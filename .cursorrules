@@ -1,0 +1,318 @@
+# Pivot Parlor — Cursor Rules
+
+## E2E Testing — Default Rules
+
+All end-to-end and integration tests in this project use Playwright.
+Never use Jest, Cypress, or any other test runner for browser-based tests.
+Never suggest running a dev server locally for testing — always test against the live deployment.
+
+### Target environment
+- Production URL: https://pivotparlor.com
+- Dev login: https://pivotparlor.com/dev/login
+- Admin login: https://pivotparlor.com/admin/login
+- Customer booking: https://pivotparlor.com/:shopSlug
+
+### Test file location
+All E2E test files live in: tests/e2e/
+File naming convention: [feature].spec.ts
+Example: tests/e2e/dev-login.spec.ts
+
+### Playwright setup
+- Use @playwright/test — import { test, expect } from '@playwright/test'
+- Default browser: chromium
+- Base URL is set in playwright.config.ts — use relative paths in tests (e.g. '/dev/login' not the full URL)
+- Always use page.waitForURL() or expect(page).toHaveURL() to assert navigation after form submission
+- Always use page.waitForLoadState('networkidle') after actions that trigger a fetch or redirect
+- Never use hard-coded timeouts (setTimeout / page.waitForTimeout) — use Playwright locator assertions instead
+
+### playwright.config.ts baseline
+Use this config if one does not already exist:
+
+import { defineConfig } from '@playwright/test'
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  use: {
+    baseURL: 'https://pivotparlor.com',
+    headless: true,
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  retries: 1,
+})
+
+### When to write a test
+Whenever a new feature, form, route, or auth flow is added or modified:
+1. Write or update the corresponding spec file in tests/e2e/
+2. Run: npx playwright test [filename]
+3. Paste the test output back into the conversation
+
+### Auth helper
+Reuse this pattern for any route that requires a logged-in session:
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/dev/login')
+  await page.fill('[name="email"]', 'dev@pivotparlor.com')
+  await page.fill('[name="password"]', process.env.DEV_PASSWORD)
+  await page.click('button[type="submit"]')
+  await page.waitForURL('/dev/dashboard')
+})
+
+Store credentials in .env — never hardcode passwords in test files.
+
+### Failure reporting
+When a test fails, always include:
+- The failing assertion line
+- The actual vs expected value
+- A screenshot path if captured
+- The full page URL at point of failure
+
+## Project Overview
+Multi-tenant SaaS booking platform for beauty parlours and barber shops.
+
+## Stack
+- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui
+- **Backend**: Cloudflare Workers + Hono framework
+- **Database**: Cloudflare D1 (SQLite) — bindings in wrangler.toml
+- **Cache/Sessions**: Cloudflare KV
+- **Auth**: JWT via hono/jwt — roles: developer | admin | staff | customer
+- **AI**: Claude API (claude-sonnet-4-20250514) — used for shop site generation
+- **Monorepo**: Turborepo, npm workspaces
+
+## Directory Structure
+```
+pivot-parlor/
+├── apps/
+│   ├── web/          ← Next.js 14 (App Router)
+│   └── worker/       ← Cloudflare Worker (Hono API)
+├── packages/
+│   ├── types/        ← Shared TypeScript types (import from @repo/types)
+│   └── utils/        ← Shared utilities (import from @repo/utils)
+```
+
+## Coding Standards
+
+### TypeScript
+- Strict mode everywhere. No `any` — use `unknown` and narrow.
+- Always type function params and return values explicitly.
+- Use `interface` for objects, `type` for unions/intersections.
+- Prefer `const` over `let`.
+
+### React / Next.js
+- Use Server Components by default. Add `"use client"` only when needed (hooks, event handlers, browser APIs).
+- Use Next.js App Router patterns: `layout.tsx`, `page.tsx`, `loading.tsx`, `error.tsx`.
+- Route groups: `(marketing)`, `(auth)`, `(developer)`, `(admin)`, `(staff)`.
+- Dynamic segments: `[shopSlug]` for public shop pages.
+- All async params must be `Promise<{ ... }>` and awaited (Next.js 15 pattern).
+
+### Tailwind / Styling
+- Use `cn()` from `@/lib/utils` for conditional class merging.
+- Prefer Tailwind utilities over inline styles.
+- Use CSS variables defined in `globals.css` for theming.
+- Design system colours: primary (violet), muted backgrounds, card surfaces.
+
+### Cloudflare Worker
+- The `Env` interface is defined in `apps/worker/src/index.ts`.
+- Use D1 prepared statements — never string-interpolate user input into SQL.
+- Use `c.env.DB` for D1, `c.env.KV` for KV, `c.env.JWT_SECRET` for auth.
+- All routes use Hono's chainable API: `app.get("/path", middleware, handler)`.
+- Return `c.json({ success: true, data: ... })` for success and `c.json({ success: false, error: "..." }, status)` for errors.
+
+### Auth & RBAC
+- `authMiddleware` validates JWT in every protected route.
+- `requireRole(...roles)` enforces role-based access.
+- Role hierarchy: developer > admin > staff > customer.
+- Developer can access all routes. Admin manages their own shop. Staff sees their own schedule.
+
+### API Conventions
+- Base URL: `NEXT_PUBLIC_API_URL` (env var, defaults to `http://localhost:8787`)
+- All responses: `{ success: boolean, data?: T, error?: string }`
+- Paginated responses add `total`, `page`, `limit`.
+- Prices stored as integers in cents (e.g. $45.00 = 4500).
+- Dates stored as ISO 8601 strings in UTC.
+
+### Database
+- Schema in `apps/worker/src/db/schema.sql`.
+- Query helpers in `apps/worker/src/db/queries.ts`.
+- Never use raw SQL in route handlers — add a query function.
+- Use transactions (`db.batch(...)`) for multi-step writes.
+
+### AI Generation
+- Uses `claude-sonnet-4-20250514` via Anthropic Messages API.
+- Prompt must instruct Claude to return strict JSON only.
+- Always provide a fallback if JSON parsing fails.
+
+### File & Import Conventions
+- Shared types: `import type { Shop } from "@repo/types"`
+- Shared utils: `import { slugify } from "@repo/utils"`
+- Web-internal paths: `@/components/...`, `@/lib/...`, `@/hooks/...`
+- Worker-internal paths: relative with `.js` extension (ESM Workers requirement).
+
+## GitHub Secrets Required
+```
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+NEXT_PUBLIC_API_URL
+JWT_SECRET         (set in Worker via wrangler secret put JWT_SECRET)
+CLAUDE_API_KEY     (set in Worker via wrangler secret put CLAUDE_API_KEY)
+```
+
+## Local Development
+```bash
+# Install all dependencies
+npm install
+
+# Start everything
+npm run dev
+
+# Worker only (port 8787)
+cd apps/worker && npx wrangler dev
+
+# Web only (port 3000)
+cd apps/web && npm run dev
+
+# Apply D1 schema locally
+npx wrangler d1 execute pivot-parlor-db --local --file=apps/worker/src/db/schema.sql
+```
+
+---
+
+## QUALITY GATE — Mandatory for every task
+
+Before reporting any task as complete, you must self-validate your own output against all of the following gates. If any gate fails, fix the issue and re-validate silently. Only report back to Ferdinand when ALL gates pass.
+
+### Gate 1 — Functional Completeness
+- Every file mentioned in the task specification must exist and be non-empty
+- Every route mentioned must be reachable (no dead imports, no missing exports)
+- Every Worker route must have a corresponding handler registered in index.ts
+- Every Remix route file must export a default component and a loader or action if required
+
+### Gate 2 — Security
+- No secrets, API keys, tokens, or passwords hardcoded anywhere in source files
+- All secrets must come from context.env (Worker) or process.env (web)
+- All user inputs must be validated before use in D1 queries (no raw string interpolation in SQL)
+- All Worker routes that modify data must verify authentication via requireAuth() before processing
+- Stripe webhook endpoints must verify the Stripe signature before processing any event
+- No console.log statements that output sensitive data (tokens, passwords, user PII)
+
+### Gate 3 — Database Integrity
+- Every new table must have a migration file in apps/worker/src/db/migrations/
+- Migration files must be numbered sequentially and not skip numbers
+- Every INSERT or UPDATE must include all required non-nullable fields
+- Foreign key references must point to tables that exist in the schema
+
+### Gate 4 — Deployment Readiness
+- Worker must compile without TypeScript errors (run: npx tsc --noEmit in apps/worker)
+- Web must compile without TypeScript errors (run: npx tsc --noEmit in apps/web)
+- All new Cloudflare bindings (R2, KV, D1, Queues) must be declared in wrangler.toml
+- No import of node-specific modules (fs, path, crypto) in Worker code — use Web Crypto API instead
+
+### Gate 5 — Test Compliance
+- Never start a local dev server for Playwright tests
+- Never call real AI generation endpoints (OpenRouter, Gemini) in any automated test
+- Never call real Stripe API in any automated test
+- All new routes must have at least one corresponding Playwright test in tests/e2e/
+- All Playwright tests must run against https://pivotparlor.com only
+- All Playwright tests must complete in under 30 seconds
+- After writing tests, run: npx playwright test --reporter=line --timeout=30000
+- If tests fail, fix the root cause and re-run — do not report back until all tests pass
+
+### Gate 6 — Code Quality
+- No duplicate logic — if a function exists, use it, do not rewrite it
+- No unused imports or variables
+- All async functions must have proper error handling (try/catch or .catch())
+- Worker queue consumers must handle message failures gracefully and not crash the worker
+- All API responses must include consistent JSON structure: { success: boolean, data?: any, error?: string }
+
+### Gate 7 — Reporting Format
+Only report back to Ferdinand when Gates 1–8 (including Gate 8 — Live Site Verification after deployments) pass. Your report must include:
+- List of files created or modified
+- List of tests run and their pass/fail count
+- Any manual steps Ferdinand needs to take (wrangler secret put, D1 migrations, etc.)
+- One-line confirmation: "All quality gates passed"
+
+If you cannot satisfy a gate after 3 attempts, report the specific gate that failed and why — do not keep trying silently beyond 3 attempts.
+
+---
+
+### Gate 8 — Live Site Verification (runs after every deployment)
+
+After every Worker deploy and Pages deploy, run a live verification script before reporting back.
+
+Create and run this verification script: `scripts/verify-live.mjs`
+
+The script must make real HTTP `fetch()` calls — no mocks, no stubs.
+
+**WORKER CHECKS** (base: `https://api.pivotparlor.com` — public API; the `*.workers.dev` URL may sit behind **Cloudflare Access** and return HTML sign-in pages, which makes automated JSON checks fail. Override with env `LIVE_VERIFY_WORKER_URL` only if you have an unauthenticated API base.)
+
+**Check 1 — Worker health**  
+  `GET /health` or `GET /` (Worker registers `/health` at API root; there is no `/api/health`.)  
+  Expected: HTTP 200 or 404 (not 500, not connection refused)  
+  Fail if: connection refused or 500
+
+**Check 2 — Dev login endpoint exists**  
+  `POST /auth/login` with body `{ "email": "gate8-live-verify-nonexistent@pivotparlor.com", "password": "wrong" }` (Worker mounts auth at `/auth`, not `/api/auth`. Do **not** use `dev@pivotparlor.com` with a random password — the Worker bootstraps that account on first login using the password provided, which can incorrectly return 200.)  
+  Expected: HTTP 400 or 401 (endpoint exists and rejects bad credentials)  
+  Fail if: 404 (route not registered) or 500
+
+**Check 3 — Shop services endpoint exists**  
+  `GET /api/shops/test-slug/services`  
+  Expected: HTTP 200 with `{ success: true, data: [] }` OR HTTP 404 with `{ success: false }`  
+  Fail if: 500 or HTML response (means Worker crashed or returned error page)
+
+**Check 4 — API always returns JSON**  
+  `GET /api/shops/any-slug/services` (use a deterministic slug such as `gate8-verify-nonexistent-shop-xyz`)  
+  Expected: `Content-Type` header contains `application/json`  
+  Fail if: `Content-Type` is `text/html` (means Worker returned an error page instead of JSON)
+
+**PAGES CHECKS** (base: `https://pivotparlor.com`)
+
+**Check 5 — Homepage loads**  
+  `GET https://pivotparlor.com`  
+  Expected: HTTP 200, body contains `Pivot Parlor`  
+  Fail if: 404, 500, or body does not contain `Pivot Parlor`
+
+**Check 6 — Dev login page loads**  
+  `GET https://pivotparlor.com/dev/login`  
+  Expected: HTTP 200, body contains `login` or `sign in` (case insensitive)  
+  Fail if: 404 or 500
+
+**Check 7 — Booking page loads for a known slug**  
+  `GET https://pivotparlor.com/test-shop/book`  
+  Expected: HTTP 200 OR 404 (page renders, not 500)  
+  Fail if: 500 or connection refused
+
+**Check 8 — No page returns raw HTML error for API routes**  
+  `GET https://pivotparlor.com/api/anything`  
+  Expected: Either 404 or redirects to app page  
+  Fail if: Returns a raw Cloudflare error page (body contains `Error 1101` or `Worker threw exception`)
+
+**REPORTING FORMAT**
+
+The script must output:
+```
+[LIVE CHECK] Worker health: PASS/FAIL
+[LIVE CHECK] Dev login endpoint: PASS/FAIL
+[LIVE CHECK] Services endpoint: PASS/FAIL
+[LIVE CHECK] API returns JSON: PASS/FAIL
+[LIVE CHECK] Homepage loads: PASS/FAIL
+[LIVE CHECK] Dev login page: PASS/FAIL
+[LIVE CHECK] Booking page: PASS/FAIL
+[LIVE CHECK] No raw errors: PASS/FAIL
+[LIVE CHECK] Overall: X/8 passed
+```
+
+If any check fails, Cursor must:
+1. Read the exact HTTP response body of the failing check
+2. Identify the root cause from the response
+3. Fix the root cause
+4. Redeploy
+5. Re-run Gate 8
+6. Only report back to Ferdinand when all 8 live checks pass
+
+**RULES**
+- Never skip Gate 8 after a deployment
+- Never report "deployment successful" without running Gate 8
+- Never use mocked responses in Gate 8 — real HTTP calls only
+- If a check returns HTML instead of JSON from a `/api/` route, that is always a critical failure requiring immediate fix before proceeding
+- Gate 8 must run last, after all other gates
