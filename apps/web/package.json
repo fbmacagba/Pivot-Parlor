@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "remix vite:dev",
+    "clean": "node scripts/clean-build.mjs",
     "build": "remix vite:build",
+    "postbuild": "node scripts/copy-public.mjs",
     "start": "wrangler pages dev ./build/client",
-    "deploy": "npm run build && node scripts/copy-static-and-functions.mjs && npx wrangler pages deploy ./build/client --project-name=pivot-parlor-web --commit-dirty=true",
+    "deploy": "npm run clean && npm run build && node scripts/prepare-pages-deploy.mjs && npx wrangler pages deploy ./.pages-dist --project-name=pivot-parlor-web --branch=main --commit-dirty=true",
+    "deploy:pages-client": "npm run build && npx wrangler pages deploy ./build/client --project-name=pivot-parlor-web --commit-dirty=true",
+    "deploy:preview": "npm run clean && npm run build && node scripts/prepare-pages-deploy.mjs && npx wrangler pages deploy ./.pages-dist --project-name=pivot-parlor-web --commit-dirty=true",
     "typecheck": "tsc",
     "lint": "eslint --max-warnings 0 app"
   },

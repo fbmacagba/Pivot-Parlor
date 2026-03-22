@@ -1,0 +1,482 @@
+/**
+ * pivot-parlor-research — Cloudflare Queue consumer for site-research-queue.
+ * Produces a visual/content spec via OpenRouter, persists to D1 + KV, enqueues site-build-queue.
+ */
+import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
+
+export interface Env {
+  DB: D1Database;
+  KV: KVNamespace;
+  SITE_BUILD_QUEUE: Queue;
+  OPENROUTER_API_KEY: string;
+  ENVIRONMENT: string;
+}
+
+// ─── Input (site-research-queue) ───────────────────────────────────────────────
+
+export interface ResearchQueueMessage {
+  jobId: string;
+  shopId: string;
+  shopName: string;
+  shopType: "barber_shop" | "beauty_parlor" | "both";
+  shopSlug: string;
+  styleNotes: string;
+  services: { name: string; price_gbp: number; duration_min: number }[];
+  hasLogoFile: boolean;
+}
+
+// ─── Rich AI spec (returned by model) ─────────────────────────────────────────
+
+export interface ResearchSpec {
+  palette: {
+    primary: string;
+    accent: string;
+    background: string;
+    text: string;
+    muted: string;
+  };
+  typography: {
+    heading_font: string;
+    body_font: string;
+    heading_weight: string;
+    heading_style: string;
+  };
+  layout_mood: string;
+  brand_voice: string;
+  content: {
+    headline: string;
+    subheadline: string;
+    hero_cta: string;
+    about_title: string;
+    about_body: string;
+    trust_signals: string[];
+    unique_selling_points: string[];
+    seo_title: string;
+    seo_description: string;
+  };
+  image_prompts: {
+    hero: string;
+    logo: string;
+    catalog: string[];
+  };
+  legal_content: {
+    privacy_policy: string;
+    terms_of_service: string;
+    cookie_policy: string;
+  };
+  social_stubs: Record<string, string>;
+}
+
+/** Shape expected by pivot-parlor-api `processSiteBuildMessage` (site-build-queue). */
+export interface BuildResearchOutput {
+  positioning: string;
+  headline: string;
+  subheadline: string;
+  hero_cta: string;
+  about_title: string;
+  about_body: string;
+  unique_selling_points: string[];
+  services: Array<{
+    name: string;
+    duration_minutes: number;
+    price_gbp: number;
+    description: string;
+    image_prompt: string;
+  }>;
+  hero_image_prompt: string;
+  logo_prompt: string;
+  color_primary: string;
+  color_accent: string;
+  font_heading: string;
+  font_body: string;
+  seo_title: string;
+  seo_description: string;
+  trust_signals: string[];
+}
+
+export interface SiteBuildQueueMessage {
+  jobId: string;
+  shopId: string;
+  shopSlug: string;
+  shopName: string;
+  shopType: string;
+  template: string;
+  hasLogoFile: boolean;
+  researchOutput: BuildResearchOutput;
+  design_notes?: string;
+  /** Full rich spec for forward-looking consumers (ignored by current build worker). */
+  researchSpecification?: ResearchSpec;
+}
+
+const TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
+
+const LAYOUT_MOOD_TO_TEMPLATE: Record<string, string> = {
+  "luxury-dark": "luxury",
+  "modern-minimal": "minimal",
+  "bold-vibrant": "vibrant",
+  "warm-editorial": "editorial",
+  "classic-traditional": "classic",
+  "fresh-pastel": "fresh",
+};
+
+const SYSTEM_PROMPT =
+  "You are a world-class brand strategist and visual designer specialising in barber shops and beauty salons. Your job is to produce a complete visual identity and content specification for a high-converting booking website. You have deep knowledge of what makes barber and beauty shop websites convert visitors into bookings. Return valid JSON only. No markdown. No backticks. No explanation.";
+
+function jobKvKey(jobId: string): string {
+  return `job:${jobId}`;
+}
+
+async function putJobKv(kv: KVNamespace, jobId: string, data: Record<string, unknown>): Promise<void> {
+  await kv.put(jobKvKey(jobId), JSON.stringify(data));
+}
+
+async function updateGenerationJob(
+  db: D1Database,
+  id: string,
+  patch: {
+    status?: string;
+    stage?: string;
+    research_output?: string | null;
+    error?: string | null;
+  }
+): Promise<void> {
+  const sets: string[] = ["updated_at = ?"];
+  const vals: unknown[] = [new Date().toISOString()];
+  if (patch.status !== undefined) {
+    sets.push("status = ?");
+    vals.push(patch.status);
+  }
+  if (patch.stage !== undefined) {
+    sets.push("stage = ?");
+    vals.push(patch.stage);
+  }
+  if (patch.research_output !== undefined) {
+    sets.push("research_output = ?");
+    vals.push(patch.research_output);
+  }
+  if (patch.error !== undefined) {
+    sets.push("error = ?");
+    vals.push(patch.error);
+  }
+  vals.push(id);
+  await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+}
+
+function buildUserPrompt(msg: ResearchQueueMessage): string {
+  const servicesText = msg.services.map((s) => `${s.name} (£${s.price_gbp}, ${s.duration_min} min)`).join("; ");
+  const style = msg.styleNotes?.trim() || "not provided";
+  return `Shop name: ${msg.shopName}
+Shop type: ${msg.shopType}
+Style notes from owner: ${style}
+Services offered: ${servicesText || "none listed"}
+Has existing logo: ${msg.hasLogoFile}
+
+Produce a complete visual and content specification. Return this exact JSON structure with no other text:
+{
+  "palette": {
+    "primary": string (hex — dominant brand colour, chosen to match shop personality and style notes),
+    "accent": string (hex — complementary CTA colour, high contrast with primary, draws the eye),
+    "background": string (hex — page background, usually near-white or very dark),
+    "text": string (hex — body text colour),
+    "muted": string (hex — secondary text, captions)
+  },
+  "typography": {
+    "heading_font": string (Google Font name — matches brand personality),
+    "body_font": string (Google Font name — highly readable, pairs well with heading),
+    "heading_weight": string (e.g. 700 or 800),
+    "heading_style": string (e.g. serif, sans-serif)
+  },
+  "layout_mood": string (one of: luxury-dark, modern-minimal, bold-vibrant, warm-editorial, classic-traditional, fresh-pastel),
+  "brand_voice": string (2 sentences describing the shop tone — e.g. authoritative and premium, warm and community-focused),
+  "content": {
+    "headline": string (max 8 words, punchy, benefit-focused),
+    "subheadline": string (max 18 words, expands on headline, includes shop personality),
+    "hero_cta": string (max 4 words, action-oriented e.g. Book Your Cut),
+    "about_title": string (max 6 words),
+    "about_body": string (3 sentences written as the shop owner, warm and personal, mentions speciality),
+    "trust_signals": string[] (exactly 3 items, specific and credible e.g. 500+ happy clients, Walk-ins welcome, 5-star rated on Google),
+    "unique_selling_points": string[] (exactly 3 items, max 8 words each, what makes this shop different),
+    "seo_title": string (max 60 chars, includes shop name and location type),
+    "seo_description": string (max 155 chars, includes booking CTA)
+  },
+  "image_prompts": {
+    "hero": string (detailed photorealistic prompt for a hero background image — full-bleed barbershop or beauty salon atmosphere matching the layout_mood and palette, no people visible, focus on ambiance, lighting, textures),
+    "logo": string (detailed prompt for a professional logo — style matching layout_mood, includes shop name, clean and scalable, white background),
+    "catalog": string[] (one prompt per service in the input services array — each prompt describes a clean product/style photography shot for that specific service, square format, professional lighting)
+  },
+  "legal_content": {
+    "privacy_policy": string (full GDPR and UK PECR compliant privacy policy for a barber/beauty booking platform — includes: data collected, how used, cookies, third parties, customer rights, contact details placeholder, shop name inserted throughout),
+    "terms_of_service": string (full terms covering: booking policy, cancellation policy (24 hours notice required), refund policy, service descriptions, liability, governing law UK),
+    "cookie_policy": string (explains: essential cookies (session, auth), analytics cookies (optional), marketing cookies (optional), how to manage consent, references pivotparlor.com platform)
+  },
+  "social_stubs": {
+    "instagram_url": "",
+    "facebook_url": "",
+    "tiktok_url": "",
+    "twitter_url": "",
+    "youtube_url": "",
+    "whatsapp_url": "",
+    "linkedin_url": ""
+  }
+}
+
+You MUST include exactly ${msg.services.length} strings in image_prompts.catalog (same order as services listed above).`;
+}
+
+async function openRouterJson(apiKey: string, system: string, user: string): Promise<string> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://pivotparlor.com",
+      "X-Title": "Pivot Parlor Research",
+    },
+    body: JSON.stringify({
+      model: TEXT_MODEL,
+      max_tokens: 12000,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`OpenRouter error ${res.status}: ${await res.text()}`);
+  }
+  const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
+  return (data.choices[0]?.message?.content ?? "{}").trim().replace(/```json|```/g, "").trim();
+}
+
+function isHexColor(s: unknown): s is string {
+  return typeof s === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.trim());
+}
+
+function validateResearchSpec(raw: unknown, serviceCount: number): raw is ResearchSpec {
+  if (!raw || typeof raw !== "object") return false;
+  const o = raw as Record<string, unknown>;
+  const palette = o.palette;
+  if (!palette || typeof palette !== "object") return false;
+  const p = palette as Record<string, unknown>;
+  if (!isHexColor(p.primary) || !isHexColor(p.accent) || !isHexColor(p.background) || !isHexColor(p.text) || !isHexColor(p.muted)) {
+    return false;
+  }
+  const typo = o.typography;
+  if (!typo || typeof typo !== "object") return false;
+  const t = typo as Record<string, unknown>;
+  if (typeof t.heading_font !== "string" || typeof t.body_font !== "string") return false;
+  if (typeof t.heading_weight !== "string" || typeof t.heading_style !== "string") return false;
+  if (typeof o.layout_mood !== "string" || typeof o.brand_voice !== "string") return false;
+  const content = o.content;
+  if (!content || typeof content !== "object") return false;
+  const c = content as Record<string, unknown>;
+  const strKeys = [
+    "headline",
+    "subheadline",
+    "hero_cta",
+    "about_title",
+    "about_body",
+    "seo_title",
+    "seo_description",
+  ] as const;
+  for (const k of strKeys) {
+    if (typeof c[k] !== "string") return false;
+  }
+  if (!Array.isArray(c.trust_signals) || c.trust_signals.length !== 3) return false;
+  if (!c.trust_signals.every((x) => typeof x === "string")) return false;
+  if (!Array.isArray(c.unique_selling_points) || c.unique_selling_points.length !== 3) return false;
+  if (!c.unique_selling_points.every((x) => typeof x === "string")) return false;
+  const img = o.image_prompts;
+  if (!img || typeof img !== "object") return false;
+  const im = img as Record<string, unknown>;
+  if (typeof im.hero !== "string" || typeof im.logo !== "string") return false;
+  if (!Array.isArray(im.catalog) || im.catalog.length !== serviceCount) return false;
+  if (!im.catalog.every((x) => typeof x === "string")) return false;
+  const legal = o.legal_content;
+  if (!legal || typeof legal !== "object") return false;
+  const l = legal as Record<string, unknown>;
+  if (typeof l.privacy_policy !== "string" || typeof l.terms_of_service !== "string" || typeof l.cookie_policy !== "string") {
+    return false;
+  }
+  if (!o.social_stubs || typeof o.social_stubs !== "object") return false;
+  return true;
+}
+
+function mapToBuildResearchOutput(
+  spec: ResearchSpec,
+  services: ResearchQueueMessage["services"],
+  shopName: string
+): BuildResearchOutput {
+  const positioning = `${spec.layout_mood}: ${spec.brand_voice}`.slice(0, 2000);
+  const outServices = services.map((s, i) => ({
+    name: s.name,
+    duration_minutes: s.duration_min,
+    price_gbp: s.price_gbp,
+    description: `Professional ${s.name} at ${shopName}. Book online in seconds.`,
+    image_prompt: String(spec.image_prompts.catalog[i]),
+  }));
+  return {
+    positioning,
+    headline: spec.content.headline,
+    subheadline: spec.content.subheadline,
+    hero_cta: spec.content.hero_cta,
+    about_title: spec.content.about_title,
+    about_body: spec.content.about_body,
+    unique_selling_points: spec.content.unique_selling_points,
+    trust_signals: spec.content.trust_signals,
+    services: outServices,
+    hero_image_prompt: spec.image_prompts.hero,
+    logo_prompt: spec.image_prompts.logo,
+    color_primary: spec.palette.primary,
+    color_accent: spec.palette.accent,
+    font_heading: spec.typography.heading_font,
+    font_body: spec.typography.body_font,
+    seo_title: spec.content.seo_title,
+    seo_description: spec.content.seo_description,
+  };
+}
+
+function templateFromLayoutMood(layoutMood: string): string {
+  return LAYOUT_MOOD_TO_TEMPLATE[layoutMood] ?? "minimal";
+}
+
+function parseInput(body: unknown): ResearchQueueMessage | null {
+  if (!body || typeof body !== "object") return null;
+  const o = body as Record<string, unknown>;
+  if (typeof o.jobId !== "string" || typeof o.shopId !== "string") return null;
+  if (typeof o.shopName !== "string" || typeof o.shopSlug !== "string") return null;
+  if (o.shopType !== "barber_shop" && o.shopType !== "beauty_parlor" && o.shopType !== "both") return null;
+  if (typeof o.styleNotes !== "string") return null;
+  if (typeof o.hasLogoFile !== "boolean") return null;
+  if (!Array.isArray(o.services)) return null;
+  const services: ResearchQueueMessage["services"] = [];
+  for (const s of o.services) {
+    if (!s || typeof s !== "object") return null;
+    const sv = s as Record<string, unknown>;
+    if (typeof sv.name !== "string" || typeof sv.price_gbp !== "number" || typeof sv.duration_min !== "number") return null;
+    services.push({ name: sv.name, price_gbp: sv.price_gbp, duration_min: sv.duration_min });
+  }
+  if (services.length < 2) return null;
+  return {
+    jobId: o.jobId,
+    shopId: o.shopId,
+    shopName: o.shopName,
+    shopType: o.shopType,
+    shopSlug: o.shopSlug,
+    styleNotes: o.styleNotes,
+    services,
+    hasLogoFile: o.hasLogoFile,
+  };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function processOneMessage(body: unknown, env: Env): Promise<void> {
+  const input = parseInput(body);
+  if (!input) {
+    console.error("[pivot-parlor-research] Invalid queue message shape", body);
+    return;
+  }
+
+  const { jobId, shopId } = input;
+  const apiKey = env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    const msg = "OPENROUTER_API_KEY is not configured";
+    try {
+      await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
+      await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug: input.shopSlug });
+    } catch (e) {
+      console.error("[pivot-parlor-research] Failed to persist config error", e);
+    }
+    return;
+  }
+
+  try {
+    await updateGenerationJob(env.DB, jobId, { status: "running", stage: "research", error: null });
+    await putJobKv(env.KV, jobId, { status: "running", stage: "research", shopSlug: input.shopSlug });
+
+    const userPrompt = buildUserPrompt(input);
+    const rawText = await openRouterJson(apiKey, SYSTEM_PROMPT, userPrompt);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      await updateGenerationJob(env.DB, jobId, {
+        status: "failed",
+        error: "Research worker returned invalid JSON",
+      });
+      await putJobKv(env.KV, jobId, {
+        status: "failed",
+        error: "Research worker returned invalid JSON",
+        shopSlug: input.shopSlug,
+      });
+      return;
+    }
+
+    if (!validateResearchSpec(parsed, input.services.length)) {
+      await updateGenerationJob(env.DB, jobId, {
+        status: "failed",
+        error: "Research worker returned invalid JSON",
+      });
+      await putJobKv(env.KV, jobId, {
+        status: "failed",
+        error: "Research worker returned invalid JSON",
+        shopSlug: input.shopSlug,
+      });
+      return;
+    }
+
+    const spec = parsed;
+    const researchOutput = mapToBuildResearchOutput(spec, input.services, input.shopName);
+    const fullJson = JSON.stringify(spec);
+
+    await updateGenerationJob(env.DB, jobId, {
+      status: "running",
+      stage: "build",
+      research_output: fullJson,
+      error: null,
+    });
+    await putJobKv(env.KV, jobId, { status: "running", stage: "build", shopSlug: input.shopSlug });
+
+    const buildMessage: SiteBuildQueueMessage = {
+      jobId,
+      shopId,
+      shopSlug: input.shopSlug,
+      shopName: input.shopName,
+      shopType: input.shopType,
+      template: templateFromLayoutMood(spec.layout_mood),
+      hasLogoFile: input.hasLogoFile,
+      researchOutput,
+      design_notes: input.styleNotes?.trim() || undefined,
+      researchSpecification: spec,
+    };
+
+    await env.SITE_BUILD_QUEUE.send(buildMessage);
+  } catch (err) {
+    const msg = errorMessage(err);
+    console.error("[pivot-parlor-research] Job failed", jobId, err);
+    try {
+      await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
+      await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug: input.shopSlug });
+    } catch (persistErr) {
+      console.error("[pivot-parlor-research] Failed to persist job failure", persistErr);
+    }
+  }
+}
+
+export default {
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    for (const msg of batch.messages) {
+      try {
+        await processOneMessage(msg.body, env);
+      } catch (err) {
+        console.error("[pivot-parlor-research] Unexpected outer failure", err);
+      } finally {
+        msg.ack();
+      }
+    }
+  },
+};

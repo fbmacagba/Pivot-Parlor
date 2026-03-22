@@ -1,0 +1,24 @@
+name = "pivot-parlor-builder"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[[queues.consumers]]
+queue = "site-assemble-queue"
+max_batch_size = 1
+max_batch_timeout = 60
+
+[[queues.producers]]
+binding = "SITE_AUDIT_QUEUE"
+queue = "site-audit-queue"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pivot-parlor-db"
+database_id = "515a7270-81b4-4935-b106-15aeee639f57"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "12eca802e7ff47c2a5358da0f985eecd"
+
+[vars]
+ENVIRONMENT = "production"

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Gate 8 — Live Site Verification (real HTTP only, no mocks).
+ * Live Site Verification (real HTTP only, no mocks). 9 checks.
  * Env overrides: LIVE_VERIFY_WORKER_URL, LIVE_VERIFY_PAGES_URL
  */
 
@@ -236,6 +236,37 @@ async function check8() {
   }
 }
 
+// Check 9 — Stripe webhook must not redirect (Stripe requires 2xx JSON, not 301/302)
+async function check9() {
+  try {
+    const res = await fetch(`${WORKER}/api/webhooks/stripe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      redirect: "manual",
+    });
+    if (res.status === 301 || res.status === 302 || res.status === 303 || res.status === 307 || res.status === 308) {
+      logCheck("Webhook endpoint (no redirect)", false, `HTTP ${res.status} redirect to ${res.headers.get("location") ?? "?"}`);
+      return false;
+    }
+    // Expected: 400 (bad/missing signature) or 500 (webhook secret unset) — never a redirect
+    if (res.status === 400 || res.status === 500) {
+      logCheck("Webhook endpoint (no redirect)", true);
+      return true;
+    }
+    if (res.status === 200) {
+      logCheck("Webhook endpoint (no redirect)", true);
+      return true;
+    }
+    const text = await res.text();
+    logCheck("Webhook endpoint (no redirect)", false, `unexpected HTTP ${res.status} ${text.slice(0, 200)}`);
+    return false;
+  } catch (e) {
+    logCheck("Webhook endpoint (no redirect)", false, e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
 async function main() {
   console.log(`[LIVE CHECK] Worker base: ${WORKER}`);
   console.log(`[LIVE CHECK] Pages base: ${PAGES}`);
@@ -249,12 +280,13 @@ async function main() {
   await check6();
   await check7();
   await check8();
+  await check9();
 
   const passed = results.filter((r) => r.pass).length;
   console.log("");
-  console.log(`[LIVE CHECK] Overall: ${passed}/8 passed`);
+  console.log(`[LIVE CHECK] Overall: ${passed}/9 passed`);
 
-  if (passed < 8) {
+  if (passed < 9) {
     console.log("");
     console.log("[LIVE CHECK] Failed checks detail:");
     for (const r of results.filter((x) => !x.pass)) {

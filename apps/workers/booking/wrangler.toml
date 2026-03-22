@@ -1,0 +1,21 @@
+name = "pivot-parlor-booking"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pivot-parlor-db"
+database_id = "515a7270-81b4-4935-b106-15aeee639f57"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "12eca802e7ff47c2a5358da0f985eecd"
+
+[vars]
+ENVIRONMENT = "production"
+PLATFORM_URL = "https://pivotparlor.com"
+
+# Secrets:
+#   STRIPE_SECRET_KEY
+#   JWT_SECRET

@@ -1,17 +1,47 @@
-import { useFetcher, useLoaderData } from "@remix-run/react";
-import { useState } from "react";
+import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 
 const TEMPLATES = [
-  { id: "minimal", name: "Minimal", tagline: "Clean and spacious" },
-  { id: "luxury", name: "Luxury", tagline: "Dark and premium" },
-  { id: "vibrant", name: "Vibrant", tagline: "Bold and energetic" },
-  { id: "editorial", name: "Editorial", tagline: "Magazine-style layout" },
-  { id: "classic", name: "Classic", tagline: "Traditional barbershop feel" },
-  { id: "fresh", name: "Fresh", tagline: "Bright and airy" },
+  {
+    id: "minimal",
+    name: "Minimal",
+    tagline: "Clean & Modern — White space, serif headings",
+    primaryColor: "#374151",
+  },
+  {
+    id: "luxury",
+    name: "Luxury",
+    tagline: "Dark Luxury — Black and gold, premium feel",
+    primaryColor: "#C9A84C",
+  },
+  {
+    id: "vibrant",
+    name: "Vibrant",
+    tagline: "Bold & Vibrant — Strong colours, energetic layout",
+    primaryColor: "#E07C5C",
+  },
+  {
+    id: "editorial",
+    name: "Editorial",
+    tagline: "Warm Editorial — Soft tones, lifestyle feel",
+    primaryColor: "#c4a77d",
+  },
+  {
+    id: "classic",
+    name: "Classic",
+    tagline: "Classic Barber — Deep red, vintage typography",
+    primaryColor: "#8B0000",
+  },
+  {
+    id: "fresh",
+    name: "Fresh",
+    tagline: "Fresh & Bright — Pastel tones, rounded and friendly",
+    primaryColor: "#81c784",
+  },
 ] as const;
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -42,7 +72,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const api = createApiClient(env.API_URL, token);
 
   const user = await api.get<{ id: string; role: string; shop_id: string | null }>("/auth/me");
-  if (!user.shop_id) return json({ error: "Unauthorized" }, 401);
+  if (!user.shop_id) return json({ error: "Unauthorized", jobId: null }, 401);
 
   const formData = await request.formData();
   const template = formData.get("template")?.toString();
@@ -51,9 +81,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const designNotes = formData.get("design_notes")?.toString();
   const logoFile = formData.get("logo_file") as File | null;
 
-  if (!template) return json({ error: "Please select a template" }, 400);
+  if (!template) return json({ error: "Please select a template", jobId: null }, 400);
 
-  const body: Record<string, unknown> = {
+  const jsonBody: Record<string, unknown> = {
     template,
     color_primary: colorPrimary || undefined,
     color_accent: colorAccent || undefined,
@@ -73,28 +103,145 @@ export async function action({ request, context }: ActionFunctionArgs) {
       headers: { Authorization: `Bearer ${token}` },
       body: fd,
     });
-
-    const data = (await res.json()) as { success?: boolean; error?: string };
-    if (!res.ok) return json({ error: data.error ?? "Generation failed" }, 400);
-    throw redirect("/admin?site_live=1");
+    const data = (await res.json()) as {
+      success?: boolean;
+      data?: { jobId: string; message?: string };
+      error?: string;
+    };
+    if (!res.ok) return json({ error: data.error ?? "Generation failed", jobId: null }, 400);
+    if (!data.success || !data.data?.jobId) {
+      return json({ error: data.error ?? "Invalid response", jobId: null }, 400);
+    }
+    return json({ error: null, jobId: data.data.jobId, message: data.data.message ?? null });
   }
 
   try {
-    await api.post(`/api/shops/${user.shop_id}/generate-site`, body);
-    throw redirect("/admin?site_live=1");
+    const out = await api.post<{ jobId: string; message: string }>(
+      `/api/shops/${user.shop_id}/generate-site`,
+      jsonBody
+    );
+    return json({ error: null, jobId: out.jobId, message: out.message ?? null });
   } catch (err) {
-    if (err instanceof Response) throw err;
-    return json({ error: err instanceof Error ? err.message : "Generation failed" }, 400);
+    return json(
+      { error: err instanceof Error ? err.message : "Generation failed", jobId: null },
+      400
+    );
+  }
+}
+
+type JobStatusPayload = {
+  success?: boolean;
+  data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
+  error?: string;
+};
+
+function progressCopy(stage: string | undefined, status: string | undefined): string {
+  if (status === "failed") return "";
+  if (stage === "done" || status === "complete") {
+    return "Your site is ready! Redirecting...";
+  }
+  switch (stage) {
+    case "queued":
+      return "Queuing your site generation...";
+    case "research":
+      return "Researching your brand and market positioning...";
+    case "build":
+      return "Building your website and generating images...";
+    case "audit":
+      return "Running quality checks on your site...";
+    default:
+      return "Working on your site...";
   }
 }
 
 export default function TemplateSelect() {
   const { shop } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
+  const navigate = useNavigate();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [colorPrimary, setColorPrimary] = useState("#8B0000");
   const [colorAccent, setColorAccent] = useState("#1a1f3a");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStage, setJobStage] = useState<string>("");
+  const [jobStatus, setJobStatus] = useState<string>("");
+  const [jobError, setJobError] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
+  const [formKey, setFormKey] = useState(0);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const isSubmitting = fetcher.state !== "idle";
+  const isPolling = !!jobId;
+  const showProgress = isPolling || redirecting;
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if ("jobId" in fetcher.data && fetcher.data.jobId && !fetcher.data.error) {
+      setJobId(fetcher.data.jobId);
+      setJobError(null);
+      setJobStage("queued");
+      setJobStatus("queued");
+    }
+    if (fetcher.data.error) {
+      setJobId(null);
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  useEffect(() => {
+    if (!jobId) return;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/jobs/${jobId}/status`);
+        const j = (await r.json()) as JobStatusPayload;
+        if (cancelled) return;
+        if (!j.success || !j.data) {
+          setJobError(j.error ?? "Status request failed");
+          setJobId(null);
+          return;
+        }
+        const { stage, status, error } = j.data;
+        setJobStage(stage ?? "");
+        setJobStatus(status ?? "");
+        if (status === "failed" || stage === "failed") {
+          setJobError(error ?? "Generation failed");
+          setJobId(null);
+          return;
+        }
+        if (stage === "done" || status === "complete") {
+          setJobStage("done");
+          setJobStatus(status ?? "complete");
+          setRedirecting(true);
+          setJobId(null);
+          if (redirectTimer.current) clearTimeout(redirectTimer.current);
+          redirectTimer.current = setTimeout(() => {
+            navigate("/admin?siteGenerated=1");
+          }, 2000);
+        }
+      } catch {
+        if (!cancelled) setJobError("Could not load job status");
+      }
+    };
+
+    void poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      if (redirectTimer.current) clearTimeout(redirectTimer.current);
+    };
+  }, [jobId, navigate]);
+
+  const tryAgain = useCallback(() => {
+    setJobId(null);
+    setJobError(null);
+    setJobStage("");
+    setJobStatus("");
+    setRedirecting(false);
+    if (redirectTimer.current) clearTimeout(redirectTimer.current);
+    setSelectedTemplate(null);
+    setFormKey((k) => k + 1);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#0D0D0D] px-6 py-12">
@@ -104,7 +251,39 @@ export default function TemplateSelect() {
         </h1>
         <p className="mt-2 text-white/60">Select a design, customise colours, then generate.</p>
 
-        <fetcher.Form method="post" className="mt-10 space-y-10">
+        {showProgress && (
+          <div className="mt-8 rounded-xl border border-[#C9A84C]/40 bg-[#C9A84C]/10 px-6 py-5">
+            <p className="text-sm font-medium text-[#C9A84C]">
+              {progressCopy(jobStage, jobStatus)}
+            </p>
+            <p className="mt-1 text-xs text-white/50">
+              Stage: {jobStage || "…"} · Status: {jobStatus || "…"}
+            </p>
+          </div>
+        )}
+
+        {jobError && (
+          <div className="mt-8 space-y-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            <p>Generation failed: {jobError}. Please try again.</p>
+            <button
+              type="button"
+              onClick={tryAgain}
+              className="rounded-lg border border-white/30 px-4 py-2 text-white hover:bg-white/10"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        <form
+          key={formKey}
+          method="post"
+          className="mt-10 space-y-10"
+          onSubmit={(e) => {
+            e.preventDefault();
+            fetcher.submit(new FormData(e.currentTarget), { method: "post" });
+          }}
+        >
           {/* Template grid */}
           <div>
             <h2 className="mb-4 text-lg font-semibold text-white">Template</h2>
@@ -116,6 +295,7 @@ export default function TemplateSelect() {
                   id={t.id}
                   name={t.name}
                   tagline={t.tagline}
+                  primaryColor={t.primaryColor}
                   selected={selectedTemplate === t.id}
                   onSelect={() => setSelectedTemplate(t.id)}
                 />
@@ -123,9 +303,9 @@ export default function TemplateSelect() {
             </div>
           </div>
 
-          {/* Customisation */}
+          {/* Owner customisation panel */}
           <div className="rounded-xl border border-white/10 bg-white/5 p-6">
-            <h2 className="mb-4 text-lg font-semibold text-white">Customisation</h2>
+            <h2 className="mb-4 text-lg font-semibold text-white">Owner customisation</h2>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-sm text-white/80">Primary colour</label>
@@ -164,17 +344,19 @@ export default function TemplateSelect() {
               />
             </div>
             <div className="mt-4">
-              <label className="block text-sm text-white/80">Logo upload (optional)</label>
+              <label className="block text-sm text-white/80">
+                Upload your logo (optional — skips AI logo generation)
+              </label>
               <input
                 type="file"
                 name="logo_file"
-                accept=".png,.jpg,.jpeg,.svg"
+                accept=".png,.jpg,.svg"
                 className="mt-1 block w-full text-sm text-white/80 file:mr-4 file:rounded file:border-0 file:bg-[#C9A84C] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-black"
               />
             </div>
           </div>
 
-          {fetcher.data?.error && (
+          {fetcher.data && "error" in fetcher.data && fetcher.data.error && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
               {fetcher.data.error}
             </div>
@@ -182,41 +364,63 @@ export default function TemplateSelect() {
 
           <button
             type="submit"
-            disabled={isSubmitting || !selectedTemplate}
+            disabled={isSubmitting || !selectedTemplate || isPolling || redirecting || !!jobError}
             className="w-full rounded-lg bg-[#C9A84C] py-4 text-sm font-semibold text-black transition hover:bg-[#D4B86A] disabled:opacity-50"
           >
             {isSubmitting
-              ? "Generating your site — this takes about 15 seconds"
-              : "Generate My Site"}
+              ? "Starting generation..."
+              : isPolling || redirecting
+                ? "Generation in progress..."
+                : "Generate My Site →"}
           </button>
-        </fetcher.Form>
+        </form>
       </div>
     </div>
   );
 }
 
 function TemplateCard({
-  id,
   name,
   tagline,
+  primaryColor,
   selected,
   onSelect,
 }: {
   id: string;
   name: string;
   tagline: string;
+  primaryColor: string;
   selected: boolean;
   onSelect: () => void;
 }) {
   return (
     <div
-      className={`flex flex-col rounded-xl border-2 p-4 transition ${
-        selected ? "border-[#C9A84C]" : "border-white/20 hover:border-white/40"
+      className={`relative flex flex-col rounded-xl border-2 p-4 transition ${
+        selected ? "" : "border-white/20 hover:border-white/40"
       }`}
+      style={
+        selected
+          ? { borderColor: primaryColor, borderWidth: 4 }
+          : {
+              borderLeftWidth: 4,
+              borderLeftColor: primaryColor,
+            }
+      }
     >
-      <div className="mb-3 h-24 rounded-lg bg-white/10" />
+      {selected && (
+        <div
+          className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full"
+          style={{ backgroundColor: primaryColor }}
+        >
+          <span className="text-xs font-bold text-white">✓</span>
+        </div>
+      )}
+      <div
+        className="mb-3 h-1 w-full rounded-full"
+        style={{ backgroundColor: primaryColor }}
+      />
       <span className="font-medium text-white">{name}</span>
-      <span className="text-sm text-white/60">{tagline}</span>
+      <span className="mt-1 text-sm text-white/60">{tagline}</span>
       <button
         type="button"
         onClick={onSelect}

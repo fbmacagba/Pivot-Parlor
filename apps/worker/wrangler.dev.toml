@@ -1,0 +1,43 @@
+name = "pivot-parlor-api"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pivot-parlor-db"
+database_id = "515a7270-81b4-4935-b106-15aeee639f57"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "12eca802e7ff47c2a5358da0f985eecd"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "pivot-parlor-assets"
+
+[[queues.producers]]
+binding = "QUEUE"
+queue = "pivot-parlor-reminders"
+
+[[queues.producers]]
+binding = "site_research_queue"
+queue = "site-research-queue"
+
+[[queues.producers]]
+binding = "site_build_queue"
+queue = "site-build-queue"
+
+[[queues.producers]]
+binding = "site_audit_queue"
+queue = "site-audit-queue"
+
+# Site pipeline queues are consumed by apps/workers/*; this worker only consumes reminders.
+[[queues.consumers]]
+queue = "pivot-parlor-reminders"
+max_batch_size = 10
+max_batch_timeout = 30
+
+[vars]
+ENVIRONMENT = "development"
+JWT_SECRET = "dev-jwt-secret-change-in-production-min32chars"
+ANTHROPIC_API_KEY = "sk-ant-placeholder"

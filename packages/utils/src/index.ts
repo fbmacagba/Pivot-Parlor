@@ -1,0 +1,61 @@
+/** Generate a URL-friendly slug from a string */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Format a price (cents) to a locale currency string */
+export function formatPrice(cents: number, currency = "USD", locale = "en-US"): string {
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
+/** Format a date-time string to a readable locale string */
+export function formatDateTime(iso: string, locale = "en-US"): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(iso));
+}
+
+/** Format minutes into "Xhr Ymin" display */
+export function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}min`;
+  if (m === 0) return `${h}hr`;
+  return `${h}hr ${m}min`;
+}
+
+/** Calculate platform commission */
+export function calcCommission(amount: number, ratePercent: number): number {
+  return Math.round(amount * (ratePercent / 100));
+}
+
+/** Add minutes to a Date and return a new Date */
+export function addMinutes(date: Date, minutes: number): Date {
+  return new Date(date.getTime() + minutes * 60_000);
+}
+
+/** Check if two date ranges overlap */
+export function rangesOverlap(
+  aStart: Date,
+  aEnd: Date,
+  bStart: Date,
+  bEnd: Date
+): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+/** Generate a cryptographically-random ID (safe in both browser and Workers) */
+export function generateId(length = 16): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}

@@ -1,0 +1,32 @@
+name = "pivot-parlor-images"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+[[queues.consumers]]
+queue = "site-build-queue"
+max_batch_size = 1
+max_batch_timeout = 60
+
+[[queues.producers]]
+binding = "SITE_ASSEMBLE_QUEUE"
+queue = "site-assemble-queue"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "pivot-parlor-assets"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pivot-parlor-db"
+database_id = "515a7270-81b4-4935-b106-15aeee639f57"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "12eca802e7ff47c2a5358da0f985eecd"
+
+[vars]
+ENVIRONMENT = "production"
+ASSET_BASE_URL = "https://api.pivotparlor.com"
+
+# Secrets (wrangler secret put --name pivot-parlor-images):
+#   OPENROUTER_API_KEY

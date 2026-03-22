@@ -1,0 +1,39 @@
+name: Deploy Remix Frontend to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/deploy-web.yml"
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Remix app
+        run: npm run build --workspace=apps/web
+
+      # Static + Pages Functions (Remix SSR) — do not deploy ./build/client alone.
+      - name: Prepare Pages deploy bundle (.pages-dist)
+        run: node scripts/prepare-pages-deploy.mjs
+        working-directory: apps/web
+
+      - name: Deploy to Cloudflare Pages (production)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          command: pages deploy ./.pages-dist --project-name=pivot-parlor-web --branch=main --commit-dirty=true
