@@ -1,7 +1,12 @@
 import { Link } from "@remix-run/react";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { MessageCircle, X } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
+
+const CHATBOT_CHAT_URL = "https://pivot-parlor-chatbot.bmorris0565.workers.dev/chat";
+
+type ChatTurn = { role: "user" | "assistant"; content: string };
 
 function trimMediaUrl(url: string | undefined | null): string {
   if (typeof url !== "string") return "";
@@ -81,7 +86,69 @@ export function CommercialShopChrome({
 }: CommercialShopChromeProps) {
   const [navOpen, setNavOpen] = useState(false);
   const [cookieForce, setCookieForce] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const closeNav = () => setNavOpen(false);
+
+  const shopId = site.shop_id?.trim() ?? "";
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    setChatMessages((prev) => {
+      if (prev.length > 0) return prev;
+      return [
+        {
+          role: "assistant",
+          content: `Hi! I'm ${site.shop_name}'s assistant. How can I help you today?`,
+        },
+      ];
+    });
+  }, [chatOpen, site.shop_name]);
+
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [chatMessages, chatSending, chatOpen]);
+
+  const sendChatMessage = async () => {
+    const text = chatDraft.trim();
+    if (!text || chatSending || !shopId) return;
+    const historyPayload = chatMessages.map((m) => ({ role: m.role, content: m.content }));
+    setChatDraft("");
+    setChatMessages((prev) => [...prev, { role: "user", content: text }]);
+    setChatSending(true);
+    try {
+      const res = await fetch(CHATBOT_CHAT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shopId,
+          message: text,
+          history: historyPayload,
+        }),
+      });
+      const data = (await res.json()) as { reply?: string };
+      const reply =
+        typeof data.reply === "string" && data.reply.trim()
+          ? data.reply.trim()
+          : "Sorry — something went wrong. Please try again.";
+      setChatMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Sorry — we couldn't reach the assistant. Please try again in a moment.",
+        },
+      ]);
+    } finally {
+      setChatSending(false);
+    }
+  };
 
   const bookingEnabled = settings.booking_enabled !== false;
 
@@ -137,7 +204,7 @@ export function CommercialShopChrome({
     >
       <style
         dangerouslySetInnerHTML={{
-          __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);}`,
+          __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}`,
         }}
       />
 
@@ -411,12 +478,128 @@ export function CommercialShopChrome({
 
       <ShopSiteCookieConsent forceOpen={cookieForce} onClose={() => setCookieForce(false)} />
 
+      {chatOpen ? (
+        <div
+          className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-2xl border border-white/15 bg-[color:var(--color-brand)] shadow-2xl"
+          style={{ height: 480, maxHeight: "min(480px, calc(100vh - 7.5rem))" }}
+          role="dialog"
+          aria-label="Chat with the shop"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <header className="flex shrink-0 items-start gap-3 border-b border-white/10 px-4 py-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              {logoSrc ? (
+                <img
+                  src={logoSrc}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+              ) : (
+                <span
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--color-accent)]/50 bg-[color:var(--color-accent)]/15 pp-heading text-xs font-bold text-[color:var(--color-accent)]"
+                  aria-hidden
+                >
+                  {shopNameInitials(site.shop_name)}
+                </span>
+              )}
+              <div className="min-w-0">
+                <p className="pp-heading truncate text-sm font-semibold text-white">{site.shop_name}</p>
+                <p className="text-xs text-white/55">Ask us anything</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 hover:text-white"
+              aria-label="Close chat"
+              onClick={() => setChatOpen(false)}
+            >
+              <X className="h-5 w-5" strokeWidth={2} />
+            </button>
+          </header>
+
+          <div
+            ref={chatScrollRef}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3"
+          >
+            {chatMessages.map((m, i) =>
+              m.role === "user" ? (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[color:var(--color-accent)] px-3 py-2 text-sm text-black">
+                    {m.content}
+                  </div>
+                </div>
+              ) : (
+                <div key={i} className="flex justify-start">
+                  <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-zinc-700 px-3 py-2 text-sm text-white/95">
+                    {m.content}
+                  </div>
+                </div>
+              )
+            )}
+            {chatSending ? (
+              <div className="flex justify-start" aria-live="polite" aria-label="Assistant is typing">
+                <div className="flex items-center gap-1 rounded-2xl rounded-bl-md bg-zinc-700 px-4 py-3">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className="h-2 w-2 rounded-full bg-white/55"
+                      style={{
+                        animation: "pp-chat-bounce 1.2s ease-in-out infinite",
+                        animationDelay: `${dot * 0.2}s`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          {!shopId ? (
+            <p className="shrink-0 border-t border-white/10 px-4 py-2 text-center text-xs text-white/50">
+              Chat is unavailable on this page.
+            </p>
+          ) : null}
+
+          <div className="shrink-0 border-t border-white/10 p-3">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatDraft}
+                onChange={(e) => setChatDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void sendChatMessage();
+                  }
+                }}
+                placeholder="Type a message…"
+                disabled={!shopId || chatSending}
+                className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/15 bg-black/25 px-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-[color:var(--color-accent)]/50 disabled:opacity-50"
+                aria-label="Message"
+              />
+              <button
+                type="button"
+                onClick={() => void sendChatMessage()}
+                disabled={!shopId || chatSending || !chatDraft.trim()}
+                className="shrink-0 rounded-xl bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <button
         type="button"
-        className="fixed bottom-6 right-6 z-50 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-2xl text-black shadow-xl"
-        aria-label="Chat — coming soon"
+        className="fixed bottom-6 right-6 z-[60] flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-black shadow-xl transition hover:opacity-95"
+        aria-label={chatOpen ? "Close chat" : "Open chat"}
+        aria-expanded={chatOpen}
+        onClick={() => setChatOpen((o) => !o)}
       >
-        💬
+        <MessageCircle className="h-7 w-7" strokeWidth={2} aria-hidden />
       </button>
     </div>
   );

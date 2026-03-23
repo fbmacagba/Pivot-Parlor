@@ -194,6 +194,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   return json({
     slug,
     shop: {
+      id: shop.id,
       name: shop.name,
       slug: shop.slug,
       phone: shop.phone,

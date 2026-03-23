@@ -1,4 +1,6 @@
 export type SiteData = {
+  /** Shop row id for chatbot and integrations. */
+  shop_id?: string;
   shop_name: string;
   headline?: string;
   tagline: string;

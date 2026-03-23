@@ -102,6 +102,116 @@ app.use(
 
 const chat = new Hono<{ Bindings: Env }>();
 
+/** Stateless chat for shop sites: `{ shopId, message, history }` → `{ reply }`. */
+chat.post("/", async (c) => {
+  const platformUrl = c.env.PLATFORM_URL || "https://pivotparlor.com";
+
+  try {
+    let body: { shopId?: string; message?: string; history?: unknown };
+    try {
+      body = (await c.req.json()) as typeof body;
+    } catch {
+      return c.json({ reply: FALLBACK_REPLY, error: "Invalid JSON" }, 400);
+    }
+
+    const shopId = typeof body.shopId === "string" ? body.shopId.trim() : "";
+    const visitorMessage = typeof body.message === "string" ? body.message.trim() : "";
+    if (!shopId || !visitorMessage) {
+      return c.json({ reply: FALLBACK_REPLY, error: "shopId and message are required" }, 400);
+    }
+
+    const priorMessages: ChatMessage[] = [];
+    if (Array.isArray(body.history)) {
+      for (const item of body.history) {
+        if (!item || typeof item !== "object") continue;
+        const o = item as { role?: string; content?: string };
+        if ((o.role === "user" || o.role === "assistant") && typeof o.content === "string") {
+          priorMessages.push({ role: o.role, content: o.content });
+        }
+      }
+    }
+
+    const shop = await c.env.DB.prepare("SELECT id, name, type, slug FROM shops WHERE id = ? LIMIT 1")
+      .bind(shopId)
+      .first<{ id: string; name: string; type: string; slug: string }>();
+    if (!shop) {
+      return c.json({ reply: FALLBACK_REPLY, error: "Shop not found" }, 404);
+    }
+
+    const shopSlug = shop.slug;
+    const rlKey = rateLimitKey(shopSlug);
+    const current = Number((await c.env.KV.get(rlKey)) ?? "0");
+    if (current >= 100) {
+      return c.json(
+        {
+          reply:
+            "This chat is temporarily busy. Please try again shortly or book directly using the Book link on this site.",
+        },
+        429
+      );
+    }
+    await c.env.KV.put(rlKey, String(current + 1), { expirationTtl: 7200 });
+
+    let reply: string;
+    let usedOpenRouter = false;
+    let usageForLog: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null;
+
+    if (isPlatformQuestion(visitorMessage)) {
+      reply = PLATFORM_REFERRAL_REPLY;
+    } else {
+      usedOpenRouter = true;
+      const ctx = await loadShopContext(c.env.DB, shop.id, shopSlug, shop.name, shop.type);
+      let systemPrompt = appendPromoAwareness(buildSystemPrompt(ctx, platformUrl), ctx.promoActive);
+      if (ctx.promoActive && /\b(discount|offer|promo|deal|code)\b/i.test(visitorMessage)) {
+        systemPrompt = `${systemPrompt}\nThe visitor is asking about offers — reference the active promo if applicable.`;
+      }
+
+      const or = await callOpenRouter({
+        apiKey: c.env.OPENROUTER_API_KEY,
+        systemPrompt,
+        history: priorMessages,
+        userMessage: visitorMessage,
+        referer: "https://pivotparlor.com",
+        title: "Pivot Parlor Chatbot",
+      });
+
+      if (or.ok) {
+        reply = or.content;
+        usageForLog = or.usage;
+      } else {
+        reply = FALLBACK_REPLY;
+      }
+    }
+
+    if (usedOpenRouter && usageForLog) {
+      const total = usageForLog.total_tokens;
+      const cost = total * 0.000000075;
+      const logId = crypto.randomUUID();
+      const jobRef = `public-chat:${logId}`;
+      await c.env.DB.prepare(
+        `INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, job_id)
+         VALUES (?, ?, 'pivot-parlor-chatbot', ?, 'chatbot', ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          logId,
+          shop.id,
+          OPENROUTER_MODEL,
+          usageForLog.prompt_tokens,
+          usageForLog.completion_tokens,
+          total,
+          cost,
+          jobRef
+        )
+        .run();
+    }
+
+    return c.json({ reply });
+  } catch (e) {
+    console.error("[chatbot] public /chat error", e);
+    return c.json({ reply: FALLBACK_REPLY, error: "Something went wrong" }, 500);
+  }
+});
+
 chat.post("/:shopSlug/session", async (c) => {
   try {
     const shopSlug = c.req.param("shopSlug");

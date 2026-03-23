@@ -19,7 +19,7 @@ export default function ShopTermsOfService() {
   if (!data?.shop) return null;
 
   const site = data.site as ShopSiteData | null;
-  const siteChrome = siteDataForChrome(data.shop.name, site);
+  const siteChrome = siteDataForChrome(data.shop.name, site, data.shop.id);
   const slug = data.slug;
 
   return (

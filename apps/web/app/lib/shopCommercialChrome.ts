@@ -10,10 +10,12 @@ export function siteDataForChrome(
     font_body?: string | null;
     logo_url?: string | null;
     headline?: string | null;
-  }
+  },
+  shopId?: string
 ): SiteData {
   const s = site;
   return {
+    ...(shopId ? { shop_id: shopId } : {}),
     shop_name: shopName,
     tagline: "",
     headline: typeof s?.headline === "string" && s.headline.trim() ? s.headline.trim() : undefined,

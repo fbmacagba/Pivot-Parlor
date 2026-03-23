@@ -59,6 +59,7 @@ export default function ShopLanding() {
   const taglineRaw = s.tagline;
   const aboutRaw = s.about;
   const siteData: SiteData = {
+    shop_id: shop.id,
     shop_name: shop.name,
     headline:
       typeof headlineRaw === "string" && headlineRaw.trim() ? headlineRaw.trim() : undefined,
