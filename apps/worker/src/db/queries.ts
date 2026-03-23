@@ -157,13 +157,25 @@ export async function getAllShops(db: D1Database) {
       `SELECT s.*,
               COUNT(DISTINCT b.id)                                     AS booking_count,
               COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.commission ELSE 0 END), 0) AS commission_total,
-              (SELECT 1 FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS has_site
+              (SELECT 1 FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS has_site,
+              (SELECT ss.website_status FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS website_status,
+              (SELECT ss.hero_image_url FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS hero_image_url,
+              (SELECT ss.logo_url FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS logo_url
        FROM shops s
        LEFT JOIN bookings b ON b.shop_id = s.id
        GROUP BY s.id
        ORDER BY s.shop_number`
     )
-    .all<DBShop & { booking_count: number; commission_total: number; has_site: number | null }>();
+    .all<
+      DBShop & {
+        booking_count: number;
+        commission_total: number;
+        has_site: number | null;
+        website_status: string | null;
+        hero_image_url: string | null;
+        logo_url: string | null;
+      }
+    >();
   return results;
 }
 
@@ -349,6 +361,8 @@ export interface DBShopSite {
   catalog_images_json: string | null;
   generated_at: string | null;
   status: string;
+  /** draft | live | paused */
+  website_status?: string;
 }
 
 export function getShopSiteByShopId(db: D1Database, shopId: string) {
@@ -380,6 +394,7 @@ export function createShopSite(
     design_notes?: string | null;
     owner_color_primary?: string | null;
     owner_color_accent?: string | null;
+    website_status?: string;
   }
 ) {
   return db
@@ -388,8 +403,8 @@ export function createShopSite(
          (id, shop_id, template, headline, tagline, about, services_json,
           color_primary, color_accent, font_heading, font_body,
           hero_image_url, logo_url, catalog_images_json, generated_at, status,
-          design_notes, owner_color_primary, owner_color_accent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          design_notes, owner_color_primary, owner_color_accent, website_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       site.id,
@@ -410,8 +425,30 @@ export function createShopSite(
       site.status ?? "active",
       site.design_notes ?? null,
       site.owner_color_primary ?? null,
-      site.owner_color_accent ?? null
+      site.owner_color_accent ?? null,
+      site.website_status ?? "draft"
     )
+    .run();
+}
+
+export function updateShopSiteWebsiteStatus(db: D1Database, shopId: string, websiteStatus: string) {
+  return db
+    .prepare("UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'")
+    .bind(websiteStatus, shopId)
+    .run();
+}
+
+export function updateShopSiteHeroImageUrl(db: D1Database, shopId: string, url: string) {
+  return db
+    .prepare("UPDATE shop_sites SET hero_image_url = ? WHERE shop_id = ? AND status = 'active'")
+    .bind(url, shopId)
+    .run();
+}
+
+export function updateShopSiteLogoUrl(db: D1Database, shopId: string, url: string) {
+  return db
+    .prepare("UPDATE shop_sites SET logo_url = ? WHERE shop_id = ? AND status = 'active'")
+    .bind(url, shopId)
     .run();
 }
 
@@ -438,6 +475,7 @@ export async function replaceShopSiteForShop(
     design_notes?: string | null;
     owner_color_primary?: string | null;
     owner_color_accent?: string | null;
+    website_status?: string;
   }
 ) {
   await db.prepare("DELETE FROM shop_sites WHERE shop_id = ?").bind(site.shop_id).run();

@@ -8,8 +8,16 @@ max_batch_size = 1
 max_batch_timeout = 60
 
 [[queues.producers]]
-binding = "SITE_BUILD_QUEUE"
-queue = "site-build-queue"
+binding = "SITE_IMAGES_QUEUE"
+queue = "site-images-queue"
+
+[[queues.producers]]
+binding = "SITE_TEXT_QUEUE"
+queue = "site-text-queue"
+
+[[queues.producers]]
+binding = "SITE_ASSEMBLE_QUEUE"
+queue = "site-assemble-queue"
 
 [[d1_databases]]
 binding = "DB"

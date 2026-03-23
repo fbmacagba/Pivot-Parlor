@@ -1,12 +1,14 @@
 /**
  * pivot-parlor-audit — Final site generation step: quality checks → activate site or fail job.
  */
-import type { D1Database, KVNamespace, MessageBatch } from "@cloudflare/workers-types";
+import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
 
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   ENVIRONMENT: string;
+  /** Producer for deferred real image generation (optional — log if unbound). */
+  site_images_queue?: Queue;
 }
 
 export interface AuditQueueMessage {
@@ -91,6 +93,7 @@ function parseJsonArrayField(raw: unknown): { ok: true; arr: unknown[] } | { ok:
 
 /**
  * Run all 12 checks; hardFailures stop activation, warnings are logged only.
+ * Legal pages and empty hero/logo URLs are warnings only (deferred image pass may fill assets).
  */
 function runQualityChecks(
   shopSite: Record<string, unknown> | null,
@@ -133,9 +136,14 @@ function runQualityChecks(
     }
   }
 
-  // CHECK 5 — hero image (WARNING only)
+  // CHECK 5 — hero image (warning only)
   if (shopSite && !nonEmptyString(shopSite.hero_image_url)) {
-    warnings.push("hero_image_url is empty — image generation may have failed");
+    warnings.push("hero_image_url is empty — image generation may have failed or not yet completed");
+  }
+
+  // CHECK 5b — logo (warning only)
+  if (shopSite && !nonEmptyString(shopSite.logo_url)) {
+    warnings.push("logo_url is empty — image generation may have failed or not yet completed");
   }
 
   // CHECK 6 — services JSON
@@ -157,7 +165,7 @@ function runQualityChecks(
     }
   }
 
-  // CHECK 7 — legal pages
+  // CHECK 7 — legal pages (warnings only)
   const byType = new Map<string, Record<string, unknown>>();
   for (const p of pages) {
     const t = p.page_type;
@@ -177,7 +185,7 @@ function runQualityChecks(
     }
   }
   if (legalProblems.length) {
-    hardFailures.push(`Missing legal pages: [${legalProblems.join(", ")}]`);
+    warnings.push(`Missing legal pages: [${legalProblems.join(", ")}]`);
   }
 
   // CHECK 8 — shop_settings
@@ -228,6 +236,36 @@ function runQualityChecks(
   }
 
   return { hardFailures, warnings };
+}
+
+/** Deferred image prompts from audit when hero/logo URLs are missing. */
+function parseImagePromptsFromBuildOutput(buildOutputRaw: string | null): {
+  heroImagePrompt: string;
+  logoPrompt: string;
+  catalogImagePrompts: string[];
+} | null {
+  if (!buildOutputRaw) return null;
+  try {
+    const bo = JSON.parse(buildOutputRaw) as Record<string, unknown>;
+    const h = bo.heroImagePrompt;
+    const l = bo.logoPrompt;
+    const c = bo.catalogImagePrompts;
+    if (typeof h !== "string" || typeof l !== "string" || !Array.isArray(c)) return null;
+    const catalogImagePrompts = c.filter((x): x is string => typeof x === "string");
+    return { heroImagePrompt: h, logoPrompt: l, catalogImagePrompts };
+  } catch {
+    return null;
+  }
+}
+
+function buildOutputNeedsDeferredImages(buildOutputRaw: string | null): boolean {
+  if (!buildOutputRaw) return true;
+  try {
+    const bo = JSON.parse(buildOutputRaw) as Record<string, unknown>;
+    return !nonEmptyString(bo.heroUrl) || !nonEmptyString(bo.logoUrl);
+  } catch {
+    return true;
+  }
 }
 
 function parseInput(body: unknown): AuditQueueMessage | null {
@@ -294,6 +332,34 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
 
       if (shopSite) {
         await env.KV.put(siteKvKey(shopSlug), JSON.stringify(shopSite), { expirationTtl: SITE_CACHE_TTL_SEC });
+      }
+
+      const jobRow = await env.DB.prepare("SELECT build_output FROM generation_jobs WHERE id = ?")
+        .bind(jobId)
+        .first<{ build_output: string | null }>();
+      const imagePrompts = parseImagePromptsFromBuildOutput(jobRow?.build_output ?? null);
+      const needsDeferred = buildOutputNeedsDeferredImages(jobRow?.build_output ?? null);
+
+      if (!env.site_images_queue) {
+        console.warn("[pivot-parlor-audit] site_images_queue binding missing; skipping deferred image generation");
+      } else if (!imagePrompts) {
+        console.warn(
+          "[pivot-parlor-audit] No heroImagePrompt/logoPrompt/catalogImagePrompts on generation_jobs.build_output; skipping deferred image generation"
+        );
+      } else if (!needsDeferred) {
+        console.log(
+          `[pivot-parlor-audit] build_output already has heroUrl and logoUrl; skipping site-images-queue enqueue jobId=${jobId}`
+        );
+      } else {
+        await env.site_images_queue.send({
+          jobId,
+          shopId,
+          shopSlug,
+          heroImagePrompt: imagePrompts.heroImagePrompt,
+          logoPrompt: imagePrompts.logoPrompt,
+          catalogImagePrompts: imagePrompts.catalogImagePrompts,
+        });
+        console.log(`[pivot-parlor-audit] Enqueued site-images-queue for jobId=${jobId} shopSlug=${shopSlug}`);
       }
 
       console.log(

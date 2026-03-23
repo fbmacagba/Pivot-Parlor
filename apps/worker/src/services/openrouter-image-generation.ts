@@ -1,12 +1,21 @@
 /**
- * OpenRouter Gemini image model: request/response parsing + logging for Workers.
- * API returns images in choices[0].message.content as multimodal parts, e.g.
- * [{ type: "image_url", image_url: { url: "data:image/png;base64,..." } }]
+ * OpenRouter image models: Gemini (modalities + image_config + data URLs) vs
+ * FLUX (plain chat body, image URL in response.data[0].url or message).
  */
 
 export const OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/** Gemini / nano-banana style models on OpenRouter. */
+export function isGeminiStyleImageModel(model: string): boolean {
+  return model.trim().toLowerCase().startsWith("google/");
+}
+
+/** FLUX and similar on OpenRouter — no modalities / image_config. */
+export function isFluxStyleImageModel(model: string): boolean {
+  return model.trim().toLowerCase().startsWith("black-forest-labs/");
+}
 
 /** Shorten data URLs and huge base64-like strings for logs (full response can be MB+). */
 export function truncateOpenRouterResponseForLog(raw: string, maxLen = 14_000): string {
@@ -45,36 +54,6 @@ function logMessageShapeForDebug(message: unknown, logPrefix: string): void {
   }
 }
 
-/**
- * Extract data:image/...;base64,... URL from OpenRouter chat message (multimodal).
- * Supports message.content as array or JSON string; legacy message.images.
- */
-export function extractDataImageUrlFromOpenRouterMessage(message: unknown): string | null {
-  if (!message || typeof message !== "object") return null;
-  const m = message as Record<string, unknown>;
-
-  const legacy = m.images;
-  if (Array.isArray(legacy)) {
-    const first = legacy[0];
-    if (first && typeof first === "object") {
-      const url = (first as { image_url?: { url?: string } }).image_url?.url;
-      if (typeof url === "string" && url.startsWith("data:image/")) return url;
-    }
-  }
-
-  const content = m.content;
-  const parts = normalizeContentParts(content);
-  for (const part of parts) {
-    if (!part || typeof part !== "object") continue;
-    const p = part as Record<string, unknown>;
-    if (p.type === "image_url" && p.image_url && typeof p.image_url === "object") {
-      const url = (p.image_url as { url?: string }).url;
-      if (typeof url === "string" && url.startsWith("data:image/")) return url;
-    }
-  }
-  return null;
-}
-
 function normalizeContentParts(content: unknown): unknown[] {
   if (Array.isArray(content)) return content;
   if (typeof content === "string") {
@@ -89,6 +68,62 @@ function normalizeContentParts(content: unknown): unknown[] {
     }
   }
   return [];
+}
+
+/**
+ * Extract data:image/...;base64,... or https image URL from OpenRouter chat message.
+ * FLUX may return https URLs in image_url parts or plain text content.
+ */
+export function extractDataImageUrlFromOpenRouterMessage(message: unknown): string | null {
+  if (!message || typeof message !== "object") return null;
+  const m = message as Record<string, unknown>;
+
+  const legacy = m.images;
+  if (Array.isArray(legacy)) {
+    const first = legacy[0];
+    if (first && typeof first === "object") {
+      const url = (first as { image_url?: { url?: string } }).image_url?.url;
+      if (typeof url === "string" && (url.startsWith("data:image/") || isHttpImageUrl(url))) return url;
+    }
+  }
+
+  const content = m.content;
+  if (typeof content === "string") {
+    const t = content.trim();
+    if (isHttpImageUrl(t)) return t;
+  }
+
+  const parts = normalizeContentParts(content);
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue;
+    const p = part as Record<string, unknown>;
+    if (p.type === "image_url" && p.image_url && typeof p.image_url === "object") {
+      const url = (p.image_url as { url?: string }).url;
+      if (typeof url === "string" && (url.startsWith("data:image/") || isHttpImageUrl(url))) return url;
+    }
+  }
+  return null;
+}
+
+function isHttpImageUrl(s: string): boolean {
+  return /^https?:\/\//i.test(s);
+}
+
+/**
+ * FLUX-style OpenRouter responses: top-level `data` array with `{ url }` (HTTP image link).
+ */
+export function extractFluxHttpImageUrlFromOpenRouterJson(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const root = data as Record<string, unknown>;
+  const dataArr = root.data;
+  if (Array.isArray(dataArr) && dataArr.length > 0) {
+    const first = dataArr[0];
+    if (first && typeof first === "object") {
+      const url = (first as { url?: string }).url;
+      if (typeof url === "string" && isHttpImageUrl(url)) return url;
+    }
+  }
+  return null;
 }
 
 function uint8ToArrayBuffer(u8: Uint8Array): ArrayBuffer {
@@ -110,30 +145,64 @@ export function dataImageUrlToArrayBuffer(dataUrl: string): ArrayBuffer {
     const binary = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     return uint8ToArrayBuffer(binary);
   }
-  // Non-base64 data URL (unlikely for OpenRouter)
   const decoded = decodeURIComponent(b64);
   return uint8ToArrayBuffer(new TextEncoder().encode(decoded));
 }
 
-export interface OpenRouterImageRequestBody {
-  model: string;
-  messages: Array<{ role: string; content: string }>;
-  modalities: string[];
-  image_config: { aspect_ratio: string };
+async function fetchHttpImageToArrayBuffer(imageUrl: string, logPrefix: string): Promise<ArrayBuffer> {
+  let imgRes: Response;
+  try {
+    imgRes = await fetch(imageUrl, {
+      headers: { Accept: "image/*,*/*" },
+    });
+  } catch (e) {
+    console.error(`${logPrefix} failed to fetch image URL:`, imageUrl.slice(0, 200), e);
+    throw new Error(`Failed to fetch image from URL: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!imgRes.ok) {
+    const t = await imgRes.text().catch(() => "");
+    console.error(`${logPrefix} image URL fetch not ok`, {
+      status: imgRes.status,
+      urlPreview: imageUrl.slice(0, 200),
+      bodyPreview: t.slice(0, 500),
+    });
+    throw new Error(`Image URL returned HTTP ${imgRes.status}`);
+  }
+  const buf = await imgRes.arrayBuffer();
+  if (!buf || buf.byteLength === 0) {
+    throw new Error("Downloaded image is empty");
+  }
+  return buf;
+}
+
+function buildOpenRouterRequestBody(
+  model: string,
+  prompt: string,
+  aspectRatio: string
+): Record<string, unknown> {
+  if (isFluxStyleImageModel(model)) {
+    return {
+      model,
+      messages: [{ role: "user", content: prompt }],
+    };
+  }
+  return {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    modalities: ["image", "text"],
+    image_config: { aspect_ratio: aspectRatio },
+  };
 }
 
 export async function generateOpenRouterImageBuffer(
   prompt: string,
   aspectRatio: string,
   apiKey: string,
-  logPrefix = "[site-gen][image]"
+  logPrefix = "[site-gen][image]",
+  model?: string
 ): Promise<ArrayBuffer> {
-  const requestBody: OpenRouterImageRequestBody = {
-    model: OPENROUTER_IMAGE_MODEL,
-    messages: [{ role: "user", content: prompt }],
-    modalities: ["image", "text"],
-    image_config: { aspect_ratio: aspectRatio },
-  };
+  const resolvedModel = (model && model.trim()) || OPENROUTER_IMAGE_MODEL;
+  const requestBody = buildOpenRouterRequestBody(resolvedModel, prompt, aspectRatio);
 
   console.log(`${logPrefix} OpenRouter request body:`, JSON.stringify(requestBody));
 
@@ -161,7 +230,9 @@ export async function generateOpenRouterImageBuffer(
   );
 
   if (!res.ok) {
-    console.error(`${logPrefix} OpenRouter error (first 4k of body):`, responseText.slice(0, 4000));
+    console.error(
+      `${logPrefix} OpenRouter error: status=${res.status} statusText=${res.statusText} full body:\n${responseText}`
+    );
     throw new Error(`OpenRouter image error ${res.status}: ${responseText.slice(0, 800)}`);
   }
 
@@ -174,11 +245,33 @@ export async function generateOpenRouterImageBuffer(
   }
 
   const message = (data as { choices?: Array<{ message?: unknown }> })?.choices?.[0]?.message;
+
+  if (isFluxStyleImageModel(resolvedModel)) {
+    let httpUrl = extractFluxHttpImageUrlFromOpenRouterJson(data);
+    if (!httpUrl) {
+      httpUrl = extractDataImageUrlFromOpenRouterMessage(message);
+    }
+    if (httpUrl && isHttpImageUrl(httpUrl)) {
+      return fetchHttpImageToArrayBuffer(httpUrl, logPrefix);
+    }
+    if (httpUrl && httpUrl.startsWith("data:image/")) {
+      return dataImageUrlToArrayBuffer(httpUrl);
+    }
+    console.error(`${logPrefix} FLUX: no HTTP or data image URL in response; dumping shapes`);
+    console.error(`${logPrefix} parsed top-level keys:`, data && typeof data === "object" ? Object.keys(data as object) : []);
+    logMessageShapeForDebug(message, logPrefix);
+    throw new Error("No image URL in OpenRouter response (expected data[0].url or message image content)");
+  }
+
   const dataUrl = extractDataImageUrlFromOpenRouterMessage(message);
   if (!dataUrl) {
-    console.error(`${logPrefix} No data:image URL in response; dumping message shape`);
+    console.error(`${logPrefix} No image URL in response; dumping message shape`);
     logMessageShapeForDebug(message, logPrefix);
     throw new Error("No image in OpenRouter response (check content[].type === image_url)");
+  }
+
+  if (isHttpImageUrl(dataUrl)) {
+    return fetchHttpImageToArrayBuffer(dataUrl, logPrefix);
   }
 
   try {

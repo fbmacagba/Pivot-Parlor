@@ -1,18 +1,17 @@
 /**
- * pivot-parlor-research — Cloudflare Queue consumer for site-research-queue.
- * Produces a visual/content spec via OpenRouter, persists to D1 + KV, enqueues site-build-queue.
+ * pivot-parlor-research — Consumes site-research-queue: OpenRouter spec → D1 + KV → site-images-queue + site-text-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
 
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
-  SITE_BUILD_QUEUE: Queue;
+  SITE_IMAGES_QUEUE: Queue;
+  SITE_TEXT_QUEUE: Queue;
+  SITE_ASSEMBLE_QUEUE: Queue;
   OPENROUTER_API_KEY: string;
   ENVIRONMENT: string;
 }
-
-// ─── Input (site-research-queue) ───────────────────────────────────────────────
 
 export interface ResearchQueueMessage {
   jobId: string;
@@ -23,9 +22,10 @@ export interface ResearchQueueMessage {
   styleNotes: string;
   services: { name: string; price_gbp: number; duration_min: number }[];
   hasLogoFile: boolean;
+  text_model: string;
+  image_model: string;
+  skip_images?: boolean;
 }
-
-// ─── Rich AI spec (returned by model) ─────────────────────────────────────────
 
 export interface ResearchSpec {
   palette: {
@@ -67,48 +67,27 @@ export interface ResearchSpec {
   social_stubs: Record<string, string>;
 }
 
-/** Shape expected by pivot-parlor-api `processSiteBuildMessage` (site-build-queue). */
-export interface BuildResearchOutput {
-  positioning: string;
-  headline: string;
-  subheadline: string;
-  hero_cta: string;
-  about_title: string;
-  about_body: string;
-  unique_selling_points: string[];
-  services: Array<{
-    name: string;
-    duration_minutes: number;
-    price_gbp: number;
-    description: string;
-    image_prompt: string;
-  }>;
-  hero_image_prompt: string;
-  logo_prompt: string;
-  color_primary: string;
-  color_accent: string;
-  font_heading: string;
-  font_body: string;
-  seo_title: string;
-  seo_description: string;
-  trust_signals: string[];
-}
-
-export interface SiteBuildQueueMessage {
+/** Stored at gen:{jobId}:research (TTL 1h) for images + text workers. */
+export interface GenResearchKvPayload {
+  spec: ResearchSpec;
+  services: { name: string; price_gbp: number; duration_min: number }[];
   jobId: string;
   shopId: string;
   shopSlug: string;
   shopName: string;
   shopType: string;
-  template: string;
   hasLogoFile: boolean;
-  researchOutput: BuildResearchOutput;
-  design_notes?: string;
-  /** Full rich spec for forward-looking consumers (ignored by current build worker). */
-  researchSpecification?: ResearchSpec;
+  template: string;
+  text_model: string;
+  image_model: string;
 }
 
-const TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
+const KV_TTL_SEC = 3600;
+const genResearchKey = (jobId: string) => `gen:${jobId}:research`;
+const genImagesKey = (jobId: string) => `gen:${jobId}:images`;
+
+const DEFAULT_TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
+const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
 
 const LAYOUT_MOOD_TO_TEMPLATE: Record<string, string> = {
   "luxury-dark": "luxury",
@@ -223,7 +202,14 @@ Produce a complete visual and content specification. Return this exact JSON stru
 You MUST include exactly ${msg.services.length} strings in image_prompts.catalog (same order as services listed above).`;
 }
 
-async function openRouterJson(apiKey: string, system: string, user: string): Promise<string> {
+function maxTokensForOpenRouterModel(model: string): number {
+  const m = model.trim().toLowerCase();
+  if (m.startsWith("meta-llama/")) return 4096;
+  if (m.startsWith("google/gemini-3.1-flash-lite")) return 8000;
+  return 4096;
+}
+
+async function openRouterJson(apiKey: string, model: string, system: string, user: string): Promise<string> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -233,8 +219,8 @@ async function openRouterJson(apiKey: string, system: string, user: string): Pro
       "X-Title": "Pivot Parlor Research",
     },
     body: JSON.stringify({
-      model: TEXT_MODEL,
-      max_tokens: 12000,
+      model,
+      max_tokens: maxTokensForOpenRouterModel(model),
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
@@ -303,40 +289,6 @@ function validateResearchSpec(raw: unknown, serviceCount: number): raw is Resear
   return true;
 }
 
-function mapToBuildResearchOutput(
-  spec: ResearchSpec,
-  services: ResearchQueueMessage["services"],
-  shopName: string
-): BuildResearchOutput {
-  const positioning = `${spec.layout_mood}: ${spec.brand_voice}`.slice(0, 2000);
-  const outServices = services.map((s, i) => ({
-    name: s.name,
-    duration_minutes: s.duration_min,
-    price_gbp: s.price_gbp,
-    description: `Professional ${s.name} at ${shopName}. Book online in seconds.`,
-    image_prompt: String(spec.image_prompts.catalog[i]),
-  }));
-  return {
-    positioning,
-    headline: spec.content.headline,
-    subheadline: spec.content.subheadline,
-    hero_cta: spec.content.hero_cta,
-    about_title: spec.content.about_title,
-    about_body: spec.content.about_body,
-    unique_selling_points: spec.content.unique_selling_points,
-    trust_signals: spec.content.trust_signals,
-    services: outServices,
-    hero_image_prompt: spec.image_prompts.hero,
-    logo_prompt: spec.image_prompts.logo,
-    color_primary: spec.palette.primary,
-    color_accent: spec.palette.accent,
-    font_heading: spec.typography.heading_font,
-    font_body: spec.typography.body_font,
-    seo_title: spec.content.seo_title,
-    seo_description: spec.content.seo_description,
-  };
-}
-
 function templateFromLayoutMood(layoutMood: string): string {
   return LAYOUT_MOOD_TO_TEMPLATE[layoutMood] ?? "minimal";
 }
@@ -358,6 +310,11 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     services.push({ name: sv.name, price_gbp: sv.price_gbp, duration_min: sv.duration_min });
   }
   if (services.length < 2) return null;
+  const text_model =
+    typeof o.text_model === "string" && o.text_model.trim() ? o.text_model.trim() : DEFAULT_TEXT_MODEL;
+  const image_model =
+    typeof o.image_model === "string" && o.image_model.trim() ? o.image_model.trim() : DEFAULT_IMAGE_MODEL;
+  const skip_images = o.skip_images === true;
   return {
     jobId: o.jobId,
     shopId: o.shopId,
@@ -367,6 +324,9 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     styleNotes: o.styleNotes,
     services,
     hasLogoFile: o.hasLogoFile,
+    text_model,
+    image_model,
+    skip_images,
   };
 }
 
@@ -395,11 +355,13 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
   }
 
   try {
+    console.log(`[${jobId}] [pivot-parlor-research] start shopSlug=${input.shopSlug}`);
     await updateGenerationJob(env.DB, jobId, { status: "running", stage: "research", error: null });
     await putJobKv(env.KV, jobId, { status: "running", stage: "research", shopSlug: input.shopSlug });
 
     const userPrompt = buildUserPrompt(input);
-    const rawText = await openRouterJson(apiKey, SYSTEM_PROMPT, userPrompt);
+    console.log(`[${jobId}] [pivot-parlor-research] text model=${input.text_model}`);
+    const rawText = await openRouterJson(apiKey, input.text_model, SYSTEM_PROMPT, userPrompt);
     let parsed: unknown;
     try {
       parsed = JSON.parse(rawText);
@@ -430,34 +392,92 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     }
 
     const spec = parsed;
-    const researchOutput = mapToBuildResearchOutput(spec, input.services, input.shopName);
     const fullJson = JSON.stringify(spec);
 
-    await updateGenerationJob(env.DB, jobId, {
-      status: "running",
-      stage: "build",
-      research_output: fullJson,
-      error: null,
-    });
-    await putJobKv(env.KV, jobId, { status: "running", stage: "build", shopSlug: input.shopSlug });
-
-    const buildMessage: SiteBuildQueueMessage = {
+    const payload: GenResearchKvPayload = {
+      spec,
+      services: input.services.map((s) => ({
+        name: s.name,
+        price_gbp: s.price_gbp,
+        duration_min: s.duration_min,
+      })),
       jobId,
       shopId,
       shopSlug: input.shopSlug,
       shopName: input.shopName,
       shopType: input.shopType,
-      template: templateFromLayoutMood(spec.layout_mood),
       hasLogoFile: input.hasLogoFile,
-      researchOutput,
-      design_notes: input.styleNotes?.trim() || undefined,
-      researchSpecification: spec,
+      template: templateFromLayoutMood(spec.layout_mood),
+      text_model: input.text_model,
+      image_model: input.image_model,
     };
 
-    await env.SITE_BUILD_QUEUE.send(buildMessage);
+    await env.KV.put(genResearchKey(jobId), JSON.stringify(payload), { expirationTtl: KV_TTL_SEC });
+    console.log(`[${jobId}] [pivot-parlor-research] wrote KV ${genResearchKey(jobId)} ttl=${KV_TTL_SEC}s`);
+
+    await updateGenerationJob(env.DB, jobId, {
+      status: "running",
+      stage: "parallel",
+      research_output: fullJson,
+      error: null,
+    });
+    await putJobKv(env.KV, jobId, { status: "running", stage: "parallel", shopSlug: input.shopSlug });
+
+    if (input.skip_images) {
+      const row = await env.DB.prepare(
+        "SELECT hero_image_url, logo_url, catalog_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+      )
+        .bind(shopId)
+        .first<{
+          hero_image_url: string | null;
+          logo_url: string | null;
+          catalog_images_json: string | null;
+        }>();
+      let catalogUrls: string[] = [];
+      if (row?.catalog_images_json) {
+        try {
+          const p = JSON.parse(row.catalog_images_json) as unknown;
+          if (Array.isArray(p)) {
+            catalogUrls = p.filter((x): x is string => typeof x === "string");
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const imagesPayload = {
+        heroUrl: row?.hero_image_url?.trim() ?? "",
+        logoUrl: row?.logo_url?.trim() ?? "",
+        catalogUrls,
+        completedAt: new Date().toISOString(),
+        errors: [] as { step: string; detail: string }[],
+      };
+      await env.KV.put(genImagesKey(jobId), JSON.stringify(imagesPayload), { expirationTtl: KV_TTL_SEC });
+      await env.SITE_ASSEMBLE_QUEUE.send({
+        jobId,
+        shopId,
+        shopSlug: input.shopSlug,
+      });
+      console.log(`[${jobId}] [pivot-parlor-research] skip_images: wrote ${genImagesKey(jobId)} + site-assemble-queue`);
+    } else {
+      await env.SITE_IMAGES_QUEUE.send({
+        jobId,
+        shopId,
+        shopSlug: input.shopSlug,
+        image_model: input.image_model,
+      });
+      console.log(`[${jobId}] [pivot-parlor-research] enqueued site-images-queue`);
+    }
+
+    await env.SITE_TEXT_QUEUE.send({
+      jobId,
+      shopId,
+      shopSlug: input.shopSlug,
+      text_model: input.text_model,
+    });
+    console.log(`[${jobId}] [pivot-parlor-research] enqueued site-text-queue`);
   } catch (err) {
     const msg = errorMessage(err);
-    console.error("[pivot-parlor-research] Job failed", jobId, err);
+    console.error(`[${jobId}] [pivot-parlor-research] Job failed`, err);
     try {
       await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
       await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug: input.shopSlug });

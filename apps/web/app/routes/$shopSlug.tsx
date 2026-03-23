@@ -2,7 +2,97 @@ import { Outlet } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
-import type { Review, ShopSettings, StaffMember } from "~/components/CommercialTemplate";
+import type {
+  Review,
+  Service,
+  ShopSettings,
+  StaffMember,
+} from "~/components/CommercialTemplate";
+
+/** GET /api/shops/:slug/services (unwrapped `data` array). */
+type ApiPublicService = {
+  id: string;
+  name: string;
+  description?: string;
+  durationMinutes: number;
+  price: number;
+  category?: string;
+};
+
+export function normalizeCommercialServices(
+  rawList: Array<Record<string, unknown>>,
+  catalog: string[]
+): Service[] {
+  return rawList.map((raw, index) => {
+    const id = typeof raw.id === "string" ? raw.id : `svc-${index}`;
+    const name = String(raw.name ?? "Service");
+    const duration_minutes =
+      typeof raw.duration_minutes === "number"
+        ? raw.duration_minutes
+        : typeof raw.duration_min === "number"
+          ? raw.duration_min
+          : 30;
+    const price_gbp =
+      typeof raw.price_gbp === "number"
+        ? raw.price_gbp
+        : typeof raw.price === "number"
+          ? raw.price
+          : 0;
+    const category =
+      (typeof raw.category === "string" && raw.category.trim())
+        ? raw.category.trim()
+        : "Service";
+    const description =
+      typeof raw.description === "string" ? raw.description : undefined;
+    const image_url =
+      typeof raw.image_url === "string"
+        ? raw.image_url
+        : catalog[index % catalog.length] || "";
+    return {
+      id,
+      name,
+      duration_minutes,
+      price_gbp,
+      category,
+      description,
+      image_url,
+    };
+  });
+}
+
+function mapApiServicesToCommercial(
+  apiList: ApiPublicService[],
+  catalog: string[]
+): Service[] {
+  return apiList.map((row, index) => ({
+    id: row.id,
+    name: row.name,
+    duration_minutes: row.durationMinutes,
+    price_gbp: row.price,
+    description: row.description?.trim() || undefined,
+    category: row.category?.trim() || "Service",
+    image_url: catalog[index % catalog.length] || "",
+  }));
+}
+
+/** Normalize `services` from /site (array, JSON string, or missing). */
+function parseServicesFromSitePayload(site: ShopSiteData | null): Array<Record<string, unknown>> {
+  if (!site) return [];
+  const raw = site.services as unknown;
+  if (Array.isArray(raw)) {
+    return raw.filter((x): x is Record<string, unknown> => x !== null && typeof x === "object");
+  }
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw) as unknown;
+      if (!Array.isArray(p)) return [];
+      return p.filter((x): x is Record<string, unknown> => x !== null && typeof x === "object");
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 export interface ShopSiteData {
   template: string;
@@ -19,6 +109,8 @@ export interface ShopSiteData {
   catalog_images: string[];
   seo_title?: string | null;
   seo_description?: string | null;
+  /** draft | live | paused — public routes gate on this */
+  website_status?: string | null;
 }
 
 export async function loader({ params, context }: LoaderFunctionArgs) {
@@ -47,6 +139,45 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
     /* Coming Soon */
   }
 
+  if (site) {
+    const ws = (site.website_status ?? "draft").toLowerCase();
+    if (ws === "paused") {
+      throw new Response(
+        `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Unavailable</title></head><body style="margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem;text-align:center"><div><h1 style="font-size:1.25rem;margin:0 0 0.5rem">This site is temporarily unavailable</h1><p style="margin:0;opacity:0.75;font-size:0.95rem">Please try again later.</p></div></body></html>`,
+        {
+          status: 503,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        }
+      );
+    }
+    if (ws === "draft") {
+      throw new Response("Not found", { status: 404 });
+    }
+  }
+
+  const catalog = site?.catalog_images ?? [];
+  let commercialServices: Service[] = [];
+  try {
+    const apiRows = await api.get<ApiPublicService[]>(`/api/shops/${slug}/services`);
+    if (Array.isArray(apiRows) && apiRows.length > 0) {
+      commercialServices = mapApiServicesToCommercial(apiRows, catalog);
+    }
+  } catch {
+    /* fall through to shop_sites JSON */
+  }
+
+  const siteServicesParsed = parseServicesFromSitePayload(site);
+  console.log("[pp shop loader] services from /site after parse", {
+    slug,
+    count: siteServicesParsed.length,
+    names: siteServicesParsed.map((s) => (typeof s.name === "string" ? s.name : "?")),
+    rawType: site ? typeof site.services : "no-site",
+  });
+
+  if (commercialServices.length === 0 && siteServicesParsed.length > 0) {
+    commercialServices = normalizeCommercialServices(siteServicesParsed, catalog);
+  }
+
   const [staffR, reviewsR, settingsR] = await Promise.allSettled([
     api.get<StaffMember[]>(`/api/shops/${slug}/booking-staff`),
     api.get<Review[]>(`/api/shops/${slug}/reviews`),
@@ -69,6 +200,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
       created_at: shop.created_at,
     },
     site,
+    commercialServices,
     staff,
     reviews,
     settings,

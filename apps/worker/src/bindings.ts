@@ -7,8 +7,6 @@ export type Bindings = {
   /** Booking reminder queue (legacy) */
   QUEUE?: Queue;
   site_research_queue?: Queue;
-  site_build_queue?: Queue;
-  site_audit_queue?: Queue;
   JWT_SECRET: string;
   OPENROUTER_API_KEY: string;
   GOOGLE_AI_API_KEY: string;

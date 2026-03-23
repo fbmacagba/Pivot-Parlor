@@ -1,9 +1,6 @@
 import { Link, useRouteLoaderData } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/cloudflare";
-import CommercialTemplate, {
-  type Service,
-  type SiteData,
-} from "~/components/CommercialTemplate";
+import CommercialTemplate, { type SiteData } from "~/components/CommercialTemplate";
 import type { loader as shopLoader } from "./$shopSlug";
 import type { ShopSiteData } from "./$shopSlug";
 
@@ -16,50 +13,12 @@ export const meta: MetaFunction<typeof shopLoader> = ({ data }) => {
   return [{ title }];
 };
 
-function normalizeCommercialServices(
-  rawList: Array<Record<string, unknown>>,
-  catalog: string[]
-): Service[] {
-  return rawList.map((raw, index) => {
-    const id = typeof raw.id === "string" ? raw.id : `svc-${index}`;
-    const name = String(raw.name ?? "Service");
-    const duration_minutes =
-      typeof raw.duration_minutes === "number"
-        ? raw.duration_minutes
-        : typeof raw.duration_min === "number"
-          ? raw.duration_min
-          : 30;
-    const price_gbp =
-      typeof raw.price_gbp === "number"
-        ? raw.price_gbp
-        : typeof raw.price === "number"
-          ? raw.price
-          : 0;
-    const category =
-      typeof raw.category === "string" && raw.category ? raw.category : undefined;
-    const description =
-      typeof raw.description === "string" ? raw.description : undefined;
-    const image_url =
-      typeof raw.image_url === "string"
-        ? raw.image_url
-        : catalog[index % catalog.length] || undefined;
-    return {
-      id,
-      name,
-      duration_minutes,
-      price_gbp,
-      category,
-      description,
-      image_url,
-    };
-  });
-}
-
 export default function ShopLanding() {
   const data = useRouteLoaderData<typeof shopLoader>("routes/$shopSlug");
-  const { shop, site, staff, reviews, settings } = data ?? {
+  const { shop, site, commercialServices, staff, reviews, settings } = data ?? {
     shop: null,
     site: null,
+    commercialServices: [],
     staff: [],
     reviews: [],
     settings: {},
@@ -87,22 +46,29 @@ export default function ShopLanding() {
   }
 
   const s = site as ShopSiteData;
-  const catalog = s.catalog_images ?? [];
-  const services = normalizeCommercialServices(
-    (s.services ?? []) as Array<Record<string, unknown>>,
-    catalog
-  );
+  const services = commercialServices ?? [];
 
   const reviewAvg =
     reviews.length > 0
       ? reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length
       : undefined;
 
+  const heroRaw = s.hero_image_url;
+  const logoRaw = s.logo_url;
+  const headlineRaw = s.headline;
+  const taglineRaw = s.tagline;
+  const aboutRaw = s.about;
   const siteData: SiteData = {
     shop_name: shop.name,
-    tagline: s.tagline ?? "",
-    hero_image_url: s.hero_image_url ?? undefined,
-    logo_url: s.logo_url ?? undefined,
+    headline:
+      typeof headlineRaw === "string" && headlineRaw.trim() ? headlineRaw.trim() : undefined,
+    tagline: typeof taglineRaw === "string" && taglineRaw.trim() ? taglineRaw.trim() : "",
+    about: typeof aboutRaw === "string" && aboutRaw.trim() ? aboutRaw.trim() : undefined,
+    font_heading: typeof s.font_heading === "string" && s.font_heading.trim() ? s.font_heading.trim() : undefined,
+    font_body: typeof s.font_body === "string" && s.font_body.trim() ? s.font_body.trim() : undefined,
+    hero_image_url:
+      typeof heroRaw === "string" && heroRaw.trim() ? heroRaw.trim() : undefined,
+    logo_url: typeof logoRaw === "string" && logoRaw.trim() ? logoRaw.trim() : undefined,
     color_primary: s.color_primary ?? undefined,
     color_accent: s.color_accent ?? undefined,
     seo_title: s.seo_title ?? undefined,
@@ -118,7 +84,6 @@ export default function ShopLanding() {
       services={services}
       reviews={reviews}
       settings={settings}
-      shopCreatedAt={shop.created_at}
     />
   );
 }

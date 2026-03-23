@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # Dependencies
-node_modules
+node_modules/
 .pnp
 .pnp.js
 
@@ -24,8 +24,14 @@ coverage
 # Build Outputs
 .next/
 out/
-build
+build/
 dist
+.pages-dist/
+.wrangler/
+apps/worker/.wrangler-bundle-out/
+
+# Source maps (generated)
+*.js.map
 
 
 # Debug

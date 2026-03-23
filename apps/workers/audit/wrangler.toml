@@ -7,6 +7,10 @@ queue = "site-audit-queue"
 max_batch_size = 1
 max_batch_timeout = 60
 
+[[queues.producers]]
+binding = "site_images_queue"
+queue = "site-images-queue"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "pivot-parlor-db"

@@ -14,7 +14,7 @@ id = "12eca802e7ff47c2a5358da0f985eecd"
 
 [vars]
 ENVIRONMENT = "production"
-PLATFORM_URL = "https://pivotparlor.com"
+PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 
 # Secrets:
 #   OPENROUTER_API_KEY

@@ -255,6 +255,7 @@ export async function generateShopSite(
     design_notes: options.design_notes || null,
     owner_color_primary: options.color_primary || null,
     owner_color_accent: options.color_accent || null,
+    website_status: "live",
   });
 
   // Step 5: Cache in KV

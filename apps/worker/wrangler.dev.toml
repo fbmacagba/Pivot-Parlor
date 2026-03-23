@@ -23,14 +23,6 @@ queue = "pivot-parlor-reminders"
 binding = "site_research_queue"
 queue = "site-research-queue"
 
-[[queues.producers]]
-binding = "site_build_queue"
-queue = "site-build-queue"
-
-[[queues.producers]]
-binding = "site_audit_queue"
-queue = "site-audit-queue"
-
 # Site pipeline queues are consumed by apps/workers/*; this worker only consumes reminders.
 [[queues.consumers]]
 queue = "pivot-parlor-reminders"

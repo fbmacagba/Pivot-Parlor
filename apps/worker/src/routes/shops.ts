@@ -3,19 +3,99 @@ import Stripe from "stripe";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Bindings } from "../bindings.js";
 import {
-  getAllShops, getShopById, getShopBySlug,
-  createShop, getNextShopNumber,
+  getAllShops,
+  getShopById,
+  getShopBySlug,
+  createShop,
+  createShopSite,
+  getNextShopNumber,
   createInvite,
   getShopSiteByShopId,
   updateShopStripeSession,
   insertGenerationJob,
   updateGenerationJob,
   getStaffByShop,
+  getServicesByShop,
+  updateShopSiteHeroImageUrl,
+  updateShopSiteLogoUrl,
+  updateShopSiteWebsiteStatus,
+  type DBService,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
 
 const shops = new Hono<{ Bindings: Bindings }>();
+
+/** Matches `ResearchQueueMessage.services` in apps/workers/research. */
+type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number };
+
+function mapDbServiceToResearchQueue(row: DBService): SiteResearchQueueService {
+  return { name: row.name, price_gbp: row.price, duration_min: row.duration_min };
+}
+
+function servicesFromShopSitesJson(servicesJson: string | null | undefined): SiteResearchQueueService[] {
+  if (!servicesJson) return [];
+  try {
+    const arr = JSON.parse(servicesJson) as unknown[];
+    if (!Array.isArray(arr)) return [];
+    const out: SiteResearchQueueService[] = [];
+    for (const item of arr) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      if (typeof o.name !== "string" || !o.name.trim()) continue;
+      const price_gbp =
+        typeof o.price_gbp === "number" && !Number.isNaN(o.price_gbp)
+          ? o.price_gbp
+          : typeof o.price === "number" && !Number.isNaN(o.price)
+            ? o.price
+            : 25;
+      const duration_min =
+        typeof o.duration_min === "number" && !Number.isNaN(o.duration_min)
+          ? o.duration_min
+          : typeof o.duration_minutes === "number" && !Number.isNaN(o.duration_minutes)
+            ? o.duration_minutes
+            : 30;
+      out.push({ name: o.name.trim(), price_gbp, duration_min });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function buildSiteResearchQueueServices(
+  db: D1Database,
+  shopId: string
+): Promise<SiteResearchQueueService[]> {
+  const dbRows = await getServicesByShop(db, shopId);
+  let services = dbRows.map(mapDbServiceToResearchQueue);
+
+  if (services.length < 2) {
+    const site = await getShopSiteByShopId(db, shopId);
+    const fromSite = servicesFromShopSitesJson(site?.services_json ?? null);
+    const seen = new Set(services.map((s) => s.name.toLowerCase()));
+    for (const s of fromSite) {
+      if (services.length >= 2) break;
+      const k = s.name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      services.push(s);
+    }
+  }
+
+  let n = 0;
+  while (services.length < 2) {
+    n += 1;
+    services.push({
+      name: `Default service ${n}`,
+      price_gbp: 25,
+      duration_min: 30,
+    });
+  }
+
+  return services;
+}
 
 function toSlug(name: string): string {
   return name
@@ -91,18 +171,34 @@ shops.get("/:shopId/site", async (c) => {
   const shop = await getShopBySlug(c.env.DB, shopId) ?? await getShopById(c.env.DB, shopId);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  const cached = await c.env.KV.get(`site:${shop.slug}`);
-  if (cached) return c.json({ success: true, data: JSON.parse(cached) });
-
   const site = await getShopSiteByShopId(c.env.DB, shop.id);
   if (!site) return c.json({ success: false, error: "No site generated for this shop" }, 404);
+
+  const freshServices = site.services_json ? JSON.parse(site.services_json) : [];
+
+  const websiteStatus = (site as { website_status?: string | null }).website_status ?? "draft";
+
+  const cached = await c.env.KV.get(`site:${shop.slug}`);
+  if (cached) {
+    try {
+      const data = JSON.parse(cached) as Record<string, unknown>;
+      data.services = freshServices;
+      data.website_status = websiteStatus;
+      // Always refresh image URLs from D1 — KV snapshot can be stale after save-image / pipeline
+      data.hero_image_url = site.hero_image_url;
+      data.logo_url = site.logo_url;
+      return c.json({ success: true, data });
+    } catch {
+      /* fall through to rebuild from D1 */
+    }
+  }
 
   const data = {
     template: site.template,
     headline: site.headline,
     tagline: site.tagline,
     about: site.about,
-    services: site.services_json ? JSON.parse(site.services_json) : [],
+    services: freshServices,
     color_primary: site.color_primary,
     color_accent: site.color_accent,
     font_heading: site.font_heading,
@@ -112,6 +208,7 @@ shops.get("/:shopId/site", async (c) => {
     catalog_images: site.catalog_images_json ? JSON.parse(site.catalog_images_json) : [],
     seo_title: (site as { seo_title?: string | null }).seo_title ?? null,
     seo_description: (site as { seo_description?: string | null }).seo_description ?? null,
+    website_status: websiteStatus,
   };
 
   await c.env.KV.put(`site:${shop.slug}`, JSON.stringify(data), { expirationTtl: 60 * 60 * 24 });
@@ -271,18 +368,292 @@ shops.get("/:shopId/generation-prefs", authMiddleware, async (c) => {
   });
 });
 
+function genSettingsKvKey(shopId: string): string {
+  return `gen:settings:${shopId}`;
+}
+
+/** Matches [vars] ASSET_BASE_URL in wrangler.toml — used if env var missing at runtime. */
+const DEFAULT_ASSET_PUBLIC_BASE = "https://pivot-parlor-api.bmorris0565.workers.dev";
+
+function assetPublicUrl(
+  c: { env: Bindings; req?: { url: string } },
+  shopSlug: string,
+  filename: string
+): string {
+  let base = (c.env.ASSET_BASE_URL ?? "").trim().replace(/\/$/, "");
+  if (!base && c.req?.url) {
+    try {
+      base = new URL(c.req.url).origin;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (!base) base = DEFAULT_ASSET_PUBLIC_BASE;
+  return `${base}/assets/${shopSlug}/${filename}`;
+}
+
+async function ensureDraftShopSiteRow(db: D1Database, shopId: string): Promise<void> {
+  const existing = await getShopSiteByShopId(db, shopId);
+  if (existing) return;
+  await createShopSite(db, {
+    id: crypto.randomUUID(),
+    shop_id: shopId,
+    template: "minimal",
+    status: "active",
+    website_status: "draft",
+  });
+}
+
+// ─── POST /api/shops/:shopId/settings — save dev generation prefs to KV (24h) ───
+
+shops.post("/:shopId/settings", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const body = await c.req
+    .json<{ design_notes?: string; text_model?: string; image_model?: string }>()
+    .catch(() => ({}));
+  await c.env.KV.put(
+    genSettingsKvKey(shop.id),
+    JSON.stringify({
+      design_notes: typeof body.design_notes === "string" ? body.design_notes : "",
+      text_model: typeof body.text_model === "string" ? body.text_model : "",
+      image_model: typeof body.image_model === "string" ? body.image_model : "",
+    }),
+    { expirationTtl: 60 * 60 * 24 }
+  );
+  return c.json({ ok: true });
+});
+
+// ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer or admin) ───
+
+const DEFAULT_OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+
+shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  const apiKey = c.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    console.error("[generate-image] OPENROUTER_API_KEY not configured", { shopId: shop.id });
+    return c.json({ error: "OPENROUTER_API_KEY not configured" }, 503);
+  }
+
+  const contentType = c.req.header("Content-Type") || "";
+  let rawText: string;
+  try {
+    rawText = await c.req.text();
+  } catch (e) {
+    console.error("[generate-image] failed to read request body", { shopId: shop.id, err: String(e) });
+    return c.json({ error: "Could not read request body" }, 400);
+  }
+
+  let body: Record<string, unknown> = {};
+  if (rawText.trim()) {
+    try {
+      body = JSON.parse(rawText) as Record<string, unknown>;
+    } catch (e) {
+      console.error("[generate-image] invalid JSON body", {
+        shopId: shop.id,
+        contentType,
+        bodyPreview: rawText.slice(0, 2000),
+        parseError: String(e),
+      });
+      return c.json(
+        {
+          error: `Invalid JSON body: ${e instanceof Error ? e.message : String(e)}`,
+        },
+        400
+      );
+    }
+  } else {
+    console.error("[generate-image] empty body", { shopId: shop.id, contentType });
+    return c.json(
+      {
+        error:
+          'Empty request body: send JSON with required field "type" ("logo" or "hero"); optional "image_model" and "design_notes".',
+      },
+      400
+    );
+  }
+
+  const typeRaw = body.type;
+  const type = typeRaw === "hero" || typeRaw === "logo" ? typeRaw : null;
+  if (!type) {
+    console.error("[generate-image] invalid or missing type", {
+      shopId: shop.id,
+      receivedBody: body,
+      typeField: typeRaw,
+      typeFieldType: typeof typeRaw,
+    });
+    const got =
+      typeRaw === undefined
+        ? "undefined (missing)"
+        : typeof typeRaw === "string"
+          ? JSON.stringify(typeRaw)
+          : JSON.stringify(typeRaw);
+    return c.json(
+      {
+        error: `Invalid field "type": must be "logo" or "hero"; received ${got}`,
+      },
+      400
+    );
+  }
+
+  const imageModelRaw = body.image_model;
+  const imageModel =
+    typeof imageModelRaw === "string" && imageModelRaw.trim()
+      ? imageModelRaw.trim()
+      : DEFAULT_OPENROUTER_IMAGE_MODEL;
+  const notes =
+    typeof body.design_notes === "string" ? body.design_notes.trim() : "";
+
+  const shopTypeLabel = shop.type.replace(/_/g, " ");
+
+  const prompt =
+    type === "hero"
+      ? `Cinematic interior of a ${shopTypeLabel} called ${shop.name}. ${notes}. Professional photography, dramatic lighting, no people, wide angle.`
+      : `Minimalist professional logo for ${shop.name}. ${notes}. Clean lines, scalable, white background.`;
+
+  const aspectRatio = type === "hero" ? "16:9" : "1:1";
+  const filename = `${type}.png`;
+  const key = `shops/${shop.slug}/${filename}`;
+
+  try {
+    const buf = await generateOpenRouterImageBuffer(
+      prompt,
+      aspectRatio,
+      apiKey,
+      `[shop-generate-image][${type}]`,
+      imageModel
+    );
+    await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType: "image/png" } });
+    const imageUrl = assetPublicUrl(c, shop.slug, filename);
+    return c.json({ imageUrl });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[generate-image] image generation or upload failed", {
+      shopId: shop.id,
+      slug: shop.slug,
+      type,
+      imageModel,
+      error: msg,
+    });
+    return c.json({ error: msg || "Image generation failed" }, 500);
+  }
+});
+
+// ─── POST /api/shops/:shopId/upload-image — multipart file → R2 ───
+
+shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  let form: Record<string, unknown>;
+  try {
+    form = (await c.req.parseBody()) as Record<string, unknown>;
+  } catch {
+    return c.json({ success: false, error: "Invalid multipart body" }, 400);
+  }
+  const typeRaw = form.type;
+  const type = typeRaw === "hero" || typeRaw === "logo" ? typeRaw : null;
+  if (!type) return c.json({ success: false, error: "type must be logo or hero" }, 400);
+  const file = form.file;
+  if (!(file instanceof File) || file.size === 0) {
+    return c.json({ success: false, error: "file required" }, 400);
+  }
+
+  const filename = `${type}.png`;
+  const key = `shops/${shop.slug}/${filename}`;
+  const buf = await file.arrayBuffer();
+  const ext = file.name.match(/\.(png|jpg|jpeg|webp)$/i)?.[1] ?? "png";
+  const contentType =
+    file.type ||
+    (ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png");
+
+  await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType } });
+  const imageUrl = assetPublicUrl(c, shop.slug, filename);
+  return c.json({ imageUrl });
+});
+
+// ─── POST /api/shops/:shopId/save-image — persist URL on shop_sites ───
+
+shops.post("/:shopId/save-image", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const body = await c.req.json<{ type?: string; imageUrl?: string }>().catch(() => ({}));
+  const type = body.type === "hero" || body.type === "logo" ? body.type : null;
+  const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
+  if (!type || !imageUrl) return c.json({ success: false, error: "type and imageUrl required" }, 400);
+
+  await ensureDraftShopSiteRow(c.env.DB, shop.id);
+  if (type === "hero") {
+    await updateShopSiteHeroImageUrl(c.env.DB, shop.id, imageUrl);
+  } else {
+    await updateShopSiteLogoUrl(c.env.DB, shop.id, imageUrl);
+  }
+  return c.json({ ok: true });
+});
+
+// ─── POST /api/shops/:shopId/activate — developer only ───
+
+shops.post("/:shopId/activate", authMiddleware, requireRole("developer"), async (c) => {
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "live");
+  return c.json({ ok: true });
+});
+
+// ─── POST /api/shops/:shopId/pause — developer only ───
+
+shops.post("/:shopId/pause", authMiddleware, requireRole("developer"), async (c) => {
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "paused");
+  return c.json({ ok: true });
+});
+
 // ─── POST /api/shops/:shopId/generate-site — AI site generation (developer or admin) ───
 
 shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
   const user = getUser(c);
   const { shopId } = c.req.param();
 
-  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shopId)) {
+  const shop = await getShopById(c.env.DB, shopId) ?? (await getShopBySlug(c.env.DB, shopId));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
-
-  const shop = await getShopById(c.env.DB, shopId) ?? await getShopBySlug(c.env.DB, shopId);
-  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
   const contentType = c.req.header("Content-Type") ?? "";
   let body: {
@@ -291,6 +662,9 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     color_accent?: string;
     design_notes?: string;
     logo_file?: File;
+    text_model?: string;
+    image_model?: string;
+    skip_images?: boolean;
   } = {};
 
   if (contentType.includes("multipart/form-data")) {
@@ -307,9 +681,22 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     body = json;
   }
 
-  const validTemplates = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
-  const template =
-    body.template?.trim() && validTemplates.includes(body.template) ? body.template : "minimal";
+  const settingsRaw = await c.env.KV.get(genSettingsKvKey(shop.id));
+  let settingsKv: { design_notes?: string; text_model?: string; image_model?: string } = {};
+  if (settingsRaw) {
+    try {
+      settingsKv = JSON.parse(settingsRaw) as typeof settingsKv;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const styleNotesMerged =
+    (typeof body.design_notes === "string" && body.design_notes.trim()
+      ? body.design_notes.trim()
+      : settingsKv.design_notes?.trim()) ?? "";
+
+  const skip_images = body.skip_images === true;
 
   let jobId: string | null = null;
   const nowKv = () =>
@@ -340,16 +727,33 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       });
     }
 
+    const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
+
+    const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
+    const hasLogoFile =
+      Boolean(body.logo_file && body.logo_file.size > 0) || logoUploadHead !== null;
+
+    const text_model =
+      typeof body.text_model === "string" && body.text_model.trim()
+        ? body.text_model.trim()
+        : settingsKv.text_model?.trim() || "google/gemini-3.1-flash-lite-preview";
+    const image_model =
+      typeof body.image_model === "string" && body.image_model.trim()
+        ? body.image_model.trim()
+        : settingsKv.image_model?.trim() || "google/gemini-3.1-flash-image-preview";
+
     const queuePayload = {
       jobId,
       shopId: shop.id,
       shopName: shop.name,
-      shopType: shop.type,
       shopSlug: shop.slug,
-      template,
-      color_primary: body.color_primary?.trim() || undefined,
-      color_accent: body.color_accent?.trim() || undefined,
-      design_notes: body.design_notes?.trim() || undefined,
+      shopType: shop.type as "barber_shop" | "beauty_parlor" | "both",
+      styleNotes: styleNotesMerged,
+      hasLogoFile,
+      services: researchServices,
+      text_model,
+      image_model,
+      skip_images,
     };
 
     if (!c.env.site_research_queue) {
@@ -371,6 +775,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     }
 
     await c.env.site_research_queue.send(queuePayload);
+    await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "draft");
     return c.json(
       { success: true, data: { jobId, message: "Site generation started" } },
       202

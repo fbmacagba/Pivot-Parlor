@@ -1,4 +1,4 @@
-name = "pivot-parlor-builder"
+name = "pivot-parlor-assembler"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 
@@ -8,8 +8,8 @@ max_batch_size = 1
 max_batch_timeout = 60
 
 [[queues.producers]]
-binding = "SITE_AUDIT_QUEUE"
-queue = "site-audit-queue"
+binding = "SITE_ASSEMBLE_QUEUE"
+queue = "site-assemble-queue"
 
 [[d1_databases]]
 binding = "DB"

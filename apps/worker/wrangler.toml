@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
-ASSET_BASE_URL = "https://api.pivotparlor.com"
+ASSET_BASE_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 
 # D1 Database
 [[d1_databases]]
@@ -38,14 +38,6 @@ max_retries = 3
 [[queues.producers]]
 binding = "site_research_queue"
 queue = "site-research-queue"
-
-[[queues.producers]]
-binding = "site_build_queue"
-queue = "site-build-queue"
-
-[[queues.producers]]
-binding = "site_audit_queue"
-queue = "site-audit-queue"
 
 # Cron trigger: 08:00 UTC daily → send 24-hour-ahead reminders
 [triggers]

@@ -1,98 +1,65 @@
 /**
- * pivot-parlor-images — Consumes site-build-queue: OpenRouter image gen → R2 → site-assemble-queue.
+ * pivot-parlor-images — Consumes site-images-queue: OpenRouter images → R2 → KV gen:{jobId}:images → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue, R2Bucket } from "@cloudflare/workers-types";
 
 export interface Env {
-  DB: D1Database;
-  KV: KVNamespace;
   ASSETS: R2Bucket;
+  KV: KVNamespace;
+  DB: D1Database;
   SITE_ASSEMBLE_QUEUE: Queue;
   OPENROUTER_API_KEY: string;
   ENVIRONMENT: string;
   ASSET_BASE_URL: string;
 }
 
-const IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+export interface StageMessage {
+  jobId: string;
+  shopId: string;
+  shopSlug: string;
+  image_model?: string;
+  skip_images?: boolean;
+}
+
+interface ResearchSpecShape {
+  image_prompts?: { hero?: string; logo?: string; catalog?: string[] };
+}
+
+interface GenResearchKvPayload {
+  spec: ResearchSpecShape;
+  services: unknown[];
+  jobId: string;
+  shopId: string;
+  shopSlug: string;
+  shopName: string;
+  shopType: string;
+  hasLogoFile: boolean;
+  template: string;
+  text_model?: string;
+  image_model?: string;
+}
+
+interface ImagesKvPayload {
+  heroUrl: string;
+  logoUrl: string;
+  catalogUrls: string[];
+  completedAt: string;
+  errors: Array<{ step: string; detail: string }>;
+}
+
+const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const KV_TTL_SEC = 3600;
 
-export interface ImagePrompts {
-  hero: string;
-  logo: string;
-  catalog: string[];
+const genResearchKey = (jobId: string) => `gen:${jobId}:research`;
+const genImagesKey = (jobId: string) => `gen:${jobId}:images`;
+
+function publicAssetUrl(base: string, shopSlug: string, file: string): string {
+  const b = base.replace(/\/$/, "");
+  return `${b}/assets/${shopSlug}/${file}`;
 }
 
-/** Message from site-build-queue (nested spec and/or flat research output). */
-export interface BuildQueueMessage {
-  jobId: string;
-  shopId: string;
-  shopSlug: string;
-  shopName: string;
-  shopType: string;
-  hasLogoFile: boolean;
-  researchOutput: Record<string, unknown>;
-  researchSpecification?: Record<string, unknown>;
-  template?: string;
-  design_notes?: string;
-}
-
-export interface AssembleQueueMessage {
-  jobId: string;
-  shopId: string;
-  shopSlug: string;
-  shopName: string;
-  shopType: string;
-  hasLogoFile: boolean;
-  imageUrls: {
-    hero: string;
-    logo: string;
-    catalog: string[];
-  };
-  researchOutput: Record<string, unknown>;
-}
-
-function jobKvKey(jobId: string): string {
-  return `job:${jobId}`;
-}
-
-async function putJobKv(kv: KVNamespace, jobId: string, data: Record<string, unknown>): Promise<void> {
-  await kv.put(jobKvKey(jobId), JSON.stringify(data));
-}
-
-async function updateGenerationJob(
-  db: D1Database,
-  id: string,
-  patch: {
-    status?: string;
-    stage?: string;
-    build_output?: string | null;
-    error?: string | null;
-  }
-): Promise<void> {
-  const sets: string[] = ["updated_at = ?"];
-  const vals: unknown[] = [new Date().toISOString()];
-  if (patch.status !== undefined) {
-    sets.push("status = ?");
-    vals.push(patch.status);
-  }
-  if (patch.stage !== undefined) {
-    sets.push("stage = ?");
-    vals.push(patch.stage);
-  }
-  if (patch.build_output !== undefined) {
-    sets.push("build_output = ?");
-    vals.push(patch.build_output);
-  }
-  if (patch.error !== undefined) {
-    sets.push("error = ?");
-    vals.push(patch.error);
-  }
-  vals.push(id);
-  await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
-}
-
-/** User-requested helper: raw base64 string → ArrayBuffer (no data: prefix). */
-export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -134,10 +101,6 @@ function normalizeContentParts(content: unknown): unknown[] {
   return [];
 }
 
-/**
- * OpenRouter multimodal: choices[0].message.content[] with image_url.url data URLs.
- * Also tolerates nested content[0].image_url.url per provider quirks.
- */
 function extractDataImageUrlFromMessage(message: unknown): string | null {
   if (!message || typeof message !== "object") return null;
   const m = message as Record<string, unknown>;
@@ -158,13 +121,21 @@ function extractDataImageUrlFromMessage(message: unknown): string | null {
   return null;
 }
 
-async function openRouterGenerateImageBuffer(
+async function openRouterGenerateImage(
   apiKey: string,
+  model: string,
   prompt: string,
-  aspectRatio: string
-): Promise<ArrayBuffer | null> {
+  aspectRatio: string,
+  label: string,
+  jobId: string
+): Promise<{ buffer: ArrayBuffer | null; httpStatus: number; rawBody: string }> {
+  const promptPreview = prompt.slice(0, 100);
+  console.log(
+    `[${jobId}] [pivot-parlor-images] OpenRouter request ${label} model=${model} prompt[0:100]=${JSON.stringify(promptPreview)}`
+  );
+
   const requestBody = {
-    model: IMAGE_MODEL,
+    model,
     messages: [
       {
         role: "user",
@@ -188,253 +159,248 @@ async function openRouterGenerateImageBuffer(
       body: JSON.stringify(requestBody),
     });
   } catch (e) {
-    console.error("[pivot-parlor-images] OpenRouter fetch failed", e);
-    return null;
+    const errMsg = e instanceof Error ? e.message : String(e);
+    console.error(`[${jobId}] [pivot-parlor-images] ${label} network error`, errMsg);
+    return { buffer: null, httpStatus: 0, rawBody: errMsg };
   }
 
   const text = await res.text();
+  console.log(
+    `[${jobId}] [pivot-parlor-images] OpenRouter response ${label} status=${res.status} body[0:200]=${JSON.stringify(text.slice(0, 200))}`
+  );
   if (!res.ok) {
-    console.error("[pivot-parlor-images] OpenRouter error", res.status, text.slice(0, 800));
-    return null;
+    console.error(`[${jobId}] [pivot-parlor-images] ${label} HTTP ${res.status}`, text.slice(0, 2000));
+    return { buffer: null, httpStatus: res.status, rawBody: text };
   }
 
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
-    console.error("[pivot-parlor-images] OpenRouter response not JSON");
-    return null;
+    console.error(`[${jobId}] [pivot-parlor-images] ${label} invalid JSON`, text.slice(0, 2000));
+    return { buffer: null, httpStatus: res.status, rawBody: text };
   }
 
   const message = (data as { choices?: Array<{ message?: unknown }> })?.choices?.[0]?.message;
   const dataUrl = extractDataImageUrlFromMessage(message);
   if (!dataUrl) {
-    console.error("[pivot-parlor-images] No data:image URL in OpenRouter message");
-    return null;
+    console.error(`[${jobId}] [pivot-parlor-images] ${label} no image in response`, text.slice(0, 4000));
+    return { buffer: null, httpStatus: res.status, rawBody: text };
   }
 
   const buf = dataImageUrlToArrayBuffer(dataUrl);
   if (!buf || buf.byteLength === 0) {
-    console.error("[pivot-parlor-images] Failed to decode image data URL");
-    return null;
+    return { buffer: null, httpStatus: res.status, rawBody: text };
   }
-  return buf;
+  return { buffer: buf, httpStatus: res.status, rawBody: text };
 }
 
-function resolveImagePrompts(msg: BuildQueueMessage): ImagePrompts {
-  const ro = msg.researchOutput;
-  const nested = ro.image_prompts as Record<string, unknown> | undefined;
-  if (
-    nested &&
-    typeof nested.hero === "string" &&
-    typeof nested.logo === "string" &&
-    Array.isArray(nested.catalog)
-  ) {
-    return {
-      hero: nested.hero,
-      logo: nested.logo,
-      catalog: nested.catalog.filter((x): x is string => typeof x === "string"),
-    };
-  }
-
-  const rs = msg.researchSpecification;
-  const rsImg = rs?.image_prompts as Record<string, unknown> | undefined;
-  if (
-    rsImg &&
-    typeof rsImg.hero === "string" &&
-    typeof rsImg.logo === "string" &&
-    Array.isArray(rsImg.catalog)
-  ) {
-    return {
-      hero: rsImg.hero,
-      logo: rsImg.logo,
-      catalog: rsImg.catalog.filter((x): x is string => typeof x === "string"),
-    };
-  }
-
-  const hero = typeof ro.hero_image_prompt === "string" ? ro.hero_image_prompt : "";
-  const logo = typeof ro.logo_prompt === "string" ? ro.logo_prompt : "";
-  const services = Array.isArray(ro.services) ? ro.services : [];
-  const catalog = services.map((s) => {
-    if (s && typeof s === "object" && typeof (s as { image_prompt?: string }).image_prompt === "string") {
-      return (s as { image_prompt: string }).image_prompt;
-    }
-    return "";
-  });
-  return { hero, logo, catalog };
+async function uploadPng(bucket: R2Bucket, key: string, buf: ArrayBuffer): Promise<void> {
+  await bucket.put(key, buf, { httpMetadata: { contentType: "image/png" } });
 }
 
-function mergeResearchOutputForDownstream(msg: BuildQueueMessage, prompts: ImagePrompts): Record<string, unknown> {
-  return {
-    ...msg.researchOutput,
-    image_prompts: prompts,
-  };
-}
-
-function parseInput(body: unknown): BuildQueueMessage | null {
+function parseStageMessage(body: unknown): StageMessage | null {
   if (!body || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
   if (typeof o.jobId !== "string" || typeof o.shopId !== "string" || typeof o.shopSlug !== "string") return null;
-  if (typeof o.shopName !== "string" || typeof o.shopType !== "string") return null;
-  if (typeof o.hasLogoFile !== "boolean") return null;
-  if (!o.researchOutput || typeof o.researchOutput !== "object") return null;
-  const msg: BuildQueueMessage = {
-    jobId: o.jobId,
-    shopId: o.shopId,
-    shopSlug: o.shopSlug,
-    shopName: o.shopName,
-    shopType: o.shopType,
-    hasLogoFile: o.hasLogoFile,
-    researchOutput: o.researchOutput as Record<string, unknown>,
-  };
-  if (o.researchSpecification && typeof o.researchSpecification === "object") {
-    msg.researchSpecification = o.researchSpecification as Record<string, unknown>;
-  }
-  if (typeof o.template === "string") msg.template = o.template;
-  if (typeof o.design_notes === "string") msg.design_notes = o.design_notes;
-  return msg;
+  const image_model =
+    typeof o.image_model === "string" && o.image_model.trim() ? o.image_model.trim() : undefined;
+  const skip_images = o.skip_images === true;
+  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, image_model, skip_images };
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-async function uploadPng(env: Env, key: string, buffer: ArrayBuffer): Promise<void> {
-  await env.ASSETS.put(key, buffer, {
-    httpMetadata: { contentType: "image/png" },
-  });
-}
-
-function publicAssetUrl(env: Env, shopSlug: string, filename: string): string {
-  const base = (env.ASSET_BASE_URL ?? "https://api.pivotparlor.com").replace(/\/$/, "");
-  return `${base}/assets/${shopSlug}/${filename}`;
-}
-
-async function processOneMessage(body: unknown, env: Env): Promise<void> {
-  const input = parseInput(body);
-  if (!input) {
-    console.error("[pivot-parlor-images] Invalid queue message", body);
+async function processOne(body: unknown, env: Env): Promise<void> {
+  const msg = parseStageMessage(body);
+  if (!msg) {
+    console.error("[pivot-parlor-images] invalid message", body);
     return;
   }
 
-  const { jobId, shopSlug, hasLogoFile } = input;
+  const { jobId, shopSlug, shopId } = msg;
+  console.log(
+    `[${jobId}] [pivot-parlor-images] message received jobId=${jobId} shopId=${shopId} shopSlug=${shopSlug} image_model=${msg.image_model ?? "(unset, will use KV or default)"} skip_images=${Boolean(msg.skip_images)}`
+  );
+
+  if (msg.skip_images) {
+    const row = await env.DB.prepare(
+      "SELECT hero_image_url, logo_url, catalog_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+    )
+      .bind(shopId)
+      .first<{
+        hero_image_url: string | null;
+        logo_url: string | null;
+        catalog_images_json: string | null;
+      }>();
+    let catalogUrls: string[] = [];
+    if (row?.catalog_images_json) {
+      try {
+        const p = JSON.parse(row.catalog_images_json) as unknown;
+        if (Array.isArray(p)) catalogUrls = p.filter((x): x is string => typeof x === "string");
+      } catch {
+        /* ignore */
+      }
+    }
+    const imagesPayload: ImagesKvPayload = {
+      heroUrl: row?.hero_image_url?.trim() ?? "",
+      logoUrl: row?.logo_url?.trim() ?? "",
+      catalogUrls,
+      completedAt: new Date().toISOString(),
+      errors: [],
+    };
+    await env.KV.put(genImagesKey(jobId), JSON.stringify(imagesPayload), { expirationTtl: KV_TTL_SEC });
+    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+    console.log(`[${jobId}] [pivot-parlor-images] skip_images: KV + site-assemble-queue`);
+    return;
+  }
+
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    const msg = "OPENROUTER_API_KEY is not configured";
-    try {
-      await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
-      await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug });
-    } catch (e) {
-      console.error("[pivot-parlor-images] Failed to persist config error", e);
-    }
+    console.error(`[${jobId}] [pivot-parlor-images] OPENROUTER_API_KEY missing`);
     return;
   }
 
+  const researchRaw = await env.KV.get(genResearchKey(jobId));
+  const researchFound = Boolean(researchRaw);
+  if (!researchRaw) {
+    console.error(`[${jobId}] [pivot-parlor-images] missing KV ${genResearchKey(jobId)}`);
+    return;
+  }
+
+  let research: GenResearchKvPayload;
   try {
-    const prompts = resolveImagePrompts(input);
-    const prefix = `shops/${shopSlug}`;
+    research = JSON.parse(researchRaw) as GenResearchKvPayload;
+  } catch {
+    console.error(`[${jobId}] [pivot-parlor-images] invalid research JSON`);
+    return;
+  }
 
-    const heroTask = (async (): Promise<string> => {
-      const p = prompts.hero?.trim();
-      if (!p) return "";
-      const settled = await Promise.allSettled([openRouterGenerateImageBuffer(apiKey, p, "16:9")]);
-      const buf = settled[0].status === "fulfilled" ? settled[0].value : null;
-      if (!buf) return "";
+  const resolvedImageModel =
+    msg.image_model?.trim() || research.image_model?.trim() || DEFAULT_IMAGE_MODEL;
+
+  const ip = research.spec?.image_prompts;
+  const heroPrompt = typeof ip?.hero === "string" ? ip.hero : "";
+  const logoPrompt = typeof ip?.logo === "string" ? ip.logo : "";
+  const catalogAll = Array.isArray(ip?.catalog) ? ip.catalog.filter((x): x is string => typeof x === "string") : [];
+  const catalogPrompts = catalogAll.slice(0, 3);
+
+  console.log(
+    `[${jobId}] [pivot-parlor-images] KV gen:${jobId}:research found=${researchFound} heroPromptLen=${heroPrompt.length} usingModel=${resolvedImageModel}`
+  );
+
+  const baseUrl = env.ASSET_BASE_URL || "https://localhost";
+  const prefix = `shops/${shopSlug}`;
+  const errors: ImagesKvPayload["errors"] = [];
+
+  let heroUrl = "";
+  if (heroPrompt.trim()) {
+    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, heroPrompt, "16:9", "hero", jobId);
+    if (r.buffer) {
       try {
-        await uploadPng(env, `${prefix}/hero.png`, buf);
-        return publicAssetUrl(env, shopSlug, "hero.png");
+        await uploadPng(env.ASSETS, `${prefix}/hero.png`, r.buffer);
+        heroUrl = publicAssetUrl(baseUrl, shopSlug, "hero.png");
+        console.log(`[${jobId}] [pivot-parlor-images] hero uploaded ${heroUrl}`);
       } catch (e) {
-        console.error("[pivot-parlor-images] Hero R2 upload failed", e);
-        return "";
+        const d = e instanceof Error ? e.message : String(e);
+        errors.push({ step: "hero_r2", detail: d });
+        console.error(`[${jobId}] [pivot-parlor-images] hero R2 failed`, d);
       }
-    })();
+    } else {
+      errors.push({ step: "hero_openrouter", detail: r.rawBody.slice(0, 8000) });
+    }
+  } else {
+    errors.push({ step: "hero_prompt", detail: "empty hero prompt" });
+  }
 
-    const logoTask = (async (): Promise<string> => {
-      if (hasLogoFile) return "";
-      const p = prompts.logo?.trim();
-      if (!p) return "";
-      const settled = await Promise.allSettled([openRouterGenerateImageBuffer(apiKey, p, "1:1")]);
-      const buf = settled[0].status === "fulfilled" ? settled[0].value : null;
-      if (!buf) return "";
+  let logoUrl = "";
+  if (research.hasLogoFile) {
+    const uploaded = await env.ASSETS.get(`${prefix}/logo-upload`);
+    if (uploaded?.body) {
       try {
-        await uploadPng(env, `${prefix}/logo.png`, buf);
-        return publicAssetUrl(env, shopSlug, "logo.png");
+        const buf = await uploaded.arrayBuffer();
+        const ct = uploaded.httpMetadata?.contentType ?? "image/png";
+        await env.ASSETS.put(`${prefix}/logo.png`, buf, { httpMetadata: { contentType: ct } });
+        logoUrl = publicAssetUrl(baseUrl, shopSlug, "logo.png");
+        console.log(`[${jobId}] [pivot-parlor-images] logo from upload ${logoUrl}`);
       } catch (e) {
-        console.error("[pivot-parlor-images] Logo R2 upload failed", e);
-        return "";
+        const d = e instanceof Error ? e.message : String(e);
+        errors.push({ step: "logo_copy", detail: d });
       }
-    })();
+    } else {
+      console.log(`[${jobId}] [pivot-parlor-images] hasLogoFile but no logo-upload object`);
+    }
+  }
 
-    const [heroSettled, logoSettled] = await Promise.allSettled([heroTask, logoTask]);
-    const heroUrl = heroSettled.status === "fulfilled" ? heroSettled.value : "";
-    const logoUrl = logoSettled.status === "fulfilled" ? logoSettled.value : "";
+  if (!logoUrl && logoPrompt.trim()) {
+    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, logoPrompt, "1:1", "logo", jobId);
+    if (r.buffer) {
+      try {
+        await uploadPng(env.ASSETS, `${prefix}/logo.png`, r.buffer);
+        logoUrl = publicAssetUrl(baseUrl, shopSlug, "logo.png");
+        console.log(`[${jobId}] [pivot-parlor-images] logo generated ${logoUrl}`);
+      } catch (e) {
+        const d = e instanceof Error ? e.message : String(e);
+        errors.push({ step: "logo_r2", detail: d });
+      }
+    } else {
+      errors.push({ step: "logo_openrouter", detail: r.rawBody.slice(0, 8000) });
+    }
+  }
 
-    const catalogUrls: string[] = [];
-    const catalogSettled = await Promise.allSettled(
-      prompts.catalog.map(async (prompt, i) => {
-        const p = prompt?.trim();
-        if (!p) return "";
-        const gen = await Promise.allSettled([openRouterGenerateImageBuffer(apiKey, p, "1:1")]);
-        const buf = gen[0].status === "fulfilled" ? gen[0].value : null;
-        if (!buf) return "";
-        const filename = `catalog-${i}.png`;
-        try {
-          await uploadPng(env, `${prefix}/${filename}`, buf);
-          return publicAssetUrl(env, shopSlug, filename);
-        } catch (e) {
-          console.error("[pivot-parlor-images] Catalog R2 upload failed", i, e);
-          return "";
-        }
-      })
+  const catalogUrls: string[] = [];
+  for (let i = 0; i < catalogPrompts.length; i++) {
+    const p = catalogPrompts[i]!;
+    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, p, "1:1", `catalog-${i}`, jobId);
+    const filename = `catalog-${i}.png`;
+    if (r.buffer) {
+      try {
+        await uploadPng(env.ASSETS, `${prefix}/${filename}`, r.buffer);
+        catalogUrls.push(publicAssetUrl(baseUrl, shopSlug, filename));
+        console.log(`[${jobId}] [pivot-parlor-images] ${filename} ok`);
+      } catch (e) {
+        const d = e instanceof Error ? e.message : String(e);
+        errors.push({ step: `catalog_${i}_r2`, detail: d });
+        catalogUrls.push("");
+      }
+    } else {
+      errors.push({ step: `catalog_${i}_openrouter`, detail: r.rawBody.slice(0, 8000) });
+      catalogUrls.push("");
+    }
+  }
+
+  if (!heroUrl) {
+    console.error(`[${jobId}] [pivot-parlor-images] HERO FAILED — errors:`, JSON.stringify(errors));
+  }
+
+  const imagesPayload: ImagesKvPayload = {
+    heroUrl,
+    logoUrl,
+    catalogUrls,
+    completedAt: new Date().toISOString(),
+    errors,
+  };
+
+  try {
+    await env.KV.put(genImagesKey(jobId), JSON.stringify(imagesPayload), { expirationTtl: KV_TTL_SEC });
+    console.log(
+      `[${jobId}] [pivot-parlor-images] KV write gen:${jobId}:images success heroUrl=${heroUrl || "(empty)"} logoUrl=${logoUrl || "(empty)"} catalogUrls=${JSON.stringify(catalogUrls)}`
     );
-    for (const s of catalogSettled) {
-      catalogUrls.push(s.status === "fulfilled" ? s.value : "");
-    }
-
-    const buildPayload = { heroUrl, logoUrl, catalogUrls };
-    await updateGenerationJob(env.DB, jobId, {
-      status: "running",
-      stage: "assemble",
-      build_output: JSON.stringify(buildPayload),
-      error: null,
-    });
-    await putJobKv(env.KV, jobId, { status: "running", stage: "assemble", shopSlug });
-
-    const researchOutput = mergeResearchOutputForDownstream(input, prompts);
-
-    const assembleMessage: AssembleQueueMessage = {
-      jobId: input.jobId,
-      shopId: input.shopId,
-      shopSlug: input.shopSlug,
-      shopName: input.shopName,
-      shopType: input.shopType,
-      hasLogoFile: input.hasLogoFile,
-      imageUrls: { hero: heroUrl, logo: logoUrl, catalog: catalogUrls },
-      researchOutput,
-    };
-
-    await env.SITE_ASSEMBLE_QUEUE.send(assembleMessage);
-  } catch (err) {
-    const msg = errorMessage(err);
-    console.error("[pivot-parlor-images] Job failed", jobId, err);
-    try {
-      await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
-      await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug });
-    } catch (persistErr) {
-      console.error("[pivot-parlor-images] Failed to persist failure", persistErr);
-    }
+    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+    console.log(`[${jobId}] [pivot-parlor-images] enqueued site-assemble-queue (immediately after KV)`);
+  } catch (e) {
+    console.error(`[${jobId}] [pivot-parlor-images] KV write gen:${jobId}:images FAILED`, e);
+    throw e;
   }
 }
 
 export default {
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
-    for (const msg of batch.messages) {
+    for (const m of batch.messages) {
       try {
-        await processOneMessage(msg.body, env);
-      } catch (err) {
-        console.error("[pivot-parlor-images] Outer failure", err);
+        await processOne(m.body, env);
+      } catch (e) {
+        console.error("[pivot-parlor-images] outer failure", e);
       } finally {
-        msg.ack();
+        m.ack();
       }
     }
   },
