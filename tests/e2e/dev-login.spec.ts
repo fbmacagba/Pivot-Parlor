@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Dev login", () => {
-  test("Page load — /dev/login renders and shows submit button", async ({
+  test("Page load — /login renders and shows submit button", async ({
     page,
   }) => {
-    await page.goto("/dev/login");
+    await page.goto("/login");
 
     await expect(page).toHaveTitle(/Pivot Parlor/);
     await expect(
@@ -18,7 +18,7 @@ test.describe("Dev login", () => {
     const password = process.env.DEV_PASSWORD;
     if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
 
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
@@ -30,7 +30,7 @@ test.describe("Dev login", () => {
   });
 
   test("Failed login — shows an error message", async ({ page }) => {
-    await page.goto("/dev/login");
+    await page.goto("/login");
 
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill("wrong123");

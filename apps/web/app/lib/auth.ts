@@ -88,7 +88,7 @@ export function decodeToken(token: string): SessionPayload | null {
   }
 }
 
-/** Require authentication. Throws a redirect to /dev/login if not authenticated. */
+/** Require authentication. Redirects to `/login` when unauthenticated or session invalid. */
 export async function requireAuth(
   request: Request,
   apiUrl: string
@@ -96,7 +96,7 @@ export async function requireAuth(
   const token = getSessionToken(request);
   if (!token) {
     const url = new URL(request.url);
-    throw redirect(`/dev/login?redirect=${encodeURIComponent(url.pathname)}`);
+    throw redirect(`/login?redirect=${encodeURIComponent(url.pathname)}`);
   }
 
   try {
@@ -120,7 +120,7 @@ export async function requireAuth(
       exp,
     };
   } catch {
-    throw redirect("/dev/login");
+    throw redirect("/login");
   }
 }
 
@@ -134,12 +134,12 @@ export async function requireRole(
   if (payload.role !== role) {
     // Redirect to the user's correct dashboard, not root
     const dashMap: Record<UserRole, string> = {
-      developer: "/dev",
+      developer: "/dev/dashboard",
       admin: "/admin",
       staff: "/staff",
-      customer: "/",
+      customer: "/account",
     };
-    throw redirect(dashMap[payload.role] ?? "/dev/login");
+    throw redirect(dashMap[payload.role] ?? "/login");
   }
   return payload;
 }

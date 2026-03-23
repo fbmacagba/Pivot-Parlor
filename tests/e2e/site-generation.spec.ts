@@ -8,7 +8,7 @@ import { installSiteGenerationOwnerFlowMocks } from "./shop-onboarding-routes";
  * Requires: DEV_PASSWORD for dev@pivotparlor.com
  *
  * Tests are split into:
- * - Template UI: no auth; redirects to /dev/login pass with note
+ * - Template UI: no auth; redirects to /login pass with note
  * - Site generation: slow tests that call AI or mock API, timeout 90s
  */
 
@@ -349,7 +349,7 @@ test.describe.serial("Site generation", () => {
     const shopName = `E2E Site Gen ${uniqueId}`;
     const ownerEmail = `e2e-sitegen-${uniqueId}@example.com`;
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
@@ -415,7 +415,7 @@ test.describe.serial("Site generation", () => {
     const shopName = `E2E No Site ${uniqueId}`;
     const ownerEmail = `e2e-nosite-${uniqueId}@example.com`;
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
@@ -484,7 +484,7 @@ test.describe.serial("Site generation", () => {
     const shopName = `E2E Design Notes ${uniqueId}`;
     const ownerEmail = `e2e-notes-${uniqueId}@example.com`;
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
@@ -577,7 +577,7 @@ test.describe.serial("Site generation", () => {
     const shopName = `E2E Logo Upload ${uniqueId}`;
     const ownerEmail = `e2e-logo-${uniqueId}@example.com`;
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
@@ -631,7 +631,7 @@ test.describe.serial("Site generation", () => {
 
     const slugs: string[] = [];
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();

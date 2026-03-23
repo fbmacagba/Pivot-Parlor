@@ -183,7 +183,7 @@ async function check5() {
 // Check 6 — Dev login page
 async function check6() {
   try {
-    const { res, text } = await safeFetch(`${PAGES}/dev/login`);
+    const { res, text } = await safeFetch(`${PAGES}/login`);
     if (res.status !== 200) {
       logCheck("Dev login page", false, `HTTP ${res.status}`);
       return false;

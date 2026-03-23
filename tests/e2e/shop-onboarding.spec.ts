@@ -26,7 +26,7 @@ test.describe.serial("Shop onboarding", () => {
     if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
 
     // Log in first for this page context
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
@@ -61,7 +61,7 @@ test.describe.serial("Shop onboarding", () => {
     const ownerEmail = `e2e-owner-${uniqueId}@example.com`;
 
     // Log in
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();

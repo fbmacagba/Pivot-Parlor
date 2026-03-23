@@ -149,7 +149,7 @@ test.describe("Stripe payment gate", () => {
     const password = process.env.DEV_PASSWORD;
     if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
@@ -168,7 +168,7 @@ test.describe("Stripe payment gate", () => {
     const password = process.env.DEV_PASSWORD;
     if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
 
-    await page.goto("/dev/login");
+    await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: /sign in/i }).click();
