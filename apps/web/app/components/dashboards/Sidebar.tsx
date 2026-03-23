@@ -1,4 +1,4 @@
-import { Link, useLocation } from "@remix-run/react";
+import { Link, useLocation, useNavigate } from "@remix-run/react";
 import {
   BarChart3,
   Bot,
@@ -51,14 +51,25 @@ const NAV_MAP: Record<UserRole, NavItem[]> = {
   customer: [],
 };
 
+/** Current "Switch View" target for developers (SPA path). */
+function developerViewSelectValue(pathname: string): string {
+  if (pathname.startsWith("/admin")) return "/admin";
+  if (pathname.startsWith("/staff")) return "/staff";
+  if (pathname.startsWith("/account")) return "/account";
+  return "/dev/dashboard";
+}
+
 interface SidebarProps {
   role: UserRole;
   shopName?: string;
   userName?: string;
+  /** Show Switch View while browsing as admin/staff with a developer session. */
+  showDeveloperViewSwitcher?: boolean;
 }
 
-export function Sidebar({ role, shopName, userName }: SidebarProps) {
+export function Sidebar({ role, shopName, userName, showDeveloperViewSwitcher = false }: SidebarProps) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const navItems = NAV_MAP[role] ?? [];
 
   return (
@@ -75,6 +86,32 @@ export function Sidebar({ role, shopName, userName }: SidebarProps) {
 
       {/* Nav items */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
+        {role === "developer" || showDeveloperViewSwitcher ? (
+          <div className="mb-4 px-2">
+            <label htmlFor="pp-dev-switch-view" className="mb-1.5 block text-xs font-medium text-white/45">
+              Switch View
+            </label>
+            <select
+              id="pp-dev-switch-view"
+              className="w-full rounded-lg border border-white/15 bg-white/5 px-2.5 py-2 text-sm text-white focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/40"
+              value={developerViewSelectValue(pathname)}
+              onChange={(e) => navigate(e.target.value)}
+            >
+              <option className="bg-dark text-white" value="/dev/dashboard">
+                Developer Dashboard
+              </option>
+              <option className="bg-dark text-white" value="/admin">
+                Admin View
+              </option>
+              <option className="bg-dark text-white" value="/staff">
+                Staff View
+              </option>
+              <option className="bg-dark text-white" value="/account">
+                Customer View
+              </option>
+            </select>
+          </div>
+        ) : null}
         <ul className="space-y-0.5">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active =

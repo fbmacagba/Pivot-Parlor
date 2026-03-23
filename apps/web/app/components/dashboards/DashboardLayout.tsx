@@ -8,6 +8,8 @@ interface DashboardLayoutProps {
   userName?: string;
   topBarTitle?: string;
   topBanner?: React.ReactNode;
+  /** True when a developer is viewing this dashboard (admin/staff) so Switch View stays available. */
+  showDeveloperViewSwitcher?: boolean;
 }
 
 export function DashboardLayout({
@@ -16,10 +18,16 @@ export function DashboardLayout({
   userName,
   topBarTitle,
   topBanner,
+  showDeveloperViewSwitcher = false,
 }: DashboardLayoutProps) {
   return (
     <div className="flex h-screen overflow-hidden bg-dark">
-      <Sidebar role={role} shopName={shopName} userName={userName} />
+      <Sidebar
+        role={role}
+        shopName={shopName}
+        userName={userName}
+        showDeveloperViewSwitcher={showDeveloperViewSwitcher}
+      />
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-dark px-6">

@@ -124,13 +124,19 @@ export async function requireAuth(
   }
 }
 
-/** Require a specific role. Throws a redirect if role doesn't match. */
+/**
+ * Require a specific role. Throws a redirect if role doesn't match.
+ * Developers pass every role check so they can open any dashboard for support.
+ */
 export async function requireRole(
   request: Request,
   role: UserRole,
   apiUrl: string
 ): Promise<SessionPayload> {
   const payload = await requireAuth(request, apiUrl);
+  if (payload.role === "developer") {
+    return payload;
+  }
   if (payload.role !== role) {
     // Redirect to the user's correct dashboard, not root
     const dashMap: Record<UserRole, string> = {

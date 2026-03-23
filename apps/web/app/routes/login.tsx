@@ -101,8 +101,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 }
 
-/** Optional ?redirect= must not send staff to /dev-only areas, etc. */
+/** Optional ?redirect= must not send users to the wrong role's areas. */
 function canUseRedirectForRole(path: string, role: string): boolean {
+  if (role === "developer") return true;
   if (path.startsWith("/dev") && role !== "developer") return false;
   if (path.startsWith("/admin") && role !== "admin") return false;
   if (path.startsWith("/staff") && role !== "staff") return false;

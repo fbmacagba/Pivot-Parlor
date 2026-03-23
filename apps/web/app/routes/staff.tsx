@@ -12,5 +12,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export default function StaffLayout() {
   const { user } = useLoaderData<typeof loader>();
-  return <DashboardLayout role="staff" userName={user.sub} />;
+  const isDeveloper = user.role === "developer";
+  return (
+    <DashboardLayout
+      role="staff"
+      userName={user.sub}
+      showDeveloperViewSwitcher={isDeveloper}
+    />
+  );
 }
