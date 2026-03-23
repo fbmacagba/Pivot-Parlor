@@ -195,8 +195,8 @@ export default function CommercialTemplate({
           )}
         </div>
 
-        <div className="relative z-10 flex min-h-screen w-full flex-col justify-center px-4 pb-24 pt-28 md:px-6 md:pb-32 md:pt-32">
-          <div className="mx-auto w-full max-w-7xl translate-y-10 md:translate-y-16 lg:translate-y-[max(3.5rem,7vh)]">
+        <div className="relative z-10 flex min-h-screen w-full flex-col justify-center px-4 pb-6 pt-7 md:px-6 md:pb-8 md:pt-8">
+          <div className="mx-auto w-full max-w-7xl translate-y-2 md:translate-y-4 lg:translate-y-[max(1rem,2vh)]">
             <div className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 bg-black/35 px-4 py-2 text-sm text-white/95 backdrop-blur-md">
               <span className="tracking-tight text-[color:var(--color-accent)]" aria-hidden>
                 ⭐⭐⭐⭐⭐

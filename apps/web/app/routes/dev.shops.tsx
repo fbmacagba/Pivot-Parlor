@@ -335,6 +335,13 @@ function resolvePublicAssetImageUrl(raw: string, apiBase: string | undefined): s
   return t;
 }
 
+/** Append cache-bust query so the browser reloads after upload/save. */
+function withImageCacheBust(url: string, bust: number): string {
+  if (!url || bust <= 0) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}t=${bust}`;
+}
+
 export default function DevShops() {
   const { shops, apiUrl } = useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -361,6 +368,9 @@ export default function DevShops() {
   const wasExpandedGenSubmittingRef = useRef(false);
   const pendingUploadTypeRef = useRef<"logo" | "hero" | null>(null);
   const pendingSaveTypeRef = useRef<"logo" | "hero" | null>(null);
+  const pendingSaveUrlRef = useRef<string | null>(null);
+  const logoSaveFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const heroSaveFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [genImageLoading, setGenImageLoading] = useState<"logo" | "hero" | null>(null);
   const [genImageError, setGenImageError] = useState<string | null>(null);
 
@@ -377,8 +387,14 @@ export default function DevShops() {
   const [expHeroPreview, setExpHeroPreview] = useState<string | null>(null);
   const [expLogoPendingUrl, setExpLogoPendingUrl] = useState<string | null>(null);
   const [expHeroPendingUrl, setExpHeroPendingUrl] = useState<string | null>(null);
-  const [expLogoSaved, setExpLogoSaved] = useState(false);
-  const [expHeroSaved, setExpHeroSaved] = useState(false);
+  /** True when preview matches last server state (no pending save). */
+  const [expLogoInSync, setExpLogoInSync] = useState(false);
+  const [expHeroInSync, setExpHeroInSync] = useState(false);
+  /** Brief "Saved" tick after each successful save. */
+  const [expLogoSaveFlash, setExpLogoSaveFlash] = useState(false);
+  const [expHeroSaveFlash, setExpHeroSaveFlash] = useState(false);
+  const [expLogoImgBust, setExpLogoImgBust] = useState(0);
+  const [expHeroImgBust, setExpHeroImgBust] = useState(0);
 
   const [expandedGenJob, setExpandedGenJob] = useState<{
     jobId: string;
@@ -466,11 +482,17 @@ export default function DevShops() {
           console.log("[dev/shops] generate-image resolved against apiUrl:", absoluteUrl);
         }
         if (type === "logo") {
+          setExpLogoInSync(false);
+          setExpLogoSaveFlash(false);
           setExpLogoPendingUrl(absoluteUrl);
           setExpLogoPreview(absoluteUrl);
+          setExpLogoImgBust(Date.now());
         } else {
+          setExpHeroInSync(false);
+          setExpHeroSaveFlash(false);
           setExpHeroPendingUrl(absoluteUrl);
           setExpHeroPreview(absoluteUrl);
+          setExpHeroImgBust(Date.now());
         }
       } catch (e) {
         setGenImageError(e instanceof Error ? e.message : "Network error");
@@ -483,12 +505,24 @@ export default function DevShops() {
 
   useEffect(() => {
     if (!expandedShopId) {
+      if (logoSaveFlashTimerRef.current) {
+        clearTimeout(logoSaveFlashTimerRef.current);
+        logoSaveFlashTimerRef.current = null;
+      }
+      if (heroSaveFlashTimerRef.current) {
+        clearTimeout(heroSaveFlashTimerRef.current);
+        heroSaveFlashTimerRef.current = null;
+      }
       setExpLogoPreview(null);
       setExpHeroPreview(null);
       setExpLogoPendingUrl(null);
       setExpHeroPendingUrl(null);
-      setExpLogoSaved(false);
-      setExpHeroSaved(false);
+      setExpLogoInSync(false);
+      setExpHeroInSync(false);
+      setExpLogoSaveFlash(false);
+      setExpHeroSaveFlash(false);
+      setExpLogoImgBust(0);
+      setExpHeroImgBust(0);
       setExpandedGenJob(null);
       setExpandedGenPoll(null);
       setGenImageLoading(null);
@@ -499,15 +533,21 @@ export default function DevShops() {
     if (!sh) return;
     setGenImageError(null);
     setGenImageLoading(null);
-    setExpLogoPreview(sh.logo_url ?? null);
-    setExpHeroPreview(sh.hero_image_url ?? null);
-    setExpLogoSaved(Boolean(sh.logo_url));
-    setExpHeroSaved(Boolean(sh.hero_image_url));
+    const logoResolved = sh.logo_url ? resolvePublicAssetImageUrl(sh.logo_url, apiUrl) : null;
+    const heroResolved = sh.hero_image_url ? resolvePublicAssetImageUrl(sh.hero_image_url, apiUrl) : null;
+    setExpLogoPreview(logoResolved);
+    setExpHeroPreview(heroResolved);
+    setExpLogoInSync(Boolean(sh.logo_url));
+    setExpHeroInSync(Boolean(sh.hero_image_url));
+    setExpLogoSaveFlash(false);
+    setExpHeroSaveFlash(false);
+    setExpLogoImgBust(Date.now());
+    setExpHeroImgBust(Date.now());
     setExpLogoPendingUrl(null);
     setExpHeroPendingUrl(null);
     setExpandedGenJob(null);
     setExpandedGenPoll(null);
-  }, [expandedShopId, shops]);
+  }, [expandedShopId, shops, apiUrl]);
 
   useEffect(() => {
     if (uploadImageFetcher.state !== "idle") return;
@@ -515,33 +555,60 @@ export default function DevShops() {
     pendingUploadTypeRef.current = null;
     if (!t) return;
     const d = uploadImageFetcher.data as { imageUrl?: string } | undefined;
-    const url = typeof d?.imageUrl === "string" ? d.imageUrl : "";
+    const url = typeof d?.imageUrl === "string" ? d.imageUrl.trim() : "";
     if (!url) return;
+    const absolute = resolvePublicAssetImageUrl(url, apiUrl);
     if (t === "logo") {
-      setExpLogoPendingUrl(url);
-      setExpLogoPreview(url);
+      setExpLogoInSync(false);
+      setExpLogoSaveFlash(false);
+      setExpLogoPendingUrl(absolute);
+      setExpLogoPreview(absolute);
+      setExpLogoImgBust(Date.now());
     } else {
-      setExpHeroPendingUrl(url);
-      setExpHeroPreview(url);
+      setExpHeroInSync(false);
+      setExpHeroSaveFlash(false);
+      setExpHeroPendingUrl(absolute);
+      setExpHeroPreview(absolute);
+      setExpHeroImgBust(Date.now());
     }
-  }, [uploadImageFetcher.state, uploadImageFetcher.data]);
+  }, [uploadImageFetcher.state, uploadImageFetcher.data, apiUrl]);
 
   useEffect(() => {
     if (saveImageFetcher.state !== "idle") return;
     const t = pendingSaveTypeRef.current;
+    const savedUrl = pendingSaveUrlRef.current?.trim() ?? "";
     pendingSaveTypeRef.current = null;
+    pendingSaveUrlRef.current = null;
     const d = saveImageFetcher.data as { ok?: boolean } | undefined;
     if (!d?.ok) return;
     revalidator.revalidate();
-    if (t === "logo") {
-      setExpLogoSaved(true);
+    if (t === "logo" && savedUrl) {
+      const absolute = resolvePublicAssetImageUrl(savedUrl, apiUrl);
+      setExpLogoPreview(absolute);
       setExpLogoPendingUrl(null);
+      setExpLogoInSync(true);
+      setExpLogoImgBust(Date.now());
+      setExpLogoSaveFlash(true);
+      if (logoSaveFlashTimerRef.current) clearTimeout(logoSaveFlashTimerRef.current);
+      logoSaveFlashTimerRef.current = setTimeout(() => {
+        setExpLogoSaveFlash(false);
+        logoSaveFlashTimerRef.current = null;
+      }, 2000);
     }
-    if (t === "hero") {
-      setExpHeroSaved(true);
+    if (t === "hero" && savedUrl) {
+      const absolute = resolvePublicAssetImageUrl(savedUrl, apiUrl);
+      setExpHeroPreview(absolute);
       setExpHeroPendingUrl(null);
+      setExpHeroInSync(true);
+      setExpHeroImgBust(Date.now());
+      setExpHeroSaveFlash(true);
+      if (heroSaveFlashTimerRef.current) clearTimeout(heroSaveFlashTimerRef.current);
+      heroSaveFlashTimerRef.current = setTimeout(() => {
+        setExpHeroSaveFlash(false);
+        heroSaveFlashTimerRef.current = null;
+      }, 2000);
     }
-  }, [saveImageFetcher.state, saveImageFetcher.data, revalidator]);
+  }, [saveImageFetcher.state, saveImageFetcher.data, revalidator, apiUrl]);
 
   useEffect(() => {
     if (expandedGenFetcher.state === "submitting") {
@@ -1180,7 +1247,7 @@ export default function DevShops() {
                               <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
                                 <div className="mb-2 flex items-center justify-between">
                                   <h3 className="text-sm font-semibold text-white">Logo</h3>
-                                  {expLogoSaved ? (
+                                  {expLogoSaveFlash ? (
                                     <span className="flex items-center gap-1 text-xs text-emerald-400">
                                       <Check className="h-3.5 w-3.5" /> Saved
                                     </span>
@@ -1194,7 +1261,7 @@ export default function DevShops() {
                                     </>
                                   ) : expLogoPreview ? (
                                     <img
-                                      src={expLogoPreview}
+                                      src={withImageCacheBust(expLogoPreview, expLogoImgBust)}
                                       alt="Logo preview"
                                       className="max-h-36 max-w-full object-contain"
                                     />
@@ -1242,13 +1309,14 @@ export default function DevShops() {
                                     size="sm"
                                     disabled={
                                       saveImageFetcher.state === "submitting" ||
-                                      expLogoSaved ||
+                                      (expLogoInSync && !expLogoPendingUrl) ||
                                       !(expLogoPendingUrl || expLogoPreview)
                                     }
                                     onClick={() => {
                                       const url = expLogoPendingUrl ?? expLogoPreview ?? "";
                                       if (!url) return;
                                       pendingSaveTypeRef.current = "logo";
+                                      pendingSaveUrlRef.current = url;
                                       saveImageFetcher.submit(
                                         { type: "logo", imageUrl: url },
                                         {
@@ -1267,7 +1335,7 @@ export default function DevShops() {
                               <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
                                 <div className="mb-2 flex items-center justify-between">
                                   <h3 className="text-sm font-semibold text-white">Hero background</h3>
-                                  {expHeroSaved ? (
+                                  {expHeroSaveFlash ? (
                                     <span className="flex items-center gap-1 text-xs text-emerald-400">
                                       <Check className="h-3.5 w-3.5" /> Saved
                                     </span>
@@ -1281,7 +1349,7 @@ export default function DevShops() {
                                     </>
                                   ) : expHeroPreview ? (
                                     <img
-                                      src={expHeroPreview}
+                                      src={withImageCacheBust(expHeroPreview, expHeroImgBust)}
                                       alt="Hero preview"
                                       className="h-full w-full object-cover"
                                     />
@@ -1329,13 +1397,14 @@ export default function DevShops() {
                                     size="sm"
                                     disabled={
                                       saveImageFetcher.state === "submitting" ||
-                                      expHeroSaved ||
+                                      (expHeroInSync && !expHeroPendingUrl) ||
                                       !(expHeroPendingUrl || expHeroPreview)
                                     }
                                     onClick={() => {
                                       const url = expHeroPendingUrl ?? expHeroPreview ?? "";
                                       if (!url) return;
                                       pendingSaveTypeRef.current = "hero";
+                                      pendingSaveUrlRef.current = url;
                                       saveImageFetcher.submit(
                                         { type: "hero", imageUrl: url },
                                         {
@@ -1363,8 +1432,8 @@ export default function DevShops() {
                                 type="button"
                                 size="sm"
                                 disabled={
-                                  !expLogoSaved ||
-                                  !expHeroSaved ||
+                                  !expLogoInSync ||
+                                  !expHeroInSync ||
                                   expandedGenFetcher.state === "submitting" ||
                                   (expandedGenJob?.shopId === shop.id && !jobComplete && !jobFailed)
                                 }
