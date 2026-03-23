@@ -319,6 +319,7 @@ shops.get("/:shopId/settings", async (c) => {
       show_youtube: flag(row.show_youtube),
       show_whatsapp: flag(row.show_whatsapp),
       show_linkedin: flag(row.show_linkedin),
+      booking_enabled: flag(row.booking_enabled) === false ? false : true,
     };
     return c.json({ success: true, data });
   } catch {
