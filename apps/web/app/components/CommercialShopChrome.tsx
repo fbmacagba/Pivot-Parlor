@@ -181,6 +181,17 @@ export function CommercialShopChrome({
           history: historyPayload,
         }),
       });
+      if (res.status === 429) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              "You've sent too many messages. Please wait a few minutes before trying again.",
+          },
+        ]);
+        return;
+      }
       const data = (await res.json()) as { reply?: string };
       const reply =
         typeof data.reply === "string" && data.reply.trim()

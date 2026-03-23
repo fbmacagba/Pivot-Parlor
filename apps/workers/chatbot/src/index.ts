@@ -50,6 +50,41 @@ function rateLimitKey(shopSlug: string): string {
   return `ratelimit:chat:${shopSlug}:${hour}`;
 }
 
+/** UTC hour bucket `YYYY-MM-DD-HH` for KV key suffix. */
+function publicChatRateKeySuffixes(d = new Date()): { hourSuffix: string; daySuffix: string } {
+  const iso = d.toISOString();
+  const hourSuffix = `${iso.slice(0, 10)}-${iso.slice(11, 13)}`;
+  const daySuffix = iso.slice(0, 10);
+  return { hourSuffix, daySuffix };
+}
+
+const PUBLIC_CHAT_MAX_PER_HOUR = 50;
+const PUBLIC_CHAT_MAX_PER_DAY = 200;
+
+/**
+ * Read hour + day counters; if over limit return false.
+ * Otherwise increment both and return true. TTL: 3600s (hour key), 86400s (day key).
+ */
+async function tryConsumePublicChatRate(kv: KVNamespace, shopId: string): Promise<boolean> {
+  const { hourSuffix, daySuffix } = publicChatRateKeySuffixes();
+  const hourKey = `rate:chat:${shopId}:hour:${hourSuffix}`;
+  const dayKey = `rate:chat:${shopId}:day:${daySuffix}`;
+
+  const [hourRaw, dayRaw] = await Promise.all([kv.get(hourKey), kv.get(dayKey)]);
+  const hourCount = Number(hourRaw ?? "0") || 0;
+  const dayCount = Number(dayRaw ?? "0") || 0;
+
+  if (hourCount >= PUBLIC_CHAT_MAX_PER_HOUR || dayCount >= PUBLIC_CHAT_MAX_PER_DAY) {
+    return false;
+  }
+
+  await Promise.all([
+    kv.put(hourKey, String(hourCount + 1), { expirationTtl: 3600 }),
+    kv.put(dayKey, String(dayCount + 1), { expirationTtl: 86400 }),
+  ]);
+  return true;
+}
+
 function isPlatformQuestion(msg: string): boolean {
   const m = msg.toLowerCase();
   return (
@@ -140,18 +175,14 @@ chat.post("/", async (c) => {
     }
 
     const shopSlug = shop.slug;
-    const rlKey = rateLimitKey(shopSlug);
-    const current = Number((await c.env.KV.get(rlKey)) ?? "0");
-    if (current >= 100) {
+
+    const allowed = await tryConsumePublicChatRate(c.env.KV, shop.id);
+    if (!allowed) {
       return c.json(
-        {
-          reply:
-            "This chat is temporarily busy. Please try again shortly or book directly using the Book link on this site.",
-        },
+        { error: "rate_limit", message: "Too many messages. Please try again later." },
         429
       );
     }
-    await c.env.KV.put(rlKey, String(current + 1), { expirationTtl: 7200 });
 
     let reply: string;
     let usedOpenRouter = false;

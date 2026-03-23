@@ -327,6 +327,91 @@ shops.get("/:shopId/settings", async (c) => {
   }
 });
 
+const SHOP_SETTINGS_PATCH_FIELDS = [
+  "phone",
+  "address",
+  "lat",
+  "lng",
+  "hours_json",
+  "instagram_url",
+  "facebook_url",
+  "tiktok_url",
+  "twitter_url",
+  "youtube_url",
+  "whatsapp_url",
+  "linkedin_url",
+  "show_instagram",
+  "show_facebook",
+  "show_tiktok",
+  "show_twitter",
+  "show_youtube",
+  "show_whatsapp",
+  "show_linkedin",
+] as const;
+
+type ShopSettingsPatchField = (typeof SHOP_SETTINGS_PATCH_FIELDS)[number];
+
+function coerceShopSettingValue(field: ShopSettingsPatchField, raw: unknown): string | number | null {
+  if (field === "lat" || field === "lng") {
+    if (raw === null || raw === undefined || raw === "") return null;
+    const n = typeof raw === "number" ? raw : Number(String(raw));
+    return Number.isFinite(n) ? n : null;
+  }
+  if (field.startsWith("show_")) {
+    if (raw === true || raw === 1 || raw === "1" || raw === "true" || raw === "on") return 1;
+    return 0;
+  }
+  if (raw === null || raw === undefined) return "";
+  return String(raw);
+}
+
+// ─── PATCH /api/shops/:shopId/settings — admin/developer: upsert shop_settings (D1) ───
+
+shops.patch("/:shopId/settings", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
+
+  const patchKeys = SHOP_SETTINGS_PATCH_FIELDS.filter((f) =>
+    Object.prototype.hasOwnProperty.call(body, f)
+  );
+  if (patchKeys.length === 0) {
+    return c.json({ success: false, error: "No valid fields to update" }, 400);
+  }
+
+  const sets = patchKeys.map((k) => `${k} = ?`).join(", ");
+  const vals = patchKeys.map((k) => coerceShopSettingValue(k, body[k]));
+
+  try {
+    const upd = await c.env.DB.prepare(`UPDATE shop_settings SET ${sets} WHERE shop_id = ?`)
+      .bind(...vals, shop.id)
+      .run();
+    const changes = Number((upd.meta as { changes?: number }).changes ?? 0);
+    if (changes === 0) {
+      await c.env.DB.prepare("INSERT INTO shop_settings (shop_id) VALUES (?)").bind(shop.id).run();
+      await c.env.DB.prepare(`UPDATE shop_settings SET ${sets} WHERE shop_id = ?`)
+        .bind(...vals, shop.id)
+        .run();
+    }
+    return c.json({ success: true, data: { updated: patchKeys } });
+  } catch (e) {
+    console.error("[shops] PATCH settings", e);
+    return c.json({ success: false, error: "Failed to save settings" }, 500);
+  }
+});
+
 // ─── GET /api/shops/:shopId/generation-prefs — developer/admin: last saved inputs for regenerate-site ───
 
 shops.get("/:shopId/generation-prefs", authMiddleware, async (c) => {
