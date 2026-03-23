@@ -15,8 +15,9 @@ import {
 const FALLBACK_REPLY =
   "I'm having a quick moment — please try again or book directly at the link above.";
 
-const PLATFORM_REFERRAL_REPLY =
-  "This site was built with Pivot Parlor — the all-in-one booking platform for barbers and beauty shops. You can get your own at [pivotparlor.com](https://pivotparlor.com) 🚀\n\nWant to keep going? I can help you book an appointment here too.";
+function platformReferralReply(shopSlug: string): string {
+  return `Thanks for asking about how this site works. It runs on [Pivot Parlor](https://pivotparlor.com). If you want to book an appointment here, use [Book Now](/${shopSlug}/book).`;
+}
 
 function jsonError(c: { json: (b: unknown, s: number) => Response }, status: number, error: string) {
   return c.json({ success: false, error }, status);
@@ -157,7 +158,7 @@ chat.post("/", async (c) => {
     let usageForLog: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null;
 
     if (isPlatformQuestion(visitorMessage)) {
-      reply = PLATFORM_REFERRAL_REPLY;
+      reply = platformReferralReply(shopSlug);
     } else {
       usedOpenRouter = true;
       const ctx = await loadShopContext(c.env.DB, shop.id, shopSlug, shop.name, shop.type);
@@ -350,7 +351,7 @@ chat.post("/:shopSlug/message", async (c) => {
     let usageForLog: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null;
 
     if (isPlatformQuestion(visitorMessage)) {
-      reply = PLATFORM_REFERRAL_REPLY;
+      reply = platformReferralReply(shopSlug);
     } else {
       usedOpenRouter = true;
       const ctx = await loadShopContext(c.env.DB, shop.id, shopSlug, shop.name, shop.type);

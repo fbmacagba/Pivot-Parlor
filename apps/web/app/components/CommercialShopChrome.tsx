@@ -8,6 +8,56 @@ const CHATBOT_CHAT_URL = "https://pivot-parlor-chatbot.bmorris0565.workers.dev/c
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
+function isSafeChatHref(href: string): boolean {
+  const t = href.trim();
+  if (!t) return false;
+  if (t.startsWith("/") && !t.startsWith("//")) return true;
+  try {
+    const u = new URL(t);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+/** Renders `[label](url)` as clickable links; other text stays plain. */
+function renderMarkdownLinks(text: string): ReactNode {
+  const re = /\[([^\]]*)\]\(([^)]*)\)/g;
+  const parts: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) {
+      parts.push(text.slice(last, m.index));
+    }
+    const label = m[1] ?? "";
+    const href = (m[2] ?? "").trim();
+    if (isSafeChatHref(href)) {
+      parts.push(
+        <a
+          key={`chat-md-${key++}`}
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium underline text-[color:var(--color-accent)]"
+        >
+          {label}
+        </a>
+      );
+    } else {
+      parts.push(m[0]);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) {
+    parts.push(text.slice(last));
+  }
+  if (parts.length === 0) return text;
+  if (parts.length === 1) return parts[0];
+  return <>{parts}</>;
+}
+
 function trimMediaUrl(url: string | undefined | null): string {
   if (typeof url !== "string") return "";
   return url.trim();
@@ -533,7 +583,7 @@ export function CommercialShopChrome({
               ) : (
                 <div key={i} className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-zinc-700 px-3 py-2 text-sm text-white/95">
-                    {m.content}
+                    {renderMarkdownLinks(m.content)}
                   </div>
                 </div>
               )

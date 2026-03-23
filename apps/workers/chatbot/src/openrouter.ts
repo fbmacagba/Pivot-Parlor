@@ -34,7 +34,7 @@ export async function callOpenRouter(params: {
       },
       body: JSON.stringify({
         model: OPENROUTER_MODEL,
-        max_tokens: 300,
+        max_tokens: 150,
         messages,
       }),
     });
