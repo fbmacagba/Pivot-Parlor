@@ -11,6 +11,7 @@ node_modules/
 .env.development.local
 .env.test.local
 .env.production.local
+.dev.vars
 
 # Testing
 coverage
@@ -32,7 +33,6 @@ apps/worker/.wrangler-bundle-out/
 
 # Source maps (generated)
 *.js.map
-
 
 # Debug
 npm-debug.log*
