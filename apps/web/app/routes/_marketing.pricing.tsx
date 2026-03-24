@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/Button";
 import { Check } from "lucide-react";
 
 export const meta: MetaFunction = () => [
-  { title: "Pricing — Zero Monthly Fees | Pivot Parlor" },
+  { title: "Pricing — £100 Setup, No Monthly Fees | Pivot Parlor" },
 ];
 
 export default function Pricing() {
@@ -16,13 +16,13 @@ export default function Pricing() {
             We only earn <span className="gradient-text">when you earn</span>
           </h1>
           <p className="mt-4 text-lg text-white/60">
-            No monthly fees. No setup costs. Just 10% commission on completed bookings.
+            One-time £100 setup fee. No monthly fees. Then just 10% commission on completed bookings.
           </p>
         </div>
 
         <div className="rounded-2xl border border-gold/30 bg-dark-100 p-10 text-center mb-12">
           <div className="flex flex-wrap items-end justify-center gap-x-12 gap-y-6">
-            {[["£0", "Setup fee"], ["£0", "Monthly fee"], ["10%", "Per booking"]].map(([val, label]) => (
+            {[["£100", "One-time setup"], ["£0", "Monthly fee"], ["10%", "Per booking"]].map(([val, label]) => (
               <div key={label}>
                 <p className="font-heading text-6xl font-bold text-gold">{val}</p>
                 <p className="mt-2 text-white/50">{label}</p>
@@ -50,9 +50,9 @@ export default function Pricing() {
 
           <div className="mt-10">
             <Button asChild size="xl">
-              <Link to="/contact">Get started for free →</Link>
+              <Link to="/contact">Get started →</Link>
             </Button>
-            <p className="mt-3 text-xs text-white/40">No credit card required · Setup in 24 hours</p>
+            <p className="mt-3 text-xs text-white/40">£100 setup · No monthly fees · Live in 24 hours</p>
           </div>
         </div>
 

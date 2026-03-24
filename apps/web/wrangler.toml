@@ -9,3 +9,4 @@ APP_DOMAIN = "pivotparlor.com"
 
 # Secrets (set via `wrangler secret put --config apps/web/wrangler.toml`):
 #   JWT_SECRET
+#   OPENROUTER_API_KEY   ← used by marketing chatbot (/api/chat) and worker AI routes

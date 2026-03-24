@@ -50,11 +50,11 @@ export function ExitIntentModal() {
           Before you go —
         </h2>
         <p className="mt-2 text-white/70">
-          Get your shop&apos;s AI-branded booking page{" "}
-          <strong className="text-gold">for free</strong> during our beta.
+          Get your shop&apos;s AI-branded booking page live for a{" "}
+          <strong className="text-gold">one-time £100 setup fee</strong>. No monthly fees, ever.
         </p>
         <p className="mt-1 text-sm text-white/50">
-          No setup costs · No monthly fees · Live in 24 hours
+          £100 setup · No monthly fees · Live in 24 hours
         </p>
         <div className="mt-6 flex flex-col gap-3">
           <Button asChild size="lg" className="w-full">

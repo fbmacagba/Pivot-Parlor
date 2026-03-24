@@ -19,6 +19,7 @@ export type ShopContext = {
   promoDiscountPercent: number;
   promoDiscountCode: string;
   nextSlotsLines: string[];
+  hasProducts: boolean;
 };
 
 function formatShopType(type: string): string {
@@ -56,6 +57,11 @@ function formatHoursJson(hoursJson: string | null | undefined): string {
   }
 }
 
+/** Returns true if the service name looks like a retail product rather than a treatment. */
+function looksLikeProduct(name: string): boolean {
+  return /\b(shampoo|conditioner|pomade|wax|gel|oil|serum|cream|balm|spray|tonic|beard|hair product|grooming kit|aftershave|moisturiser|moisturizer|clay|paste|putty|powder|treatment kit|retail)\b/i.test(name);
+}
+
 export async function loadShopContext(
   db: D1Database,
   shopId: string,
@@ -83,14 +89,29 @@ export async function loadShopContext(
 
   const servicesRes = await db
     .prepare(
-      "SELECT name, price, duration_min FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
+      "SELECT name, price, duration_min, category FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
     )
     .bind(shopId)
     .all();
-  const serviceRows = d1Rows<{ name: string; price: number; duration_min: number }>(servicesRes);
-  const servicesLines = serviceRows.map(
+  const serviceRows = d1Rows<{ name: string; price: number; duration_min: number; category: string | null }>(servicesRes);
+
+  // Separate services from products
+  const productRows = serviceRows.filter(
+    (s) => s.category?.toLowerCase() === "product" || looksLikeProduct(s.name)
+  );
+  const treatmentRows = serviceRows.filter(
+    (s) => s.category?.toLowerCase() !== "product" && !looksLikeProduct(s.name)
+  );
+
+  const servicesLines = treatmentRows.map(
     (s) => `- ${s.name}: £${Number(s.price).toFixed(2)}, ${s.duration_min} min`
   );
+
+  const productLines = productRows.map(
+    (s) => `- ${s.name}: £${Number(s.price).toFixed(2)} [product for sale]`
+  );
+
+  const allServicesLines = [...servicesLines, ...productLines];
 
   const staffRes = await db
     .prepare("SELECT display_name, bio FROM staff WHERE shop_id = ? AND is_active = 1 ORDER BY display_name ASC")
@@ -134,12 +155,13 @@ export async function loadShopContext(
     shopType: formatShopType(shopType),
     address: settings?.address?.trim() || "Not listed — ask the team.",
     hoursText: formatHoursJson(settings?.hours_json ?? null),
-    servicesLines,
+    servicesLines: allServicesLines,
     staffLines,
     promoActive,
     promoDiscountPercent,
     promoDiscountCode,
     nextSlotsLines,
+    hasProducts: productRows.length > 0,
   };
 }
 
@@ -158,6 +180,10 @@ export function buildSystemPrompt(ctx: ShopContext, _platformUrl: string): strin
 
   const bookMarkdown = `[Book Now](/${ctx.shopSlug}/book)`;
 
+  const productsNote = ctx.hasProducts
+    ? `\nPRODUCTS: This shop also sells retail products. When visitors ask about products, list them by name and price. Products cannot be booked — they are purchased in-store.\n`
+    : "";
+
   return `You are ${ctx.shopName}'s friendly booking assistant: warm, concise, and efficient.
 
 SHOP INFORMATION:
@@ -171,7 +197,7 @@ ${servicesBlock}
 
 STAFF AVAILABLE:
 ${staffBlock}
-
+${productsNote}
 ${promoBlock ? `${promoBlock}\n` : ""}
 ${slotsBlock ? `${slotsBlock}\n` : ""}
 
@@ -187,7 +213,7 @@ BOOKING LINKS:
 - Never use full site URLs, workers.dev, or hash links like #book — only the relative path form above.
 
 PIVOT PARLOR (PLATFORM) LINKS:
-- When explaining the platform or how to get a similar site, always link as: [Pivot Parlor](https://pivotparlor.com)
+- When explaining the platform or how to get a similar website, always link as: [Pivot Parlor](https://pivotparlor.com)
 - Never show pivotparlor.com or any URL as plain text.
 
 OTHER:
@@ -196,19 +222,46 @@ OTHER:
 - If you do not know something, say so briefly and offer ${bookMarkdown} or to leave a message for the team.
 
 PLATFORM QUESTIONS (IMPORTANT):
-If they ask how this site was built, how to get a similar booking page, who made the site, or anything similar about the technology or platform:
+If they ask how this website was built, how to get a similar booking website, who made the site, or anything similar about the technology or platform:
 - Acknowledge in one sentence, then give [Pivot Parlor](https://pivotparlor.com) as the only platform link.
 - Optionally add one short sentence offering to help them book here with ${bookMarkdown}.`;
 }
 
+/**
+ * Builds the opening welcome message shown when a visitor first opens the chatbot.
+ * Includes a snapshot of available services so the visitor knows what's on offer immediately.
+ * If the shop sells products, mentions that too.
+ */
 export function welcomeMessage(
   shopName: string,
   promoActive: boolean,
   promoDiscountPercent: number,
-  promoDiscountCode: string
+  promoDiscountCode: string,
+  services: { name: string; price: number }[] = [],
+  hasProducts = false
 ): string {
+  const topServices = services.slice(0, 3);
+  const serviceSnippet = topServices.length > 0
+    ? topServices.map(s => `${s.name} (£${Number(s.price).toFixed(0)})`).join(", ")
+    : "";
+
+  const moreLine = services.length > 3
+    ? ` and ${services.length - 3} more`
+    : "";
+
+  const servicesLine = serviceSnippet
+    ? `We offer: ${serviceSnippet}${moreLine}.`
+    : "";
+
+  const productsLine = hasProducts ? " We also sell grooming products in-store." : "";
+
   if (promoActive && promoDiscountCode) {
-    return `Welcome to ${shopName}. We have a special offer: ${promoDiscountPercent}% off with code ${promoDiscountCode}. Want help booking a slot?`;
+    return `Welcome to ${shopName}! We have a special offer: ${promoDiscountPercent}% off with code ${promoDiscountCode}. ${servicesLine}${productsLine} Want help booking a slot?`;
   }
+
+  if (servicesLine) {
+    return `Welcome to ${shopName}! ${servicesLine}${productsLine} How can I help you today?`;
+  }
+
   return `Welcome to ${shopName}. Looking to book? I can help you find a slot in seconds.`;
 }

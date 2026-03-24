@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { SiteTemplateProps } from "./types";
+import { TemplateNavbar } from "./TemplateNavbar";
 
 export function ClassicTemplate({ shop, site }: SiteTemplateProps) {
   const fontHeading =
@@ -14,6 +15,13 @@ export function ClassicTemplate({ shop, site }: SiteTemplateProps) {
       className="min-h-screen"
       style={{ backgroundColor: accent, fontFamily: fontBody }}
     >
+      <TemplateNavbar
+        shopName={shop.name}
+        shopSlug={shop.slug}
+        primaryColor={primary}
+        accentColor={primary}
+        dark
+      />
       {/* Hero — full-width banner with shop name in large display type */}
       <section
         className="relative flex min-h-[50vh] w-full flex-col items-center justify-center px-6 text-center"

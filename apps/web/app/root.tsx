@@ -1,5 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
 import tailwindStylesheet from "~/tailwind.css?url";
+import { PlatformCookieBanner } from "~/components/PlatformCookieBanner";
 
 export const links = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -35,6 +36,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {children}
         <ScrollRestoration />
         <Scripts />
+        <PlatformCookieBanner />
       </body>
     </html>
   );

@@ -1,45 +1,266 @@
-import { useLoaderData, useSearchParams } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { Form, useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { getSessionToken } from "~/lib/auth";
+import { useEffect, useState } from "react";
+import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
+import { Button } from "~/components/ui/Button";
+import { Input } from "~/components/ui/Input";
+
+interface Booking {
+  id: string;
+  booking_date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  customer_name: string;
+  service_name: string;
+  duration_min: number;
+}
+
+interface TimeOff {
+  id: string;
+  from_date: string;
+  to_date: string;
+  reason: string | null;
+  status: "pending" | "approved" | "denied";
+  created_at: string;
+}
+
+interface ScheduleRow { day_of_week: number; start_time: string; end_time: string; is_active: number }
+
+const DAY_LABELS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const STATUS_BADGE: Record<string, "warning"|"success"|"error"|"gold"|"outline"|"default"> = {
+  pending:   "warning",
+  confirmed: "gold",
+  in_progress: "gold",
+  completed: "success",
+  cancelled: "error",
+  no_show:   "default",
+};
+
+function formatDate(iso: string) {
+  try { return new Date(iso).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" }); }
+  catch { return iso; }
+}
+function formatTime(iso: string) {
+  try { return new Date(iso).toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" }); }
+  catch { return iso; }
+}
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
+  await requireRole(request, "staff", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  let bookings: never[] = [];
-  try { bookings = await api.get("/api/staff/bookings"); } catch { /* empty */ }
-  return json({ bookings });
+  const url = new URL(request.url);
+  const filter = url.searchParams.get("filter") ?? "upcoming";
+  const tab    = url.searchParams.get("tab")    ?? "bookings";
+
+  let bookings: Booking[] = [];
+  let schedule: ScheduleRow[] = [];
+  let timeOff: TimeOff[] = [];
+
+  try { bookings = await api.get<Booking[]>(`/api/staff/me/bookings?filter=${filter}`); } catch { /* empty */ }
+  try { schedule = await api.get<ScheduleRow[]>("/api/staff/me/schedule"); } catch { /* empty */ }
+  try { timeOff = await api.get<TimeOff[]>("/api/staff/me/time-off"); } catch { /* empty */ }
+
+  return json({ bookings, schedule, timeOff, filter, tab });
 }
 
-export default function StaffBookings() {
-  const { bookings } = useLoaderData<typeof loader>();
+export async function action({ request, context }: ActionFunctionArgs) {
+  const env = context.env as { API_URL: string };
+  await requireRole(request, "staff", env.API_URL);
+  const token = getSessionToken(request);
+  const api = createApiClient(env.API_URL, token);
+  const body = await request.json() as { from_date?: string; to_date?: string; reason?: string };
+
+  try {
+    await api.post("/api/staff/me/time-off", body);
+    return json({ ok: true });
+  } catch (e) {
+    return json({ ok: false, error: e instanceof Error ? e.message : "Failed" }, { status: 400 });
+  }
+}
+
+export default function StaffBookingsAvailability() {
+  const { bookings, schedule, timeOff, filter, tab } = useLoaderData<typeof loader>();
   const [params, setParams] = useSearchParams();
-  const filter = params.get("filter") ?? "upcoming";
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const [toast, setToast] = useState<{ type: "success"|"error"; text: string } | null>(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate]     = useState("");
+  const [reason, setReason]     = useState("");
+
+  const activeTab = params.get("tab") ?? "bookings";
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data.ok) {
+      setToast({ type: "success", text: "Time-off request submitted." });
+      setFromDate(""); setToDate(""); setReason("");
+    } else {
+      setToast({ type: "error", text: fetcher.data.error ?? "Failed." });
+    }
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [fetcher.state, fetcher.data]);
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="font-heading text-2xl font-bold text-white">My Bookings</h1>
-        <div className="flex gap-2">
-          {["upcoming", "past"].map((f) => (
-            <button
-              key={f}
-              onClick={() => setParams({ filter: f })}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors capitalize ${
-                filter === f ? "bg-gold/20 text-gold" : "text-white/50 hover:text-white"
-              }`}
-            >
-              {f}
-            </button>
-          ))}
+    <div className="space-y-6">
+      {toast && (
+        <div className={`fixed bottom-6 right-6 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg ${
+          toast.type === "success" ? "border-emerald-500/40 bg-emerald-950/90 text-emerald-100" : "border-red-500/40 bg-red-950/90 text-red-100"
+        }`} role="status">{toast.text}</div>
+      )}
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-white/10 pb-0">
+        {[
+          { key: "bookings",     label: "My Bookings" },
+          { key: "availability", label: "Availability" },
+        ].map(t => (
+          <button key={t.key}
+            onClick={() => setParams(prev => { const n = new URLSearchParams(prev); n.set("tab", t.key); return n; })}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === t.key
+                ? "border-gold text-gold"
+                : "border-transparent text-white/50 hover:text-white"
+            }`}
+          >{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── BOOKINGS TAB ── */}
+      {activeTab === "bookings" && (
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            {["upcoming","past","today"].map(f => (
+              <button key={f}
+                onClick={() => setParams(prev => { const n = new URLSearchParams(prev); n.set("filter", f); n.set("tab","bookings"); return n; })}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
+                  filter === f ? "bg-gold/20 text-gold" : "text-white/50 hover:text-white"
+                }`}
+              >{f}</button>
+            ))}
+          </div>
+
+          {bookings.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/30 text-sm">
+              No {filter} bookings.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {bookings.map(b => (
+                <div key={b.id}
+                  className="flex items-center gap-4 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 hover:border-white/15 transition-colors">
+                  <div className="w-16 shrink-0 text-center">
+                    <p className="text-sm font-semibold text-white">{formatTime(b.start_time)}</p>
+                    <p className="text-xs text-white/35">{formatDate(b.booking_date)}</p>
+                  </div>
+                  <div className="h-8 w-px bg-white/10 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">{b.customer_name}</p>
+                    <p className="text-xs text-white/50 truncate">{b.service_name} · {b.duration_min}m</p>
+                  </div>
+                  <Badge variant={STATUS_BADGE[b.status] ?? "default"}>{b.status.replace("_"," ")}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
-      <div className="rounded-xl border border-white/10 bg-dark-100 p-8 text-center text-white/40">
-        {bookings.length === 0 ? "No bookings to show." : `${bookings.length} bookings`}
-      </div>
+      )}
+
+      {/* ── AVAILABILITY TAB ── */}
+      {activeTab === "availability" && (
+        <div className="space-y-6 max-w-2xl">
+          {/* Weekly schedule (read-only) */}
+          <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
+            <h2 className="font-heading text-base font-semibold text-white mb-1">Weekly schedule</h2>
+            <p className="text-xs text-white/40 mb-4">Set by your manager. Contact them to make changes.</p>
+            <div className="space-y-2">
+              {DAY_LABELS.map((label, d) => {
+                const row = schedule.find(s => s.day_of_week === d);
+                const isOn = row?.is_active === 1;
+                return (
+                  <div key={d} className="flex items-center gap-4 text-sm">
+                    <span className="w-24 font-medium text-white/80">{label}</span>
+                    {isOn && row
+                      ? <span className="text-white/70">{row.start_time} – {row.end_time}</span>
+                      : <span className="text-white/30">Off</span>
+                    }
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Time off request form */}
+          <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
+            <h2 className="font-heading text-base font-semibold text-white mb-4">Request time off</h2>
+            <div className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input label="From date" name="from" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+                <Input label="To date"   name="to"   type="date" value={toDate}   onChange={e => setToDate(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-white/80 mb-1.5">Reason (optional)</label>
+                <textarea
+                  rows={3}
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  className="flex w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
+                  placeholder="Optional reason…"
+                />
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                disabled={!fromDate || !toDate || fetcher.state !== "idle"}
+                onClick={() => fetcher.submit(
+                  { from_date: fromDate, to_date: toDate, reason: reason || undefined } as unknown as Record<string,string>,
+                  { method: "POST", encType: "application/json" }
+                )}
+              >
+                {fetcher.state !== "idle" ? "Submitting…" : "Submit request"}
+              </Button>
+            </div>
+          </div>
+
+          {/* Pending requests */}
+          {timeOff.length > 0 && (
+            <div className="rounded-xl border border-white/10 bg-dark-100 overflow-x-auto">
+              <div className="px-5 py-4 border-b border-white/10">
+                <h2 className="font-heading text-base font-semibold text-white">My requests</h2>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/10">
+                    {["From","To","Reason","Status"].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-white/40 uppercase tracking-wider">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {timeOff.map(r => (
+                    <tr key={r.id} className="hover:bg-white/[0.02]">
+                      <td className="px-4 py-3 text-white/80">{formatDate(r.from_date)}</td>
+                      <td className="px-4 py-3 text-white/80">{formatDate(r.to_date)}</td>
+                      <td className="px-4 py-3 text-white/50">{r.reason ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant={r.status === "approved" ? "success" : r.status === "denied" ? "error" : "warning"}>
+                          {r.status}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -14,4 +14,11 @@ export type Bindings = {
   STRIPE_WEBHOOK_SECRET?: string;
   ENVIRONMENT?: string;
   ASSET_BASE_URL?: string;
+  APP_URL?: string;
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  FACEBOOK_OAUTH_APP_ID?: string;
+  FACEBOOK_OAUTH_APP_SECRET?: string;
+  LINKEDIN_OAUTH_CLIENT_ID?: string;
+  LINKEDIN_OAUTH_CLIENT_SECRET?: string;
 };

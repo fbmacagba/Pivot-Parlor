@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { SiteTemplateProps } from "./types";
+import { TemplateNavbar } from "./TemplateNavbar";
 
 export function FreshTemplate({ shop, site }: SiteTemplateProps) {
   const fontHeading =
@@ -14,6 +15,12 @@ export function FreshTemplate({ shop, site }: SiteTemplateProps) {
       className="min-h-screen"
       style={{ backgroundColor: "#e8f5e9", fontFamily: fontBody }}
     >
+      <TemplateNavbar
+        shopName={shop.name}
+        shopSlug={shop.slug}
+        primaryColor="#2e7d32"
+        accentColor="#880e4f"
+      />
       {/* Hero — light section with large friendly headline and soft hero image */}
       <section className="relative overflow-hidden px-6 py-24">
         <div className="relative mx-auto max-w-4xl">

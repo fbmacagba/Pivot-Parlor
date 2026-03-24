@@ -33,12 +33,7 @@ export default function About() {
               rel="noopener noreferrer"
               className="flex items-center gap-2 border border-[#C9A84C] text-[#C9A84C] px-4 py-2 rounded-full text-sm hover:bg-[#C9A84C] hover:text-black transition-colors"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
               </svg>
               DM us on LinkedIn
@@ -71,7 +66,7 @@ export default function About() {
             {[
               { title: "You focus on your craft", desc: "We handle the tech — setup, maintenance, and updates." },
               { title: "Your shop gets an AI-branded page", desc: "Unique design, copy, and identity generated in minutes." },
-              { title: "We only earn when you earn", desc: "10% commission on completed bookings. Nothing upfront." },
+              { title: "We only earn when you earn", desc: "£100 one-time setup, then 10% commission on completed bookings only." },
             ].map(({ title, desc }, i) => (
               <div key={title} className="rounded-xl border border-white/10 bg-dark-100 p-6">
                 <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-gold/10 text-gold font-heading font-bold">
@@ -91,7 +86,7 @@ export default function About() {
           <h2 className="text-center font-heading text-4xl font-bold text-white mb-16">Why Pivot Parlor</h2>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {[
-              { title: "Zero upfront cost", desc: "No setup fees, no monthly subscription." },
+              { title: "£100 one-time setup", desc: "No monthly fees. Just 10% commission on completed bookings." },
               { title: "AI-branded pages", desc: "Your shop gets a unique identity, not a template." },
               { title: "Built on Cloudflare", desc: "99.99% uptime, global edge network." },
               { title: "GDPR compliant", desc: "Your customer data is isolated and protected." },

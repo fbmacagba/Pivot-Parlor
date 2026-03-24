@@ -8,7 +8,7 @@ export const meta: MetaFunction = () => [
   {
     name: "description",
     content:
-      "AI-branded booking pages, staff scheduling, and automated reminders for beauty parlours and barber shops. Zero monthly fees — 10% commission only.",
+      "AI-branded booking pages, staff scheduling, and automated reminders for beauty parlours and barber shops. £100 setup fee, then 10% commission only.",
   },
 ];
 
@@ -47,23 +47,19 @@ export default function Homepage() {
 
             <p className="mt-6 text-lg text-white/70 leading-relaxed">
               Pivot Parlor powers beauty parlours and barber shops with
-              AI‑branded booking pages, smart scheduling, and zero upfront
-              cost.
+              AI‑branded booking pages, smart scheduling, and no monthly fees.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <Button asChild size="xl">
-                <Link to="/contact">Get your site</Link>
-              </Button>
-              <Button asChild variant="outline" size="xl">
-                <Link to="/contact">Get started</Link>
+                <Link to="/contact">Get your shop live →</Link>
               </Button>
               <Button asChild variant="ghost" size="xl" className="text-white/80">
                 <a href="#how-it-works">See how it works</a>
               </Button>
             </div>
             <p className="mt-3 text-xs text-white/40">
-              No credit card required · Setup in 24 hours · Cancel anytime
+              £100 one-time setup · No monthly fees · Live in 24 hours
             </p>
           </div>
 
@@ -214,13 +210,14 @@ export default function Homepage() {
             We only earn when you earn
           </h2>
           <p className="mt-4 text-white/60">
-            No monthly fees. No setup costs. Just 10% commission on completed
-            bookings — automatically calculated and transparent.
+            One-time £100 setup fee covers everything — onboarding, training,
+            and your AI-generated booking site. Then just 10% on completed
+            bookings. No monthly fees, ever.
           </p>
           <div className="mt-12 rounded-2xl border border-gold/30 bg-dark-100 p-10">
             <div className="flex flex-wrap items-end justify-center gap-x-8 gap-y-4">
               {[
-                ["£0", "setup"],
+                ["£100", "one-time setup"],
                 ["£0", "/ month"],
                 ["10%", "per booking"],
               ].map(([val, unit]) => (
@@ -234,10 +231,10 @@ export default function Homepage() {
             </div>
             <div className="mt-8">
               <Button asChild size="lg">
-                <Link to="/contact">Get started for free →</Link>
+                <Link to="/contact">Get started →</Link>
               </Button>
               <p className="mt-3 text-xs text-white/40">
-                No credit card required · Setup in 24 hours
+                £100 setup · No monthly fees · Live in 24 hours
               </p>
             </div>
           </div>

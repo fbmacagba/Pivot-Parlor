@@ -6,6 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ENVIRONMENT = "production"
 ASSET_BASE_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
+APP_URL = "https://pivotparlor.com"
 
 # D1 Database
 [[d1_databases]]
@@ -53,3 +54,9 @@ local_protocol = "http"
 #   GOOGLE_AI_API_KEY
 #   STRIPE_SECRET_KEY
 #   STRIPE_WEBHOOK_SECRET
+#   GOOGLE_OAUTH_CLIENT_ID
+#   GOOGLE_OAUTH_CLIENT_SECRET
+#   FACEBOOK_OAUTH_APP_ID
+#   FACEBOOK_OAUTH_APP_SECRET
+#   LINKEDIN_OAUTH_CLIENT_ID
+#   LINKEDIN_OAUTH_CLIENT_SECRET

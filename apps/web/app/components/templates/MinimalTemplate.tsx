@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { SiteTemplateProps } from "./types";
+import { TemplateNavbar } from "./TemplateNavbar";
 
 export function MinimalTemplate({ shop, site }: SiteTemplateProps) {
   const fontHeading = site.font_heading ? `"${site.font_heading}", serif` : "serif";
@@ -10,6 +11,12 @@ export function MinimalTemplate({ shop, site }: SiteTemplateProps) {
       className="min-h-screen bg-white"
       style={{ fontFamily: fontBody }}
     >
+      <TemplateNavbar
+        shopName={shop.name}
+        shopSlug={shop.slug}
+        primaryColor="#111111"
+        accentColor={site.color_accent}
+      />
       {/* Hero — text only */}
       <section className="px-6 py-24 text-center">
         <h1

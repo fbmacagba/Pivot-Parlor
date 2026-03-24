@@ -3,6 +3,7 @@ import { AnnouncementBar } from "~/components/marketing/AnnouncementBar";
 import { ExitIntentModal } from "~/components/marketing/ExitIntentModal";
 import { FloatingCTA } from "~/components/marketing/FloatingCTA";
 import { Footer } from "~/components/marketing/Footer";
+import { MarketingChatbot } from "~/components/marketing/MarketingChatbot";
 import { Navbar } from "~/components/marketing/Navbar";
 
 export default function MarketingLayout() {
@@ -14,6 +15,7 @@ export default function MarketingLayout() {
       <Footer />
       <FloatingCTA />
       <ExitIntentModal />
+      <MarketingChatbot />
     </>
   );
 }

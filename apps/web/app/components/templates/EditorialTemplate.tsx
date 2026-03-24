@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { SiteTemplateProps } from "./types";
+import { TemplateNavbar } from "./TemplateNavbar";
 
 export function EditorialTemplate({ shop, site }: SiteTemplateProps) {
   const fontHeading = site.font_heading ? `"${site.font_heading}", serif` : "serif";
@@ -11,6 +12,12 @@ export function EditorialTemplate({ shop, site }: SiteTemplateProps) {
       className="min-h-screen"
       style={{ backgroundColor: bg, fontFamily: fontBody }}
     >
+      <TemplateNavbar
+        shopName={shop.name}
+        shopSlug={shop.slug}
+        primaryColor="#2d2d2d"
+        accentColor="#2d2d2d"
+      />
       {/* Hero — lifestyle feel, subtle image */}
       <section className="px-6 py-20">
         <div className="mx-auto max-w-4xl">

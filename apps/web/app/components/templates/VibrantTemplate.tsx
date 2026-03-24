@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { SiteTemplateProps } from "./types";
+import { TemplateNavbar } from "./TemplateNavbar";
 
 export function VibrantTemplate({ shop, site }: SiteTemplateProps) {
   const fontHeading = site.font_heading ? `"${site.font_heading}", sans-serif` : "sans-serif";
@@ -12,6 +13,13 @@ export function VibrantTemplate({ shop, site }: SiteTemplateProps) {
       className="min-h-screen overflow-hidden"
       style={{ fontFamily: fontBody }}
     >
+      <TemplateNavbar
+        shopName={shop.name}
+        shopSlug={shop.slug}
+        primaryColor={primary}
+        accentColor={accent}
+        dark
+      />
       {/* Hero — color_primary background, high contrast */}
       <section
         className="relative px-6 py-24 text-center text-white"

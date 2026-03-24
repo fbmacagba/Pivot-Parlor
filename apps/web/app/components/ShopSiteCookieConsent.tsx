@@ -1,6 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 
-const COOKIE_KEY = "pp_cookie_consent";
+// Shop-site cookie consent
+// KEY RULE: if the visitor already consented on the main Pivot Parlor platform
+// (pp_platform_consent), we honour that and skip showing this banner entirely.
+// This prevents double-banner on shops served under pivotparlor.com/slug.
+
+const SHOP_KEY     = "pp_cookie_consent";
+const PLATFORM_KEY = "pp_platform_consent";
+
+function alreadyConsentedOnPlatform(): boolean {
+  try {
+    const raw = localStorage.getItem(PLATFORM_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { decided?: boolean };
+    return parsed?.decided === true;
+  } catch {
+    return false;
+  }
+}
+
+function alreadyConsentedOnShop(): boolean {
+  try {
+    return !!localStorage.getItem(SHOP_KEY);
+  } catch {
+    return false;
+  }
+}
 
 export function ShopSiteCookieConsent({
   forceOpen,
@@ -18,11 +43,9 @@ export function ShopSiteCookieConsent({
       setVisible(true);
       return;
     }
-    try {
-      if (!localStorage.getItem(COOKIE_KEY)) setVisible(true);
-    } catch {
-      setVisible(true);
-    }
+    // If the user already consented on the main platform site, skip entirely
+    if (alreadyConsentedOnPlatform()) return;
+    if (!alreadyConsentedOnShop()) setVisible(true);
   }, [forceOpen]);
 
   const persist = useCallback(
@@ -34,7 +57,7 @@ export function ShopSiteCookieConsent({
         timestamp: new Date().toISOString(),
       };
       try {
-        localStorage.setItem(COOKIE_KEY, JSON.stringify(payload));
+        localStorage.setItem(SHOP_KEY, JSON.stringify(payload));
       } catch {
         /* ignore */
       }
@@ -54,7 +77,7 @@ export function ShopSiteCookieConsent({
     >
       <div className="mx-auto flex max-w-4xl flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
-          <p className="pp-heading text-lg text-white">Cookies & privacy</p>
+          <p className="pp-heading text-lg text-white">Cookies &amp; privacy</p>
           <p className="mt-1 max-w-xl text-sm text-white/60">
             We use essential cookies to run the site. You can opt in to analytics and marketing below.
           </p>

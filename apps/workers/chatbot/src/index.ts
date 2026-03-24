@@ -50,7 +50,6 @@ function rateLimitKey(shopSlug: string): string {
   return `ratelimit:chat:${shopSlug}:${hour}`;
 }
 
-/** UTC hour bucket `YYYY-MM-DD-HH` for KV key suffix. */
 function publicChatRateKeySuffixes(d = new Date()): { hourSuffix: string; daySuffix: string } {
   const iso = d.toISOString();
   const hourSuffix = `${iso.slice(0, 10)}-${iso.slice(11, 13)}`;
@@ -61,10 +60,6 @@ function publicChatRateKeySuffixes(d = new Date()): { hourSuffix: string; daySuf
 const PUBLIC_CHAT_MAX_PER_HOUR = 50;
 const PUBLIC_CHAT_MAX_PER_DAY = 200;
 
-/**
- * Read hour + day counters; if over limit return false.
- * Otherwise increment both and return true. TTL: 3600s (hour key), 86400s (day key).
- */
 async function tryConsumePublicChatRate(kv: KVNamespace, shopId: string): Promise<boolean> {
   const { hourSuffix, daySuffix } = publicChatRateKeySuffixes();
   const hourKey = `rate:chat:${shopId}:hour:${hourSuffix}`;
@@ -116,6 +111,12 @@ function appendPromoAwareness(base: string, promoActive: boolean): string {
   return `${base}
 
 PROMO AWARENESS: If the visitor asks about discounts, offers, promos, deals, or codes, explain the active promotion clearly and warmly.`;
+}
+
+/** Returns true if the service name looks like a retail product. */
+function looksLikeProduct(name: string, category: string | null): boolean {
+  if (category?.toLowerCase() === "product") return true;
+  return /\b(shampoo|conditioner|pomade|wax|gel|oil|serum|cream|balm|spray|tonic|beard|hair product|grooming kit|aftershave|moisturiser|moisturizer|clay|paste|putty|powder|treatment kit|retail)\b/i.test(name);
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -265,7 +266,8 @@ chat.post("/:shopSlug/session", async (c) => {
       return jsonError(c, 404, "Shop not found");
     }
 
-    const [site, settings] = await Promise.all([
+    // Fetch site, settings, and services in parallel
+    const [site, settings, servicesRes] = await Promise.all([
       c.env.DB.prepare("SELECT logo_url FROM shop_sites WHERE shop_id = ? LIMIT 1")
         .bind(shop.id)
         .first<{ logo_url: string | null }>(),
@@ -279,15 +281,19 @@ chat.post("/:shopSlug/session", async (c) => {
           promo_discount_code: string | null;
           promo_discount_percent: number | null;
         }>(),
+      c.env.DB
+        .prepare(
+          "SELECT name, price, category FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
+        )
+        .bind(shop.id)
+        .all<{ name: string; price: number; category: string | null }>(),
     ]);
 
-    await Promise.all([
-      c.env.DB
-        .prepare("SELECT 1 AS ok FROM services WHERE shop_id = ? AND is_active = 1 LIMIT 1")
-        .bind(shop.id)
-        .first(),
-      c.env.DB.prepare("SELECT 1 AS ok FROM staff WHERE shop_id = ? AND is_active = 1 LIMIT 1").bind(shop.id).first(),
-    ]);
+    // Separate treatments from products
+    const allServices: { name: string; price: number; category: string | null }[] =
+      (servicesRes.results ?? []) as { name: string; price: number; category: string | null }[];
+    const treatmentServices = allServices.filter(s => !looksLikeProduct(s.name, s.category));
+    const hasProducts = allServices.some(s => looksLikeProduct(s.name, s.category));
 
     const promoActive = Number(settings?.promo_active ?? 0) === 1;
     const promoDiscountPercent = Math.round(Number(settings?.promo_discount_percent ?? 0));
@@ -302,7 +308,15 @@ chat.post("/:shopSlug/session", async (c) => {
       .bind(sessionId, shop.id, visitorId)
       .run();
 
-    const welcome = buildWelcomeMessage(shop.name, promoActive, promoDiscountPercent, promoDiscountCode);
+    // Build welcome message with services snapshot and product awareness
+    const welcome = buildWelcomeMessage(
+      shop.name,
+      promoActive,
+      promoDiscountPercent,
+      promoDiscountCode,
+      treatmentServices,
+      hasProducts
+    );
 
     return c.json({
       success: true,

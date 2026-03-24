@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { SiteTemplateProps } from "./types";
+import { TemplateNavbar } from "./TemplateNavbar";
 
 export function LuxuryTemplate({ shop, site }: SiteTemplateProps) {
   const fontHeading = site.font_heading ? `"${site.font_heading}", serif` : "serif";
@@ -12,6 +13,13 @@ export function LuxuryTemplate({ shop, site }: SiteTemplateProps) {
       className="min-h-screen"
       style={{ backgroundColor: bg, fontFamily: fontBody }}
     >
+      <TemplateNavbar
+        shopName={shop.name}
+        shopSlug={shop.slug}
+        primaryColor={accent}
+        accentColor={accent}
+        dark
+      />
       {/* Hero — full-bleed image with overlay */}
       <section className="relative min-h-[70vh]">
         {site.hero_image_url && (

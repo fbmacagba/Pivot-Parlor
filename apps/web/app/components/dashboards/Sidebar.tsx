@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquare,
+  Scissors,
   Settings,
   ShoppingBag,
   Users,
@@ -32,6 +33,7 @@ const DEV_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Overview", icon: LayoutDashboard },
   { href: "/admin/staff", label: "Staff", icon: Users },
+  { href: "/admin/services", label: "Services", icon: Scissors },
   { href: "/admin/schedule", label: "Schedule", icon: Calendar },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
   { href: "/admin/revenue", label: "Revenue", icon: BarChart3 },

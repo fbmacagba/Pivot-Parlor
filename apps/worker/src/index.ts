@@ -7,6 +7,7 @@ import type { Bindings } from "./bindings.js";
 export type { Bindings } from "./bindings.js";
 
 import authRouter from "./routes/auth.js";
+import oauthRouter from "./routes/oauth.js";
 import contactRouter from "./routes/contact.js";
 import shopsRouter from "./routes/shops.js";
 import invitesRouter from "./routes/invites.js";
@@ -20,6 +21,13 @@ import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
 import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import {
+  devRouter,
+  shopStatsRouter,
+  shopRevenueRouter,
+  staffMeRouter,
+  meRouter,
+} from "./routes/dashboard.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -87,6 +95,9 @@ app.get("/assets/:shopSlug/:filename", async (c) => {
 // Auth (public + protected)
 app.route("/auth", authRouter);
 
+// OAuth social login (Google, Facebook, LinkedIn)
+app.route("/auth", oauthRouter);
+
 // Developer-scoped shop management  (auth + requireRole applied inside router)
 app.route("/api/shops", shopsRouter);
 
@@ -103,6 +114,25 @@ app.route("/api/shops/:shopId/staff", staffRouter);
 app.route("/api/shops/:shopId/services", servicesRouter);
 app.route("/api/shops/:shopId/schedule", scheduleRouter);
 app.route("/api/shops/:shopId/bookings", bookingsRouter);
+
+// ─── Dashboard endpoints ──────────────────────────────────────────────────────
+
+// Developer platform stats + revenue (developer role only)
+app.route("/api/dev", devRouter);
+
+// Admin shop stats (today's summary)
+app.route("/api/shops/:shopId/stats", shopStatsRouter);
+
+// Admin shop revenue breakdown
+app.route("/api/shops/:shopId/revenue", shopRevenueRouter);
+
+// Staff member's own data (scoped to JWT — no shopId in URL)
+app.route("/api/staff/me", staffMeRouter);
+
+// Customer's own booking history
+app.route("/api/me", meRouter);
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Public: time slots
 app.route("/api/shops/:shopId/slots", slotsRouter);
