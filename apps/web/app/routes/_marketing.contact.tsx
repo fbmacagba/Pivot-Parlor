@@ -73,7 +73,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
 // Turnstile site key — replace with your real key from Cloudflare dashboard
 // https://dash.cloudflare.com → Turnstile → Add site
-const TURNSTILE_SITE_KEY = "0x4AAAAAABkMGL_MKYoNAFNB";
+const TURNSTILE_SITE_KEY = "0x4AAAAAACxPFNWfoxKge7a9";
 
 export default function Contact() {
   const data = useActionData<typeof action>();
