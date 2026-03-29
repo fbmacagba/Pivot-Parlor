@@ -60,14 +60,14 @@
 - [x] Bookings: detail drawer with status update ✅ 29 Mar
 - [x] Services: add / edit / archive
 - [x] Revenue: gross, commission, net, per-staff, per-service, daily chart
-- [ ] Staff: avatar/photo upload ⏳ (worker endpoint done, UI pending)
+- [x] Staff: avatar/photo upload ✅ 29 Mar (R2 upload + hover overlay UI)
 - [ ] Schedule: weekly grid (Mon–Sun × staff), editable hours, block time off
 - [ ] Notification preferences (email/SMS reminder timing)
 
-### Staff Dashboard (/staff) ⏳ PENDING
-- [ ] Today view: my schedule timeline, next booking, upcoming
-- [ ] My bookings: past + upcoming, filter by date/status
-- [ ] My availability: weekly schedule, request time off
+### Staff Dashboard (/staff) ✅ COMPLETE
+- [x] Today view: next appointment card, schedule timeline, completed collapsible
+- [x] My bookings: upcoming/past/today filter
+- [x] My availability: weekly schedule (read-only) + time-off request form
 
 ### Customer Dashboard (/account) ⏳ PENDING
 - [ ] My Bookings: upcoming + past
@@ -104,7 +104,7 @@
 - [ ] SEO: meta title, OG tags per shop
 - [ ] Google Business Profile link per shop
 - [ ] Analytics dashboard (booking trends, peak hours)
-- [ ] Email notifications via Resend ⏳ (RESEND_API_KEY set, pending deploy test)
+- [x] Email notifications via Resend ✅ 29 Mar (confirmation + 24h reminder, dark branded HTML)
 
 ---
 
@@ -172,4 +172,4 @@ git reset --hard origin/main
 |---|---|---|
 | 23 Mar | S1 | Infrastructure, schema, auth, RBAC, booking flow, AI generation |
 | 24 Mar | S2 | CommercialTemplate, legal pages, OAuth, developer dashboard |
-| 29 Mar | S3 | Admin bookings (list+calendar), setup gate, staff management (edit/assign/deactivate), KV cache bust, enquiries modal, Turnstile on /contact |
+| 29 Mar | S3 | Admin bookings (list+calendar), setup gate, staff management (edit/assign/deactivate), KV cache bust, enquiries modal, Turnstile on /contact, staff avatar upload, Resend emails (confirmation + reminder) |
