@@ -78,7 +78,8 @@ async function testWorker() {
     const res = await get(`${WORKER_URL}/api/shops/${SHOP_SLUG}/site`);
     const j = await res.json();
     if (!j.success) throw new Error(j.error ?? "success:false");
-    return { note: `→ 200 · shop: ${j.data?.shop?.name ?? "?"}` };
+    const label = j.data?.headline ?? j.data?.seo_title ?? "(no headline)";
+    return { note: `→ ${res.status} · "${label}"` };
   });
 
   await check("GET  /api/shops/:slug/reviews (public reviews)", async () => {
