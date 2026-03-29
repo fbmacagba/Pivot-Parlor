@@ -17,7 +17,13 @@ staff.use("*", authMiddleware, requireShop());
 staff.get("/", async (c) => {
   const shopId = c.req.param("shopId")!;
   const members = await getStaffByShop(c.env.DB, shopId);
-  return c.json({ success: true, data: members });
+  const enriched = await Promise.all(
+    members.map(async (m) => {
+      const services = await getStaffServices(c.env.DB, m.id);
+      return { ...m, services };
+    })
+  );
+  return c.json({ success: true, data: enriched });
 });
 
 // ─── GET /api/shops/:shopId/staff/:staffId ────────────────────────────────────
