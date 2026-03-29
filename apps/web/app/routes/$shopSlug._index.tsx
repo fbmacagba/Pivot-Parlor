@@ -5,12 +5,29 @@ import type { loader as shopLoader } from "./$shopSlug";
 import type { ShopSiteData } from "./$shopSlug";
 
 export const meta: MetaFunction<typeof shopLoader> = ({ data }) => {
+  const shopName = data?.shop?.name ?? "Book your appointment";
   const title =
     data?.site?.seo_title?.trim() ||
     data?.site?.headline?.trim() ||
-    data?.shop?.name ||
-    "Book your appointment";
-  return [{ title }];
+    shopName;
+  const description =
+    data?.site?.seo_description?.trim() ||
+    data?.site?.about?.trim() ||
+    `Book appointments at ${shopName} — powered by Pivot Parlor.`;
+  const image = data?.site?.hero_image_url || data?.site?.logo_url || "";
+
+  return [
+    { title },
+    { name: "description", content: description },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
+    { property: "og:type", content: "website" },
+    ...(image ? [{ property: "og:image", content: image }] : []),
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: title },
+    { name: "twitter:description", content: description },
+    ...(image ? [{ name: "twitter:image", content: image }] : []),
+  ];
 };
 
 export default function ShopLanding() {

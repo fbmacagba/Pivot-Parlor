@@ -168,3 +168,89 @@ export async function sendBookingReminder(
     reminderHtml(data)
   );
 }
+
+// ─── EOD Developer Alert ──────────────────────────────────────────────────────
+
+export interface EodAlertData {
+  developer_email: string;
+  date: string;             // "YYYY-MM-DD"
+  booking_count: number;
+  shop_count: number;       // active shops with at least 1 booking today
+}
+
+function eodAlertHtml(d: EodAlertData): string {
+  return baseLayout(`
+    <div class="header">
+      <h1>📊 Daily summary — ${d.date}</h1>
+      <p>End-of-day platform overview.</p>
+    </div>
+    <div class="body">
+      <div class="detail-row">
+        <span class="detail-label">Bookings today</span>
+        <span class="detail-value amount">${d.booking_count}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Active shops</span>
+        <span class="detail-value">${d.shop_count}</span>
+      </div>
+      <p style="font-size:12px;color:#4b5563;margin-top:20px;">
+        Pivot Parlor developer alert · Sent automatically at 20:00 UTC
+      </p>
+    </div>
+  `, "Pivot Parlor");
+}
+
+export async function sendEodAlert(
+  apiKey: string,
+  data: EodAlertData
+): Promise<void> {
+  await sendEmail(
+    apiKey,
+    data.developer_email,
+    `Pivot Parlor — ${data.booking_count} booking${data.booking_count !== 1 ? "s" : ""} today (${data.date})`,
+    eodAlertHtml(data)
+  );
+}
+
+// ─── Review Request ───────────────────────────────────────────────────────────
+
+export interface ReviewRequestData {
+  customer_name: string;
+  customer_email: string;
+  service_name: string;
+  shop_name: string;
+  shop_slug: string;
+  booking_id: string;
+}
+
+function reviewRequestHtml(d: ReviewRequestData): string {
+  const reviewUrl = `https://pivotparlor.com/${d.shop_slug}?review=${d.booking_id}`;
+  return baseLayout(`
+    <div class="header">
+      <h1>⭐ How was your visit?</h1>
+      <p>Hi ${d.customer_name}, we hope you enjoyed your appointment.</p>
+    </div>
+    <div class="body">
+      <p style="font-size:14px;color:#9ca3af;margin-bottom:20px;">
+        You recently had <strong style="color:#e2e8f0;">${d.service_name}</strong> at 
+        <strong style="color:#e2e8f0;">${d.shop_name}</strong>. We'd love to hear how it went.
+      </p>
+      <a href="${reviewUrl}" class="btn">Leave a review →</a>
+      <p style="font-size:12px;color:#4b5563;margin-top:20px;">
+        Takes less than a minute. Your feedback helps the shop improve.
+      </p>
+    </div>
+  `, d.shop_name);
+}
+
+export async function sendReviewRequest(
+  apiKey: string,
+  data: ReviewRequestData
+): Promise<void> {
+  await sendEmail(
+    apiKey,
+    data.customer_email,
+    `How was your visit to ${data.shop_name}?`,
+    reviewRequestHtml(data)
+  );
+}

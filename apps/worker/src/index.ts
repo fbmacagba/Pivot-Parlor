@@ -21,6 +21,7 @@ import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
 import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import { sendEodAlert } from "./services/email.js";
 import {
   devRouter,
   shopStatsRouter,
@@ -184,9 +185,52 @@ export default {
    * Cron trigger: send pending 24-hour reminders (fallback if Queue not configured).
    * Schedule: "0 8 * * *" — fires at 08:00 UTC daily.
    */
-  async scheduled(_event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
-    console.log("[Cron] Processing pending reminders...");
-    await sendPendingReminders(env.DB, env.RESEND_API_KEY);
+  async scheduled(event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
+    const cron = event.cron;
+
+    // 08:00 UTC — send 24h-ahead booking reminders
+    if (cron === "0 8 * * *") {
+      console.log("[Cron 08:00] Processing pending reminders...");
+      await sendPendingReminders(env.DB, env.RESEND_API_KEY);
+      return;
+    }
+
+    // 20:00 UTC — EOD developer alert (booking count only, no financial amounts)
+    if (cron === "0 20 * * *") {
+      console.log("[Cron 20:00] Sending EOD developer alert...");
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const row = await env.DB
+          .prepare(
+            `SELECT COUNT(*) AS booking_count,
+                    COUNT(DISTINCT shop_id) AS shop_count
+             FROM bookings
+             WHERE booking_date = ?
+               AND status NOT IN ('cancelled', 'no_show')`
+          )
+          .bind(today)
+          .first<{ booking_count: number; shop_count: number }>();
+
+        // Get developer email from platform_users
+        const dev = await env.DB
+          .prepare("SELECT email FROM platform_users WHERE role = 'developer' LIMIT 1")
+          .first<{ email: string }>();
+
+        if (dev?.email && env.RESEND_API_KEY) {
+          await sendEodAlert(env.RESEND_API_KEY, {
+            developer_email: dev.email,
+            date: today,
+            booking_count: row?.booking_count ?? 0,
+            shop_count: row?.shop_count ?? 0,
+          });
+        }
+      } catch (err) {
+        console.error("[Cron 20:00] EOD alert failed:", err);
+      }
+      return;
+    }
+
+    console.warn("[Cron] Unknown schedule:", cron);
   },
 
   /**

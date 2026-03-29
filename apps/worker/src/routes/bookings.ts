@@ -5,7 +5,7 @@ import {
   updateBookingStatus, checkSlotConflict, getServiceById, getShopById, getStaffById,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
-import { sendBookingConfirmation } from "../services/email.js";
+import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js";
 import { requireShop } from "../middleware/rbac.js";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -53,6 +53,27 @@ bookings.put("/:bookingId/status", async (c) => {
   }
 
   await updateBookingStatus(c.env.DB, bookingId, body.status);
+
+  // Send review request when booking is marked completed
+  if (body.status === "completed" && c.env.RESEND_API_KEY) {
+    try {
+      const shop = await getShopById(c.env.DB, shopId);
+      const service = await getServiceById(c.env.DB, booking.service_id);
+      if (shop && service) {
+        await sendReviewRequest(c.env.RESEND_API_KEY, {
+          customer_name:  booking.customer_name,
+          customer_email: booking.customer_email,
+          service_name:   service.name,
+          shop_name:      shop.name,
+          shop_slug:      shop.slug,
+          booking_id:     bookingId,
+        });
+      }
+    } catch (err) {
+      console.warn("[Review] Request email failed (non-fatal):", err);
+    }
+  }
+
   return c.json({ success: true });
 });
 
