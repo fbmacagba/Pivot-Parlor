@@ -5,6 +5,8 @@ import { Calendar, TrendingUp, Users, Clock, ArrowRight, CheckCircle, AlertCircl
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { StatCard } from "~/components/dashboards/StatCard";
+import { SetupGate } from "~/components/admin/SetupGate";
+import type { SetupStatus } from "~/components/admin/SetupGate";
 
 interface AdminStats {
   date: string;
@@ -72,14 +74,26 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     } catch { /* empty */ }
   }
 
-  return json({ stats, todayBookings, shopId });
+  let setupStatus: SetupStatus | null = null;
+  if (shopId) {
+    try {
+      setupStatus = await api.get<SetupStatus>(`/api/shops/${shopId}/setup-status`);
+    } catch { /* non-fatal */ }
+  }
+
+  return json({ stats, todayBookings, shopId, setupStatus });
 }
 
 export default function AdminOverview() {
-  const { stats, todayBookings, shopId } = useLoaderData<typeof loader>();
+  const { stats, todayBookings, shopId, setupStatus } = useLoaderData<typeof loader>();
 
   const upcoming = todayBookings.filter(b => b.status !== "completed" && b.status !== "cancelled" && b.status !== "no_show");
   const completed = todayBookings.filter(b => b.status === "completed");
+
+  // Show setup gate until all steps complete
+  if (setupStatus && !setupStatus.all_done) {
+    return <SetupGate status={setupStatus} />;
+  }
 
   return (
     <div className="space-y-8">

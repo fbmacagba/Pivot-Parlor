@@ -25,6 +25,7 @@ import {
   devRouter,
   shopStatsRouter,
   shopRevenueRouter,
+  shopSetupStatusRouter,
   staffMeRouter,
   meRouter,
 } from "./routes/dashboard.js";
@@ -125,6 +126,7 @@ app.route("/api/shops/:shopId/stats", shopStatsRouter);
 
 // Admin shop revenue breakdown
 app.route("/api/shops/:shopId/revenue", shopRevenueRouter);
+app.route("/api/shops/:shopId/setup-status", shopSetupStatusRouter);
 
 // Staff member's own data (scoped to JWT — no shopId in URL)
 app.route("/api/staff/me", staffMeRouter);

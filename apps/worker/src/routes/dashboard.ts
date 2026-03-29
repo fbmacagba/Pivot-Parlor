@@ -690,3 +690,64 @@ meRouter.get("/bookings", async (c) => {
     },
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /api/shops/:shopId/setup-status  — Setup gate checks for admin dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const shopSetupStatusRouter = new Hono<{ Bindings: Bindings }>();
+shopSetupStatusRouter.use("*", authMiddleware);
+
+/**
+ * GET /api/shops/:shopId/setup-status
+ * Returns the 4 setup gate checks needed before a shop can go live.
+ * Developer can access any shop; admin restricted to their own.
+ */
+shopSetupStatusRouter.get("/", async (c) => {
+  const user = getUser(c);
+  const shopId = c.req.param("shopId")!;
+
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shopId)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const [staffRow, serviceRow, settingsRow, shopRow] = await Promise.all([
+    c.env.DB
+      .prepare("SELECT COUNT(*) AS total FROM staff WHERE shop_id = ? AND is_active = 1")
+      .bind(shopId)
+      .first<{ total: number }>(),
+
+    c.env.DB
+      .prepare("SELECT COUNT(*) AS total FROM services WHERE shop_id = ? AND is_active = 1")
+      .bind(shopId)
+      .first<{ total: number }>(),
+
+    c.env.DB
+      .prepare("SELECT address FROM shop_settings WHERE shop_id = ? LIMIT 1")
+      .bind(shopId)
+      .first<{ address: string | null }>(),
+
+    c.env.DB
+      .prepare("SELECT stripe_payment_status, status FROM shops WHERE id = ? LIMIT 1")
+      .bind(shopId)
+      .first<{ stripe_payment_status: string | null; status: string }>(),
+  ]);
+
+  const staffOk    = (staffRow?.total ?? 0) > 0;
+  const servicesOk = (serviceRow?.total ?? 0) > 0;
+  const addressOk  = !!(settingsRow?.address?.trim());
+  const stripeOk   = shopRow?.stripe_payment_status === "paid";
+  const allDone    = staffOk && servicesOk && addressOk && stripeOk;
+
+  return c.json({
+    success: true,
+    data: {
+      staff:    { done: staffOk,    count: staffRow?.total ?? 0 },
+      services: { done: servicesOk, count: serviceRow?.total ?? 0 },
+      address:  { done: addressOk },
+      stripe:   { done: stripeOk,   status: shopRow?.stripe_payment_status ?? "unpaid" },
+      all_done: allDone,
+      shop_status: shopRow?.status ?? "pending",
+    },
+  });
+});
