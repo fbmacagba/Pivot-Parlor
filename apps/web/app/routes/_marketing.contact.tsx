@@ -1,8 +1,5 @@
 import { Form, useActionData, useNavigation } from "@remix-run/react";
-import type {
-  ActionFunctionArgs,
-  MetaFunction,
-} from "@remix-run/cloudflare";
+import type { ActionFunctionArgs, LinksFunction, MetaFunction } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
@@ -12,34 +9,71 @@ export const meta: MetaFunction = () => [
   { title: "Contact Us | Pivot Parlor" },
 ];
 
+// Load Turnstile script only on this route
+export const links: LinksFunction = () => [
+  {
+    rel: "preload",
+    href: "https://challenges.cloudflare.com/turnstile/v0/api.js",
+    as: "script",
+  },
+];
+
+// ─── Action ───────────────────────────────────────────────────────────────────
+
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
-    const env = context.env as { API_URL: string };
+    const env = context.env as { API_URL: string; TURNSTILE_SECRET_KEY?: string };
     const form = await request.formData();
+
+    // ── Turnstile verification ──
+    const turnstileToken = form.get("cf-turnstile-response");
+    const secretKey = env.TURNSTILE_SECRET_KEY;
+
+    if (secretKey) {
+      if (!turnstileToken || typeof turnstileToken !== "string") {
+        return json({ success: false, error: "Please complete the security check." }, { status: 400 });
+      }
+
+      const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          secret: secretKey,
+          response: turnstileToken,
+          remoteip: request.headers.get("CF-Connecting-IP") ?? "",
+        }),
+      });
+
+      const verifyData = await verifyRes.json<{ success: boolean }>();
+      if (!verifyData.success) {
+        return json({ success: false, error: "Security check failed. Please try again." }, { status: 400 });
+      }
+    }
+
+    // ── Submit to API ──
     const api = createApiClient(env.API_URL);
-
-    console.log("[web contact] incoming form", Object.fromEntries(form));
-
     const payload = {
-      full_name: form.get("full_name"),
-      shop_name: form.get("shop_name"),
-      shop_type: form.get("shop_type"),
-      email: form.get("email"),
-      phone: form.get("phone") || null,
-      message: form.get("message") || null,
+      full_name:  form.get("full_name"),
+      shop_name:  form.get("shop_name"),
+      shop_type:  form.get("shop_type"),
+      email:      form.get("email"),
+      phone:      form.get("phone") || null,
+      message:    form.get("message") || null,
     };
 
-    const result = await api.post("/api/contact", payload);
-    console.log("[web contact] success", result);
-
+    await api.post("/api/contact", payload);
     return json({ success: true });
   } catch (error: unknown) {
-    console.error("[web contact] action crash", error);
-    const msg =
-      error instanceof Error ? error.message : "Unexpected error submitting the form";
+    const msg = error instanceof Error ? error.message : "Unexpected error submitting the form";
     return json({ success: false, error: msg }, { status: 500 });
   }
 }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+// Turnstile site key — replace with your real key from Cloudflare dashboard
+// https://dash.cloudflare.com → Turnstile → Add site
+const TURNSTILE_SITE_KEY = "0x4AAAAAABkMGL_MKYoNAFNB";
 
 export default function Contact() {
   const data = useActionData<typeof action>();
@@ -48,6 +82,13 @@ export default function Contact() {
 
   return (
     <main className="px-4 py-24 sm:px-6 lg:px-8">
+      {/* Load Turnstile script */}
+      <script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+        async
+        defer
+      />
+
       <div className="mx-auto max-w-2xl">
         <div className="text-center mb-12">
           <h1 className="font-heading text-5xl font-bold text-white">
@@ -88,14 +129,12 @@ export default function Contact() {
             )}
 
             <div className="grid gap-5 sm:grid-cols-2">
-              <Input label="Full name" name="full_name" required placeholder="Jane Smith" />
-              <Input label="Shop name" name="shop_name" required placeholder="The Barber Co." />
+              <Input label="Full name"  name="full_name"  required placeholder="Jane Smith" />
+              <Input label="Shop name"  name="shop_name"  required placeholder="The Barber Co." />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">
-                Shop type
-              </label>
+              <label className="block text-sm font-medium text-white/80 mb-1.5">Shop type</label>
               <select
                 name="shop_type"
                 required
@@ -103,20 +142,18 @@ export default function Contact() {
               >
                 <option value="" className="bg-dark">Select type…</option>
                 <option value="beauty_parlor" className="bg-dark">Beauty parlour</option>
-                <option value="barber_shop" className="bg-dark">Barber shop</option>
-                <option value="both" className="bg-dark">Both</option>
+                <option value="barber_shop"   className="bg-dark">Barber shop</option>
+                <option value="both"          className="bg-dark">Both</option>
               </select>
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
-              <Input label="Email address" name="email" type="email" required placeholder="jane@yourshop.com" />
-              <Input label="Phone (optional)" name="phone" type="tel" placeholder="+44 7700 900000" />
+              <Input label="Email address"    name="email" type="email" required placeholder="jane@yourshop.com" />
+              <Input label="Phone (optional)" name="phone" type="tel"            placeholder="+44 7700 900000" />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">
-                Message
-              </label>
+              <label className="block text-sm font-medium text-white/80 mb-1.5">Message</label>
               <textarea
                 name="message"
                 rows={4}
@@ -125,6 +162,14 @@ export default function Contact() {
                 className="flex w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold resize-none"
               />
             </div>
+
+            {/* Turnstile widget — renders automatically, injects cf-turnstile-response hidden field */}
+            <div
+              className="cf-turnstile"
+              data-sitekey={TURNSTILE_SITE_KEY}
+              data-theme="dark"
+              data-size="normal"
+            />
 
             <Button type="submit" disabled={submitting} className="w-full" size="lg">
               {submitting ? "Sending…" : "Send enquiry →"}

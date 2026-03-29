@@ -21,4 +21,5 @@ export type Bindings = {
   FACEBOOK_OAUTH_APP_SECRET?: string;
   LINKEDIN_OAUTH_CLIENT_ID?: string;
   LINKEDIN_OAUTH_CLIENT_SECRET?: string;
+  TURNSTILE_SECRET_KEY?: string;
 };

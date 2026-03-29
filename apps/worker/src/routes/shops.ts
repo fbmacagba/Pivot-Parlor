@@ -703,6 +703,10 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
   } else {
     await updateShopSiteLogoUrl(c.env.DB, shop.id, imageUrl);
   }
+
+  // Bust KV cache so the public site reflects the new image immediately
+  await c.env.KV.delete(`site:${shop.slug}`);
+
   return c.json({ ok: true });
 });
 

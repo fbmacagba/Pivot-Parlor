@@ -129,6 +129,8 @@ export default function DevEnquiries() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [successPayload, setSuccessPayload] = useState<OnboardSuccess | null>(null);
   const [copied, setCopied] = useState(false);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [messageEnquiry, setMessageEnquiry] = useState<Enquiry | null>(null);
 
   const prevFetcherState = useRef(fetcher.state);
 
@@ -216,8 +218,17 @@ export default function DevEnquiries() {
                     <td className="px-4 py-3 text-white/50 text-xs max-w-[120px] truncate" title={e.phone ?? ""}>
                       {e.phone || "—"}
                     </td>
-                    <td className="px-4 py-3 text-white/50 text-xs max-w-[200px] truncate" title={e.message ?? ""}>
-                      {e.message || "—"}
+                    <td className="px-4 py-3 text-white/50 text-xs max-w-[200px]">
+                      {e.message ? (
+                        <button
+                          type="button"
+                          onClick={() => { setMessageEnquiry(e); setMessageOpen(true); }}
+                          className="truncate block max-w-[200px] text-left hover:text-gold transition-colors underline decoration-dotted"
+                          title="Click to read full message"
+                        >
+                          {e.message}
+                        </button>
+                      ) : "—"}
                     </td>
                     <td className="px-4 py-3 text-white/40 text-xs whitespace-nowrap">
                       {new Date(e.created_at).toLocaleString()}
@@ -362,6 +373,48 @@ export default function DevEnquiries() {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Message from {messageEnquiry?.full_name}</DialogTitle>
+          </DialogHeader>
+          {messageEnquiry && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-white/40 mb-0.5">Shop</p>
+                  <p className="text-white">{messageEnquiry.shop_name}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-white/40 mb-0.5">Email</p>
+                  <a href={`mailto:${messageEnquiry.email}`} className="text-gold hover:underline">{messageEnquiry.email}</a>
+                </div>
+                {messageEnquiry.phone && (
+                  <div>
+                    <p className="text-xs text-white/40 mb-0.5">Phone</p>
+                    <a href={`tel:${messageEnquiry.phone}`} className="text-white/70 hover:text-white">{messageEnquiry.phone}</a>
+                  </div>
+                )}
+                <div>
+                  <p className="text-xs text-white/40 mb-0.5">Received</p>
+                  <p className="text-white/60">{new Date(messageEnquiry.created_at).toLocaleString()}</p>
+                </div>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap leading-relaxed">
+                {messageEnquiry.message}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button asChild variant="outline" size="sm">
+                  <a href={`mailto:${messageEnquiry.email}`}>Reply by email</a>
+                </Button>
+                <Button type="button" onClick={() => setMessageOpen(false)}>Close</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

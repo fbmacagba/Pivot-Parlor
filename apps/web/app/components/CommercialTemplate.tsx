@@ -370,7 +370,7 @@ export default function CommercialTemplate({
             {[
               { n: "1", t: "Choose a service", d: "Browse treatments and pick what suits you.", icon: "✨" },
               { n: "2", t: "Pick your time", d: "Select a staff member and a slot that fits your diary.", icon: "📅" },
-              { n: "3", t: "Confirm & pay", d: "Lock in your booking and arrive relaxed.", icon: "✓" },
+              { n: "3", t: "Confirm your booking", d: "Lock in your slot instantly. No card required.", icon: "✓" },
             ].map((step) => (
               <div key={step.n} className="text-center">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--color-accent)]/20 text-3xl">{step.icon}</div>
