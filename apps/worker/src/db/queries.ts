@@ -956,9 +956,10 @@ export async function getBookingsDueForReminder(db: D1Database) {
   const { results } = await db
     .prepare(
       `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
-              b.start_time, b.booking_date, b.notes,
-              sv.name AS service_name, st.display_name AS staff_name,
-              sh.name AS shop_name
+              b.start_time, b.booking_date, b.notes, b.amount,
+              sv.name AS service_name, sv.duration_min,
+              st.display_name AS staff_name,
+              sh.name AS shop_name, sh.slug AS shop_slug
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
@@ -975,9 +976,12 @@ export async function getBookingsDueForReminder(db: D1Database) {
       start_time: string;
       booking_date: string;
       notes: string | null;
+      amount: number;
       service_name: string;
+      duration_min: number;
       staff_name: string;
       shop_name: string;
+      shop_slug: string;
     }>();
   return results;
 }

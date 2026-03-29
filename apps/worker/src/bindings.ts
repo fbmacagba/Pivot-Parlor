@@ -22,4 +22,5 @@ export type Bindings = {
   LINKEDIN_OAUTH_CLIENT_ID?: string;
   LINKEDIN_OAUTH_CLIENT_SECRET?: string;
   TURNSTILE_SECRET_KEY?: string;
+  RESEND_API_KEY?: string;
 };

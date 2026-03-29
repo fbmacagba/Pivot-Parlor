@@ -2,9 +2,10 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
   getBookingsByShop, getBookingById, createBooking,
-  updateBookingStatus, checkSlotConflict, getServiceById, getShopById,
+  updateBookingStatus, checkSlotConflict, getServiceById, getShopById, getStaffById,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
+import { sendBookingConfirmation } from "../services/email.js";
 import { requireShop } from "../middleware/rbac.js";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -119,6 +120,28 @@ publicBookings.post("/", async (c) => {
     amount: service.price,
     commission,
   });
+
+  // Send booking confirmation email — fire-and-forget, never block booking creation
+  try {
+    if (c.env.RESEND_API_KEY) {
+      const staffMember = await getStaffById(c.env.DB, staff_id);
+      await sendBookingConfirmation(c.env.RESEND_API_KEY, {
+        customer_name,
+        customer_email,
+        service_name: service.name,
+        staff_name: staffMember?.display_name ?? "your specialist",
+        shop_name: shop.name,
+        shop_slug: shop.slug,
+        booking_date: bookingDate,
+        start_time: startISO,
+        duration_min: service.duration_min,
+        amount: service.price,
+        booking_id: id,
+      });
+    }
+  } catch (err) {
+    console.warn("[Email] Confirmation send failed (non-fatal):", err);
+  }
 
   // Enqueue reminder job (24h before booking) — fire-and-forget, never block booking creation
   try {

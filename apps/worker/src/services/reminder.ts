@@ -1,5 +1,6 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { getBookingsDueForReminder, markReminderSent } from "../db/queries.js";
+import { sendBookingReminder } from "./email.js";
 
 export interface ReminderPayload {
   bookingId: string;
@@ -10,14 +11,14 @@ export interface ReminderPayload {
  * Process a single reminder payload (called from the Queue consumer).
  * Extend to integrate Resend / SendGrid / Twilio.
  */
-export async function processReminder(payload: ReminderPayload, db: D1Database): Promise<void> {
+export async function processReminder(payload: ReminderPayload, db: D1Database, resendApiKey?: string): Promise<void> {
   const booking = await db
     .prepare(
       `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
-              b.start_time, b.booking_date, b.notes,
-              sv.name AS service_name,
+              b.start_time, b.booking_date, b.notes, b.amount,
+              sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
-              sh.name AS shop_name
+              sh.name AS shop_name, sh.slug AS shop_slug
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
@@ -34,19 +35,41 @@ export async function processReminder(payload: ReminderPayload, db: D1Database):
       start_time: string;
       booking_date: string;
       notes: string | null;
+      amount: number;
       service_name: string;
+      duration_min: number;
       staff_name: string;
       shop_name: string;
+      shop_slug: string;
     }>();
 
   if (!booking) return; // already sent or cancelled
 
-  // TODO: Integrate with email/SMS provider (Resend, Twilio, etc.)
-  console.log(
-    `[Reminder] ${booking.customer_name} <${booking.customer_email}> — ` +
-    `${booking.service_name} at ${booking.shop_name} on ${booking.booking_date} ` +
-    `${booking.start_time} with ${booking.staff_name}`
-  );
+  // Send reminder email via Resend
+  if (resendApiKey) {
+    try {
+      await sendBookingReminder(resendApiKey, {
+        customer_name:  booking.customer_name,
+        customer_email: booking.customer_email,
+        service_name:   booking.service_name,
+        staff_name:     booking.staff_name,
+        shop_name:      booking.shop_name,
+        shop_slug:      booking.shop_slug,
+        booking_date:   booking.booking_date,
+        start_time:     booking.start_time,
+        duration_min:   booking.duration_min,
+        amount:         booking.amount,
+        booking_id:     booking.id,
+      });
+    } catch (err) {
+      console.warn("[Reminder] Email send failed (non-fatal):", err);
+    }
+  } else {
+    console.log(
+      `[Reminder] ${booking.customer_name} <${booking.customer_email}> — ` +
+      `${booking.service_name} at ${booking.shop_name} on ${booking.booking_date}`
+    );
+  }
 
   await markReminderSent(db, booking.id);
 }
@@ -55,14 +78,31 @@ export async function processReminder(payload: ReminderPayload, db: D1Database):
  * Cron-based fallback: send 24h-ahead reminders for all eligible bookings.
  * Used when Queue is not configured.
  */
-export async function sendPendingReminders(db: D1Database): Promise<void> {
+export async function sendPendingReminders(db: D1Database, resendApiKey?: string): Promise<void> {
   const bookings = await getBookingsDueForReminder(db);
   await Promise.all(
     bookings.map(async (b) => {
-      console.log(
-        `[Cron Reminder] ${b.customer_name} <${b.customer_email}> — ` +
-        `${b.service_name} at ${b.shop_name} on ${b.booking_date} with ${b.staff_name}`
-      );
+      if (resendApiKey) {
+        try {
+          await sendBookingReminder(resendApiKey, {
+            customer_name:  b.customer_name,
+            customer_email: b.customer_email,
+            service_name:   b.service_name,
+            staff_name:     b.staff_name,
+            shop_name:      b.shop_name,
+            shop_slug:      b.shop_slug,
+            booking_date:   b.booking_date,
+            start_time:     b.start_time,
+            duration_min:   b.duration_min,
+            amount:         b.amount,
+            booking_id:     b.id,
+          });
+        } catch (err) {
+          console.warn(`[Cron Reminder] Email failed for ${b.id}:`, err);
+        }
+      } else {
+        console.log(`[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`);
+      }
       await markReminderSent(db, b.id);
     })
   );

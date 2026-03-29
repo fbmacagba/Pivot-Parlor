@@ -186,7 +186,7 @@ export default {
    */
   async scheduled(_event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
     console.log("[Cron] Processing pending reminders...");
-    await sendPendingReminders(env.DB);
+    await sendPendingReminders(env.DB, env.RESEND_API_KEY);
   },
 
   /**
@@ -207,7 +207,7 @@ export default {
             continue;
           }
 
-          await processReminder(body, env.DB);
+          await processReminder(body, env.DB, env.RESEND_API_KEY);
           msg.ack();
         } catch (err) {
           console.error("[Queue] Failed to process reminder", msg.body, err);
