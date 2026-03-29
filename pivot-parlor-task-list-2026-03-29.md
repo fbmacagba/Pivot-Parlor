@@ -73,7 +73,7 @@
 - [x] My Bookings: upcoming + past ✅ (already built)
 - [x] Booking detail ✅ (already built)
 - [x] Profile: name + phone editable ✅ 29 Mar
-- [ ] Customer registration from shop booking page
+- [x] Customer account dashboard ✅ (already built — upcoming/past bookings, profile edit)
 
 ---
 
@@ -173,4 +173,4 @@ git reset --hard origin/main
 |---|---|---|
 | 23 Mar | S1 | Infrastructure, schema, auth, RBAC, booking flow, AI generation |
 | 24 Mar | S2 | CommercialTemplate, legal pages, OAuth, developer dashboard |
-| 29 Mar | S3 | Admin bookings (list+calendar), setup gate, staff management (edit/assign/deactivate), KV cache bust, enquiries modal, Turnstile on /contact, staff avatar upload, Resend emails (confirmation + reminder) |
+| 29 Mar | S3 | Admin bookings, setup gate, staff mgmt+avatars, Resend emails (confirm+reminder+EOD+review request), review collection, OG meta, chatbot rate limiting, customer profile edit, setup/stripe page, health-check.mjs (33/33) |
