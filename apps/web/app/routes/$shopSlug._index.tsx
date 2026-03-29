@@ -1,6 +1,8 @@
-import { Link, useRouteLoaderData } from "@remix-run/react";
+import { Link, useRouteLoaderData, useSearchParams } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/cloudflare";
+import { useState, useEffect } from "react";
 import CommercialTemplate, { type SiteData } from "~/components/CommercialTemplate";
+import { ReviewModal } from "~/components/ReviewModal";
 import type { loader as shopLoader } from "./$shopSlug";
 import type { ShopSiteData } from "./$shopSlug";
 
@@ -40,6 +42,14 @@ export default function ShopLanding() {
     reviews: [],
     settings: {},
   };
+
+  const [searchParams] = useSearchParams();
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const reviewBookingId = searchParams.get("review");
+
+  useEffect(() => {
+    if (reviewBookingId) setReviewOpen(true);
+  }, [reviewBookingId]);
 
   if (!shop) return null;
 
@@ -96,12 +106,22 @@ export default function ShopLanding() {
   };
 
   return (
-    <CommercialTemplate
-      site={siteData}
-      staff={staff}
-      services={services}
-      reviews={reviews}
-      settings={settings}
-    />
+    <>
+      <CommercialTemplate
+        site={siteData}
+        staff={staff}
+        services={services}
+        reviews={reviews}
+        settings={settings}
+      />
+      {reviewOpen && (
+        <ReviewModal
+          shopId={shop.id}
+          shopName={shop.name}
+          bookingId={reviewBookingId}
+          onClose={() => setReviewOpen(false)}
+        />
+      )}
+    </>
   );
 }

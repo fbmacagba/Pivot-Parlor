@@ -276,6 +276,62 @@ shops.get("/:shopId/reviews", async (c) => {
   }
 });
 
+// ─── POST /api/shops/:shopId/reviews — public review submission ──────────────
+
+shops.post("/:shopId/reviews", async (c) => {
+  try {
+    const shopIdParam = c.req.param("shopId");
+    const shop =
+      (await getShopBySlug(c.env.DB, shopIdParam)) ?? (await getShopById(c.env.DB, shopIdParam));
+    if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+
+    const body = await c.req.json<{
+      customer_name?: string;
+      rating?: number;
+      body?: string;
+      booking_id?: string;
+    }>();
+
+    const name = typeof body.customer_name === "string" ? body.customer_name.trim() : "";
+    const text = typeof body.body === "string" ? body.body.trim() : "";
+    const rating = typeof body.rating === "number" ? body.rating : 0;
+    const bookingId = typeof body.booking_id === "string" ? body.booking_id.trim() : null;
+
+    if (!name) return c.json({ success: false, error: "Name is required" }, 400);
+    if (!text) return c.json({ success: false, error: "Review text is required" }, 400);
+    if (rating < 1 || rating > 5) return c.json({ success: false, error: "Rating must be 1–5" }, 400);
+
+    // Verify booking belongs to this shop (if provided)
+    if (bookingId) {
+      const booking = await c.env.DB
+        .prepare("SELECT id FROM bookings WHERE id = ? AND shop_id = ? LIMIT 1")
+        .bind(bookingId, shop.id)
+        .first<{ id: string }>();
+      if (!booking) return c.json({ success: false, error: "Invalid booking" }, 400);
+
+      // Check for duplicate review
+      const existing = await c.env.DB
+        .prepare("SELECT id FROM reviews WHERE booking_id = ? LIMIT 1")
+        .bind(bookingId)
+        .first<{ id: string }>();
+      if (existing) return c.json({ success: false, error: "Review already submitted for this booking" }, 409);
+    }
+
+    const id = crypto.randomUUID();
+    await c.env.DB
+      .prepare(
+        "INSERT INTO reviews (id, shop_id, customer_name, rating, body, booking_id) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .bind(id, shop.id, name, rating, text, bookingId)
+      .run();
+
+    return c.json({ success: true, data: { id } }, 201);
+  } catch (e) {
+    console.error("[reviews] POST failed", e);
+    return c.json({ success: false, error: "Failed to submit review" }, 500);
+  }
+});
+
 // ─── GET /api/shops/:shopId/settings — public shop settings (best-effort; {} on error) ───
 
 shops.get("/:shopId/settings", async (c) => {
