@@ -2,7 +2,7 @@ import { Link, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { Calendar, Clock, ArrowRight, RefreshCw } from "lucide-react";
 
-type Me = { id: string; name: string | null; email: string; role: string };
+type Me = { id: string; name: string | null; email: string; phone?: string | null; role: string };
 
 interface Booking {
   id: string;
@@ -37,6 +37,102 @@ const STATUS_PILL: Record<string, string> = {
   cancelled:   "bg-red-500/10 text-red-400",
   no_show:     "bg-white/5 text-white/30",
 };
+
+
+function ProfileCard({ me }: { me: Me }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(me.name ?? "");
+  const [phone, setPhone] = useState(me.phone ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function save() {
+    setSaving(true); setErr("");
+    try {
+      const res = await fetch("/api/me/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name: name.trim(), phone: phone.trim() }),
+      });
+      const data = await res.json() as { success: boolean; error?: string };
+      if (data.success) {
+        setSaved(true); setEditing(false);
+        setTimeout(() => setSaved(false), 3000);
+      } else {
+        setErr(data.error ?? "Failed to save.");
+      }
+    } catch {
+      setErr("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-white/10 bg-dark-100 p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-heading text-base font-semibold text-white">Profile</h2>
+        {!editing && (
+          <button onClick={() => setEditing(true)}
+            className="text-xs text-gold hover:text-gold/80 transition-colors font-medium">
+            Edit
+          </button>
+        )}
+        {saved && <span className="text-xs text-emerald-400">Saved ✓</span>}
+      </div>
+
+      {editing ? (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-white/40 mb-1">Name</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)}
+              className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold" />
+          </div>
+          <div>
+            <label className="block text-xs text-white/40 mb-1">Phone (optional)</label>
+            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
+              placeholder="+44 7700 900000"
+              className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold" />
+          </div>
+          <div>
+            <label className="block text-xs text-white/40 mb-1">Email</label>
+            <p className="text-sm text-white/50">{me.email} <span className="text-white/25">(cannot change)</span></p>
+          </div>
+          {err && <p className="text-xs text-red-400">{err}</p>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={() => { setEditing(false); setName(me.name ?? ""); setPhone(me.phone ?? ""); }}
+              className="flex-1 py-2 rounded-lg border border-white/20 text-sm text-white/60 hover:bg-white/5 transition-colors">
+              Cancel
+            </button>
+            <button onClick={save} disabled={saving}
+              className="flex-1 py-2 rounded-lg bg-gold text-dark text-sm font-semibold hover:bg-gold/90 transition-colors disabled:opacity-60">
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <dl className="space-y-2 text-sm">
+          <div className="flex gap-3">
+            <dt className="w-16 shrink-0 text-white/40">Name</dt>
+            <dd className="text-white">{me.name?.trim() || "—"}</dd>
+          </div>
+          <div className="flex gap-3">
+            <dt className="w-16 shrink-0 text-white/40">Email</dt>
+            <dd className="text-white">{me.email}</dd>
+          </div>
+          {me.phone && (
+            <div className="flex gap-3">
+              <dt className="w-16 shrink-0 text-white/40">Phone</dt>
+              <dd className="text-white">{me.phone}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </section>
+  );
+}
 
 export default function AccountIndex() {
   const { me } = useOutletContext<{ me: Me }>();
@@ -74,19 +170,7 @@ export default function AccountIndex() {
       </div>
 
       {/* Profile card */}
-      <section className="rounded-xl border border-white/10 bg-dark-100 p-5">
-        <h2 className="font-heading text-base font-semibold text-white mb-3">Profile</h2>
-        <dl className="space-y-2 text-sm">
-          <div className="flex gap-3">
-            <dt className="w-16 shrink-0 text-white/40">Name</dt>
-            <dd className="text-white">{me.name?.trim() || "—"}</dd>
-          </div>
-          <div className="flex gap-3">
-            <dt className="w-16 shrink-0 text-white/40">Email</dt>
-            <dd className="text-white">{me.email}</dd>
-          </div>
-        </dl>
-      </section>
+      <ProfileCard me={me} />
 
       {/* Upcoming bookings */}
       <section className="space-y-3">

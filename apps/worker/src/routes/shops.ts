@@ -276,6 +276,26 @@ shops.get("/:shopId/reviews", async (c) => {
   }
 });
 
+// ─── GET /api/shops/:shopId/stripe-status — admin: get payment status + checkout URL ──
+
+shops.get("/:shopId/stripe-status", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop = (await getShopById(c.env.DB, param)) ?? (await getShopBySlug(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const row = await c.env.DB
+    .prepare("SELECT stripe_payment_status, stripe_checkout_url, name, slug FROM shops WHERE id = ? LIMIT 1")
+    .bind(shop.id)
+    .first<{ stripe_payment_status: string | null; stripe_checkout_url: string | null; name: string; slug: string }>();
+
+  return c.json({ success: true, data: row });
+});
+
 // ─── POST /api/shops/:shopId/reviews — public review submission ──────────────
 
 shops.post("/:shopId/reviews", async (c) => {

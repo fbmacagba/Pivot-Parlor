@@ -114,9 +114,9 @@ export function getUserByEmail(db: D1Database, email: string) {
 
 export function getUserById(db: D1Database, id: string) {
   return db
-    .prepare("SELECT id, name, email, role, shop_id, created_at FROM platform_users WHERE id = ? LIMIT 1")
+    .prepare("SELECT id, name, email, phone, role, shop_id, created_at FROM platform_users WHERE id = ? LIMIT 1")
     .bind(id)
-    .first<Omit<DBUser, "password_hash">>();
+    .first<Omit<DBUser, "password_hash"> & { phone?: string | null }>();
 }
 
 export function createUser(db: D1Database, user: {

@@ -751,3 +751,31 @@ shopSetupStatusRouter.get("/", async (c) => {
     },
   });
 });
+
+// ─── PATCH /api/me/profile — customer: update own name and phone ──────────────
+
+meRouter.patch("/profile", async (c) => {
+  const user = getUser(c);
+
+  const body = await c.req.json<{ name?: string; phone?: string }>().catch(() => ({}));
+
+  const name  = typeof body.name  === "string" ? body.name.trim()  : undefined;
+  const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
+
+  if (name === undefined && phone === undefined) {
+    return c.json({ success: false, error: "No fields to update" }, 400);
+  }
+
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (name  !== undefined) { sets.push("name = ?");  vals.push(name  || null); }
+  if (phone !== undefined) { sets.push("phone = ?"); vals.push(phone || null); }
+  vals.push(user.sub);
+
+  await c.env.DB
+    .prepare(`UPDATE platform_users SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
+
+  return c.json({ success: true });
+});

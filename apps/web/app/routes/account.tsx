@@ -22,6 +22,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     id: string;
     name: string | null;
     email: string;
+    phone?: string | null;
     role: string;
   }>("/auth/me");
   return json({ me });

@@ -82,11 +82,47 @@ async function callOpenRouter(
   return text;
 }
 
+// ─── Rate limiting ───────────────────────────────────────────────────────────
+// 20 messages per IP per hour, stored in KV with 1h TTL
+
+const RATE_LIMIT = 20;
+const RATE_WINDOW_SECONDS = 60 * 60; // 1 hour
+
+async function checkRateLimit(
+  kv: KVNamespace | undefined,
+  ip: string
+): Promise<{ allowed: boolean; remaining: number }> {
+  if (!kv) return { allowed: true, remaining: RATE_LIMIT }; // no KV = skip
+
+  const key = `chat:rate:${ip}`;
+  const raw = await kv.get(key);
+  const count = raw ? parseInt(raw, 10) : 0;
+
+  if (count >= RATE_LIMIT) return { allowed: false, remaining: 0 };
+
+  await kv.put(key, String(count + 1), { expirationTtl: RATE_WINDOW_SECONDS });
+  return { allowed: true, remaining: RATE_LIMIT - count - 1 };
+}
+
 export async function action({ request, context }: ActionFunctionArgs) {
-  const env = context.env as { OPENROUTER_API_KEY?: string };
+  const env = context.env as { OPENROUTER_API_KEY?: string; KV?: KVNamespace };
 
   if (!env.OPENROUTER_API_KEY) {
     return Response.json({ error: "Chat unavailable." }, { status: 503 });
+  }
+
+  // Rate limit by IP
+  const ip =
+    request.headers.get("CF-Connecting-IP") ||
+    request.headers.get("X-Forwarded-For")?.split(",")[0].trim() ||
+    "unknown";
+
+  const { allowed, remaining } = await checkRateLimit(env.KV, ip);
+  if (!allowed) {
+    return Response.json(
+      { error: "You've sent too many messages. Please try again in an hour." },
+      { status: 429 }
+    );
   }
 
   let body: { messages?: Array<{ role: string; content: string }> };
@@ -101,14 +137,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return Response.json({ error: "No messages provided." }, { status: 400 });
   }
 
+  // Truncate conversation history to last 10 messages to prevent prompt injection via long history
+  const safeMessages = messages.slice(-10);
+
   try {
-    const reply = await callOpenRouter(env.OPENROUTER_API_KEY, PRIMARY_MODEL, messages);
-    return Response.json({ reply });
+    const reply = await callOpenRouter(env.OPENROUTER_API_KEY, PRIMARY_MODEL, safeMessages);
+    return Response.json({ reply, remaining });
   } catch (primaryErr) {
     console.warn("[api.chat] Primary model failed, trying fallback:", primaryErr);
     try {
-      const reply = await callOpenRouter(env.OPENROUTER_API_KEY, FALLBACK_MODEL, messages);
-      return Response.json({ reply });
+      const reply = await callOpenRouter(env.OPENROUTER_API_KEY, FALLBACK_MODEL, safeMessages);
+      return Response.json({ reply, remaining });
     } catch (fallbackErr) {
       console.error("[api.chat] Fallback model also failed:", fallbackErr);
       return Response.json({ error: "Chat unavailable. Please try again." }, { status: 502 });
