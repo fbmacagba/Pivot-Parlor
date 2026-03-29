@@ -670,13 +670,14 @@ export function createStaffMember(
 export function updateStaffMember(
   db: D1Database,
   id: string,
-  fields: { display_name?: string; bio?: string | null; is_active?: number }
+  fields: { display_name?: string; bio?: string | null; is_active?: number; avatar_url?: string | null }
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.display_name !== undefined) { sets.push("display_name = ?"); vals.push(fields.display_name); }
   if (fields.bio !== undefined) { sets.push("bio = ?"); vals.push(fields.bio); }
   if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (fields.avatar_url !== undefined) { sets.push("avatar_url = ?"); vals.push(fields.avatar_url); }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
   return db.prepare(`UPDATE staff SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();

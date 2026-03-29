@@ -132,4 +132,48 @@ staff.delete("/:staffId", async (c) => {
   return c.json({ success: true });
 });
 
+// ─── POST /api/shops/:shopId/staff/:staffId/avatar ────────────────────────────
+
+staff.post("/:staffId/avatar", async (c) => {
+  const shopId = c.req.param("shopId")!;
+  const staffId = c.req.param("staffId")!;
+
+  const member = await getStaffById(c.env.DB, staffId);
+  if (!member || member.shop_id !== shopId) {
+    return c.json({ success: false, error: "Staff member not found" }, 404);
+  }
+
+  let form: Record<string, unknown>;
+  try {
+    form = (await c.req.parseBody()) as Record<string, unknown>;
+  } catch {
+    return c.json({ success: false, error: "Invalid multipart body" }, 400);
+  }
+
+  const file = form.file;
+  if (!(file instanceof File) || file.size === 0) {
+    return c.json({ success: false, error: "file required" }, 400);
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    return c.json({ success: false, error: "File too large (max 5MB)" }, 400);
+  }
+
+  const ext = file.name.match(/\.(png|jpg|jpeg|webp)$/i)?.[1]?.toLowerCase() ?? "jpg";
+  const contentType =
+    file.type ||
+    (ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg");
+
+  const key = `staff/${shopId}/${staffId}/avatar.${ext}`;
+  const buf = await file.arrayBuffer();
+  await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType } });
+
+  let base = (c.env.ASSET_BASE_URL ?? "").trim().replace(/\/$/, "");
+  if (!base) base = `https://assets.pivot-parlor.com`;
+  const avatarUrl = `${base}/${key}`;
+
+  await updateStaffMember(c.env.DB, staffId, { avatar_url: avatarUrl });
+
+  return c.json({ success: true, avatarUrl });
+});
+
 export default staff;

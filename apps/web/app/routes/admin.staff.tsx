@@ -1,8 +1,8 @@
 import { useLoaderData, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { Plus, Mail, Pencil, UserX } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Plus, Mail, Pencil, UserX, Camera } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionPayload } from "~/lib/auth";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
@@ -222,6 +222,70 @@ function EditStaffModal({
   );
 }
 
+
+// ─── Avatar Upload ────────────────────────────────────────────────────────────
+
+function AvatarUpload({ member, shopId }: { member: Staff; shopId: string }) {
+  const fetcher = useFetcher<{ success: boolean; avatarUrl?: string; error?: string }>();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(member.avatar_url ?? null);
+  const isUploading = fetcher.state !== "idle";
+
+  useEffect(() => {
+    if (fetcher.data?.success && fetcher.data.avatarUrl) {
+      setPreview(fetcher.data.avatarUrl);
+    }
+  }, [fetcher.data]);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Local preview
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    // Upload
+    const form = new FormData();
+    form.append("file", file);
+    fetcher.submit(form, {
+      method: "post",
+      action: `/api/staff/${shopId}/${member.id}/avatar`,
+      encType: "multipart/form-data",
+    });
+  }
+
+  return (
+    <div className="relative w-12 h-12 shrink-0 group">
+      {preview ? (
+        <img src={preview} alt={member.display_name}
+          className="w-12 h-12 rounded-full object-cover border border-white/10" />
+      ) : (
+        <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center font-heading text-lg font-bold text-gold">
+          {member.display_name.charAt(0).toUpperCase()}
+        </div>
+      )}
+      {/* Upload overlay */}
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={isUploading}
+        className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        title="Upload photo"
+      >
+        {isUploading
+          ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+          : <Camera className="w-4 h-4 text-white" />}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+    </div>
+  );
+}
+
 // ─── Staff Card ───────────────────────────────────────────────────────────────
 
 function StaffCard({
@@ -244,14 +308,7 @@ function StaffCard({
       {/* Avatar + name row */}
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-3">
-          {member.avatar_url ? (
-            <img src={member.avatar_url} alt={member.display_name}
-              className="w-12 h-12 rounded-full object-cover border border-white/10" />
-          ) : (
-            <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center font-heading text-lg font-bold text-gold shrink-0">
-              {member.display_name.charAt(0).toUpperCase()}
-            </div>
-          )}
+          <AvatarUpload member={member} shopId={shopId} />
           <div>
             <p className="font-semibold text-white">{member.display_name}</p>
             {member.user_email && (
