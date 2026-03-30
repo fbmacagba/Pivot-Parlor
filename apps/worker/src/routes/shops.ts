@@ -396,6 +396,10 @@ shops.get("/:shopId/settings", async (c) => {
       show_whatsapp: flag(row.show_whatsapp),
       show_linkedin: flag(row.show_linkedin),
       booking_enabled: flag(row.booking_enabled) === false ? false : true,
+      booking_confirmation_email: flag(row.booking_confirmation_email) !== false,
+      booking_reminder_email: flag(row.booking_reminder_email) !== false,
+      reminder_hours_before: typeof row.reminder_hours_before === "number" ? row.reminder_hours_before : 24,
+      review_request_email: flag(row.review_request_email) !== false,
     };
     return c.json({ success: true, data });
   } catch {
@@ -423,6 +427,10 @@ const SHOP_SETTINGS_PATCH_FIELDS = [
   "show_youtube",
   "show_whatsapp",
   "show_linkedin",
+  "booking_confirmation_email",
+  "booking_reminder_email",
+  "reminder_hours_before",
+  "review_request_email",
 ] as const;
 
 type ShopSettingsPatchField = (typeof SHOP_SETTINGS_PATCH_FIELDS)[number];
@@ -432,6 +440,14 @@ function coerceShopSettingValue(field: ShopSettingsPatchField, raw: unknown): st
     if (raw === null || raw === undefined || raw === "") return null;
     const n = typeof raw === "number" ? raw : Number(String(raw));
     return Number.isFinite(n) ? n : null;
+  }
+  if (field === "reminder_hours_before") {
+    if (raw === null || raw === undefined || raw === "") return 24;
+    const n = typeof raw === "number" ? raw : Number(String(raw));
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 72) : 24;
+  }
+  if (field === "booking_confirmation_email" || field === "booking_reminder_email" || field === "review_request_email") {
+    return raw === true || raw === 1 || raw === "1" ? 1 : 0;
   }
   if (field.startsWith("show_")) {
     if (raw === true || raw === 1 || raw === "1" || raw === "true" || raw === "on") return 1;

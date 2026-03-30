@@ -57,6 +57,11 @@ bookings.put("/:bookingId/status", async (c) => {
   // Send review request when booking is marked completed
   if (body.status === "completed" && c.env.RESEND_API_KEY) {
     try {
+      const reviewPref = await c.env.DB
+        .prepare("SELECT review_request_email FROM shop_settings WHERE shop_id = ? LIMIT 1")
+        .bind(shopId)
+        .first<{ review_request_email: number | null }>();
+      if (reviewPref?.review_request_email === 0) throw new Error("review_request disabled");
       const shop = await getShopById(c.env.DB, shopId);
       const service = await getServiceById(c.env.DB, booking.service_id);
       if (shop && service) {
@@ -144,7 +149,11 @@ publicBookings.post("/", async (c) => {
 
   // Send booking confirmation email — fire-and-forget, never block booking creation
   try {
-    if (c.env.RESEND_API_KEY) {
+    const confirmPref = await c.env.DB
+      .prepare("SELECT booking_confirmation_email FROM shop_settings WHERE shop_id = ? LIMIT 1")
+      .bind(shop_id)
+      .first<{ booking_confirmation_email: number | null }>();
+    if (c.env.RESEND_API_KEY && confirmPref?.booking_confirmation_email !== 0) {
       const staffMember = await getStaffById(c.env.DB, staff_id);
       await sendBookingConfirmation(c.env.RESEND_API_KEY, {
         customer_name,
@@ -164,10 +173,20 @@ publicBookings.post("/", async (c) => {
     console.warn("[Email] Confirmation send failed (non-fatal):", err);
   }
 
-  // Enqueue reminder job (24h before booking) — fire-and-forget, never block booking creation
+  // Enqueue reminder job — fire-and-forget, never block booking creation
   try {
-    const sendAt = new Date(startDate.getTime() - 24 * 60 * 60_000).toISOString();
-    await c.env.QUEUE?.send({ bookingId: id, sendAt });
+    // Use shop's configured reminder_hours_before (default 24h)
+    const settingsRow = await c.env.DB
+      .prepare("SELECT booking_reminder_email, reminder_hours_before FROM shop_settings WHERE shop_id = ? LIMIT 1")
+      .bind(shop_id)
+      .first<{ booking_reminder_email: number | null; reminder_hours_before: number | null }>();
+    const reminderEnabled = settingsRow?.booking_reminder_email !== 0;
+    const hoursBeforeNum = settingsRow?.reminder_hours_before ?? 24;
+    const hoursBefore = Number.isFinite(hoursBeforeNum) && hoursBeforeNum > 0 ? hoursBeforeNum : 24;
+    if (reminderEnabled) {
+      const sendAt = new Date(startDate.getTime() - hoursBefore * 60 * 60_000).toISOString();
+      await c.env.QUEUE?.send({ bookingId: id, sendAt });
+    }
   } catch (err) {
     console.warn("[Queue] Could not enqueue reminder (non-fatal):", err);
   }

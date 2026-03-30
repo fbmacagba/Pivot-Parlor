@@ -103,6 +103,10 @@ type ShopSettingsPayload = {
   show_youtube?: boolean;
   show_whatsapp?: boolean;
   show_linkedin?: boolean;
+  booking_confirmation_email?: boolean;
+  booking_reminder_email?: boolean;
+  reminder_hours_before?: number;
+  review_request_email?: boolean;
 };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -184,6 +188,10 @@ export default function AdminSettings() {
   const [yt, setYt] = useState(settings.youtube_url ?? "");
   const [wa, setWa] = useState(settings.whatsapp_url ?? "");
   const [li, setLi] = useState(settings.linkedin_url ?? "");
+  const [confirmEmail, setConfirmEmail] = useState(settings.booking_confirmation_email !== false);
+  const [reminderEmail, setReminderEmail] = useState(settings.booking_reminder_email !== false);
+  const [reminderHours, setReminderHours] = useState(settings.reminder_hours_before ?? 24);
+  const [reviewEmail, setReviewEmail] = useState(settings.review_request_email !== false);
 
   const [showIg, setShowIg] = useState(settings.show_instagram === true);
   const [showFb, setShowFb] = useState(settings.show_facebook === true);
@@ -415,7 +423,68 @@ export default function AdminSettings() {
           {fetcher.state !== "idle" ? "Saving…" : "Save"}
         </Button>
       </section>
+
+      {/* Notification preferences */}
+      <section className="space-y-5 rounded-xl border border-white/10 bg-dark-100 p-6">
+        <h2 className="font-heading text-lg font-semibold text-white">Email notifications</h2>
+        <p className="text-sm text-white/40 -mt-2">Control which automated emails are sent to customers.</p>
+
+        {/* Confirmation email */}
+        <div className="flex items-center justify-between gap-4 py-1">
+          <div>
+            <p className="text-sm font-medium text-white">Booking confirmation</p>
+            <p className="text-xs text-white/40 mt-0.5">Sent immediately when a booking is made</p>
+          </div>
+          <Toggle value={confirmEmail} onChange={setConfirmEmail} />
+        </div>
+
+        {/* Reminder email + timing */}
+        <div className="space-y-3 border-t border-white/10 pt-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-white">Booking reminder</p>
+              <p className="text-xs text-white/40 mt-0.5">Sent before the appointment</p>
+            </div>
+            <Toggle value={reminderEmail} onChange={setReminderEmail} />
+          </div>
+          {reminderEmail && (
+            <div className="flex items-center gap-3 pl-1">
+              <span className="text-sm text-white/50">Send</span>
+              <select
+                value={reminderHours}
+                onChange={e => setReminderHours(Number(e.target.value))}
+                className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+              >
+                {[2, 4, 6, 12, 24, 48, 72].map(h => (
+                  <option key={h} value={h} className="bg-dark">{h}h before</option>
+                ))}
+              </select>
+              <span className="text-sm text-white/50">the appointment</span>
+            </div>
+          )}
+        </div>
+
+        {/* Review request */}
+        <div className="flex items-center justify-between gap-4 border-t border-white/10 pt-4">
+          <div>
+            <p className="text-sm font-medium text-white">Review request</p>
+            <p className="text-xs text-white/40 mt-0.5">Sent when a booking is marked completed</p>
+          </div>
+          <Toggle value={reviewEmail} onChange={setReviewEmail} />
+        </div>
+      </section>
+
     </div>
+  );
+}
+
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${value ? "bg-gold" : "bg-white/20"}`}>
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${value ? "translate-x-6" : "translate-x-1"}`} />
+    </button>
   );
 }
 
