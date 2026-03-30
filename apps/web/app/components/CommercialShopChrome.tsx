@@ -251,6 +251,7 @@ export function CommercialShopChrome({
   const logoSrc = trimMediaUrl(site.logo_url);
 
   const ig = settings.instagram_url?.trim();
+  const gbp = settings.google_business_url?.trim();
   const fb = settings.facebook_url?.trim();
   const tt = settings.tiktok_url?.trim();
   const tw = settings.twitter_url?.trim();
@@ -351,6 +352,13 @@ export function CommercialShopChrome({
                 {settings.show_twitter && tw ? (<SocialIcon href={tw} label="X"><svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M4 4l7.2 9.4L4 20h2.4l5.6-6.2 4.5 6.2H20l-7.4-9.6L19.6 4h-2.4l-5 5.5L8.2 4H4z" /></svg></SocialIcon>) : null}
                 {settings.show_youtube && yt ? (<SocialIcon href={yt} label="YouTube"><svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M21.8 8.001a2.75 2.75 0 0 0-1.94-1.96C18.88 5.5 12 5.5 12 5.5s-6.88 0-8.86.46A2.75 2.75 0 0 0 1.2 8.05 28.3 28.3 0 0 0 .75 12a28.3 28.3 0 0 0 .45 3.99 2.75 2.75 0 0 0 1.94 2.17c1.98.47 8.86.47 8.86.47s6.88 0 8.86-.47a2.75 2.75 0 0 0 1.94-2.17 28.3 28.3 0 0 0 .45-3.99 28.3 28.3 0 0 0-.45-3.99zM10 15.25v-6.5L15.2 12 10 15.25z" /></svg></SocialIcon>) : null}
                 {settings.show_whatsapp && wa ? (<SocialIcon href={wa} label="WhatsApp"><svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M20.52 3.48A11.84 11.84 0 0 0 12.06 0C5.92 0 .93 4.99.93 11.13c0 1.96.51 3.87 1.48 5.56L0 24l7.47-1.96a11.7 11.7 0 0 0 5.59 1.43h.01c6.14 0 11.13-4.99 11.13-11.13a11.06 11.06 0 0 0-2.68-7.86zM12.07 21.1h-.01a9.4 9.4 0 0 1-4.8-1.32l-.34-.2-4.45 1.17 1.19-4.33-.22-.36a9.43 9.43 0 1 1 8.63 5.04zm5.18-7.07c-.28-.14-1.65-.81-1.9-.9-.25-.1-.43-.14-.61.14-.18.28-.7.9-.86 1.08-.16.18-.32.2-.6.07a7.26 7.26 0 0 1-2.14-1.32 8.09 8.09 0 0 1-1.48-1.85c-.16-.28 0-.43.12-.57.12-.12.28-.32.42-.48.14-.16.18-.28.28-.46.1-.18.05-.34-.02-.48-.07-.14-.61-1.47-.84-2.01-.22-.52-.45-.45-.61-.46h-.52a1 1 0 0 0-.72.34A3.05 3.05 0 0 0 8 9.81a5.3 5.3 0 0 0 1.12 2.38 12.1 12.1 0 0 0 4.65 4.11c.65.28 1.16.45 1.56.57.66.21 1.26.18 1.74.11.53-.08 1.65-.67 1.88-1.32.23-.65.23-1.21.16-1.32-.07-.11-.25-.18-.53-.32z" /></svg></SocialIcon>) : null}
+                {settings.show_google_business && gbp ? (
+                  <SocialIcon href={gbp} label="Google Business">
+                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93s3.06-7.44 7-7.93v15.86zm2-15.86c1.03.13 2 .45 2.87.93H13v-.93zM13 7h5.24c.25.31.48.65.68 1H13V7zm0 3h6.74c.08.32.15.65.19.99L13 11V10zm0 3l6.93-.01c-.05.34-.12.67-.21 1H13v-.99zM13 16h6c-.31.7-.7 1.35-1.17 1.93H13V16zm0 4.93V19h3.48c-1 .58-2.12.9-3.28.96L13 20.93z"/>
+                    </svg>
+                  </SocialIcon>
+                ) : null}
                 {settings.show_linkedin && li ? (<SocialIcon href={li} label="LinkedIn"><svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M6.5 8.5h3V21h-3V8.5zM8 3.25a1.75 1.75 0 1 1-1.75 1.75A1.75 1.75 0 0 1 8 3.25zM14.5 8.5h2.9v1.7h.04c.4-.75 1.4-1.55 2.9-1.55 3.1 0 3.66 2.04 3.66 4.7V21h-3.2v-6.4c0-1.53 0-3.5-2.14-3.5-2.14 0-2.46 1.67-2.46 3.4V21h-3.2V8.5z" /></svg></SocialIcon>) : null}
               </div>
             </div>

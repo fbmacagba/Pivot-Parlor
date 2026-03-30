@@ -103,6 +103,8 @@ type ShopSettingsPayload = {
   show_youtube?: boolean;
   show_whatsapp?: boolean;
   show_linkedin?: boolean;
+  google_business_url?: string;
+  show_google_business?: boolean;
   booking_confirmation_email?: boolean;
   booking_reminder_email?: boolean;
   reminder_hours_before?: number;
@@ -188,6 +190,8 @@ export default function AdminSettings() {
   const [yt, setYt] = useState(settings.youtube_url ?? "");
   const [wa, setWa] = useState(settings.whatsapp_url ?? "");
   const [li, setLi] = useState(settings.linkedin_url ?? "");
+  const [gbp, setGbp] = useState(settings.google_business_url ?? "");
+  const [showGbp, setShowGbp] = useState(settings.show_google_business ?? false);
   const [confirmEmail, setConfirmEmail] = useState(settings.booking_confirmation_email !== false);
   const [reminderEmail, setReminderEmail] = useState(settings.booking_reminder_email !== false);
   const [reminderHours, setReminderHours] = useState(settings.reminder_hours_before ?? 24);
@@ -494,17 +498,22 @@ function SocialRow({
   onUrlChange,
   show,
   onShowChange,
+  placeholder = "https://…",
+  hint,
 }: {
   label: string;
   url: string;
   onUrlChange: (v: string) => void;
   show: boolean;
   onShowChange: (v: boolean) => void;
+  placeholder?: string;
+  hint?: string;
 }) {
   const hasUrl = url.trim().length > 0;
   return (
     <div className="space-y-2">
-      <Input label={label} type="url" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder="https://…" />
+      <Input label={label} type="url" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder={placeholder} />
+      {hint && !hasUrl && <p className="text-xs text-white/30">{hint}</p>}
       {hasUrl ? (
         <div className="flex items-center gap-3">
           <span className="text-xs text-white/50">Show on site</span>

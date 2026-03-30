@@ -395,6 +395,8 @@ shops.get("/:shopId/settings", async (c) => {
       show_youtube: flag(row.show_youtube),
       show_whatsapp: flag(row.show_whatsapp),
       show_linkedin: flag(row.show_linkedin),
+      google_business_url: row.google_business_url ?? "",
+      show_google_business: flag(row.show_google_business),
       booking_enabled: flag(row.booking_enabled) === false ? false : true,
       booking_confirmation_email: flag(row.booking_confirmation_email) !== false,
       booking_reminder_email: flag(row.booking_reminder_email) !== false,
@@ -427,6 +429,8 @@ const SHOP_SETTINGS_PATCH_FIELDS = [
   "show_youtube",
   "show_whatsapp",
   "show_linkedin",
+  "google_business_url",
+  "show_google_business",
   "booking_confirmation_email",
   "booking_reminder_email",
   "reminder_hours_before",
@@ -448,6 +452,9 @@ function coerceShopSettingValue(field: ShopSettingsPatchField, raw: unknown): st
   }
   if (field === "booking_confirmation_email" || field === "booking_reminder_email" || field === "review_request_email") {
     return raw === true || raw === 1 || raw === "1" ? 1 : 0;
+  }
+  if (field === "google_business_url") {
+    return typeof raw === "string" ? raw.trim() : "";
   }
   if (field.startsWith("show_")) {
     if (raw === true || raw === 1 || raw === "1" || raw === "true" || raw === "on") return 1;
