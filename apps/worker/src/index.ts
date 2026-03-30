@@ -28,6 +28,7 @@ import {
   shopStatsRouter,
   shopRevenueRouter,
   shopSetupStatusRouter,
+  shopAnalyticsRouter,
   staffMeRouter,
   meRouter,
 } from "./routes/dashboard.js";
@@ -129,6 +130,7 @@ app.route("/api/shops/:shopId/stats", shopStatsRouter);
 // Admin shop revenue breakdown
 app.route("/api/shops/:shopId/revenue", shopRevenueRouter);
 app.route("/api/shops/:shopId/setup-status", shopSetupStatusRouter);
+app.route("/api/shops/:shopId/analytics", shopAnalyticsRouter);
 app.route("/api/walkin", walkinRouter);
 app.route("/api/shops/:shopId/walkin", adminWalkinRouter);
 

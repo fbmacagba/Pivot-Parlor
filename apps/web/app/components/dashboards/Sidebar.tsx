@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from "@remix-run/react";
 import {
+  BarChart2,
   BarChart3,
   Bot,
   Calendar,
@@ -39,6 +40,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
   { href: "/admin/queue", label: "Queue", icon: Users2 },
   { href: "/admin/revenue", label: "Revenue", icon: BarChart3 },
+  { href: "/admin/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 

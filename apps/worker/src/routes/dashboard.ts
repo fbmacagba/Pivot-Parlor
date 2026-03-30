@@ -779,3 +779,134 @@ meRouter.patch("/profile", async (c) => {
 
   return c.json({ success: true });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /api/shops/:shopId/analytics  — Admin analytics dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const shopAnalyticsRouter = new Hono<{ Bindings: Bindings }>();
+shopAnalyticsRouter.use("*", authMiddleware);
+
+/**
+ * GET /api/shops/:shopId/analytics
+ * Returns booking trends, peak hours, peak days, status breakdown,
+ * and top services/staff for the last 12 months.
+ */
+shopAnalyticsRouter.get("/", async (c) => {
+  const user = getUser(c);
+  const shopId = c.req.param("shopId")!;
+
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shopId)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const now = new Date();
+  const toDate = now.toISOString().slice(0, 10);
+  const fromDate = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    .toISOString().slice(0, 10);
+
+  const [
+    monthlyRows,
+    peakHourRows,
+    peakDayRows,
+    statusRows,
+    topServiceRows,
+    topStaffRows,
+    totalsRow,
+  ] = await Promise.all([
+
+    // Monthly booking + revenue trend (last 12 months)
+    c.env.DB.prepare(
+      `SELECT strftime('%Y-%m', booking_date) AS month,
+              COUNT(*) AS booking_count,
+              COALESCE(SUM(amount), 0) AS gross
+       FROM bookings
+       WHERE shop_id = ? AND booking_date >= ? AND booking_date <= ?
+         AND status = 'completed'
+       GROUP BY month
+       ORDER BY month ASC`
+    ).bind(shopId, fromDate, toDate).all<{ month: string; booking_count: number; gross: number }>(),
+
+    // Peak hours (0-23) — all time
+    c.env.DB.prepare(
+      `SELECT CAST(strftime('%H', start_time) AS INTEGER) AS hour,
+              COUNT(*) AS booking_count
+       FROM bookings
+       WHERE shop_id = ? AND status NOT IN ('cancelled','no_show')
+       GROUP BY hour
+       ORDER BY hour ASC`
+    ).bind(shopId).all<{ hour: number; booking_count: number }>(),
+
+    // Peak days of week (0=Sun,1=Mon…6=Sat) — all time
+    c.env.DB.prepare(
+      `SELECT CAST(strftime('%w', booking_date) AS INTEGER) AS dow,
+              COUNT(*) AS booking_count
+       FROM bookings
+       WHERE shop_id = ? AND status NOT IN ('cancelled','no_show')
+       GROUP BY dow
+       ORDER BY dow ASC`
+    ).bind(shopId).all<{ dow: number; booking_count: number }>(),
+
+    // Status breakdown (last 12 months)
+    c.env.DB.prepare(
+      `SELECT status, COUNT(*) AS count
+       FROM bookings
+       WHERE shop_id = ? AND booking_date >= ?
+       GROUP BY status`
+    ).bind(shopId, fromDate).all<{ status: string; count: number }>(),
+
+    // Top 5 services by booking count (last 12 months)
+    c.env.DB.prepare(
+      `SELECT sv.name AS service_name,
+              COUNT(b.id) AS booking_count,
+              COALESCE(SUM(b.amount), 0) AS gross
+       FROM bookings b
+       JOIN services sv ON sv.id = b.service_id
+       WHERE b.shop_id = ? AND b.booking_date >= ? AND b.status = 'completed'
+       GROUP BY b.service_id
+       ORDER BY booking_count DESC
+       LIMIT 5`
+    ).bind(shopId, fromDate).all<{ service_name: string; booking_count: number; gross: number }>(),
+
+    // Top staff by booking count (last 12 months)
+    c.env.DB.prepare(
+      `SELECT st.display_name,
+              COUNT(b.id) AS booking_count,
+              COALESCE(SUM(b.amount), 0) AS gross
+       FROM bookings b
+       JOIN staff st ON st.id = b.staff_id
+       WHERE b.shop_id = ? AND b.booking_date >= ? AND b.status = 'completed'
+       GROUP BY b.staff_id
+       ORDER BY booking_count DESC
+       LIMIT 5`
+    ).bind(shopId, fromDate).all<{ display_name: string; booking_count: number; gross: number }>(),
+
+    // All-time totals
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS total_bookings,
+              COALESCE(SUM(CASE WHEN status='completed' THEN amount ELSE 0 END), 0) AS total_revenue,
+              COALESCE(SUM(CASE WHEN status='completed' THEN commission ELSE 0 END), 0) AS total_commission,
+              COUNT(DISTINCT customer_email) AS unique_customers
+       FROM bookings WHERE shop_id = ?`
+    ).bind(shopId).first<{
+      total_bookings: number;
+      total_revenue: number;
+      total_commission: number;
+      unique_customers: number;
+    }>(),
+  ]);
+
+  return c.json({
+    success: true,
+    data: {
+      period: { from: fromDate, to: toDate },
+      totals: totalsRow,
+      monthly: monthlyRows.results ?? [],
+      peak_hours: peakHourRows.results ?? [],
+      peak_days: peakDayRows.results ?? [],
+      status_breakdown: statusRows.results ?? [],
+      top_services: topServiceRows.results ?? [],
+      top_staff: topStaffRows.results ?? [],
+    },
+  });
+});
