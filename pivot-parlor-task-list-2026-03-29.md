@@ -1,5 +1,5 @@
 # Pivot Parlor — Master Task List
-**Last updated: 29 March 2026 (Session 3)**
+**Last updated: 30 March 2026 (Session 4)**
 **Project path:** `F:\Projects\Pivot Parlor\pivot-parlor`
 **GitHub:** `fbmacagba/Pivot-Parlor`
 **Test shop:** `ferdyms-barber-shop-014` | `shop_id: daf88508-cb57-42b4-a5c2-953ff9e2a22c`
@@ -104,7 +104,7 @@
 - [x] Review collection: post-booking email + modal + display ✅ 29 Mar
 - [x] SEO: OG + Twitter card meta on shop pages ✅ 29 Mar
 - [ ] Google Business Profile link per shop
-- [ ] Analytics dashboard (booking trends, peak hours)
+- [x] Analytics dashboard: 12mo trend, peak hours/days, status breakdown, top services/staff ✅ 30 Mar
 - [x] Email notifications via Resend ✅ 29 Mar (confirmation + 24h reminder, dark branded HTML)
 
 ---
@@ -174,3 +174,4 @@ git reset --hard origin/main
 | 23 Mar | S1 | Infrastructure, schema, auth, RBAC, booking flow, AI generation |
 | 24 Mar | S2 | CommercialTemplate, legal pages, OAuth, developer dashboard |
 | 29 Mar | S3 | Admin bookings, setup gate, staff mgmt+avatars, Resend emails (confirm+reminder+EOD+review request), review collection, OG meta, chatbot rate limiting, customer profile edit, setup/stripe page, health-check.mjs (33/33) |
+| 30 Mar | S4 | Turnstile on chatbot worker, walk-in queue system (Phase 3 complete), notification preferences UI, analytics dashboard, deploy script fix (emoji/UTF-8 strip) |
