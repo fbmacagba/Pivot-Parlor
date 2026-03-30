@@ -22,6 +22,7 @@ import jobsRouter from "./routes/jobs.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
 import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
 import { sendEodAlert } from "./services/email.js";
+import { walkinRouter, adminWalkinRouter } from "./routes/walkin.js";
 import {
   devRouter,
   shopStatsRouter,
@@ -128,6 +129,8 @@ app.route("/api/shops/:shopId/stats", shopStatsRouter);
 // Admin shop revenue breakdown
 app.route("/api/shops/:shopId/revenue", shopRevenueRouter);
 app.route("/api/shops/:shopId/setup-status", shopSetupStatusRouter);
+app.route("/api/walkin", walkinRouter);
+app.route("/api/shops/:shopId/walkin", adminWalkinRouter);
 
 // Staff member's own data (scoped to JWT — no shopId in URL)
 app.route("/api/staff/me", staffMeRouter);

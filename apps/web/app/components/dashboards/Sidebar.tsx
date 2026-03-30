@@ -3,6 +3,7 @@ import {
   BarChart3,
   Bot,
   Calendar,
+  Users2,
   CalendarDays,
   Clock,
   LayoutDashboard,
@@ -36,6 +37,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/services", label: "Services", icon: Scissors },
   { href: "/admin/schedule", label: "Schedule", icon: Calendar },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
+  { href: "/admin/queue", label: "Queue", icon: Users2 },
   { href: "/admin/revenue", label: "Revenue", icon: BarChart3 },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
