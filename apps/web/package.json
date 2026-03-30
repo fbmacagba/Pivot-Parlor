@@ -9,7 +9,7 @@
     "build": "remix vite:build",
     "postbuild": "node scripts/copy-public.mjs",
     "start": "wrangler pages dev ./build/client",
-    "deploy": "npm run clean && npm run build && node scripts/prepare-pages-deploy.mjs && npx wrangler pages deploy ./.pages-dist --project-name=pivot-parlor-web --branch=main --commit-dirty=true",
+    "deploy": "npm run clean && npm run build && node scripts/prepare-pages-deploy.mjs && node scripts/pages-deploy.mjs",
     "deploy:pages-client": "npm run build && npx wrangler pages deploy ./build/client --project-name=pivot-parlor-web --commit-dirty=true",
     "deploy:preview": "npm run clean && npm run build && node scripts/prepare-pages-deploy.mjs && npx wrangler pages deploy ./.pages-dist --project-name=pivot-parlor-web --commit-dirty=true",
     "typecheck": "tsc",
