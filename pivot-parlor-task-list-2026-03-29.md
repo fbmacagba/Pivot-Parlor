@@ -62,7 +62,7 @@
 - [x] Revenue: gross, commission, net, per-staff, per-service, daily chart
 - [x] Staff: avatar/photo upload ✅ 29 Mar (R2 upload + hover overlay UI)
 - [x] Schedule: weekly grid per staff ✅ (already built)
-- [ ] Notification preferences (email/SMS reminder timing)
+- [x] Notification preferences: confirmation, reminder (timing selector), review request ✅ 30 Mar
 
 ### Staff Dashboard (/staff) ✅ COMPLETE
 - [x] Today view: next appointment card, schedule timeline, completed collapsible
@@ -79,11 +79,11 @@
 
 ## PHASE 3 — Walk-in & Scanner System ⏳ PENDING
 
-- [ ] QR code per shop (/{shopSlug}/walkin)
-- [ ] Walk-in landing page: queue position + wait time
-- [ ] Admin ScannerModal + NumericPad
-- [ ] Queue management (KV-based, poll 30s)
-- [ ] EOD queue clear
+- [x] QR code per shop — admin queue page shows scannable QR ✅ 30 Mar
+- [x] Walk-in landing page: join form, queue position, auto-poll 30s ✅ 30 Mar
+- [x] Admin queue page: Call next, Skip, Remove, Clear queue ✅ 30 Mar
+- [x] Queue management: KV cache bust, admin poll proxy ✅ 30 Mar
+- [x] EOD queue clear: DELETE /api/shops/:id/walkin clears all ✅ 30 Mar
 
 ---
 
@@ -119,7 +119,7 @@
 - [ ] Google OAuth still in test mode — add real users in Google Auth Platform → Audience
 - [ ] Facebook OAuth pending Meta business portfolio verification
 - [x] Cookie consent banner ✅ (fully wired — localStorage + categories)
-- [ ] Cloudflare Turnstile on shop chatbot endpoint
+- [x] Cloudflare Turnstile on shop chatbot endpoint ✅ 30 Mar
 
 ---
 
