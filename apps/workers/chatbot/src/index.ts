@@ -12,6 +12,27 @@ import {
   welcomeMessage as buildWelcomeMessage,
 } from "./prompt.js";
 
+
+// ─── Turnstile verification ───────────────────────────────────────────────────
+
+async function verifyTurnstile(
+  secretKey: string,
+  token: string,
+  ip: string
+): Promise<boolean> {
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ secret: secretKey, response: token, remoteip: ip }),
+    });
+    const data = await res.json<{ success: boolean }>();
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
 const FALLBACK_REPLY =
   "I'm having a quick moment — please try again or book directly at the link above.";
 
@@ -155,6 +176,21 @@ chat.post("/", async (c) => {
     const visitorMessage = typeof body.message === "string" ? body.message.trim() : "";
     if (!shopId || !visitorMessage) {
       return c.json({ reply: FALLBACK_REPLY, error: "shopId and message are required" }, 400);
+    }
+
+    // Turnstile bot protection — only enforced when secret key is configured
+    if (c.env.TURNSTILE_SECRET_KEY) {
+      const turnstileToken = typeof (body as { turnstileToken?: string }).turnstileToken === "string"
+        ? (body as { turnstileToken?: string }).turnstileToken!.trim()
+        : "";
+      if (!turnstileToken) {
+        return c.json({ reply: FALLBACK_REPLY, error: "Security check required" }, 400);
+      }
+      const ip = c.req.header("CF-Connecting-IP") ?? "";
+      const valid = await verifyTurnstile(c.env.TURNSTILE_SECRET_KEY, turnstileToken, ip);
+      if (!valid) {
+        return c.json({ reply: FALLBACK_REPLY, error: "Security check failed" }, 403);
+      }
     }
 
     const priorMessages: ChatMessage[] = [];

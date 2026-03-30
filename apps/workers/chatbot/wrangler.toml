@@ -18,3 +18,4 @@ PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 
 # Secrets:
 #   OPENROUTER_API_KEY
+#   TURNSTILE_SECRET_KEY

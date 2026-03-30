@@ -6,6 +6,7 @@ export type Env = {
   OPENROUTER_API_KEY: string;
   ENVIRONMENT: string;
   PLATFORM_URL: string;
+  TURNSTILE_SECRET_KEY?: string;
 };
 
 export type ChatMessage = { role: "user" | "assistant" | "system"; content: string };

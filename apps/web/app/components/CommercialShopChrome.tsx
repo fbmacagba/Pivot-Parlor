@@ -128,8 +128,21 @@ export function CommercialShopChrome({
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
   const [chatDraft, setChatDraft] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetId = useRef<string | null>(null);
   // Track whether the visitor has interacted (sent a message or tapped a chip)
   const [chatStarted, setChatStarted] = useState(false);
+
+  // Turnstile invisible widget — obtain a fresh token before each chat message
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if ((window as unknown as { turnstile?: unknown }).turnstile) return; // already loaded
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+  }, []);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const closeNav = () => setNavOpen(false);
 
@@ -149,6 +162,18 @@ export function CommercialShopChrome({
     const trimmed = text.trim();
     if (!trimmed || chatSending || !shopId) return;
 
+    // Get Turnstile token if widget is available (gracefully skip if not configured)
+    let turnstileToken = "";
+    try {
+      const ts = (window as unknown as { turnstile?: { execute: (id: string, opts: { callback: (t: string) => void }) => void } }).turnstile;
+      if (ts && turnstileWidgetId.current) {
+        turnstileToken = await new Promise<string>((resolve) => {
+          ts.execute(turnstileWidgetId.current!, { callback: resolve });
+          setTimeout(() => resolve(""), 3000); // fallback after 3s
+        });
+      }
+    } catch { /* non-fatal — proceed without token */ }
+
     // Mark as started so the welcome UI disappears
     setChatStarted(true);
 
@@ -159,7 +184,7 @@ export function CommercialShopChrome({
       const res = await fetch(CHATBOT_CHAT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, message: trimmed, history: historyPayload }),
+        body: JSON.stringify({ shopId, message: trimmed, history: historyPayload, ...(turnstileToken ? { turnstileToken } : {}) }),
       });
       if (res.status === 429) {
         setChatMessages((prev) => [...prev, {
