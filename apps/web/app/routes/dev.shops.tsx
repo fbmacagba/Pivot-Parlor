@@ -1,7 +1,7 @@
 import { useFetcher, useLoaderData, Link, useNavigate, useRevalidator, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { Bot, Check, Circle, Copy, ExternalLink, Loader2, Plus, Sparkles, XCircle } from "lucide-react";
+import { Bot, Check, Circle, Copy, ExternalLink, Loader2, Plus, Sparkles, Trash2, XCircle } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
@@ -300,6 +300,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   }
 
+  if (actionType === "delete-shop") {
+    const shopId = form.get("shopId")?.toString();
+    if (!shopId) {
+      return json({ success: false, error: "Missing shopId" } as const);
+    }
+    try {
+      await api.del(`/api/shops/${shopId}`);
+      return json({ success: true as const, deletedShopId: shopId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Delete failed";
+      return json({ success: false as const, error: msg });
+    }
+  }
+
   try {
     const result = await api.post<OnboardResult>("/api/shops", {
       name: form.get("name"),
@@ -365,6 +379,7 @@ export default function DevShops() {
   const expandedGenFetcher = useFetcher<{ success?: boolean; data?: { jobId?: string } }>();
   const activateActFetcher = useFetcher();
   const pauseActFetcher = useFetcher();
+  const deleteShopFetcher = useFetcher<{ success?: boolean; error?: string; deletedShopId?: string }>();
   const wasExpandedGenSubmittingRef = useRef(false);
   const pendingUploadTypeRef = useRef<"logo" | "hero" | null>(null);
   const pendingSaveTypeRef = useRef<"logo" | "hero" | null>(null);
@@ -382,6 +397,7 @@ export default function DevShops() {
   const [regenTextModel, setRegenTextModel] = useState(DEFAULT_TEXT_MODEL);
   const [regenImageModel, setRegenImageModel] = useState(DEFAULT_IMAGE_MODEL);
 
+  const [shopToDelete, setShopToDelete] = useState<Shop | null>(null);
   const [expandedShopId, setExpandedShopId] = useState<string | null>(null);
   const [expLogoPreview, setExpLogoPreview] = useState<string | null>(null);
   const [expHeroPreview, setExpHeroPreview] = useState<string | null>(null);
@@ -643,6 +659,15 @@ export default function DevShops() {
       revalidator.revalidate();
     }
   }, [pauseActFetcher.state, pauseActFetcher.data, revalidator]);
+
+  useEffect(() => {
+    if (deleteShopFetcher.state !== "idle" || !deleteShopFetcher.data) return;
+    const d = deleteShopFetcher.data;
+    if (d.success) {
+      setShopToDelete(null);
+      revalidator.revalidate();
+    }
+  }, [deleteShopFetcher.state, deleteShopFetcher.data, revalidator]);
 
   useEffect(() => {
     if (regenPrefsFetcher.state !== "idle" || !regenShopId) return;
@@ -976,6 +1001,55 @@ export default function DevShops() {
         </Dialog>
       </div>
 
+      <Dialog open={shopToDelete !== null} onOpenChange={(open) => !open && setShopToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete shop</DialogTitle>
+          </DialogHeader>
+          {shopToDelete && (
+            <>
+              <p className="text-sm text-white/70">
+                Permanently delete{" "}
+                <span className="font-medium text-white">{shopToDelete.name}</span> ({shopToDelete.slug})? This
+                removes onboarding data and linked records. This cannot be undone.
+              </p>
+              {deleteShopFetcher.data?.success === false && deleteShopFetcher.data?.error ? (
+                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                  {deleteShopFetcher.data.error}
+                </div>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setShopToDelete(null)}>
+                  Cancel
+                </Button>
+                <deleteShopFetcher.Form method="post">
+                  <input type="hidden" name="_action" value="delete-shop" />
+                  <input type="hidden" name="shopId" value={shopToDelete.id} />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="bg-red-600 hover:bg-red-500"
+                    disabled={deleteShopFetcher.state !== "idle"}
+                  >
+                    {deleteShopFetcher.state !== "idle" ? (
+                      <>
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        Deleting…
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="mr-1 h-3.5 w-3.5" />
+                        Delete shop
+                      </>
+                    )}
+                  </Button>
+                </deleteShopFetcher.Form>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <div className="mb-4">
         <Input
           type="search"
@@ -1224,16 +1298,24 @@ export default function DevShops() {
                                 </Button>
                               </generateFetcher.Form>
                             )}
-                            <Link to={`/dev/shops/${shop.id}`}>
-                              <Button variant="ghost" size="sm">
-                                Details
-                              </Button>
-                            </Link>
-                            <Link to={`/dev/ai-deploy?shopId=${shop.id}`}>
-                              <Button variant="ghost" size="sm">
+                            <Button asChild variant="ghost" size="sm">
+                              <Link to={`/dev/shops/${shop.id}`}>Details</Link>
+                            </Button>
+                            <Button asChild variant="ghost" size="sm">
+                              <Link to={`/dev/ai-deploy?shopId=${shop.id}`}>
                                 <Bot className="h-3.5 w-3.5 mr-1" /> AI Deploy
-                              </Button>
-                            </Link>
+                              </Link>
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                              onClick={() => setShopToDelete(shop)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" />
+                              Delete
+                            </Button>
                           </div>
                         </div>
                       </td>

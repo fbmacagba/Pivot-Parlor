@@ -2,17 +2,27 @@ import {
   Form,
   Link,
   useActionData,
+  useFetcher,
+  useNavigate,
   useNavigation,
   useOutletContext,
 } from "@remix-run/react";
 import type { ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Trash2, UserCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
-import type { DevGenerationPrefs, DevShopDetail } from "./dev.shops.$shopId";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "~/components/ui/Dialog";
+import type { DevGenerationPrefs, DevShopDetail, DevShopOwnerDetails } from "./dev.shops.$shopId";
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const shopId = params.shopId!;
@@ -55,15 +65,96 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 }
 
 export default function DevShopDetailIndex() {
-  const { shop, generationPrefs } = useOutletContext<{ shop: DevShopDetail; generationPrefs: DevGenerationPrefs }>();
+  const { shop, generationPrefs, ownerDetails } = useOutletContext<{
+    shop: DevShopDetail;
+    generationPrefs: DevGenerationPrefs;
+    ownerDetails: DevShopOwnerDetails | null;
+  }>();
   const navigation = useNavigation();
   const actionData = useActionData<{ ok?: boolean; error?: string }>();
+  const deleteShopFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const navigate = useNavigate();
+  const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const busy =
     navigation.state !== "idle" &&
     navigation.formData?.get("_action") === "regenerate-site";
 
+  useEffect(() => {
+    if (deleteShopFetcher.state !== "idle" || !deleteShopFetcher.data?.success) return;
+    setDeleteDialogOpen(false);
+    navigate("/dev/shops");
+  }, [deleteShopFetcher.state, deleteShopFetcher.data, navigate]);
+
   return (
     <div className="max-w-2xl space-y-8">
+      <div className="flex flex-wrap gap-2">
+        <Dialog open={ownerDialogOpen} onOpenChange={setOwnerDialogOpen}>
+          <DialogTrigger asChild>
+            <Button type="button" variant="secondary" size="sm">
+              <UserCircle className="mr-2 h-4 w-4" />
+              Shop owner details
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Shop owner &amp; platform users</DialogTitle>
+            </DialogHeader>
+            {ownerDetails ? (
+              <div className="space-y-4 text-sm">
+                <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                  <dl className="space-y-2">
+                    <div className="flex gap-2">
+                      <dt className="w-28 shrink-0 text-white/45">Owner name</dt>
+                      <dd className="text-white">{ownerDetails.owner_name?.trim() || "—"}</dd>
+                    </div>
+                    <div className="flex gap-2">
+                      <dt className="w-28 shrink-0 text-white/45">Owner email</dt>
+                      <dd className="break-all text-white">{ownerDetails.owner_email?.trim() || "—"}</dd>
+                    </div>
+                    <div className="flex gap-2">
+                      <dt className="w-28 shrink-0 text-white/45">Shop phone</dt>
+                      <dd className="text-white">{ownerDetails.phone?.trim() || "—"}</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                    Platform users
+                  </h3>
+                  {ownerDetails.platform_users.length === 0 ? (
+                    <p className="text-white/50">No linked platform users yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto rounded-lg border border-white/10">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-white/10 bg-white/[0.03]">
+                            <th className="px-3 py-2 font-medium text-white/50">Role</th>
+                            <th className="px-3 py-2 font-medium text-white/50">Name</th>
+                            <th className="px-3 py-2 font-medium text-white/50">Email</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {ownerDetails.platform_users.map((u) => (
+                            <tr key={u.id}>
+                              <td className="px-3 py-2 capitalize text-white/90">{u.role}</td>
+                              <td className="px-3 py-2 text-white/80">{u.name ?? "—"}</td>
+                              <td className="px-3 py-2 break-all text-white/70">{u.email}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-white/55">Could not load owner details. Refresh the page or try again.</p>
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+
       {actionData?.error && (
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
           {actionData.error}
@@ -119,6 +210,69 @@ export default function DevShopDetailIndex() {
             )}
           </Button>
         </Form>
+      </section>
+
+      <section className="rounded-xl border border-red-500/30 bg-red-500/5 p-6">
+        <h2 className="font-heading text-lg font-semibold text-red-200/90">Danger zone</h2>
+        <p className="mt-1 text-sm text-white/45">
+          Permanently delete this shop and related records. This cannot be undone.
+        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mt-4 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          onClick={() => setDeleteDialogOpen(true)}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Delete shop…
+        </Button>
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete this shop?</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-white/65">
+              This will remove <span className="font-medium text-white">{shop.name}</span> ({shop.slug}) and related
+              data. Confirm to proceed.
+            </p>
+            {deleteShopFetcher.data &&
+            typeof deleteShopFetcher.data === "object" &&
+            "error" in deleteShopFetcher.data &&
+            typeof (deleteShopFetcher.data as { error?: string }).error === "string" ? (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {(deleteShopFetcher.data as { error: string }).error}
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setDeleteDialogOpen(false)}>
+                Cancel
+              </Button>
+              <deleteShopFetcher.Form method="post" action="/dev/shops">
+                <input type="hidden" name="_action" value="delete-shop" />
+                <input type="hidden" name="shopId" value={shop.id} />
+                <Button
+                  type="submit"
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-500"
+                  disabled={deleteShopFetcher.state !== "idle"}
+                >
+                  {deleteShopFetcher.state !== "idle" ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete permanently
+                    </>
+                  )}
+                </Button>
+              </deleteShopFetcher.Form>
+            </div>
+          </DialogContent>
+        </Dialog>
       </section>
 
       <p className="text-sm text-white/40">

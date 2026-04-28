@@ -809,6 +809,82 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
   return c.json({ ok: true });
 });
 
+// ─── GET /api/shops/:shopId/owner-details — developer: shop onboarding + linked users ───
+
+shops.get("/:shopId/owner-details", authMiddleware, requireRole("developer"), async (c) => {
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+
+  const { results } = await c.env.DB
+    .prepare(
+      `SELECT id, name, email, phone, role, shop_id, created_at
+       FROM platform_users
+       WHERE shop_id = ?
+       ORDER BY CASE role WHEN 'admin' THEN 0 WHEN 'staff' THEN 1 ELSE 2 END, created_at ASC`
+    )
+    .bind(shop.id)
+    .all<{
+      id: string;
+      name: string | null;
+      email: string;
+      phone: string | null;
+      role: string;
+      shop_id: string | null;
+      created_at: string;
+    }>();
+
+  return c.json({
+    success: true,
+    data: {
+      owner_name: shop.owner_name,
+      owner_email: shop.owner_email,
+      phone: shop.phone,
+      platform_users: results ?? [],
+    },
+  });
+});
+
+// ─── DELETE /api/shops/:shopId — developer only (cascade-related cleanup) ───
+
+shops.delete("/:shopId", authMiddleware, requireRole("developer"), async (c) => {
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+
+  try {
+    await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
+    await c.env.DB
+      .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
+      .bind(shop.id)
+      .run()
+      .catch(() => {
+        /* table may not exist in older DB snapshots */
+      });
+    await c.env.DB
+      .prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?")
+      .bind(shop.id)
+      .run()
+      .catch(() => {
+        /* best effort */
+      });
+
+    await c.env.KV.delete(`site:${shop.slug}`);
+    await c.env.KV.delete(`shop:theme:${shop.id}`);
+    await c.env.KV.delete(`gen:settings:${shop.id}`);
+    await c.env.KV.delete(`walkin:queue:${shop.id}`);
+
+    await c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id).run();
+    return c.json({ success: true, data: { id: shop.id } });
+  } catch (e) {
+    console.error("[shops.delete]", e);
+    const msg = e instanceof Error ? e.message : "Delete failed";
+    return c.json({ success: false, error: msg }, 500);
+  }
+});
+
 // ─── POST /api/shops/:shopId/activate — developer only ───
 
 shops.post("/:shopId/activate", authMiddleware, requireRole("developer"), async (c) => {

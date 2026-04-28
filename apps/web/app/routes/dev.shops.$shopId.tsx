@@ -21,6 +21,21 @@ export type DevGenerationPrefs = {
   color_accent: string | null;
 };
 
+export type DevShopOwnerDetails = {
+  owner_name: string;
+  owner_email: string;
+  phone: string;
+  platform_users: {
+    id: string;
+    name: string | null;
+    email: string;
+    phone: string | null;
+    role: string;
+    shop_id: string | null;
+    created_at: string;
+  }[];
+};
+
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const shopId = params.shopId!;
   const env = context.env as { API_URL: string };
@@ -47,11 +62,18 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     /* defaults */
   }
 
-  return json({ shop, generationPrefs });
+  let ownerDetails: DevShopOwnerDetails | null = null;
+  try {
+    ownerDetails = await api.get<DevShopOwnerDetails>(`/api/shops/${shop.id}/owner-details`);
+  } catch {
+    ownerDetails = null;
+  }
+
+  return json({ shop, generationPrefs, ownerDetails });
 }
 
 export default function DevShopLayout() {
-  const { shop, generationPrefs } = useLoaderData<typeof loader>();
+  const { shop, generationPrefs, ownerDetails } = useLoaderData<typeof loader>();
 
   return (
     <div className="space-y-6">
@@ -66,7 +88,7 @@ export default function DevShopLayout() {
           /{shop.slug} · #{shop.shop_number}
         </p>
       </div>
-      <Outlet context={{ shop, generationPrefs }} />
+      <Outlet context={{ shop, generationPrefs, ownerDetails }} />
     </div>
   );
 }
