@@ -79,7 +79,7 @@ export function EditorialTemplate({ shop, site }: SiteTemplateProps) {
       {/* About — pull quote styling */}
       <section className="border-t border-neutral-200 px-6 py-20">
         <div className="mx-auto max-w-2xl">
-          <blockquote className="border-l-4 border-neutral-300 pl-6 text-lg italic text-neutral-700">
+          <blockquote className="rounded-lg bg-neutral-100/90 px-6 py-5 text-lg italic leading-relaxed text-neutral-700">
             {site.about}
           </blockquote>
         </div>

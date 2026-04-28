@@ -244,7 +244,7 @@ export default function TemplateSelect() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0D0D0D] px-6 py-12">
+    <div className="min-h-screen bg-dark px-6 py-12">
       <div className="mx-auto max-w-6xl">
         <h1 className="font-heading text-2xl font-bold text-white" data-shop-slug={shop.slug}>
           Choose your template for {shop.name}
@@ -252,8 +252,8 @@ export default function TemplateSelect() {
         <p className="mt-2 text-white/60">Select a design, customise colours, then generate.</p>
 
         {showProgress && (
-          <div className="mt-8 rounded-xl border border-[#C9A84C]/40 bg-[#C9A84C]/10 px-6 py-5">
-            <p className="text-sm font-medium text-[#C9A84C]">
+          <div className="mt-8 rounded-xl border border-gold/40 bg-gold/10 px-6 py-5">
+            <p className="text-sm font-medium text-gold">
               {progressCopy(jobStage, jobStatus)}
             </p>
             <p className="mt-1 text-xs text-white/50">
@@ -351,7 +351,7 @@ export default function TemplateSelect() {
                 type="file"
                 name="logo_file"
                 accept=".png,.jpg,.svg"
-                className="mt-1 block w-full text-sm text-white/80 file:mr-4 file:rounded file:border-0 file:bg-[#C9A84C] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-black"
+                className="mt-1 block w-full text-sm text-white/80 file:mr-4 file:rounded file:border-0 file:bg-gold file:px-4 file:py-2 file:text-sm file:font-semibold file:text-black"
               />
             </div>
           </div>
@@ -365,7 +365,7 @@ export default function TemplateSelect() {
           <button
             type="submit"
             disabled={isSubmitting || !selectedTemplate || isPolling || redirecting || !!jobError}
-            className="w-full rounded-lg bg-[#C9A84C] py-4 text-sm font-semibold text-black transition hover:bg-[#D4B86A] disabled:opacity-50"
+            className="w-full rounded-lg bg-gold py-4 text-sm font-semibold text-black transition hover:bg-gold-light disabled:opacity-50"
           >
             {isSubmitting
               ? "Starting generation..."

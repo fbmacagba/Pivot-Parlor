@@ -143,12 +143,12 @@ export default function LoginPage() {
   const redirectParam = redirectTo ? `&redirect=${encodeURIComponent(redirectTo)}` : "";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#0D0D0D] px-4">
+    <div className="flex min-h-screen items-center justify-center bg-dark px-4">
       <div className="w-full max-w-sm">
         {/* Header */}
         <div className="mb-8 text-center">
           <p className="font-heading text-2xl font-bold text-white">
-            Pivot <span className="text-[#C9A84C]">Parlor</span>
+            Pivot <span className="text-gold">Parlor</span>
           </p>
           <h1 className="mt-2 text-xl font-semibold text-white">Sign in</h1>
           <p className="mt-1 text-sm text-white/60">
@@ -156,7 +156,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-[#111111] p-8">
+        <div className="rounded-2xl border border-white/10 bg-dark-100 p-8">
           {/* Social login buttons */}
           <div className="space-y-3">
             <a
@@ -209,7 +209,7 @@ export default function LoginPage() {
                 type="email"
                 required
                 autoComplete="email"
-                className="block h-10 w-full rounded-lg border border-white/20 bg-black/20 px-3 text-sm text-white placeholder:text-white/40 focus:border-[#C9A84C] focus:outline-none focus:ring-2 focus:ring-[#C9A84C]"
+                className="block h-10 w-full rounded-lg border border-white/20 bg-black/20 px-3 text-sm text-white placeholder:text-white/40 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
@@ -223,13 +223,13 @@ export default function LoginPage() {
                 type="password"
                 required
                 autoComplete="current-password"
-                className="block h-10 w-full rounded-lg border border-white/20 bg-black/20 px-3 text-sm text-white placeholder:text-white/40 focus:border-[#C9A84C] focus:outline-none focus:ring-2 focus:ring-[#C9A84C]"
+                className="block h-10 w-full rounded-lg border border-white/20 bg-black/20 px-3 text-sm text-white placeholder:text-white/40 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
             <button
               type="submit"
-              className="flex h-10 w-full items-center justify-center rounded-lg bg-[#C9A84C] text-sm font-semibold text-black transition-colors hover:bg-[#e1c66a]"
+              className="flex h-10 w-full items-center justify-center rounded-lg bg-gold text-sm font-semibold text-black transition-colors hover:bg-gold-light"
             >
               Sign in
             </button>

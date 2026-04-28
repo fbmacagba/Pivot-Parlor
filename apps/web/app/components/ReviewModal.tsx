@@ -1,5 +1,5 @@
 // apps/web/app/components/ReviewModal.tsx
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 interface ReviewModalProps {
   shopId: string;
@@ -20,10 +20,10 @@ function StarPicker({ value, onChange }: { value: number; onChange: (n: number) 
           onMouseEnter={() => setHovered(n)}
           onMouseLeave={() => setHovered(0)}
           onClick={() => onChange(n)}
-          className="text-3xl transition-transform hover:scale-110 focus:outline-none"
+          className="rounded text-3xl outline-none transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100"
           aria-label={`${n} star${n !== 1 ? "s" : ""}`}
         >
-          <span className={(hovered || value) >= n ? "text-yellow-400" : "text-white/20"}>
+          <span className={(hovered || value) >= n ? "text-gold" : "text-white/20"}>
             ★
           </span>
         </button>
@@ -33,16 +33,38 @@ function StarPicker({ value, onChange }: { value: number; onChange: (n: number) 
 }
 
 export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose }: ReviewModalProps) {
+  const id = useId();
+  const titleId = `${id}-title`;
+  const nameId = `${id}-name`;
+  const bodyId = `${id}-body`;
+
   const [name, setName] = useState(customerName ?? "");
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
   const [state, setState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
+  useEffect(() => {
+    function onEscape(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [onClose]);
+
   async function submit() {
-    if (!name.trim()) { setErrorMsg("Please enter your name."); return; }
-    if (rating === 0) { setErrorMsg("Please select a rating."); return; }
-    if (!body.trim()) { setErrorMsg("Please write a short review."); return; }
+    if (!name.trim()) {
+      setErrorMsg("Please enter your name.");
+      return;
+    }
+    if (rating === 0) {
+      setErrorMsg("Please select a rating.");
+      return;
+    }
+    if (!body.trim()) {
+      setErrorMsg("Please write a short review.");
+      return;
+    }
     setErrorMsg("");
     setState("submitting");
 
@@ -50,7 +72,12 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
       const res = await fetch(`/api/shops/${shopId}/reviews`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_name: name.trim(), rating, body: body.trim(), booking_id: bookingId }),
+        body: JSON.stringify({
+          customer_name: name.trim(),
+          rating,
+          body: body.trim(),
+          booking_id: bookingId,
+        }),
       });
       const data = await res.json() as { success: boolean; error?: string };
       if (data.success) {
@@ -68,22 +95,35 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        role="presentation"
+        className="fixed inset-0 z-50 cursor-pointer bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
       {/* Modal */}
-      <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-50 mx-auto max-w-md rounded-2xl border border-white/10 bg-[#111] shadow-2xl overflow-hidden">
-
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="fixed inset-x-4 top-1/2 z-[51] mx-auto max-h-[90vh] max-w-md -translate-y-1/2 overflow-hidden overflow-y-auto rounded-2xl border border-white/10 bg-dark-100 shadow-2xl focus:outline-none"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
+        <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
           <div>
-            <h2 className="font-semibold text-white text-base">Leave a review</h2>
-            <p className="text-xs text-white/40 mt-0.5">{shopName}</p>
+            <h2 id={titleId} className="text-base font-semibold text-white">
+              Leave a review
+            </h2>
+            <p className="mt-0.5 text-xs text-white/40">{shopName}</p>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/50 transition-colors"
+            aria-label="Close"
+            className="flex h-10 min-h-[40px] w-10 min-w-[40px] items-center justify-center rounded-lg outline-none text-white/50 transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-gold"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -92,37 +132,43 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
         {/* Body */}
         {state === "success" ? (
           <div className="px-6 py-10 text-center">
-            <div className="text-5xl mb-4">⭐</div>
+            <div className="mb-4 text-5xl" aria-hidden>
+              ⭐
+            </div>
             <h3 className="text-lg font-semibold text-white">Thank you!</h3>
-            <p className="text-sm text-white/50 mt-2">Your review has been submitted.</p>
+            <p className="mt-2 text-sm text-white/50">Your review has been submitted.</p>
             <button
+              type="button"
               onClick={onClose}
-              className="mt-6 px-6 py-2.5 rounded-lg bg-yellow-400 text-black text-sm font-semibold hover:bg-yellow-300 transition-colors"
+              className="mt-6 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-black outline-none transition-colors hover:bg-gold-light focus-visible:ring-2 focus-visible:ring-gold-light focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100"
             >
               Close
             </button>
           </div>
         ) : (
-          <div className="px-6 py-5 space-y-5">
-
+          <div className="space-y-5 px-6 py-5">
             {/* Name */}
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">Your name</label>
+              <label htmlFor={nameId} className="mb-1.5 block text-sm font-medium text-white/80">
+                Your name
+              </label>
               <input
+                id={nameId}
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Jane Smith"
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-yellow-400/50"
+                autoComplete="name"
+                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder-white/30 focus:ring-2 focus:ring-gold/70"
               />
             </div>
 
             {/* Star rating */}
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-2">Rating</label>
+              <span className="mb-2 block text-sm font-medium text-white/80">Rating</span>
               <StarPicker value={rating} onChange={setRating} />
               {rating > 0 && (
-                <p className="text-xs text-white/40 mt-1">
+                <p className="mt-1 text-xs text-white/40">
                   {["", "Poor", "Fair", "Good", "Great", "Excellent"][rating]}
                 </p>
               )}
@@ -130,28 +176,34 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
 
             {/* Review text */}
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">Your review</label>
+              <label htmlFor={bodyId} className="mb-1.5 block text-sm font-medium text-white/80">
+                Your review
+              </label>
               <textarea
+                id={bodyId}
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 rows={4}
-                placeholder="Tell others about your experience…"
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-yellow-400/50 resize-none"
+                placeholder="Tell others about your experience..."
+                className="w-full resize-none rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder-white/30 focus:ring-2 focus:ring-gold/70"
               />
             </div>
 
             {/* Error */}
             {(state === "error" || errorMsg) && (
-              <p className="text-sm text-red-400">{errorMsg}</p>
+              <p role="alert" className="text-sm text-red-400">
+                {errorMsg}
+              </p>
             )}
 
             {/* Submit */}
             <button
-              onClick={submit}
+              type="button"
+              onClick={() => void submit()}
               disabled={state === "submitting"}
-              className="w-full py-3 rounded-lg bg-yellow-400 text-black font-semibold text-sm hover:bg-yellow-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full rounded-lg bg-gold py-3 text-sm font-semibold text-black outline-none transition-colors hover:bg-gold-light focus-visible:ring-2 focus-visible:ring-gold-light focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {state === "submitting" ? "Submitting…" : "Submit review"}
+              {state === "submitting" ? "Submitting..." : "Submit review"}
             </button>
           </div>
         )}

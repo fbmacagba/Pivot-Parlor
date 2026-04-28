@@ -64,7 +64,7 @@ export default function DevShopGenerationStatus() {
   return (
     <div className="max-w-2xl space-y-6">
       <div>
-        <Link to={`/dev/shops/${shopId}`} className="text-sm text-[#C9A84C] hover:underline">
+        <Link to={`/dev/shops/${shopId}`} className="text-sm text-gold hover:underline">
           ← Shop detail
         </Link>
       </div>
@@ -84,13 +84,13 @@ export default function DevShopGenerationStatus() {
               href={`https://pivotparlor.com/${doneSlug}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[#C9A84C] hover:underline"
+              className="inline-flex items-center gap-1 text-gold hover:underline"
             >
               View site <ExternalLink className="h-3.5 w-3.5" />
             </a>
           </div>
         ) : (
-          <div className="mt-4 flex items-center gap-3 text-sm text-[#C9A84C]">
+          <div className="mt-4 flex items-center gap-3 text-sm text-gold">
             <Loader2 className="h-5 w-5 animate-spin shrink-0" />
             <div>
               <p className="font-medium">Generation in progress…</p>

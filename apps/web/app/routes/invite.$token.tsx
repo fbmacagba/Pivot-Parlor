@@ -104,7 +104,7 @@ export default function InviteAccept() {
 
   if (loaderError || !invite) {
     return (
-      <div className="min-h-screen bg-[#0D0D0D] flex items-center justify-center px-4">
+      <div className="flex min-h-screen items-center justify-center bg-dark px-4">
         <div className="w-full max-w-md text-center space-y-4">
           <h1 className="font-heading text-2xl font-bold text-white">
             Invite not valid
@@ -114,7 +114,7 @@ export default function InviteAccept() {
           </p>
           <a
             href="/"
-            className="inline-block text-sm text-[#C9A84C] hover:underline"
+            className="inline-block text-sm text-gold hover:underline"
           >
             Return home
           </a>
@@ -124,16 +124,16 @@ export default function InviteAccept() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0D0D0D] flex items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center bg-dark px-4">
       <div className="w-full max-w-md space-y-8">
         {/* Logo */}
         <div className="text-center">
           <span className="font-heading text-2xl font-bold text-white tracking-wide">
-            Pivot <span className="text-[#C9A84C]">Parlor</span>
+            Pivot <span className="text-gold">Parlor</span>
           </span>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-[#111111] p-8 space-y-6">
+        <div className="space-y-6 rounded-2xl border border-white/10 bg-dark-100 p-8">
           {/* Header */}
           <div className="space-y-1">
             <h1 className="font-heading text-xl font-bold text-white">
@@ -174,7 +174,7 @@ export default function InviteAccept() {
                 required
                 autoComplete="name"
                 placeholder="Jane Smith"
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]"
+                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
@@ -193,7 +193,7 @@ export default function InviteAccept() {
                 minLength={8}
                 autoComplete="new-password"
                 placeholder="At least 8 characters"
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]"
+                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
@@ -211,13 +211,13 @@ export default function InviteAccept() {
                 required
                 autoComplete="new-password"
                 placeholder="Repeat password"
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-[#C9A84C]"
+                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full h-11 rounded-lg bg-[#C9A84C] text-black font-semibold text-sm hover:bg-[#D4B86A] transition-colors"
+              className="h-11 w-full rounded-lg bg-gold text-sm font-semibold text-black transition-colors hover:bg-gold-light"
             >
               Activate account →
             </button>

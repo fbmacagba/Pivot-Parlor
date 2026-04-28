@@ -97,7 +97,7 @@ export default function DevShopDetailIndex() {
         </dl>
       </section>
 
-      <section className="rounded-xl border border-[#C9A84C]/30 bg-[#C9A84C]/5 p-6">
+      <section className="rounded-xl border border-gold/30 bg-gold/5 p-6">
         <h2 className="font-heading text-lg font-semibold text-white">Regenerate site</h2>
         <p className="mt-1 text-sm text-white/50">
           Queues a new full site generation run with the saved inputs above (same as{" "}
@@ -122,7 +122,7 @@ export default function DevShopDetailIndex() {
       </section>
 
       <p className="text-sm text-white/40">
-        <Link to="/dev/shops" className="text-[#C9A84C] hover:underline">
+        <Link to="/dev/shops" className="text-gold hover:underline">
           Back to shops list
         </Link>
         {" · "}
@@ -130,7 +130,7 @@ export default function DevShopDetailIndex() {
           href={`https://pivotparlor.com/${shop.slug}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[#C9A84C] hover:underline"
+          className="text-gold hover:underline"
         >
           View live site
         </a>

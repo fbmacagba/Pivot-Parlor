@@ -46,8 +46,12 @@ export function DialogContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-full p-1 text-white/40 hover:text-white transition-colors">
-          <X className="h-4 w-4" />
+        <DialogPrimitive.Close
+          type="button"
+          aria-label="Close"
+          className="absolute right-4 top-4 rounded-full p-1 text-white/40 outline-none ring-offset-dark-100 transition-colors hover:text-white focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2"
+        >
+          <X className="h-4 w-4" aria-hidden />
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPortal>

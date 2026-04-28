@@ -13,7 +13,7 @@ export default function Pricing() {
       <div className="mx-auto max-w-4xl">
         <div className="text-center mb-16">
           <h1 className="font-heading text-5xl font-bold text-white">
-            We only earn <span className="gradient-text">when you earn</span>
+            We only earn <span className="text-gold">when you earn</span>
           </h1>
           <p className="mt-4 text-lg text-white/60">
             One-time £100 setup fee. No monthly fees. Then just 10% commission on completed bookings.

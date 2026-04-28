@@ -14,7 +14,7 @@ export function Footer() {
             </p>
             <p className="mt-3 max-w-sm text-sm text-white/60">
               AI-branded booking pages, staff scheduling, and automated reminders
-              for beauty parlours and barber shops. Zero monthly fees — 10%
+              for beauty parlours and barber shops. Zero monthly fees, 10%
               commission only.
             </p>
             <div className="mt-5 flex items-center gap-4">
@@ -22,7 +22,7 @@ export function Footer() {
                 href="https://www.linkedin.com/in/fbmacagba"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 border border-[#C9A84C] text-[#C9A84C] px-4 py-2 rounded-full text-sm hover:bg-[#C9A84C] hover:text-black transition-colors"
+                className="flex items-center gap-2 rounded-full border border-gold px-4 py-2 text-sm text-gold transition-colors hover:bg-gold hover:text-black"
               >
                 <LinkedInIcon /> DM us on LinkedIn
               </a>

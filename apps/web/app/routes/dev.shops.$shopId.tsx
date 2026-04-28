@@ -56,7 +56,7 @@ export default function DevShopLayout() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/dev/shops" className="text-sm text-[#C9A84C] hover:underline">
+        <Link to="/dev/shops" className="text-sm text-gold hover:underline">
           ← Shops
         </Link>
       </div>

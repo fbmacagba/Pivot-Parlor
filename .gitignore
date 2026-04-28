@@ -28,6 +28,13 @@ out/
 build/
 dist
 .pages-dist/
+
+# Stray JS next to Remix/TS sources (should only be .ts / .tsx in app/)
+apps/web/app/**/*.js
+
+# Local tooling (credentials / machine-specific)
+.vscode/mcp.json
+
 .wrangler/
 apps/worker/.wrangler-bundle-out/
 

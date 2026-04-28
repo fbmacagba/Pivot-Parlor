@@ -55,7 +55,7 @@ export default function ShopLanding() {
 
   if (!site) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center bg-[#0D0D0D] px-6 text-center">
+      <main className="flex min-h-screen flex-col items-center justify-center bg-dark px-6 text-center">
         <h1 className="font-heading text-3xl font-bold text-white sm:text-4xl">
           {shop.name}
         </h1>
@@ -64,7 +64,7 @@ export default function ShopLanding() {
         </p>
         <Link
           to="/"
-          className="mt-8 text-sm text-[#C9A84C] hover:underline"
+          className="mt-8 text-sm text-gold hover:underline"
         >
           Return home
         </Link>

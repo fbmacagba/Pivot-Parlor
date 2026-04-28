@@ -211,7 +211,7 @@ function RegenStepRow({
     state === "done" ? (
       <Check className="h-4 w-4 shrink-0 text-emerald-400" strokeWidth={2.5} aria-hidden />
     ) : state === "active" ? (
-      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#C9A84C]" aria-hidden />
+      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gold" aria-hidden />
     ) : state === "failed" ? (
       <XCircle className="h-4 w-4 shrink-0 text-red-400" aria-hidden />
     ) : (
@@ -961,9 +961,9 @@ export default function DevShops() {
                     name="type"
                     className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
                   >
-                    <option value="beauty_parlor" className="bg-[#0D0D0D]">Beauty parlour</option>
-                    <option value="barber_shop" className="bg-[#0D0D0D]">Barber shop</option>
-                    <option value="both" className="bg-[#0D0D0D]">Both</option>
+                    <option value="beauty_parlor" className="bg-dark">Beauty parlour</option>
+                    <option value="barber_shop" className="bg-dark">Barber shop</option>
+                    <option value="both" className="bg-dark">Both</option>
                   </select>
                 </div>
 
@@ -998,7 +998,7 @@ export default function DevShops() {
             href={`https://pivotparlor.com/${devGenDoneSlug}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[#C9A84C] hover:underline"
+            className="text-gold hover:underline"
           >
             View Site →
           </a>
@@ -1006,7 +1006,7 @@ export default function DevShops() {
       )}
 
       {devGenJob && (
-        <div className="mb-4 rounded-lg border border-[#C9A84C]/30 bg-[#C9A84C]/10 px-4 py-3 text-sm text-[#C9A84C]">
+        <div className="mb-4 rounded-lg border border-gold/30 bg-gold/10 px-4 py-3 text-sm text-gold">
           Site generation in progress… This page will update when the pipeline finishes (research → build → audit).
         </div>
       )}
@@ -1256,7 +1256,7 @@ export default function DevShops() {
                                 <div className="mb-3 flex aspect-video max-h-40 flex-col items-center justify-center gap-2 rounded-lg bg-white/5">
                                   {genImageLoading === "logo" ? (
                                     <>
-                                      <Loader2 className="h-8 w-8 animate-spin text-[#C9A84C]" />
+                                      <Loader2 className="h-8 w-8 animate-spin text-gold" />
                                       <span className="text-xs text-white/55">Generating logo…</span>
                                     </>
                                   ) : expLogoPreview ? (
@@ -1344,7 +1344,7 @@ export default function DevShops() {
                                 <div className="mb-3 flex aspect-video max-h-40 flex-col items-center justify-center gap-2 overflow-hidden rounded-lg bg-white/5">
                                   {genImageLoading === "hero" ? (
                                     <>
-                                      <Loader2 className="h-8 w-8 animate-spin text-[#C9A84C]" />
+                                      <Loader2 className="h-8 w-8 animate-spin text-gold" />
                                       <span className="text-xs text-white/55">Generating hero…</span>
                                     </>
                                   ) : expHeroPreview ? (
@@ -1462,7 +1462,7 @@ export default function DevShops() {
                             showExpandedGenProgressUi &&
                             (expandedGenJob?.shopId === shop.id ||
                               (expandedGenFetcher.state === "submitting" && expandedShopId === shop.id)) ? (
-                              <div className="rounded-xl border border-[#C9A84C]/30 bg-[#C9A84C]/10 p-4">
+                              <div className="rounded-xl border border-gold/30 bg-gold/10 p-4">
                                 <h4 className="font-medium text-white">
                                   Generating site for {expandedGenJob?.shopName ?? shop.name}
                                 </h4>
@@ -1576,7 +1576,7 @@ export default function DevShops() {
                 className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
               >
                 {TEXT_MODEL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value} className="bg-[#0D0D0D]">
+                  <option key={o.value} value={o.value} className="bg-dark">
                     {o.label}
                   </option>
                 ))}
@@ -1591,7 +1591,7 @@ export default function DevShops() {
                 className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
               >
                 {IMAGE_MODEL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value} className="bg-[#0D0D0D]">
+                  <option key={o.value} value={o.value} className="bg-dark">
                     {o.label}
                   </option>
                 ))}

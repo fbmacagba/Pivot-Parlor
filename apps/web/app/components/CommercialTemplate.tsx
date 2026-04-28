@@ -160,7 +160,13 @@ export default function CommercialTemplate({
         <div className="absolute inset-0 -z-0">
           {heroSrc ? (
             <>
-              <img src={heroSrc} alt="" className="absolute inset-0 h-full w-full scale-105 object-cover" loading="eager" decoding="async" />
+              <img
+                src={heroSrc}
+                alt={`${site.shop_name} hero photo`}
+                className="absolute inset-0 h-full w-full scale-105 object-cover"
+                loading="eager"
+                decoding="async"
+              />
               <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-black/65 to-black/90" aria-hidden />
               <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-black/40" aria-hidden />
             </>
@@ -204,27 +210,17 @@ export default function CommercialTemplate({
           </div>
         </div>
 
-        <button type="button" className="absolute bottom-6 left-1/2 z-10 hidden -translate-x-1/2 animate-bounce md:block"
+        <button type="button" className="absolute bottom-6 left-1/2 z-10 hidden -translate-x-1/2 md:block"
           aria-label="Scroll down" onClick={() => scrollToId("stats-bar")}>
-          <span className="text-3xl text-white/70">↓</span>
+          <span className="text-3xl text-white/60 transition hover:text-white/90">↓</span>
         </button>
       </section>
 
-      {/* Stats bar */}
-      <section id="stats-bar" className="scroll-mt-24 border-y border-white/10 bg-black/55 py-10 backdrop-blur-sm">
-        <div className="mx-auto grid max-w-7xl gap-8 px-4 sm:grid-cols-3 md:px-6">
-          <div className="text-center sm:text-left">
-            <p className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold tabular-nums text-[color:var(--color-accent)]">{statsHappy}</p>
-            <p className="mt-1 text-sm font-medium text-white/65">Happy Clients</p>
-          </div>
-          <div className="text-center">
-            <p className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold tabular-nums text-[color:var(--color-accent)]">{statsRating}★</p>
-            <p className="mt-1 text-sm font-medium text-white/65">Average Rating</p>
-          </div>
-          <div className="text-center sm:text-right">
-            <p className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--color-accent)]">Same-Day</p>
-            <p className="mt-1 text-sm font-medium text-white/65">Slots Available</p>
-          </div>
+      {/* Trust line (replaces hero-metric strip) */}
+      <section id="stats-bar" className="scroll-mt-24 border-y border-white/10 bg-white/[0.03] py-6">
+        <div className="mx-auto max-w-7xl px-4 text-center text-sm text-white/70 md:px-6 md:text-base">
+          <span className="font-semibold text-[color:var(--color-accent)]">{statsRating}★</span>
+          {" "}average · {statsHappy} happy clients · Same-day slots when available
         </div>
       </section>
 
@@ -268,7 +264,11 @@ export default function CommercialTemplate({
                   <article key={svc.id} className="group flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-xl shadow-black/25 transition hover:border-[color:var(--color-accent)]/35">
                     <div className="relative aspect-[4/3] overflow-hidden bg-[color:var(--color-accent)]/15">
                       {svc.image_url ? (
-                        <img src={svc.image_url} alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+                        <img
+                          src={svc.image_url}
+                          alt={svc.name}
+                          className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+                        />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center" aria-hidden>
                           <span className="text-4xl text-[color:var(--color-accent)] drop-shadow-[0_0_18px_rgba(255,255,255,0.12)]">✦</span>
@@ -307,7 +307,7 @@ export default function CommercialTemplate({
           <div className={`grid gap-12 lg:gap-16 ${aboutText ? "lg:grid-cols-12" : "lg:grid-cols-1"}`}>
             {aboutText ? (
               <div className="lg:col-span-7">
-                <div className="border-l-4 border-[color:var(--color-accent)] pl-6 md:pl-8">
+                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
                   <h2 className="pp-heading text-[clamp(1.5rem,3.5vw,2rem)] font-bold text-white">Why book with us</h2>
                   <p className="mt-4 whitespace-pre-line text-base leading-relaxed text-white/75 md:text-lg">{aboutText}</p>
                 </div>
@@ -316,8 +316,8 @@ export default function CommercialTemplate({
             <ul className={`flex flex-col gap-8 lg:justify-center ${aboutText ? "lg:col-span-5" : "mx-auto w-full max-w-xl"}`}>
               {[
                 { title: "Expert Staff", body: "Skilled professionals who listen and deliver every time.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.847a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /> },
-                { title: "Easy Booking", body: "Pick a service and time in seconds—no phone tag.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5a2.25 2.25 0 0 0 2.25-2.25m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5a2.25 2.25 0 0 1 2.25 2.25v7.5" /> },
-                { title: "Guaranteed Satisfaction", body: "We stand behind every visit—your confidence matters.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" /> },
+                { title: "Easy Booking", body: "Pick a service and time in seconds. No phone tag.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5a2.25 2.25 0 0 0 2.25-2.25m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5a2.25 2.25 0 0 1 2.25 2.25v7.5" /> },
+                { title: "Guaranteed Satisfaction", body: "We stand behind every visit. Your confidence matters.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" /> },
               ].map((pillar) => (
                 <li key={pillar.title} className="flex gap-4">
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-accent)]/20 text-[color:var(--color-accent)]">
@@ -345,7 +345,15 @@ export default function CommercialTemplate({
                 return (
                   <article key={m.id} className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-5 text-center">
                     <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[color:var(--color-accent)]/25 text-xl font-bold text-[color:var(--color-accent)]">
-                      {m.avatar_url ? <img src={m.avatar_url} alt="" className="h-full w-full object-cover" /> : initials}
+                      {m.avatar_url ? (
+                        <img
+                          src={m.avatar_url}
+                          alt={`Photo of ${m.display_name}`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        initials
+                      )}
                     </div>
                     <h3 className="mt-4 pp-heading text-lg font-semibold">{m.display_name}</h3>
                     {m.speciality && <p className="text-sm text-[color:var(--color-accent)]">{m.speciality}</p>}

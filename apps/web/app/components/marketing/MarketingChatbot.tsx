@@ -179,7 +179,7 @@ export function MarketingChatbot() {
         )}
         <button type="button" aria-label={open ? "Close chat" : "Chat with Pip"}
           onClick={() => setOpen((v) => !v)}
-          className="relative flex h-14 w-14 items-center justify-center rounded-full transition-all hover:scale-105 active:scale-95"
+          className="relative flex h-14 w-14 items-center justify-center rounded-full outline-none transition-all hover:scale-105 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark active:scale-95"
           style={{
             background: open ? DARK_200 : GOLD_GRAD,
             boxShadow: open ? "none" : `0 4px 20px rgba(201,168,76,0.5)`,
@@ -193,7 +193,7 @@ export function MarketingChatbot() {
 
       {/* ── Chat window ── */}
       {open && (
-        <div role="dialog" aria-label="Chat with Pip"
+        <div role="dialog" aria-modal="true" aria-label="Chat with Pip"
           className="
             fixed z-50 flex flex-col overflow-hidden
             inset-0
@@ -226,7 +226,7 @@ export function MarketingChatbot() {
               <p className="text-xs" style={{ color: GOLD }}>Pivot Parlor · Active now</p>
             </div>
             <button type="button" onClick={() => setOpen(false)} aria-label="Close chat"
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-white/10">
+              className="flex h-9 w-9 items-center justify-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark">
               <ChevronDown className="h-5 w-5 sm:hidden" style={{ color: "rgba(255,255,255,0.6)" }} />
               <X className="h-4 w-4 hidden sm:block text-white/50" />
             </button>
@@ -257,6 +257,8 @@ export function MarketingChatbot() {
             onClick={handleMessagesAreaTap}
             className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-4 py-3"
             style={{ minHeight: 260, maxHeight: 360 }}
+            aria-live="polite"
+            aria-relevant="additions"
           >
             {messages.map((msg, i) => {
               const isUser        = msg.role === "user";
@@ -331,9 +333,9 @@ export function MarketingChatbot() {
           {/* Input bar */}
           <div className="flex items-center gap-2 px-3 py-2.5 shrink-0"
             style={{ borderTop: `1px solid ${DARK_200}` }}>
-            <button type="button"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/10">
-              <Scissors className="h-4 w-4" style={{ color: GOLD }} />
+            <button type="button" aria-label="Pip"
+              className="flex h-11 min-h-[44px] w-11 min-w-[44px] shrink-0 items-center justify-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark">
+              <Scissors className="h-4 w-4" style={{ color: GOLD }} aria-hidden />
             </button>
             <div className="relative flex flex-1 items-center rounded-full px-3 py-1.5"
               style={{ background: DARK_200 }}
@@ -356,10 +358,12 @@ export function MarketingChatbot() {
                 readOnly={!inputFocused}
                 placeholder="Aa"
                 disabled={loading}
-                className="flex-1 bg-transparent text-sm focus:outline-none disabled:opacity-60"
+                aria-label="Message"
+                className="flex-1 rounded-md bg-transparent px-0.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark-200 disabled:opacity-60"
                 style={{ color: "#fff", minWidth: 0 }}
               />
-              <button type="button" className="ml-1 shrink-0"
+              <button type="button" className="ml-1 flex h-11 min-h-[44px] w-11 min-w-[44px] shrink-0 items-center justify-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark-200"
+                aria-label="Focus message field"
                 onClick={() => {
                   if (inputRef.current) {
                     inputRef.current.readOnly = false;
@@ -367,21 +371,22 @@ export function MarketingChatbot() {
                     setInputFocused(true);
                   }
                 }}>
-                <Smile className="h-4 w-4" style={{ color: GOLD }} />
+                <Smile className="h-4 w-4" style={{ color: GOLD }} aria-hidden />
               </button>
             </div>
             {input.trim()
               ? (
                 <button type="button" onClick={() => sendMessage(input)}
-                  disabled={loading} aria-label="Send"
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all hover:opacity-85 disabled:opacity-40 active:scale-90"
+                  disabled={loading} aria-label="Send message"
+                  className="flex h-11 min-h-[44px] w-11 min-w-[44px] shrink-0 items-center justify-center rounded-full outline-none transition-all hover:opacity-85 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark disabled:opacity-40 active:scale-90"
                   style={{ background: GOLD_GRAD }}>
-                  <Send className="h-4 w-4" style={{ color: DARK }} />
+                  <Send className="h-4 w-4" style={{ color: DARK }} aria-hidden />
                 </button>
               ) : (
                 <button type="button" onClick={() => sendMessage("👍")}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/10 active:scale-90">
-                  <ThumbsUp className="h-5 w-5" style={{ color: GOLD }} />
+                  aria-label="Send thumbs up"
+                  className="flex h-11 min-h-[44px] w-11 min-w-[44px] shrink-0 items-center justify-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark active:scale-90">
+                  <ThumbsUp className="h-5 w-5" style={{ color: GOLD }} aria-hidden />
                 </button>
               )
             }
@@ -411,6 +416,23 @@ export function MarketingChatbot() {
         @keyframes pip-bounce {
           0%, 60%, 100% { transform: translateY(0); }
           30%           { transform: translateY(-4px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          @keyframes pip-ping {
+            0%, 100% { transform: scale(1); opacity: 0; }
+          }
+          @keyframes pip-slide-up {
+            from, to { opacity: 1; transform: none; }
+          }
+          @keyframes pip-fade-in {
+            from, to { opacity: 1; transform: none; }
+          }
+          @keyframes pip-bounce {
+            0%, 100% { transform: none; }
+          }
+          @keyframes pip-mobile-in {
+            from, to { transform: none; }
+          }
         }
         @media (max-width: 639px) {
           [role="dialog"][aria-label="Chat with Pip"] {
