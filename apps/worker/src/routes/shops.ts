@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import Stripe from "stripe";
 import type { D1Database } from "@cloudflare/workers-types";
 import type { Bindings } from "../bindings.js";
@@ -846,10 +846,13 @@ shops.get("/:shopId/owner-details", authMiddleware, requireRole("developer"), as
   });
 });
 
-// ─── DELETE /api/shops/:shopId — developer only (cascade-related cleanup) ───
+// ─── DELETE|POST /api/shops/:shopId — developer only (cascade-related cleanup) ───
+// POST …/delete matches the Remix BFF pattern (same as /activate) so deletes work even when
+// DELETE is not routed or an older Worker build is missing the DELETE handler.
 
-shops.delete("/:shopId", authMiddleware, requireRole("developer"), async (c) => {
+async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
   const param = c.req.param("shopId");
+  if (!param) return c.json({ success: false, error: "Missing shop id" }, 400);
   const shop =
     (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
@@ -883,7 +886,10 @@ shops.delete("/:shopId", authMiddleware, requireRole("developer"), async (c) => 
     const msg = e instanceof Error ? e.message : "Delete failed";
     return c.json({ success: false, error: msg }, 500);
   }
-});
+}
+
+shops.delete("/:shopId", authMiddleware, requireRole("developer"), deleteShopDeveloper);
+shops.post("/:shopId/delete", authMiddleware, requireRole("developer"), deleteShopDeveloper);
 
 // ─── POST /api/shops/:shopId/activate — developer only ───
 

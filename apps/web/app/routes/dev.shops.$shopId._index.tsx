@@ -248,9 +248,7 @@ export default function DevShopDetailIndex() {
               <Button type="button" variant="ghost" size="sm" onClick={() => setDeleteDialogOpen(false)}>
                 Cancel
               </Button>
-              <deleteShopFetcher.Form method="post" action="/dev/shops">
-                <input type="hidden" name="_action" value="delete-shop" />
-                <input type="hidden" name="shopId" value={shop.id} />
+              <deleteShopFetcher.Form method="post" action={`/api/shops/${shop.id}/delete`}>
                 <Button
                   type="submit"
                   size="sm"

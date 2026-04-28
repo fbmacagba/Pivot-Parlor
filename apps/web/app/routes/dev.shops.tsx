@@ -300,20 +300,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
   }
 
-  if (actionType === "delete-shop") {
-    const shopId = form.get("shopId")?.toString();
-    if (!shopId) {
-      return json({ success: false, error: "Missing shopId" } as const);
-    }
-    try {
-      await api.del(`/api/shops/${shopId}`);
-      return json({ success: true as const, deletedShopId: shopId });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Delete failed";
-      return json({ success: false as const, error: msg });
-    }
-  }
-
   try {
     const result = await api.post<OnboardResult>("/api/shops", {
       name: form.get("name"),
@@ -1013,18 +999,20 @@ export default function DevShops() {
                 <span className="font-medium text-white">{shopToDelete.name}</span> ({shopToDelete.slug})? This
                 removes onboarding data and linked records. This cannot be undone.
               </p>
-              {deleteShopFetcher.data?.success === false && deleteShopFetcher.data?.error ? (
+              {deleteShopFetcher.data &&
+              typeof deleteShopFetcher.data === "object" &&
+              deleteShopFetcher.data.success === false &&
+              "error" in deleteShopFetcher.data &&
+              typeof (deleteShopFetcher.data as { error?: string }).error === "string" ? (
                 <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                  {deleteShopFetcher.data.error}
+                  {(deleteShopFetcher.data as { error: string }).error}
                 </div>
               ) : null}
               <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="ghost" size="sm" onClick={() => setShopToDelete(null)}>
                   Cancel
                 </Button>
-                <deleteShopFetcher.Form method="post">
-                  <input type="hidden" name="_action" value="delete-shop" />
-                  <input type="hidden" name="shopId" value={shopToDelete.id} />
+                <deleteShopFetcher.Form method="post" action={`/api/shops/${shopToDelete.id}/delete`}>
                   <Button
                     type="submit"
                     size="sm"
