@@ -266,7 +266,11 @@ export default function AdminBookings() {
 
   function updateFilter(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
-    value ? next.set(key, value) : next.delete(key);
+    if (value) {
+      next.set(key, value);
+    } else {
+      next.delete(key);
+    }
     setSearchParams(next, { replace: true });
   }
 

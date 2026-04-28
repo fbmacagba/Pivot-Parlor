@@ -144,7 +144,7 @@ export default function WalkIn() {
         {step === "serving" && (
           <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-8 text-center">
             <div className="text-5xl mb-4">💈</div>
-            <h2 className="font-heading text-xl font-bold text-white">It's your turn!</h2>
+            <h2 className="font-heading text-xl font-bold text-white">It&apos;s your turn!</h2>
             <p className="text-sm text-white/60 mt-2">Please make your way to the counter.</p>
           </div>
         )}

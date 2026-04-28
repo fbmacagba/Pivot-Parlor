@@ -1,4 +1,4 @@
-import { Form, useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
+import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { useEffect, useState } from "react";
@@ -85,7 +85,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export default function StaffBookingsAvailability() {
-  const { bookings, schedule, timeOff, filter, tab } = useLoaderData<typeof loader>();
+  const { bookings, schedule, timeOff, filter } = useLoaderData<typeof loader>();
   const [params, setParams] = useSearchParams();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const [toast, setToast] = useState<{ type: "success"|"error"; text: string } | null>(null);

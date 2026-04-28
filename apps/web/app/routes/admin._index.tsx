@@ -1,7 +1,7 @@
 import { useLoaderData, Link } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { Calendar, TrendingUp, Users, Clock, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
+import { Calendar, TrendingUp, Users, Clock, ArrowRight, CheckCircle } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { StatCard } from "~/components/dashboards/StatCard";

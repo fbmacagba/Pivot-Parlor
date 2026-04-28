@@ -1,4 +1,4 @@
-import { Link, useLoaderData, useSearchParams } from "@remix-run/react";
+import { Link, useLoaderData } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { CheckCircle } from "lucide-react";

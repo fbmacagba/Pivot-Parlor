@@ -190,8 +190,6 @@ export default function AdminSettings() {
   const [yt, setYt] = useState(settings.youtube_url ?? "");
   const [wa, setWa] = useState(settings.whatsapp_url ?? "");
   const [li, setLi] = useState(settings.linkedin_url ?? "");
-  const [gbp, setGbp] = useState(settings.google_business_url ?? "");
-  const [showGbp, setShowGbp] = useState(settings.show_google_business ?? false);
   const [confirmEmail, setConfirmEmail] = useState(settings.booking_confirmation_email !== false);
   const [reminderEmail, setReminderEmail] = useState(settings.booking_reminder_email !== false);
   const [reminderHours, setReminderHours] = useState(settings.reminder_hours_before ?? 24);

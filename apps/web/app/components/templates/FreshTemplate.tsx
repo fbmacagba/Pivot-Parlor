@@ -7,8 +7,6 @@ export function FreshTemplate({ shop, site }: SiteTemplateProps) {
     site.font_heading ? `"${site.font_heading}", sans-serif` : '"DM Sans", sans-serif';
   const fontBody =
     site.font_body ? `"${site.font_body}", sans-serif` : '"Nunito", sans-serif';
-  const primary = site.color_primary || "#e8f5e9";
-  const accent = site.color_accent || "#fce4ec";
 
   return (
     <main

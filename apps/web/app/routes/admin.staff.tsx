@@ -139,19 +139,19 @@ function EditStaffModal({
   onClose: () => void;
 }) {
   const fetcher = useFetcher<typeof action>();
-  const nav = useNavigation();
   const [selectedServices, setSelectedServices] = useState<Set<string>>(
     new Set((member.services ?? []).map((s) => s.id))
   );
 
   useEffect(() => {
     if (fetcher.data && "ok" in fetcher.data && fetcher.data.ok) onClose();
-  }, [fetcher.data]);
+  }, [fetcher.data, onClose]);
 
   function toggleService(id: string) {
     setSelectedServices((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }

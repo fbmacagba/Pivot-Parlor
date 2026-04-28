@@ -127,11 +127,10 @@ export function CommercialShopChrome({
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
   const [chatDraft, setChatDraft] = useState("");
-  const [chatSending, setChatSending] = useState(false);
-  const turnstileRef = useRef<HTMLDivElement>(null);
-  const turnstileWidgetId = useRef<string | null>(null);
   // Track whether the visitor has interacted (sent a message or tapped a chip)
   const [chatStarted, setChatStarted] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const turnstileWidgetId = useRef<string | null>(null);
 
   // Turnstile invisible widget — obtain a fresh token before each chat message
   useEffect(() => {
@@ -212,6 +211,7 @@ export function CommercialShopChrome({
     setChatOpen(false);
     setChatMessages([]);
     setChatStarted(false);
+    setChatSending(false);
   };
 
   const bookingEnabled = settings.booking_enabled !== false;

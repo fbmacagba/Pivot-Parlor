@@ -2,7 +2,7 @@
 import { useLoaderData, useFetcher } from "@remix-run/react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 
@@ -57,14 +57,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
   return json({ ok: false }, 400);
 }
 
-const STATUS_META: Record<string, { label: string; bg: string; text: string }> = {
-  waiting: { label: "Waiting",  bg: "bg-amber-500/10",  text: "text-amber-400"  },
-  serving: { label: "Serving",  bg: "bg-gold/10",       text: "text-gold"       },
-  served:  { label: "Served",   bg: "bg-emerald-500/10",text: "text-emerald-400"},
-  skipped: { label: "Skipped",  bg: "bg-white/5",       text: "text-white/40"   },
-  removed: { label: "Removed",  bg: "bg-red-500/10",    text: "text-red-400"    },
-};
-
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (mins < 1) return "just now";
@@ -88,7 +80,6 @@ export default function AdminQueue() {
   const fetcher = useFetcher<{ ok: boolean }>();
   const [queue, setQueue] = useState<QueueEntry[]>(initialQueue);
   const [showQR, setShowQR] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(new Date());
 
   const walkinUrl = typeof window !== "undefined"
     ? `${window.location.origin}/${shopSlug}/walkin`
@@ -101,7 +92,7 @@ export default function AdminQueue() {
         const res = await fetch(`/api/shops/${shopId}/walkin-poll`);
         if (res.ok) {
           const data = await res.json() as { data?: QueueEntry[] };
-          if (data.data) { setQueue(data.data); setLastRefresh(new Date()); }
+          if (data.data) setQueue(data.data);
         }
       } catch { /* non-fatal */ }
     };

@@ -6,7 +6,6 @@ import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 
-const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"] as const;
 const DAY_LABELS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 
 interface StaffMember { id: string; display_name: string; user_email: string }

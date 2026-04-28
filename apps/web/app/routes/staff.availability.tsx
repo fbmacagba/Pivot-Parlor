@@ -3,6 +3,7 @@
 import { redirect } from "@remix-run/cloudflare";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 
-export function loader(_: LoaderFunctionArgs) {
+export function loader(args: LoaderFunctionArgs) {
+  void args;
   return redirect("/staff/bookings?tab=availability");
 }

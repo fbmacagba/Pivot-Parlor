@@ -53,9 +53,11 @@ export function MarketingChatbot() {
   const messagesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => { if (!open) setShowTeaser(true); }, 4000);
+    const t = setTimeout(() => {
+      if (!open) setShowTeaser(true);
+    }, 4000);
     return () => clearTimeout(t);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- teaser delay once on mount only (not when `open` changes)
 
   useEffect(() => {
     if (open) { setShowTeaser(false); setTeaserDismissed(true); }

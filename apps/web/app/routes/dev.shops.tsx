@@ -426,7 +426,7 @@ export default function DevShops() {
     setRegenTextModel(DEFAULT_TEXT_MODEL);
     setRegenImageModel(DEFAULT_IMAGE_MODEL);
     regenPrefsFetcher.load(`/api/shops/${regenShopId}/generation-prefs`);
-  }, [regenShopId]);
+  }, [regenShopId]); // eslint-disable-line react-hooks/exhaustive-deps -- regenPrefsFetcher.load is stable; only shop id matters
 
   const generateShopImageWithAi = useCallback(
     async (shopId: string, type: "logo" | "hero") => {
