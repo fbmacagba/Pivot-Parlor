@@ -20,8 +20,8 @@
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",
     "@types/node": "^22.15.3",
-    "@types/react": "19.2.2",
-    "@types/react-dom": "19.2.2",
+    "@types/react": "18.3.28",
+    "@types/react-dom": "18.3.7",
     "eslint": "^9.39.1",
     "typescript": "5.9.2"
   }
