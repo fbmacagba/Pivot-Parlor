@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "apps/web/**"
+      - "packages/types/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/deploy-web.yml"
 
 jobs:
