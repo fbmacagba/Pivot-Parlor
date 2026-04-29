@@ -7,7 +7,7 @@ import { json, redirect } from "@remix-run/cloudflare";
 import { useActionData, useLoaderData } from "@remix-run/react";
 import { invitePageSendsE2eMock } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
-import { buildSessionCookie } from "~/lib/auth";
+import { sessionCookieHeaders } from "~/lib/auth";
 
 interface InviteData {
   email: string;
@@ -78,7 +78,6 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     );
 
     const isProd = env.API_URL.includes("pivotparlor.com");
-    const cookie = buildSessionCookie(result.token, isProd);
 
     // Route by role — admin goes to template selection first
     const dashMap: Record<string, string> = {
@@ -89,7 +88,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     const destination = dashMap[result.role] ?? "/";
 
     throw redirect(destination, {
-      headers: { "Set-Cookie": cookie },
+      headers: sessionCookieHeaders(result.token, isProd),
     });
   } catch (err) {
     if (err instanceof Response) throw err;

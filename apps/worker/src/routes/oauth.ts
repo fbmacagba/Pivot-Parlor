@@ -92,7 +92,24 @@ async function upsertOAuthUser(
 
 function cookieHeader(token: string, isProd: boolean): string {
   const maxAge = SESSION_TTL_S;
-  return `pp_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Lax${isProd ? "; Secure" : ""}`;
+  const domain = isProd ? "; Domain=.pivotparlor.com" : "";
+  return `pp_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Lax${isProd ? "; Secure" : ""}${domain}`;
+}
+
+function clearHostOnlySessionCookie(isProd: boolean): string {
+  return `pp_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
+}
+
+/** Append Set-Cookie(s), then caller returns c.redirect. */
+function setSessionCookiesForRedirect(
+  c: { header: (name: string, value: string | undefined, init?: { append?: boolean }) => void },
+  token: string,
+  isProd: boolean
+): void {
+  if (isProd) {
+    c.header("Set-Cookie", clearHostOnlySessionCookie(true), { append: true });
+  }
+  c.header("Set-Cookie", cookieHeader(token, isProd), { append: true });
 }
 
 function dashboardForRole(role: string): string {
@@ -165,10 +182,9 @@ oauth.get("/google/callback", async (c) => {
 
   const token = await issueToken(c.env, user.id, user.role, user.shop_id);
   const dest = redirectTo && redirectTo !== "/" ? redirectTo : dashboardForRole(user.role);
-
-  return c.redirect(dest, 302, {
-    "Set-Cookie": cookieHeader(token, isProduction(c.env)),
-  } as Record<string, string>);
+  const isProd = isProduction(c.env);
+  setSessionCookiesForRedirect(c, token, isProd);
+  return c.redirect(dest, 302);
 });
 
 // ─── FACEBOOK ─────────────────────────────────────────────────────────────────
@@ -221,10 +237,9 @@ oauth.get("/facebook/callback", async (c) => {
 
   const token = await issueToken(c.env, user.id, user.role, user.shop_id);
   const dest = redirectTo && redirectTo !== "/" ? redirectTo : dashboardForRole(user.role);
-
-  return c.redirect(dest, 302, {
-    "Set-Cookie": cookieHeader(token, isProduction(c.env)),
-  } as Record<string, string>);
+  const isProd = isProduction(c.env);
+  setSessionCookiesForRedirect(c, token, isProd);
+  return c.redirect(dest, 302);
 });
 
 // ─── LINKEDIN ─────────────────────────────────────────────────────────────────
@@ -282,10 +297,9 @@ oauth.get("/linkedin/callback", async (c) => {
 
   const token = await issueToken(c.env, user.id, user.role, user.shop_id);
   const dest = redirectTo && redirectTo !== "/" ? redirectTo : dashboardForRole(user.role);
-
-  return c.redirect(dest, 302, {
-    "Set-Cookie": cookieHeader(token, isProduction(c.env)),
-  } as Record<string, string>);
+  const isProd = isProduction(c.env);
+  setSessionCookiesForRedirect(c, token, isProd);
+  return c.redirect(dest, 302);
 });
 
 export default oauth;

@@ -6,7 +6,7 @@ import type {
 import { json, redirect } from "@remix-run/cloudflare";
 import { useActionData, useLoaderData } from "@remix-run/react";
 import { createApiClient } from "~/lib/api";
-import { buildSessionCookie, getSessionToken } from "~/lib/auth";
+import { getSessionToken, sessionCookieHeaders } from "~/lib/auth";
 
 export const meta: MetaFunction = () => [{ title: "Sign in | Pivot Parlor" }];
 
@@ -79,9 +79,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const isProd =
       (env.APP_DOMAIN ?? "").trim() !== "" && env.APP_DOMAIN !== "localhost";
 
-    return redirect(dest, {
-      headers: { "Set-Cookie": buildSessionCookie(result.token, isProd) },
-    });
+    return redirect(dest, { headers: sessionCookieHeaders(result.token, isProd) });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Invalid email or password.";
     return json({ error: msg }, { status: 401 });

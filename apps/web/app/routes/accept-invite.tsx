@@ -2,7 +2,7 @@ import { Form, useActionData, useNavigation, useSearchParams } from "@remix-run/
 import type { ActionFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
-import { buildSessionCookie, decodeToken } from "~/lib/auth";
+import { decodeToken, sessionCookieHeaders } from "~/lib/auth";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 
@@ -22,8 +22,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
     });
     const payload = decodeToken(result.token);
     const dest = payload?.role === "admin" ? "/admin" : "/staff";
+    const isProd = env.APP_DOMAIN !== "localhost";
     return redirect(dest, {
-      headers: { "Set-Cookie": buildSessionCookie(result.token, env.APP_DOMAIN !== "localhost") },
+      headers: sessionCookieHeaders(result.token, isProd),
     });
   } catch (err: unknown) {
     return json({ error: err instanceof Error ? err.message : "Invalid invite" }, { status: 400 });

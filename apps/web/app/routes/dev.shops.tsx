@@ -451,7 +451,19 @@ export default function DevShops() {
       setGenImageError(null);
       setGenImageLoading(type);
       try {
-        const res = await fetch(`/api/shops/${shopId}/generate-image?_data=routes%2Fapi.shops.%24shopId.generate-image`, {
+        /**
+         * Long OpenRouter image runs can exceed Cloudflare Pages (Remix BFF) wall-clock limits when
+         * proxied through /api/... On production *.pivotparlor.com, pp_session is scoped to
+         * Domain=.pivotparlor.com so the browser can call the Worker directly with credentials.
+         */
+        const base = (apiUrl ?? "").trim().replace(/\/$/, "");
+        const onPivotParlorHost =
+          typeof window !== "undefined" &&
+          /^(?:[a-z0-9-]+\.)*pivotparlor\.com$/i.test(window.location.hostname);
+        const path = `api/shops/${encodeURIComponent(shopId)}/generate-image`;
+        const url =
+          onPivotParlorHost && base ? `${base}/${path}` : `/${path}`;
+        const res = await fetch(url, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },

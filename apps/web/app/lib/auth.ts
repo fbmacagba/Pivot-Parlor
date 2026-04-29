@@ -153,10 +153,27 @@ export async function requireRole(
 /** Build a Set-Cookie header to store the JWT. */
 export function buildSessionCookie(token: string, isProd = false): string {
   const maxAge = 60 * 60 * 24 * 7; // 7 days
-  return `pp_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Lax${isProd ? "; Secure" : ""}`;
+  const domain = isProd ? "; Domain=.pivotparlor.com" : "";
+  return `pp_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Max-Age=${maxAge}; SameSite=Lax${isProd ? "; Secure" : ""}${domain}`;
 }
 
 /** Build a Set-Cookie header to clear the session. */
-export function clearSessionCookie(): string {
-  return "pp_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax";
+export function clearSessionCookie(isProd = false): string {
+  const domain = isProd ? "; Domain=.pivotparlor.com" : "";
+  return `pp_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}${domain}`;
+}
+
+/** Clear host-only `pp_session` on the current site origin (no Domain=). Use with domain-scoped cookie updates. */
+export function clearHostOnlySessionCookie(isProd = false): string {
+  return `pp_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax${isProd ? "; Secure" : ""}`;
+}
+
+/** Multiple Set-Cookie headers for a new session in production (avoid duplicate host-only + domain cookies). */
+export function sessionCookieHeaders(token: string, isProd = false): Headers {
+  const h = new Headers();
+  if (isProd) {
+    h.append("Set-Cookie", clearHostOnlySessionCookie(true));
+  }
+  h.append("Set-Cookie", buildSessionCookie(token, isProd));
+  return h;
 }

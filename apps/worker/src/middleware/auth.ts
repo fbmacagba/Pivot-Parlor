@@ -16,17 +16,36 @@ declare module "hono" {
   }
 }
 
+function extractSessionJwt(headers: { get(name: string): string | null }): string | null {
+  const authHeader = headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const t = authHeader.slice(7).trim();
+    return t || null;
+  }
+  const cookie = headers.get("Cookie") ?? "";
+  for (const part of cookie.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === "pp_session") {
+      try {
+        return decodeURIComponent(v.join("="));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 /**
- * Extracts and verifies the Bearer JWT from Authorization header.
+ * Extracts and verifies the JWT from Authorization: Bearer or pp_session cookie.
  * Attaches the decoded payload to c.get('user').
  */
 export const authMiddleware: MiddlewareHandler<{ Bindings: Bindings }> = async (c, next) => {
-  const authHeader = c.req.header("Authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
+  const token = extractSessionJwt(c.req.raw.headers);
+  if (!token) {
     return c.json({ success: false, error: "Unauthorized" }, 401);
   }
 
-  const token = authHeader.slice(7);
   try {
     const payload = await verify(token, c.env.JWT_SECRET, "HS256") as unknown as JWTUser;
     c.set("user", payload);
