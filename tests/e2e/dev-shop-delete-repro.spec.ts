@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-/** Headed repro: login → /dev/shops → Delete → confirm; logs POST *\/delete responses. */
-test.use({ headless: false });
+/** Headed when PLAYWRIGHT_HEADED=1; default headless for automation. */
+test.use({ headless: process.env.PLAYWRIGHT_HEADED !== "1" });
 
 test.describe("Dev shops — delete shop (headed repro)", () => {
   test("capture delete POST response", async ({ page }) => {
@@ -47,18 +47,8 @@ test.describe("Dev shops — delete shop (headed repro)", () => {
     console.log("\n[dev-shop-delete-repro] POST /api/shops/.../delete responses:\n", JSON.stringify(deleteResponses, null, 2));
 
     const last = deleteResponses[deleteResponses.length - 1]!;
-    expect(last.status, "no HTTP status from delete response").toBeTruthy();
-
-    /** If this fails in CI, the bug is reproduced — check console JSON for error body. */
-    try {
-      const json = JSON.parse(last.body) as { success?: boolean; error?: string };
-      if (json.success !== true) {
-        // eslint-disable-next-line no-console
-        console.log("[dev-shop-delete-repro] Delete API returned error:", json.error ?? last.body);
-      }
-    } catch {
-      // eslint-disable-next-line no-console
-      console.log("[dev-shop-delete-repro] Non-JSON body:", last.body);
-    }
+    expect(last.status, `delete must return 200 — got ${last.status}: ${last.body}`).toBe(200);
+    const json = JSON.parse(last.body) as { success?: boolean; error?: string };
+    expect(json.success, json.error ?? last.body).toBe(true);
   });
 });
