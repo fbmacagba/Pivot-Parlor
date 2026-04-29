@@ -365,7 +365,12 @@ export default function DevShops() {
   const expandedGenFetcher = useFetcher<{ success?: boolean; data?: { jobId?: string } }>();
   const activateActFetcher = useFetcher();
   const pauseActFetcher = useFetcher();
-  const deleteShopFetcher = useFetcher<{ success?: boolean; error?: string; deletedShopId?: string }>();
+  const deleteShopFetcher = useFetcher<{
+    success?: boolean;
+    error?: string;
+    deletedShopId?: string;
+    data?: { id?: string };
+  }>();
   const wasExpandedGenSubmittingRef = useRef(false);
   const pendingUploadTypeRef = useRef<"logo" | "hero" | null>(null);
   const pendingSaveTypeRef = useRef<"logo" | "hero" | null>(null);
@@ -532,7 +537,10 @@ export default function DevShops() {
       return;
     }
     const sh = shops.find((s) => s.id === expandedShopId);
-    if (!sh) return;
+    if (!sh) {
+      setExpandedShopId(null);
+      return;
+    }
     setGenImageError(null);
     setGenImageLoading(null);
     const logoResolved = sh.logo_url ? resolvePublicAssetImageUrl(sh.logo_url, apiUrl) : null;
@@ -624,7 +632,11 @@ export default function DevShops() {
     const jobId = raw?.data?.jobId;
     if (!jobId || !expandedShopId) return;
     const sh = shops.find((s) => s.id === expandedShopId);
-    if (!sh) return;
+    if (!sh) {
+      setExpandedGenJob(null);
+      setExpandedGenPoll(null);
+      return;
+    }
     setExpandedGenJob({
       jobId,
       shopId: sh.id,
@@ -645,15 +657,6 @@ export default function DevShops() {
       revalidator.revalidate();
     }
   }, [pauseActFetcher.state, pauseActFetcher.data, revalidator]);
-
-  useEffect(() => {
-    if (deleteShopFetcher.state !== "idle" || !deleteShopFetcher.data) return;
-    const d = deleteShopFetcher.data;
-    if (d.success) {
-      setShopToDelete(null);
-      revalidator.revalidate();
-    }
-  }, [deleteShopFetcher.state, deleteShopFetcher.data, revalidator]);
 
   useEffect(() => {
     if (regenPrefsFetcher.state !== "idle" || !regenShopId) return;
@@ -692,6 +695,36 @@ export default function DevShops() {
     shopId: string;
   } | null>(null);
   const [devGenDoneSlug, setDevGenDoneSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (deleteShopFetcher.state !== "idle" || !deleteShopFetcher.data) return;
+    const d = deleteShopFetcher.data;
+    if (!d.success) return;
+
+    const deletedId =
+      shopToDelete?.id ?? (typeof d.data?.id === "string" ? d.data.id : undefined);
+    if (deletedId) {
+      if (expandedShopId === deletedId) setExpandedShopId(null);
+      if (regenShopId === deletedId) setRegenShopId(null);
+      if (expandedGenJob?.shopId === deletedId) {
+        setExpandedGenJob(null);
+        setExpandedGenPoll(null);
+      }
+      if (devGenJob?.shopId === deletedId) setDevGenJob(null);
+    }
+
+    setShopToDelete(null);
+    queueMicrotask(() => revalidator.revalidate());
+  }, [
+    deleteShopFetcher.state,
+    deleteShopFetcher.data,
+    revalidator,
+    shopToDelete,
+    expandedShopId,
+    regenShopId,
+    expandedGenJob?.shopId,
+    devGenJob?.shopId,
+  ]);
 
   useEffect(() => {
     const d = generateResult;
