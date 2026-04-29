@@ -417,6 +417,19 @@ export default function DevShops() {
   } | null>(null);
 
   useEffect(() => {
+    if (regenShopId && !shops.some((s) => s.id === regenShopId)) {
+      setRegenShopId(null);
+    }
+  }, [regenShopId, shops]);
+
+  useEffect(() => {
+    if (expandedGenJob && !shops.some((s) => s.id === expandedGenJob.shopId)) {
+      setExpandedGenJob(null);
+      setExpandedGenPoll(null);
+    }
+  }, [expandedGenJob, shops]);
+
+  useEffect(() => {
     if (settingsFetcher.state !== "idle" || !regenShopId) return;
     const d = settingsFetcher.data;
     if (d?.ok === true) {
@@ -695,6 +708,12 @@ export default function DevShops() {
     shopId: string;
   } | null>(null);
   const [devGenDoneSlug, setDevGenDoneSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (devGenJob && !shops.some((s) => s.id === devGenJob.shopId)) {
+      setDevGenJob(null);
+    }
+  }, [devGenJob, shops]);
 
   useEffect(() => {
     if (deleteShopFetcher.state !== "idle" || !deleteShopFetcher.data) return;
