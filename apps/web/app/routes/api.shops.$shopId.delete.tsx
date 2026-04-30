@@ -18,24 +18,41 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const base = `${env.API_URL}/api/shops/${seg}`;
   const authHeaders = buildWorkerUpstreamHeaders(request, token);
 
-  let res = await fetch(`${base}/delete`, {
-    method: "POST",
-    headers: { ...authHeaders, "Content-Type": "application/json" },
-    body: "{}",
-  });
+  try {
+    let res = await fetch(`${base}/delete`, {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: "{}",
+    });
 
-  if (workerResponseLooksLikeJson(res) && res.status === 404) {
-    const probe = (await res.clone().json()) as { error?: string };
-    if (probe.error === "Not found") {
+    const shouldFallbackToDelete =
+      (workerResponseLooksLikeJson(res) &&
+        res.status === 404 &&
+        ((await res.clone().json()) as { error?: string }).error === "Not found") ||
+      (!workerResponseLooksLikeJson(res) && (res.status === 404 || res.status === 405));
+
+    if (shouldFallbackToDelete) {
       res = await fetch(base, { method: "DELETE", headers: authHeaders });
     }
-  }
 
-  if (!workerResponseLooksLikeJson(res)) {
-    return json({ success: false, error: "Bad gateway" }, { status: 502 });
+    if (!workerResponseLooksLikeJson(res)) {
+      console.error("[api.shops.$shopId.delete] Non-JSON upstream response", {
+        shopId,
+        status: res.status,
+        contentType: res.headers.get("Content-Type"),
+      });
+      return json({ success: false, error: "Bad gateway" }, { status: 502 });
+    }
+
+    const payload = (await res.json()) as { success?: boolean; error?: string };
+    return json(payload, { status: res.status });
+  } catch (error) {
+    console.error("[api.shops.$shopId.delete] Upstream fetch failed", {
+      shopId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return json({ success: false, error: "Unable to reach shop service" }, { status: 502 });
   }
-  const payload = (await res.json()) as { success?: boolean; error?: string };
-  return json(payload, { status: res.status });
 }
 
 export default function ApiShopDelete() {
