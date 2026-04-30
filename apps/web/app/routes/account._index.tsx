@@ -22,11 +22,24 @@ interface Booking {
 
 interface BookingData { upcoming: Booking[]; past: Booking[] }
 
-function formatDateTime(isoDate: string, isoTime: string) {
-  try {
-    const d = new Date(isoTime);
-    return `${d.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" })} · ${d.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" })}`;
-  } catch { return isoDate; }
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+
+function bookingStartMs(b: Booking): number | null {
+  const t = new Date(b.start_time).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+/** More than 2 hours before start — online cancel allowed (server enforces the same rule). */
+function canCancelOnline(b: Booking): boolean {
+  const t = bookingStartMs(b);
+  return t != null && t - Date.now() > TWO_HOURS_MS;
+}
+
+function formatBookingWhen(b: Booking) {
+  const t = bookingStartMs(b);
+  if (t == null) return b.booking_date;
+  const d = new Date(t);
+  return `${d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 const STATUS_PILL: Record<string, string> = {
@@ -38,6 +51,90 @@ const STATUS_PILL: Record<string, string> = {
   no_show:     "bg-white/5 text-white/30",
 };
 
+
+function UpcomingBookingCard({
+  booking,
+  onCancelled,
+}: {
+  booking: Booking;
+  onCancelled: () => void;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelErr, setCancelErr] = useState("");
+
+  const cancelAllowed = canCancelOnline(booking);
+  const bookUrl = `/${booking.shop_slug}/book`;
+
+  async function cancelBooking() {
+    if (!cancelAllowed || cancelling) return;
+    setCancelling(true);
+    setCancelErr("");
+    try {
+      const res = await fetch("/api/me/bookings", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent: "cancel", bookingId: booking.id }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (data.success) onCancelled();
+      else setCancelErr(data.error ?? "Could not cancel this booking.");
+    } catch {
+      setCancelErr("Network error. Please try again.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-white truncate">{booking.service_name}</p>
+          <p className="text-xs text-white/50 mt-0.5">{booking.shop_name} · with {booking.staff_name}</p>
+          <p className="text-xs text-white/40 mt-1 flex items-center gap-1">
+            <Clock className="h-3 w-3" />
+            {formatBookingWhen(booking)}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-sm font-bold text-gold">£{booking.amount.toFixed(2)}</p>
+          <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[booking.status] ?? "bg-white/5 text-white/40"}`}>
+            {booking.status.replace("_", " ")}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 border-t border-white/5 pt-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to={bookUrl}
+            className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors"
+          >
+            {cancelAllowed ? "Change time" : "Look for another time"}
+            <ArrowRight className="h-3 w-3 opacity-70" />
+          </Link>
+          {cancelAllowed && (
+            <button
+              type="button"
+              onClick={cancelBooking}
+              disabled={cancelling}
+              className="inline-flex items-center rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            >
+              {cancelling ? "Cancelling…" : "Cancel booking"}
+            </button>
+          )}
+        </div>
+        {!cancelAllowed && (
+          <p className="text-xs text-white/45">
+            This appointment starts within two hours, so it can’t be cancelled here. You can still check the booking page for another free slot if you need a different time.
+          </p>
+        )}
+        {cancelErr && <p className="text-xs text-red-400">{cancelErr}</p>}
+      </div>
+    </div>
+  );
+}
 
 function ProfileCard({ me }: { me: Me }) {
   const [editing, setEditing] = useState(false);
@@ -142,15 +239,31 @@ export default function AccountIndex() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(false);
 
+  function reloadBookings() {
+    setLoading(true);
+    setError(false);
+    fetch("/api/me/bookings", { credentials: "include" })
+      .then(async (r) => {
+        const j = (await r.json().catch(() => null)) as { success?: boolean; data?: BookingData } | null;
+        if (!r.ok || !j?.success || !j.data) throw new Error("bad response");
+        return j.data;
+      })
+      .then((d) => setData(d))
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setError(false);
     fetch("/api/me/bookings", { credentials: "include" })
-      .then(r => r.json())
-      .then((j: { success?: boolean; data?: BookingData }) => {
-        if (!cancelled && j.success && j.data) setData(j.data);
-        else if (!cancelled) setError(true);
+      .then(async (r) => {
+        const j = (await r.json().catch(() => null)) as { success?: boolean; data?: BookingData } | null;
+        if (!r.ok || !j?.success || !j.data) throw new Error("bad response");
+        return j.data;
       })
+      .then((d) => { if (!cancelled) setData(d); })
       .catch(() => { if (!cancelled) setError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -185,34 +298,21 @@ export default function AccountIndex() {
           <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 text-sm text-red-300">
             Could not load bookings. Try refreshing the page.
           </div>
-        ) : !loading && upcoming.length === 0 ? (
+        ) : loading && data === null ? (
+          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/35">
+            Loading your bookings…
+          </div>
+        ) : upcoming.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
-            <p className="text-white/30 text-sm">No upcoming bookings.</p>
+            <p className="text-white/40 text-sm">You have no bookings to show.</p>
             <a href="/" className="mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:text-gold/80">
               Browse shops <ArrowRight className="h-3.5 w-3.5" />
             </a>
           </div>
         ) : (
           <div className="space-y-3">
-            {upcoming.map(b => (
-              <div key={b.id} className="rounded-xl border border-white/10 bg-dark-100 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{b.service_name}</p>
-                    <p className="text-xs text-white/50 mt-0.5">{b.shop_name} · with {b.staff_name}</p>
-                    <p className="text-xs text-white/40 mt-1 flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatDateTime(b.booking_date, b.start_time)}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-bold text-gold">£{b.amount.toFixed(2)}</p>
-                    <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[b.status] ?? "bg-white/5 text-white/40"}`}>
-                      {b.status.replace("_"," ")}
-                    </span>
-                  </div>
-                </div>
-              </div>
+            {upcoming.map((b) => (
+              <UpcomingBookingCard key={b.id} booking={b} onCancelled={reloadBookings} />
             ))}
           </div>
         )}
@@ -229,7 +329,7 @@ export default function AccountIndex() {
               <div key={b.id} className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-70">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-white truncate">{b.service_name}</p>
-                  <p className="text-xs text-white/40">{b.shop_name} · {formatDateTime(b.booking_date, b.start_time)}</p>
+                  <p className="text-xs text-white/40">{b.shop_name} · {formatBookingWhen(b)}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[b.status] ?? "bg-white/5 text-white/40"}`}>

@@ -37,6 +37,8 @@ export type ShopSettings = {
   show_youtube?: boolean;
   show_whatsapp?: boolean;
   show_linkedin?: boolean;
+  google_business_url?: string;
+  show_google_business?: boolean;
   /** When false, booking nav links point to services instead. Omitted defaults to true. */
   booking_enabled?: boolean;
 };

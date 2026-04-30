@@ -6,6 +6,7 @@ import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import {
+  getBookingById,
   getBookingsByShop,
   getPlatformRevenueByMonth,
   getRevenueByShop,
@@ -689,6 +690,78 @@ meRouter.get("/bookings", async (c) => {
       past: past.results,
     },
   });
+});
+
+const CANCEL_MIN_MS = 2 * 60 * 60 * 1000;
+
+function emailsMatch(a: string, b: string) {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * POST /api/me/bookings/:bookingId/cancel
+ * Customer cancels own booking if it starts more than 2 hours from now.
+ */
+meRouter.post("/bookings/:bookingId/cancel", async (c) => {
+  const user = getUser(c);
+  const bookingId = c.req.param("bookingId")!;
+
+  const userRow = await c.env.DB
+    .prepare("SELECT email FROM platform_users WHERE id = ? LIMIT 1")
+    .bind(user.sub)
+    .first<{ email: string }>();
+  if (!userRow) {
+    return c.json({ success: false, error: "Account not found" }, 404);
+  }
+
+  const booking = await getBookingById(c.env.DB, bookingId);
+  if (!booking) {
+    return c.json({ success: false, error: "Booking not found" }, 404);
+  }
+
+  if (!emailsMatch(booking.customer_email, userRow.email)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  if (booking.status === "cancelled" || booking.status === "no_show") {
+    return c.json({ success: false, error: "This booking is already closed" }, 400);
+  }
+
+  const startMs = new Date(booking.start_time).getTime();
+  if (Number.isNaN(startMs)) {
+    return c.json({ success: false, error: "Invalid booking time" }, 400);
+  }
+
+  if (startMs - Date.now() < CANCEL_MIN_MS) {
+    return c.json(
+      {
+        success: false,
+        error: "Bookings within 2 hours of the start time cannot be cancelled online.",
+        code: "inside_cancel_window",
+      },
+      400
+    );
+  }
+
+  const atomicResult = await c.env.DB
+    .prepare(
+      "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')"
+    )
+    .bind(bookingId)
+    .run();
+
+  if (!atomicResult.success || atomicResult.meta?.changes === 0) {
+    return c.json(
+      {
+        success: false,
+        error:
+          "This booking was modified by another request and could not be cancelled. Please refresh and try again.",
+      },
+      409
+    );
+  }
+
+  return c.json({ success: true });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ interface TodayBooking {
   service_name: string;
   duration_min: number;
   amount: number;
+  notes?: string | null;
 }
 
 function formatTime(iso: string) {

@@ -203,12 +203,12 @@ export default function AdminSettings() {
   const [showWa, setShowWa] = useState(settings.show_whatsapp === true);
   const [showLi, setShowLi] = useState(settings.show_linkedin === true);
 
-  const submitPatch = (patch: Record<string, unknown>) => {
+  const submitPatch = (patch: Record<string, string | number | boolean | null>) => {
     fetcher.submit(patch, { method: "POST", encType: "application/json" });
   };
 
   const saveContact = () => {
-    const patch: Record<string, unknown> = {
+    const patch: Record<string, string | number | boolean | null> = {
       phone: phone.trim(),
       address: address.trim(),
     };

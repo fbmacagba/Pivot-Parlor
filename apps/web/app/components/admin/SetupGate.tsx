@@ -171,14 +171,17 @@ export function SetupGate({ status }: { status: SetupStatus }) {
 
       {/* Steps */}
       <div className="space-y-3">
-        {STEPS.map((step, i) => (
-          <StepRow
-            key={step.key}
-            {...step}
-            done={status[step.key].done}
-            active={i === firstIncomplete}
-          />
-        ))}
+        {STEPS.map((step, i) => {
+          const { key: stepKey, ...stepProps } = step;
+          return (
+            <StepRow
+              key={stepKey}
+              {...stepProps}
+              done={status[stepKey].done}
+              active={i === firstIncomplete}
+            />
+          );
+        })}
       </div>
 
       {/* Help text */}
