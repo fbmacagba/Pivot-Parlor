@@ -33,6 +33,9 @@ jobs:
       - name: Type check
         run: npm run check-types --workspace=worker
 
+      - name: Unit tests
+        run: npm test --workspace=worker
+
       - name: Run D1 migrations
         run: |
           npx wrangler d1 execute pivot-parlor-db \
