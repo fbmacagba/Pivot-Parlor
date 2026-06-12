@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { secureHeaders } from "hono/secure-headers";
 import type { MessageBatch } from "@cloudflare/workers-types";
 
 import type { Bindings } from "./bindings.js";
@@ -48,6 +49,17 @@ stripeWebhookApp.route("/api/webhooks", webhooksRouter);
 // ─── Global middleware ────────────────────────────────────────────────────────
 
 app.use("*", logger());
+
+// API security headers (NFR-S7). The web app's headers live in apps/web/public/_headers.
+app.use(
+  "*",
+  secureHeaders({
+    xFrameOptions: "DENY",
+    xContentTypeOptions: "nosniff",
+    strictTransportSecurity: "max-age=63072000; includeSubDomains",
+    referrerPolicy: "no-referrer",
+  })
+);
 
 app.use(
   "*",
