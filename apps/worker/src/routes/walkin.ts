@@ -37,7 +37,9 @@ walkin.post("/:shopSlug/join", async (c) => {
   const shop = (await getShopBySlug(c.env.DB, slug)) ?? (await getShopById(c.env.DB, slug));
   if (!shop || !shop.is_active) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  const body = await c.req.json<{ name?: string; phone?: string; service?: string; notes?: string }>().catch(() => ({}));
+  const body = await c.req
+    .json<{ name?: string; phone?: string; service?: string; notes?: string }>()
+    .catch((): { name?: string; phone?: string; service?: string; notes?: string } => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return c.json({ success: false, error: "Name is required" }, 400);
 
@@ -143,7 +145,7 @@ adminWalkin.patch("/:entryId", async (c) => {
     .first<{ id: string }>();
   if (!entry) return c.json({ success: false, error: "Entry not found" }, 404);
 
-  const body = await c.req.json<{ status?: string }>().catch(() => ({}));
+  const body = await c.req.json<{ status?: string }>().catch((): { status?: string } => ({}));
   const valid = ["waiting", "serving", "served", "skipped", "removed"];
   if (!body.status || !valid.includes(body.status)) {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);

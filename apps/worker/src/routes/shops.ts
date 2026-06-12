@@ -604,7 +604,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
 
   const body = await c.req
     .json<{ design_notes?: string; text_model?: string; image_model?: string }>()
-    .catch(() => ({}));
+    .catch((): { design_notes?: string; text_model?: string; image_model?: string } => ({}));
   await c.env.KV.put(
     genSettingsKvKey(shop.id),
     JSON.stringify({
@@ -792,7 +792,9 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
 
-  const body = await c.req.json<{ type?: string; imageUrl?: string }>().catch(() => ({}));
+  const body = await c.req
+    .json<{ type?: string; imageUrl?: string }>()
+    .catch((): { type?: string; imageUrl?: string } => ({}));
   const type = body.type === "hero" || body.type === "logo" ? body.type : null;
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
   if (!type || !imageUrl) return c.json({ success: false, error: "type and imageUrl required" }, 400);
@@ -949,7 +951,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       logo_file: form.logo_file instanceof File ? form.logo_file : undefined,
     };
   } else {
-    const json = await c.req.json<typeof body>().catch(() => ({}));
+    const json = await c.req.json<typeof body>().catch((): typeof body => ({}));
     body = json;
   }
 

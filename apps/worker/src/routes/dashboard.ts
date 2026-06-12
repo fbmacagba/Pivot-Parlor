@@ -830,7 +830,9 @@ shopSetupStatusRouter.get("/", async (c) => {
 meRouter.patch("/profile", async (c) => {
   const user = getUser(c);
 
-  const body = await c.req.json<{ name?: string; phone?: string }>().catch(() => ({}));
+  const body = await c.req
+    .json<{ name?: string; phone?: string }>()
+    .catch((): { name?: string; phone?: string } => ({}));
 
   const name  = typeof body.name  === "string" ? body.name.trim()  : undefined;
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
