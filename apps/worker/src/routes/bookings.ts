@@ -7,6 +7,7 @@ import {
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js";
 import { requireShop } from "../middleware/rbac.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -86,7 +87,10 @@ bookings.put("/:bookingId/status", async (c) => {
 
 const publicBookings = new Hono<{ Bindings: Bindings }>();
 
-publicBookings.post("/", async (c) => {
+publicBookings.post(
+  "/",
+  rateLimit({ name: "public-booking", limit: 30, windowS: 3600, key: clientIp }),
+  async (c) => {
   const body = await c.req.json<{
     shop_id?: string;
     staff_id?: string;

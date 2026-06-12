@@ -3,6 +3,7 @@ import { sign, verify } from "hono/jwt";
 import type { Bindings } from "../bindings.js";
 import { getUserByEmail, getUserById, createUser } from "../db/queries.js";
 import { authMiddleware, extractSessionJwt, getUser, type JWTUser } from "../middleware/auth.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
 const auth = new Hono<{ Bindings: Bindings }>();
 
@@ -41,7 +42,20 @@ const SESSION_TTL_S = 60 * 60 * 24 * 7; // 7 days
 
 // ─── POST /auth/login ─────────────────────────────────────────────────────────
 
-auth.post("/login", async (c) => {
+// Brute-force brake: 5 attempts per email+IP per 15 minutes (NFR-S4).
+// Hono caches parsed bodies, so reading it here doesn't consume the handler's read.
+const loginRateLimit = rateLimit({
+  name: "login",
+  limit: 5,
+  windowS: 900,
+  key: async (c) => {
+    const body = await c.req.json<{ email?: string }>().catch((): { email?: string } => ({}));
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "-";
+    return `${email}:${clientIp(c)}`;
+  },
+});
+
+auth.post("/login", loginRateLimit, async (c) => {
   const body = await c.req.json<{ email?: string; password?: string }>();
   if (!body.email || !body.password) {
     return c.json({ success: false, error: "email and password are required" }, 400);
@@ -86,7 +100,10 @@ auth.post("/login", async (c) => {
 // Public: admin / customer can self-register (no token required).
 // Authenticated developer: can create any role including staff / developer.
 
-auth.post("/register", async (c) => {
+auth.post(
+  "/register",
+  rateLimit({ name: "register", limit: 10, windowS: 3600, key: clientIp }),
+  async (c) => {
   // Optionally decode the caller's token — never fail if absent/invalid.
   let caller: JWTUser | null = null;
   const authHeader = c.req.header("Authorization");

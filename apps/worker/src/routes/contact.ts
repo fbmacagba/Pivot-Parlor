@@ -1,11 +1,15 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
 const contact = new Hono<{ Bindings: Bindings }>();
 
 // ─── POST /api/contact — public form submission ───────────────────────────────
 
-contact.post("/", async (c) => {
+contact.post(
+  "/",
+  rateLimit({ name: "contact", limit: 5, windowS: 3600, key: clientIp }),
+  async (c) => {
   try {
     const body = await c.req.json<{
       full_name?: string;

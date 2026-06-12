@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { generateShopTheme } from "../services/ai-generator.js";
 import { MODEL_REGISTRY } from "../services/model-registry.js";
 
@@ -9,6 +10,17 @@ const ai = new Hono<{ Bindings: Bindings }>();
 
 // All AI routes require developer role
 ai.use("*", authMiddleware, requireRole("developer"));
+
+// AI generation is expensive — cap per user (cost abuse brake, NFR-S4)
+ai.use(
+  "*",
+  rateLimit({
+    name: "ai",
+    limit: 10,
+    windowS: 3600,
+    key: (c) => getUser(c)?.sub ?? clientIp(c),
+  })
+);
 
 // ─── GET /api/ai/models — return full model registry ─────────────────────────
 
