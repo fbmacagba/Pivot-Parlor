@@ -60,8 +60,8 @@ export async function seedWaitlistEntry(shopId: string): Promise<string> {
   return id;
 }
 
-/** Mint a JWT exactly like POST /auth/login does (HS256, same claims). */
-export async function tokenFor(userId: string, role: Role, shopId: string | null): Promise<string> {
+/** Mint a signed JWT only — no KV session, so authMiddleware rejects it (revocation). */
+export async function bareTokenFor(userId: string, role: Role, shopId: string | null): Promise<string> {
   return sign(
     {
       sub: userId,
@@ -71,6 +71,17 @@ export async function tokenFor(userId: string, role: Role, shopId: string | null
     },
     "test-secret"
   );
+}
+
+/** Mint a JWT exactly like POST /auth/login does: signed AND recorded in KV. */
+export async function tokenFor(userId: string, role: Role, shopId: string | null): Promise<string> {
+  const token = await bareTokenFor(userId, role, shopId);
+  await env.KV.put(
+    `session:${token}`,
+    JSON.stringify({ user_id: userId, role, shop_id: shopId }),
+    { expirationTtl: 3600 }
+  );
+  return token;
 }
 
 export function authHeaders(token: string): Record<string, string> {

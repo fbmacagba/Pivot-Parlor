@@ -16,7 +16,7 @@ declare module "hono" {
   }
 }
 
-function extractSessionJwt(headers: { get(name: string): string | null }): string | null {
+export function extractSessionJwt(headers: { get(name: string): string | null }): string | null {
   const authHeader = headers.get("Authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const t = authHeader.slice(7).trim();
@@ -46,13 +46,23 @@ export const authMiddleware: MiddlewareHandler<{ Bindings: Bindings }> = async (
     return c.json({ success: false, error: "Unauthorized" }, 401);
   }
 
+  let payload: JWTUser;
   try {
-    const payload = await verify(token, c.env.JWT_SECRET, "HS256") as unknown as JWTUser;
-    c.set("user", payload);
-    await next();
+    payload = await verify(token, c.env.JWT_SECRET, "HS256") as unknown as JWTUser;
   } catch {
     return c.json({ success: false, error: "Invalid or expired token" }, 401);
   }
+
+  // Server-side revocation: every issued token has a session:<token> KV record
+  // (login, OAuth, invite-accept). Logout deletes it; a signed JWT without one
+  // is revoked or was never issued by us.
+  const live = await c.env.KV.get(`session:${token}`);
+  if (live === null) {
+    return c.json({ success: false, error: "Session expired or revoked" }, 401);
+  }
+
+  c.set("user", payload);
+  await next();
 };
 
 export function getUser(c: Parameters<MiddlewareHandler>[0]): JWTUser {

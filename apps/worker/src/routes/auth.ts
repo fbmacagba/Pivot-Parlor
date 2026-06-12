@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { sign, verify } from "hono/jwt";
 import type { Bindings } from "../bindings.js";
 import { getUserByEmail, getUserById, createUser } from "../db/queries.js";
-import { authMiddleware, getUser, type JWTUser } from "../middleware/auth.js";
+import { authMiddleware, extractSessionJwt, getUser, type JWTUser } from "../middleware/auth.js";
 
 const auth = new Hono<{ Bindings: Bindings }>();
 
@@ -161,8 +161,8 @@ auth.get("/me", authMiddleware, async (c) => {
 // ─── POST /auth/logout ────────────────────────────────────────────────────────
 
 auth.post("/logout", authMiddleware, async (c) => {
-  const authHeader = c.req.header("Authorization") ?? "";
-  const token = authHeader.slice(7);
+  // Same extraction as authMiddleware so cookie-based sessions revoke too.
+  const token = extractSessionJwt(c.req.raw.headers);
   if (token) await c.env.KV.delete(`session:${token}`);
   return c.json({ success: true });
 });
