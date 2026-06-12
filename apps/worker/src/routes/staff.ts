@@ -29,9 +29,12 @@ staff.get("/", async (c) => {
 // ─── GET /api/shops/:shopId/staff/:staffId ────────────────────────────────────
 
 staff.get("/:staffId", async (c) => {
+  const shopId = c.req.param("shopId")!;
   const staffId = c.req.param("staffId")!;
   const member = await getStaffById(c.env.DB, staffId);
-  if (!member) return c.json({ success: false, error: "Staff member not found" }, 404);
+  if (!member || member.shop_id !== shopId) {
+    return c.json({ success: false, error: "Staff member not found" }, 404);
+  }
   const services = await getStaffServices(c.env.DB, staffId);
   return c.json({ success: true, data: { ...member, services } });
 });
