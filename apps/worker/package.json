@@ -8,6 +8,7 @@
     "deploy": "wrangler deploy",
     "lint": "tsc --noEmit",
     "check-types": "tsc --noEmit",
+    "test": "vitest run",
     "db:migrate": "wrangler d1 execute pivot-parlor-db --file=src/db/schema.sql",
     "seed:dev": "tsx --tsconfig tsconfig.json scripts/seed-dev.ts"
   },
@@ -17,10 +18,12 @@
     "stripe": "^20.4.1"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.15",
     "@cloudflare/workers-types": "^4.20241022.0",
     "@repo/typescript-config": "*",
     "tsx": "^4.21.0",
     "typescript": "5.9.2",
+    "vitest": "^4.1.8",
     "wrangler": "^4.74.0"
   }
 }
