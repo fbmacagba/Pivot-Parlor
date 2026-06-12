@@ -23,6 +23,7 @@ import {
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
 
 const shops = new Hono<{ Bindings: Bindings }>();
@@ -130,7 +131,7 @@ const E2E_MOCK_SHOPS = [
 
 shops.get("/", authMiddleware, requireRole("developer"), async (c) => {
   // Playwright sets cookie → Remix forwards header; SSR bypasses page.route().
-  if (c.req.header("X-E2E-Test-Mock-Stripe-List") === "1") {
+  if (e2eMockAllowed(c.env, c.req.header("X-E2E-Test-Mock-Stripe-List"))) {
     return c.json({ success: true, data: E2E_MOCK_SHOPS });
   }
   const allShops = await getAllShops(c.env.DB);
@@ -1148,7 +1149,8 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   // E2E: force legacy invite flow (active invite, no Checkout) when Remix sends mock header.
-  const useStripe = !!c.env.STRIPE_SECRET_KEY && c.req.header("X-E2E-Test-Mock") !== "1";
+  const useStripe =
+    !!c.env.STRIPE_SECRET_KEY && !e2eMockAllowed(c.env, c.req.header("X-E2E-Test-Mock"));
 
   if (useStripe) {
     await createShop(c.env.DB, {

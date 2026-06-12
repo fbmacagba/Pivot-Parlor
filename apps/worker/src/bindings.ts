@@ -13,6 +13,8 @@ export type Bindings = {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   ENVIRONMENT?: string;
+  /** "true" enables E2E mock/fixture request paths. Dev/staging only — never set in production. */
+  E2E_FIXTURES?: string;
   ASSET_BASE_URL?: string;
   APP_URL?: string;
   GOOGLE_OAUTH_CLIENT_ID?: string;
