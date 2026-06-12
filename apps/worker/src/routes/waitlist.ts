@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { getWaitlistByShop, createWaitlistEntry } from "../db/queries.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireShop } from "../middleware/rbac.js";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
@@ -54,11 +54,22 @@ waitlist.get("/", authMiddleware, requireShop(), async (c) => {
 // ─── PATCH /api/waitlist/:id/status — admin/developer ────────────────────────
 
 waitlist.patch("/:id/status", authMiddleware, async (c) => {
+  const user = getUser(c);
+  if (!user || !["developer", "admin", "staff"].includes(user.role)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
   const { id } = c.req.param();
   const body = await c.req.json<{ status?: string }>();
   const valid = ["waiting", "notified", "booked", "expired"];
   if (!body.status || !valid.includes(body.status)) {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);
+  }
+  const entry = await c.env.DB
+    .prepare("SELECT shop_id FROM waitlist WHERE id = ?")
+    .bind(id)
+    .first<{ shop_id: string }>();
+  if (!entry || (user.role !== "developer" && user.shop_id !== entry.shop_id)) {
+    return c.json({ success: false, error: "Not found" }, 404);
   }
   await c.env.DB
     .prepare("UPDATE waitlist SET status = ? WHERE id = ?")
