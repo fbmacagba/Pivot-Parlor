@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 /**
- * One-time: print SQL to set platform_users.password_hash for dev@pivotparlor.com
+ * Print SQL to seed-or-reset the developer account (dev@pivotparlor.com)
  * using the same PBKDF2 scheme as apps/worker/src/routes/auth.ts (hashPassword).
+ *
+ * Emits an UPSERT: creates the account on a fresh database, resets the
+ * password if it already exists. This is the ONLY supported way to provision
+ * the developer account — the first-login bootstrap in /auth/login was
+ * removed (account-takeover vector, June 2026 security review T1.1).
  *
  * Usage:
  *   1. Load DEV_PASSWORD (from env or .env):
@@ -42,7 +47,11 @@ if (!pwd) {
 
 const password_hash = await hashPassword(pwd);
 const escaped = password_hash.replace(/'/g, "''");
-const sql = `UPDATE platform_users SET password_hash = '${escaped}' WHERE email = 'dev@pivotparlor.com';`;
+// platform_users.email is UNIQUE (schema.sql), so the upsert keys on it.
+const sql =
+  `INSERT INTO platform_users (id, name, email, password_hash, role, shop_id) ` +
+  `VALUES (lower(hex(randomblob(16))), 'Developer', 'dev@pivotparlor.com', '${escaped}', 'developer', NULL) ` +
+  `ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash;`;
 
 console.log("-- Copy the next line and run via wrangler d1 execute pivot-parlor-db --remote --command \"...\"");
 console.log(sql);

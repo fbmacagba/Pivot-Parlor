@@ -47,24 +47,10 @@ auth.post("/login", async (c) => {
     return c.json({ success: false, error: "email and password are required" }, 400);
   }
 
-  let user = await getUserByEmail(c.env.DB, body.email);
-
-  // Bootstrap: if the developer account does not exist yet, create it on first login.
-  if (!user && body.email === "dev@pivotparlor.com") {
-    console.log("[auth/login] bootstrapping developer account for dev@pivotparlor.com");
-    const id = crypto.randomUUID();
-    const password_hash = await hashPassword(body.password);
-    await createUser(c.env.DB, {
-      id,
-      name: "Developer",
-      email: body.email,
-      password_hash,
-      role: "developer",
-      shop_id: null,
-    });
-    user = await getUserByEmail(c.env.DB, body.email);
-  }
-
+  // NOTE: no first-login bootstrap here. The developer account must be seeded
+  // deliberately (scripts/reset-dev-password.mjs) — auto-creating it on first
+  // login let whoever tried the well-known email first claim the platform.
+  const user = await getUserByEmail(c.env.DB, body.email);
   if (!user) return c.json({ success: false, error: "Invalid credentials" }, 401);
 
   const ok = await verifyPassword(body.password, user.password_hash);
