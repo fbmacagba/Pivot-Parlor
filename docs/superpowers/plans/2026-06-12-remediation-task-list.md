@@ -69,15 +69,18 @@
 - [ ] **T6.5 Safe JSON parsing.** `safeJsonParse` helper in `@repo/utils`; replace the 12 bare `JSON.parse` calls on KV/DB content in `shops.ts`, `ai.ts`, `slots.ts`. (NFR-R4)
 - [ ] **T6.6 Timezone correctness.** Use `shops.timezone` (exists in types, unused) in slot computation `apps/worker/src/services/slots.ts:63` and booking validation; unit tests covering BST boundary dates (last Sunday of March/October). (NFR-R2)
 
-## Phase 7 — Consistency & shared code
+## Phase 7 — Consistency & shared code (scoped — see [phase-7 plan](2026-06-13-phase-7-implementation.md))
 
-- [ ] **T7.1 Adopt zod.** Schemas in `@repo/utils` (or new `@repo/schemas`) for booking, auth, contact, services, schedule payloads; validate at route edges; consistent 400s. (NFR-Q4)
-- [ ] **T7.2 Reconcile `@repo/types` with reality.** Align `BookingStatus` (schema CHECK vs type union incl. `in_progress`), `Booking` field names (`amount`/`customer_name`), and use shared types in worker + web. (NFR-Q4)
-- [ ] **T7.3 De-duplicate utilities.** Import `addMinutes`/`rangesOverlap` from `@repo/utils` in `services/slots.ts` and `routes/bookings.ts`; delete local copies. (NFR-Q4)
-- [ ] **T7.4 Unify BFF API access.** Migrate the 23 raw-`fetch` proxy routes to `createApiClient` (extend it for pass-through/status-preserving cases). (NFR-Q4)
-- [ ] **T7.5 Standardize loader/action envelopes** to `{ success, data?, error? }` across routes currently returning `{ok}`/bare shapes (`admin.staff`, `admin.settings`, `admin.bookings`, `$shopSlug.waitlist`, …). (NFR-Q4)
-- [ ] **T7.6 FK hygiene migration.** Add `ON DELETE` actions for `bookings.staff_id`, `waitlist.staff_id`; FK for `contacts.shop_id` (D1 caveat: table-rebuild pattern for SQLite). (NFR-R5)
-- [ ] **T7.7 Split `dev.shops.tsx`** (1,780 lines) into shop list + AI config routes/components. No behavior change; E2E covers it.
+- [x] **T7.3 De-duplicate utilities.** `addMinutes`/`rangesOverlap` imported from `@repo/utils` in `slots.ts` and `bookings.ts`; local copies removed. (PR #7)
+- [x] **T7.2 (corrected).** `@repo/types` documented as the frontend camelCase contract (intentionally distinct from worker `DB*` snake_case rows — not drift). Fixed wrong `StaffAvailability.dayOfWeek` comment. The `BookingStatus`/CHECK mismatch was a real bug → fixed via the `in_progress` work below. (PR #7)
+- [x] **`in_progress` status fix (was the T7.2 CHECK mismatch — a live 500).** `schema.sql` allows it; existing DBs via operator-gated rebuild + runbook (D1 enforces FKs → decoupled, backup-first, staging-validated). (PR #7)
+- [ ] ~~**T7.4 Unify BFF API access** onto `createApiClient`~~ — **DECLINED.** The 23 raw-`fetch` routes are deliberate (cookie forwarding for CF Access, auth fallback, E2E headers, non-JSON guards) that `createApiClient` lacks. Real duplication, but the fix is a shared proxy helper, not `createApiClient`. Re-filed as a future task.
+- [ ] **T7.1 Adopt zod** — DEFERRED. Lowest payoff; strict validation risks rejecting valid public-booking payloads. Do behind E2E.
+- [ ] **T7.5 Standardize loader/action envelopes** — DEFERRED. High web churn, behavioral risk, no web test harness. Do behind E2E.
+- [ ] **T7.6 FK hygiene** — REVIEWED, mostly a non-issue: bookings `staff_id`/`service_id` correctly stay RESTRICT (protect history); only `contacts.shop_id` lacks an FK (low value, deferred).
+- [ ] **T7.7 Split `dev.shops.tsx`** (1,780 lines) — DEFERRED. Valuable but Remix route-split has runtime risk; do behind E2E.
+
+> **Prerequisite for the deferred items:** Playwright E2E smoke tests against the Phase 5 staging environment. Recommend slotting this before resuming T7.5/T7.7/T7.1.
 
 ## Phase 8 — Hygiene, DX & polish
 
