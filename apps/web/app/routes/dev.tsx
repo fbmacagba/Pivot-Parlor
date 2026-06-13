@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { json, redirect } from "@remix-run/cloudflare";
 import { useLoaderData } from "@remix-run/react";
 import { requireRole } from "~/lib/auth";
@@ -27,4 +28,9 @@ export default function DevLayout() {
       userName={user?.sub}
     />
   );
+}
+
+// Friendly fallback for loader/child-route errors instead of a blank page.
+export function ErrorBoundary() {
+  return <ErrorScreen />;
 }

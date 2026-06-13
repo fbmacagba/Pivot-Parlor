@@ -3,6 +3,7 @@ import { json } from "@remix-run/cloudflare";
 import { Link, useLoaderData } from "@remix-run/react";
 import { requireRole } from "~/lib/auth";
 import { DashboardLayout } from "~/components/dashboards/DashboardLayout";
+import { ErrorScreen } from "~/components/ErrorScreen";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -49,4 +50,10 @@ export default function AdminLayout() {
       }
     />
   );
+}
+
+// Catches errors thrown by this layout's loader or any admin child route,
+// so a failed API call shows a friendly screen instead of a blank page.
+export function ErrorBoundary() {
+  return <ErrorScreen />;
 }

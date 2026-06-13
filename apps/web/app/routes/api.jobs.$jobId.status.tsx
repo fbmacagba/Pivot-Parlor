@@ -11,11 +11,24 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json({ success: false, error: "Unauthorized" }, 401);
 
-  const res = await fetch(`${env.API_URL}/api/jobs/${jobId}/status`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const body = (await res.json()) as unknown;
-  return json(body, { status: res.status });
+  // This endpoint is polled client-side, so it must always return a JSON
+  // envelope — a worker outage or non-JSON upstream must not surface as a
+  // bare 500 that breaks the poller.
+  try {
+    const res = await fetch(`${env.API_URL}/api/jobs/${jobId}/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const text = await res.text();
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { success: false, error: "Upstream returned a non-JSON response" };
+    }
+    return json(body, { status: res.status });
+  } catch {
+    return json({ success: false, error: "Job status service is unavailable" }, 502);
+  }
 }
 
 export default function JobStatusApi() {

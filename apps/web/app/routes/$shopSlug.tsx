@@ -2,6 +2,7 @@ import { Outlet } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import type {
   Review,
   Service,
@@ -210,4 +211,10 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
 
 export default function ShopLayout() {
   return <Outlet />;
+}
+
+// Branded fallback for a missing/unavailable shop or a failed load,
+// instead of Remix's default error page.
+export function ErrorBoundary() {
+  return <ErrorScreen fullscreen />;
 }
