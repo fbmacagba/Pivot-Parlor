@@ -1,4 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+import { zonedTimeToUtc } from "../lib/timezone.js";
 
 export interface SlotResult {
   staff_id: string;
@@ -58,8 +59,16 @@ export async function getAvailableSlots(
     return JSON.parse(cached) as SlotResult[];
   }
 
-  // 2. Query schedules for this date's day_of_week
-  //    date("YYYY-MM-DD") → JS Date → getUTCDay() where 0=Sun
+  // 2. Resolve the shop's timezone — schedule times are shop-local wall clock,
+  //    slots are UTC instants. (Falls back to Europe/London, the column default.)
+  const shopRow = await db
+    .prepare("SELECT timezone FROM shops WHERE id = ? LIMIT 1")
+    .bind(shopId)
+    .first<{ timezone: string | null }>();
+  const tz = shopRow?.timezone || "Europe/London";
+
+  // Query schedules for this date's day_of_week. `date` is the shop-local
+  // calendar date, so its weekday is calendar arithmetic (timezone-free).
   const jsDay = new Date(`${date}T00:00:00Z`).getUTCDay();
 
   let scheduleQuery =
@@ -106,8 +115,8 @@ export async function getAvailableSlots(
     const [startH, startM] = schedule.start_time.split(":").map(Number) as [number, number];
     const [endH, endM] = schedule.end_time.split(":").map(Number) as [number, number];
 
-    let current = new Date(`${date}T${pad(startH)}:${pad(startM)}:00Z`);
-    const windowEnd = new Date(`${date}T${pad(endH)}:${pad(endM)}:00Z`);
+    let current = zonedTimeToUtc(date, `${pad(startH)}:${pad(startM)}`, tz);
+    const windowEnd = zonedTimeToUtc(date, `${pad(endH)}:${pad(endM)}`, tz);
 
     while (current < windowEnd) {
       const slotEnd = addMinutes(current, durationMin);

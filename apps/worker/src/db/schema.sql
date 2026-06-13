@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS shops (
   is_active       INTEGER NOT NULL DEFAULT 1,
   status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','suspended')),
   plan            TEXT NOT NULL DEFAULT 'standard',
+  timezone        TEXT NOT NULL DEFAULT 'Europe/London',
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

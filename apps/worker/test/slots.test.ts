@@ -82,4 +82,14 @@ describe("getAvailableSlots", () => {
     // same payload despite the new booking — cache hit (5-min TTL)
     expect(second).toEqual(first);
   });
+
+  it("shifts slot instants by the BST offset in summer (T6.6)", async () => {
+    // 2027-07-05 is a Monday in BST (Europe/London, the shop default).
+    // The 09:00-17:00 local schedule must map to 08:00-16:00 UTC.
+    const JULY_MONDAY = "2027-07-05";
+    const slots = await getAvailableSlots(shopId, staffId, JULY_MONDAY, 30, env.DB, env.KV);
+    expect(slots.length).toBe(16);
+    expect(slots[0]!.start_time).toBe(`${JULY_MONDAY}T08:00:00.000Z`);
+    expect(slots.at(-1)!.end_time).toBe(`${JULY_MONDAY}T16:00:00.000Z`);
+  });
 });
