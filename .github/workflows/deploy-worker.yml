@@ -36,11 +36,10 @@ jobs:
       - name: Unit tests
         run: npm test --workspace=worker
 
+      # Tracked migrations (schema_migrations table). One-time prerequisite on an
+      # existing database: node scripts/migrate.mjs --remote --baseline
       - name: Run D1 migrations
-        run: |
-          npx wrangler d1 execute pivot-parlor-db \
-            --file=apps/worker/src/db/schema.sql \
-            --remote
+        run: node scripts/migrate.mjs --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
