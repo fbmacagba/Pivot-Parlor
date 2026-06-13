@@ -1,6 +1,6 @@
 name = "pivot-parlor-assembler"
 main = "src/index.ts"
-compatibility_date = "2024-09-23"
+compatibility_date = "2025-06-01"
 
 [[queues.consumers]]
 queue = "site-assemble-queue"
