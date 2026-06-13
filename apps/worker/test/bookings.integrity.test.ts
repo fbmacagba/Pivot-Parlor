@@ -117,6 +117,19 @@ describe("double-booking prevention", () => {
     await expect(createBooking(env.DB, directBooking(staffA, start))).resolves.toBeTruthy();
   });
 
+  it("accepts the in_progress status (staff 'mark in progress' must not violate the CHECK)", async () => {
+    const start = "2027-04-01T10:00:00.000Z";
+    const booking = directBooking(staffA, start);
+    await createBooking(env.DB, booking);
+    await expect(
+      env.DB.prepare("UPDATE bookings SET status = 'in_progress' WHERE id = ?").bind(booking.id).run()
+    ).resolves.toBeTruthy();
+    const row = await env.DB.prepare("SELECT status FROM bookings WHERE id = ?")
+      .bind(booking.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("in_progress");
+  });
+
   it("rejects an overlapping booking whose instant straddles UTC midnight onto a different date", async () => {
     // Booking A ends just after UTC midnight; booking B starts just before A ends.
     // They overlap but have different start_times (so the unique index doesn't
