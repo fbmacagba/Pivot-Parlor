@@ -82,16 +82,16 @@
 
 > **Prerequisite for the deferred items:** Playwright E2E smoke tests against the Phase 5 staging environment. Recommend slotting this before resuming T7.5/T7.7/T7.1.
 
-## Phase 8 — Hygiene, DX & polish
+## Phase 8 — Hygiene, DX & polish (complete — see [phase-8 plan](2026-06-13-phase-8-implementation.md), PR #8)
 
-- [ ] **T8.1 Kill the `.js` twin footgun.** `clean:js` script removing `apps/web/app/**/*.js`; run automatically in `predev`/`prebuild`; delete the 5 currently-stale twins (incl. `admin.settings.js`, `api.me.bookings.js`).
-- [ ] **T8.2 Untrack `test-results/.last-run.json`**; add `test-results/` to `.gitignore`.
-- [ ] **T8.3 Repo root cleanup.** Move the three `pivot-parlor-task-list-2026-03-*.md` files to `docs/archive/`; delete `apps/workers/chatbot/src/_session_query_patch.ts.bak`.
-- [ ] **T8.4 Pagination** (limit/offset params, default 50) for admin/dev list endpoints currently hard-capped at `LIMIT 100` (`contact.ts:79`, invites, staff).
-- [ ] **T8.5 Update wrangler `compatibility_date`** across all 9+ configs to a current date; smoke-test each worker after bump.
-- [ ] **T8.6 Error-log context.** `app.onError` (`index.ts:167-170`) logs method + path; structured log for contact route instead of dumping raw body.
-- [ ] **T8.7 Parallelize `admin.staff.tsx` loader** fetches (`Promise.all`).
-- [ ] **T8.8 BFF auth latency (investigate, optional).** Evaluate verifying the JWT locally in the BFF (shared secret already exists) vs the per-request `/auth/me` round-trip; only adopt if revocation semantics from T4.1 are preserved (e.g. short local-verify TTL + KV check on Worker).
+- [x] **T8.1** — already done in Phase 0 (`clean-app-js.mjs` in `predev`/`prebuild`).
+- [x] **T8.2** — untracked `test-results/.last-run.json`; gitignore `test-results/` + `playwright-report/`.
+- [x] **T8.3** — archived the three `pivot-parlor-task-list-2026-03-*.md` to `docs/archive/`; deleted the `.bak`.
+- [x] **T8.4 Pagination** — `limit`/`offset` on `GET /api/contact` (default 100 = prior cap, max 200) + test. Per-shop lists left unbounded (small; capping risks truncation).
+- [x] **T8.5 compat dates** — all 9 configs + dev/vitest aligned to 2025-06-01; main worker staging-validated; background workers flagged for smoke-test on next deploy.
+- [x] **T8.6 Error-log context** — `onError` logs method+path; contact route logs structured fields, not the raw body.
+- [x] **T8.7 Parallelize `admin.staff.tsx` loader** — fetches run concurrently via `Promise.allSettled`.
+- [x] **T8.8 BFF auth latency** — investigated, intentionally NOT changed: local JWT verify would bypass T4.1's KV revocation check. Keep the `/auth/me` round-trip unless profiling proves it's a bottleneck (then use cached-verify-with-KV-fallback). Rationale in the phase-8 plan.
 
 ---
 
