@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { seedScheduleDay, seedShop, seedStaff } from "./helpers";
 import { getAvailableSlots } from "../src/services/slots";
 
-// seedScheduleDay seeds day_of_week=1 (Monday) 09:00-17:00.
+// seedScheduleDay seeds day_of_week=0 (Monday, Monday-first convention) 09:00-17:00.
 const MONDAY = "2027-01-04";
 
 let shopId: string;
@@ -91,5 +91,80 @@ describe("getAvailableSlots", () => {
     expect(slots.length).toBe(16);
     expect(slots[0]!.start_time).toBe(`${JULY_MONDAY}T08:00:00.000Z`);
     expect(slots.at(-1)!.end_time).toBe(`${JULY_MONDAY}T16:00:00.000Z`);
+  });
+
+  it("looks up the schedule using the Monday-first day_of_week convention", async () => {
+    // The shared staff only has a Monday (day 0) schedule. Add a Wednesday (day 2)
+    // schedule and confirm a real Wednesday resolves to it — proving getUTCDay
+    // (Sun=0) is converted to the stored Monday-first convention, not off by one.
+    await seedScheduleDay(shopId, staffId, 2); // Wednesday
+    const WEDNESDAY = "2027-01-06"; // getUTCDay()=3 -> Monday-first 2
+    const wed = await getAvailableSlots(shopId, staffId, WEDNESDAY, 30, env.DB, env.KV);
+    expect(wed.length).toBe(16);
+    // Thursday has no schedule -> empty (guards against the other-direction off-by-one)
+    const THURSDAY = "2027-01-07";
+    const thu = await getAvailableSlots(shopId, staffId, THURSDAY, 30, env.DB, env.KV);
+    expect(thu).toEqual([]);
+  });
+});
+
+describe("getAvailableSlots for a non-UTC shop (booking_date straddles UTC midnight)", () => {
+  let nyShop: string;
+  let nyStaff: string;
+  let nyService: string;
+  const NY_MONDAY = "2027-07-05"; // EDT (UTC-4)
+
+  beforeAll(async () => {
+    nyShop = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO shops (id, shop_number, slug, name, owner_email, timezone)
+       VALUES (?, ?, ?, ?, ?, 'America/New_York')`
+    )
+      .bind(nyShop, Math.floor(Math.random() * 1_000_000_000), `ny-${nyShop.slice(0, 8)}`, "NY Shop", `${nyShop}@t.local`)
+      .run();
+    const userId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id) VALUES (?, 'S', ?, 'x', 'staff', ?)"
+    )
+      .bind(userId, `${userId}@t.local`, nyShop)
+      .run();
+    nyStaff = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO staff (id, shop_id, user_id, display_name) VALUES (?, ?, ?, 'NY Barber')"
+    )
+      .bind(nyStaff, nyShop, userId)
+      .run();
+    nyService = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO services (id, shop_id, name, duration_min, price) VALUES (?, ?, 'Cut', 30, 25)"
+    )
+      .bind(nyService, nyShop)
+      .run();
+    // Evening hours 20:00-23:00 local Monday -> UTC 2027-07-06T00:00Z..03:00Z
+    await env.DB.prepare(
+      `INSERT INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time)
+       VALUES (?, ?, ?, 0, '20:00', '23:00')`
+    )
+      .bind(crypto.randomUUID(), nyShop, nyStaff)
+      .run();
+  });
+
+  it("marks an evening slot booked even though its UTC date is the next day", async () => {
+    // Book NY-local 20:30 = 2027-07-06T00:30Z..01:00Z; booking_date is the UTC
+    // date '2027-07-06', NOT the local schedule date '2027-07-05'.
+    await env.DB.prepare(
+      `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
+         booking_date, start_time, end_time, status, amount, commission)
+       VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2027-07-06',
+               '2027-07-06T00:30:00.000Z', '2027-07-06T01:00:00.000Z', 'confirmed', 25, 2.5)`
+    )
+      .bind(crypto.randomUUID(), nyShop, nyStaff, nyService)
+      .run();
+
+    const slots = await getAvailableSlots(nyShop, nyStaff, NY_MONDAY, 30, env.DB, env.KV);
+    const at = (utc: string) => slots.find((s) => s.start_time === utc)!;
+    // 20:30 local == 00:30Z next day — must be unavailable (was shown free before the fix)
+    expect(at("2027-07-06T00:30:00.000Z").is_available).toBe(false);
+    expect(at("2027-07-06T00:00:00.000Z").is_available).toBe(true); // 20:00 still free
   });
 });

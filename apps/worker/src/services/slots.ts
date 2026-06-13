@@ -68,9 +68,11 @@ export async function getAvailableSlots(
     .first<{ timezone: string | null }>();
   const tz = shopRow?.timezone || "Europe/London";
 
-  // Query schedules for this date's day_of_week. `date` is the shop-local
-  // calendar date, so its weekday is calendar arithmetic (timezone-free).
-  const jsDay = new Date(`${date}T00:00:00Z`).getUTCDay();
+  // Query schedules for this date's day_of_week. schedules.day_of_week uses a
+  // Monday-first convention (0=Mon..6=Sun) — that's what the admin schedule
+  // editor writes. JS getUTCDay() is Sunday-first (0=Sun), so convert, or every
+  // weekday's schedule is looked up one day off.
+  const jsDay = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
 
   let scheduleQuery =
     `SELECT sc.staff_id, sc.start_time, sc.end_time
@@ -93,12 +95,23 @@ export async function getAvailableSlots(
     return [];
   }
 
-  // 3. Query existing bookings for that date
+  // 3. Query existing bookings overlapping this local day's UTC window.
+  //    booking_date is stored as the UTC calendar date of the instant, which
+  //    can differ from the shop-local date for non-UTC shops (a local evening
+  //    slot can land on the next UTC date). Filtering by the UTC instant window
+  //    avoids missing those bookings; the in-memory rangesOverlap below still
+  //    does the exact per-slot filtering.
+  const dayStartUtc = zonedTimeToUtc(date, "00:00", tz).toISOString();
+  const nextDateObj = new Date(`${date}T00:00:00Z`);
+  nextDateObj.setUTCDate(nextDateObj.getUTCDate() + 1);
+  const dayEndUtc = zonedTimeToUtc(nextDateObj.toISOString().slice(0, 10), "00:00", tz).toISOString();
+
   let bookingQuery =
     `SELECT staff_id, start_time, end_time FROM bookings
-     WHERE shop_id = ? AND booking_date = ?
-       AND status NOT IN ('cancelled', 'no_show')`;
-  const bookingParams: unknown[] = [shopId, date];
+     WHERE shop_id = ?
+       AND status NOT IN ('cancelled', 'no_show')
+       AND start_time < ? AND end_time > ?`;
+  const bookingParams: unknown[] = [shopId, dayEndUtc, dayStartUtc];
   if (staffId) {
     bookingQuery += " AND staff_id = ?";
     bookingParams.push(staffId);

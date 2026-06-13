@@ -116,4 +116,22 @@ describe("double-booking prevention", () => {
       .run();
     await expect(createBooking(env.DB, directBooking(staffA, start))).resolves.toBeTruthy();
   });
+
+  it("rejects an overlapping booking whose instant straddles UTC midnight onto a different date", async () => {
+    // Booking A ends just after UTC midnight; booking B starts just before A ends.
+    // They overlap but have different start_times (so the unique index doesn't
+    // catch it) and different booking_date values (so a single-UTC-date conflict
+    // query would miss the overlap — the bug this guards).
+    const a = await dispatch("POST", "/api/bookings", {
+      body: bookingPayload({ start_time: "2027-03-15T23:45:00.000Z" }), // booking_date 2027-03-15
+    });
+    expect(a.status).toBe(201);
+
+    const b = await dispatch("POST", "/api/bookings", {
+      body: bookingPayload({ start_time: "2027-03-16T00:00:00.000Z" }), // booking_date 2027-03-16
+    });
+    expect(b.status).toBe(409);
+    const body = (await b.json()) as { error: string };
+    expect(body.error).toMatch(/no longer available/);
+  });
 });

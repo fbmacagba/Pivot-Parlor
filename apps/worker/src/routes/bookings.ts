@@ -137,7 +137,7 @@ publicBookings.post(
   const endISO = endDate.toISOString();
 
   // Check slot availability
-  const conflict = await checkSlotConflict(c.env.DB, staff_id, bookingDate, startISO, endISO);
+  const conflict = await checkSlotConflict(c.env.DB, staff_id, startISO, endISO);
   if (conflict) {
     return c.json({ success: false, error: "This time slot is no longer available" }, 409);
   }

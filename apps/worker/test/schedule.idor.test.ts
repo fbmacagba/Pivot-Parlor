@@ -12,8 +12,9 @@ beforeAll(async () => {
   shopB = await seedShop("Shop B");
   staffA = await seedStaff(shopA);
   staffB = await seedStaff(shopB);
-  await seedScheduleDay(shopA, staffA);
-  await seedScheduleDay(shopB, staffB);
+  // day_of_week=1 to match this file's day-1 assertions below.
+  await seedScheduleDay(shopA, staffA, 1);
+  await seedScheduleDay(shopB, staffB, 1);
   const adminA = await seedUser("admin", shopA);
   adminAToken = await tokenFor(adminA, "admin", shopA);
 });

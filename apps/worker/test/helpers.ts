@@ -40,12 +40,14 @@ export async function seedStaff(shopId: string): Promise<string> {
   return id;
 }
 
-export async function seedScheduleDay(shopId: string, staffId: string): Promise<void> {
+/** Seed a 09:00-17:00 schedule. day_of_week is Monday-first (0=Mon..6=Sun),
+ *  matching the admin editor; defaults to Monday (0). */
+export async function seedScheduleDay(shopId: string, staffId: string, dayOfWeek = 0): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time)
-     VALUES (?, ?, ?, 1, '09:00', '17:00')`
+     VALUES (?, ?, ?, ?, '09:00', '17:00')`
   )
-    .bind(uid("sched"), shopId, staffId)
+    .bind(uid("sched"), shopId, staffId, dayOfWeek)
     .run();
 }
 
