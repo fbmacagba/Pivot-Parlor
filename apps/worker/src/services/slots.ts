@@ -1,5 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
-import { safeJsonParse } from "@repo/utils";
+import { addMinutes, rangesOverlap, safeJsonParse } from "@repo/utils";
 import { zonedTimeToUtc } from "../lib/timezone.js";
 
 export interface SlotResult {
@@ -23,14 +23,6 @@ interface BookingRow {
 
 const SLOT_STEP_MIN = 30;         // slot start interval
 const KV_TTL_SECONDS = 5 * 60;   // 5 minute cache
-
-function addMinutes(date: Date, minutes: number): Date {
-  return new Date(date.getTime() + minutes * 60_000);
-}
-
-function rangesOverlap(s1: Date, e1: Date, s2: Date, e2: Date): boolean {
-  return s1 < e2 && e1 > s2;
-}
 
 /**
  * Returns available time slots for a given shop/staff/date.

@@ -9,12 +9,9 @@ import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js
 import { reminderDelaySeconds } from "../services/reminder.js";
 import { requireShop } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { addMinutes } from "@repo/utils";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
-
-function addMinutes(date: Date, minutes: number): Date {
-  return new Date(date.getTime() + minutes * 60_000);
-}
 
 function toDateString(iso: string): string {
   return iso.slice(0, 10); // "YYYY-MM-DD"
