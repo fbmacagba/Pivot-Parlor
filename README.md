@@ -115,20 +115,30 @@ npm run verify:live    # Post-deploy smoke check
 - Sequential migrations: [apps/worker/src/db/migrations/](apps/worker/src/db/migrations/)
 - Query helpers live in [apps/worker/src/db/queries.ts](apps/worker/src/db/queries.ts) — add helpers there, don't inline SQL in routes.
 
+Migrations are tracked (`schema_migrations`) and applied by [scripts/migrate.mjs](scripts/migrate.mjs) — CI runs it on every worker deploy:
+
 ```bash
-# Apply a migration to the remote DB
-npx wrangler d1 execute pivot-parlor-db --remote --file=apps/worker/src/db/migrations/NNN_name.sql
+node scripts/migrate.mjs                # local D1
+node scripts/migrate.mjs --remote       # production
+node scripts/migrate.mjs --remote --db pivot-parlor-db-staging  # staging
+node scripts/migrate.mjs --remote --baseline  # one-time adoption of an existing DB
 ```
 
 ## Deployment
 
 ```bash
-# Worker API
+# Worker API (production — CI also deploys on push to main)
 cd apps/worker && npx wrangler deploy
+
+# Worker API (staging — separate D1/KV/R2/queues, E2E fixtures enabled)
+cd apps/worker && npx wrangler deploy --env staging
+# → https://pivot-parlor-api-staging.bmorris0565.workers.dev
 
 # Frontend (Cloudflare Pages)
 cd apps/web && npm run deploy
 ```
+
+A staging frontend can be deployed as a Pages preview branch (`wrangler pages deploy --branch=staging`) with `API_URL` pointed at the staging Worker; wiring that into CI is deferred until E2E runs in CI.
 
 GitHub Actions workflows in [.github/workflows/](.github/workflows/) deploy `web` and `worker` on push. Background workers in `apps/workers/*` are deployed individually with `wrangler deploy` from each directory.
 

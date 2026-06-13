@@ -50,29 +50,45 @@ npx prettier --write "**/*.{ts,tsx,md}"
 ### Tests
 
 ```bash
-# E2E tests (Playwright). Tests run against https://pivotparlor.com by default.
-npx playwright test
+# Unit tests (vitest-pool-workers — real worker + simulated D1/KV)
+npm test                       # all workspaces
+cd apps/worker && npm test     # worker only
 
-# Run a single E2E test file
+# E2E tests (Playwright). E2E_BASE_URL is REQUIRED (set it in .env) and must
+# point at staging/preview — NEVER production. The config refuses to run
+# without it; prod has E2E fixtures disabled.
+npx playwright test
 npx playwright test tests/e2e/booking.spec.ts
 ```
 
 ### Deployment
 
 ```bash
-# Deploy Worker API
+# Deploy Worker API (production; CI does this on push to main)
 cd apps/worker && npx wrangler deploy
+
+# Deploy Worker API (staging — separate D1/KV/R2/queues, E2E fixtures enabled)
+cd apps/worker && npx wrangler deploy --env staging
 
 # Deploy Frontend (Cloudflare Pages)
 cd apps/web && npm run deploy
 ```
 
-### Database
+### Database migrations
+
+Migrations are tracked in a `schema_migrations` table and applied by `scripts/migrate.mjs` (CI runs it on worker deploy). Never apply migration files by hand with `wrangler d1 execute`.
 
 ```bash
-# Run a D1 migration (from repo root)
-npx wrangler d1 execute pivot-parlor-db --remote --file=apps/worker/src/db/migrations/NNN_name.sql
+# Apply pending migrations
+node scripts/migrate.mjs                  # local D1
+node scripts/migrate.mjs --remote         # production
+node scripts/migrate.mjs --remote --db pivot-parlor-db-staging   # staging
+
+# Adopt an existing database ONCE (records history without executing):
+node scripts/migrate.mjs --remote --baseline
 ```
+
+**Adding a migration:** create `apps/worker/src/db/migrations/0NN_name.sql` (next number; currently up to `019`), also reflect the change in `schema.sql` (it is the rolling snapshot used as migration `000`), and run the worker test suite — it replays the full chain and fails if the migration is not replayable.
 
 ## High-Level Architecture
 
@@ -103,10 +119,10 @@ The Remix frontend acts as a BFF (Backend-for-Frontend). It proxies authenticate
 
 ### Database
 
-- Cloudflare D1 (SQLite) named `pivot-parlor-db`.
-- Schema in `apps/worker/src/db/schema.sql`.
+- Cloudflare D1 (SQLite): `pivot-parlor-db` (production), `pivot-parlor-db-staging` (staging).
+- Schema snapshot in `apps/worker/src/db/schema.sql`; sequential migrations in `apps/worker/src/db/migrations/` (currently up to `019`), tracked in `schema_migrations` and applied via `scripts/migrate.mjs` (see Database migrations above).
+- The main worker's migration chain is the **canonical schema owner** — including tables used by `apps/workers/*` (`bw_*`, `chat_sessions`, `ai_usage_log`, `shop_settings`). The background workers' `ensure-schema` files are defensive idempotent duplicates only; new DDL goes in a migration.
 - Query helpers in `apps/worker/src/db/queries.ts`. Add new helpers there, do not inline SQL.
-- Migrations are sequential SQL files in `apps/worker/src/db/migrations/` (currently up to `011`).
 - UUIDs are generated with `crypto.randomUUID()`.
 
 ### Key Worker Routes
