@@ -177,7 +177,8 @@ app.route("/contact", contactRouter);
 
 app.notFound((c) => c.json({ success: false, error: "Not found" }, 404));
 app.onError((err, c) => {
-  console.error("[Worker Error]", err);
+  // Include request context so 500s are diagnosable from logs.
+  console.error(`[Worker Error] ${c.req.method} ${c.req.path} —`, err);
   return c.json({ success: false, error: "Internal server error" }, 500);
 });
 

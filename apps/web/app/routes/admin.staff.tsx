@@ -54,8 +54,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   let services: Service[] = [];
 
   if (shopId) {
-    try { staff = await api.get<Staff[]>(`/api/shops/${shopId}/staff`); } catch { /* empty */ }
-    try { services = await api.get<Service[]>(`/api/shops/${shopId}/services`); } catch { /* empty */ }
+    // Independent fetches — run them concurrently instead of serially.
+    const [staffRes, servicesRes] = await Promise.allSettled([
+      api.get<Staff[]>(`/api/shops/${shopId}/staff`),
+      api.get<Service[]>(`/api/shops/${shopId}/services`),
+    ]);
+    if (staffRes.status === "fulfilled") staff = staffRes.value;
+    if (servicesRes.status === "fulfilled") services = servicesRes.value;
   }
 
   return json({ staff, services, shopId, developerNeedsShop: user.role === "developer" && !shopId });
