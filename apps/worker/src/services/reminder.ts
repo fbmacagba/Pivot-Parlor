@@ -38,7 +38,7 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
        JOIN shops sh ON sh.id = b.shop_id
-       WHERE b.id = ? AND b.status = 'confirmed' AND b.reminder_sent = 0
+       WHERE b.id = ? AND b.status IN ('pending', 'confirmed') AND b.reminder_sent = 0
        LIMIT 1`
     )
     .bind(payload.bookingId)
