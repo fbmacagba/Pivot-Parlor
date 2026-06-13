@@ -1,4 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+import { safeJsonParse } from "@repo/utils";
 import { zonedTimeToUtc } from "../lib/timezone.js";
 
 export interface SlotResult {
@@ -53,10 +54,10 @@ export async function getAvailableSlots(
 ): Promise<SlotResult[]> {
   const cacheKey = `slots:${shopId}:${staffId ?? "any"}:${date}:${durationMin}`;
 
-  // 1. KV cache check
-  const cached = await kv.get(cacheKey);
+  // 1. KV cache check (a corrupt cache value degrades to a miss, not a crash)
+  const cached = safeJsonParse<SlotResult[]>(await kv.get(cacheKey));
   if (cached) {
-    return JSON.parse(cached) as SlotResult[];
+    return cached;
   }
 
   // 2. Resolve the shop's timezone — schedule times are shop-local wall clock,

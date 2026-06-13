@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@repo/types": "*",
+    "@repo/utils": "*",
     "hono": "^4.6.3",
     "stripe": "^20.4.1"
   },

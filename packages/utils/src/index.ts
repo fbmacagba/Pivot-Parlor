@@ -59,3 +59,17 @@ export function generateId(length = 16): string {
   crypto.getRandomValues(bytes);
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/**
+ * Parse JSON without throwing. Returns null on null/undefined input or on a
+ * parse error — use for KV/DB-stored JSON where a corrupt value must degrade
+ * to "absent" (cache miss, no theme, empty list) rather than crash the handler.
+ */
+export function safeJsonParse<T = unknown>(raw: string | null | undefined): T | null {
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}

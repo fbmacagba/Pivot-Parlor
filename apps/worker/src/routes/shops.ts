@@ -21,6 +21,7 @@ import {
   updateShopSiteWebsiteStatus,
   type DBService,
 } from "../db/queries.js";
+import { safeJsonParse } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
@@ -146,17 +147,17 @@ shops.get("/:shopId/theme", async (c) => {
   const shop = await getShopBySlug(c.env.DB, shopId) ?? await getShopById(c.env.DB, shopId);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  // Try KV cache first
-  const cached = await c.env.KV.get(`shop:theme:${shop.id}`);
+  // Try KV cache first (a corrupt value degrades to a miss, not a crash)
+  const cached = safeJsonParse(await c.env.KV.get(`shop:theme:${shop.id}`));
   if (cached) {
-    return c.json({ success: true, data: JSON.parse(cached) as unknown });
+    return c.json({ success: true, data: cached });
   }
 
   // Fall back to D1
-  if (shop.ai_theme) {
-    const theme = JSON.parse(shop.ai_theme) as unknown;
-    // Back-fill KV cache
-    await c.env.KV.put(`shop:theme:${shop.id}`, shop.ai_theme, {
+  const theme = safeJsonParse(shop.ai_theme);
+  if (theme) {
+    // Back-fill KV cache with the raw stored JSON
+    await c.env.KV.put(`shop:theme:${shop.id}`, shop.ai_theme!, {
       expirationTtl: 60 * 60 * 24 * 30,
     });
     return c.json({ success: true, data: theme });
@@ -175,7 +176,7 @@ shops.get("/:shopId/site", async (c) => {
   const site = await getShopSiteByShopId(c.env.DB, shop.id);
   if (!site) return c.json({ success: false, error: "No site generated for this shop" }, 404);
 
-  const freshServices = site.services_json ? JSON.parse(site.services_json) : [];
+  const freshServices = safeJsonParse<unknown[]>(site.services_json) ?? [];
 
   const websiteStatus = (site as { website_status?: string | null }).website_status ?? "draft";
 
@@ -206,7 +207,7 @@ shops.get("/:shopId/site", async (c) => {
     font_body: site.font_body,
     hero_image_url: site.hero_image_url,
     logo_url: site.logo_url,
-    catalog_images: site.catalog_images_json ? JSON.parse(site.catalog_images_json) : [],
+    catalog_images: safeJsonParse<unknown[]>(site.catalog_images_json) ?? [],
     seo_title: (site as { seo_title?: string | null }).seo_title ?? null,
     seo_description: (site as { seo_description?: string | null }).seo_description ?? null,
     website_status: websiteStatus,
@@ -1085,6 +1086,7 @@ shops.get("/:shopId", async (c) => {
   const shop = await getShopBySlug(c.env.DB, shopId) ?? await getShopById(c.env.DB, shopId);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
+  const aiTheme = safeJsonParse(shop.ai_theme);
   const safe = {
     id: shop.id,
     shop_number: shop.shop_number,
@@ -1095,7 +1097,7 @@ shops.get("/:shopId", async (c) => {
     commission_rate: shop.commission_rate,
     is_active: shop.is_active,
     created_at: shop.created_at,
-    ...(shop.ai_theme ? { ai_theme: JSON.parse(shop.ai_theme) } : {}),
+    ...(aiTheme ? { ai_theme: aiTheme } : {}),
   };
   return c.json({ success: true, data: safe });
 });
