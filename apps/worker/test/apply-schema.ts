@@ -1,12 +1,11 @@
 /**
- * Test setup: apply the base schema (strict) and all migrations (lenient)
- * to the per-file simulated D1 database.
+ * Test setup: replay the full migration chain (schema.sql + migrations/)
+ * against the per-file simulated D1 database — the same semantics as
+ * scripts/migrate.mjs, so every test run proves the chain stays replayable.
  *
- * Migrations are applied statement-by-statement with failures tolerated
- * because the current migration chain is not replayable from scratch
- * (e.g. 016 ALTERs shop_settings, which no migration creates — tracked
- * as T5.1-T5.3 in the remediation plan). Once migration integrity lands,
- * make this strict.
+ * schema.sql is a rolling snapshot and old migrations are deltas, so exactly
+ * two error classes are benign no-ops ("duplicate column name", "already
+ * exists"); anything else fails the suite.
  */
 import { env } from "cloudflare:test";
 import { beforeAll } from "vitest";
@@ -19,17 +18,18 @@ const migrationModules = import.meta.glob("../src/db/migrations/*.sql", {
 }) as Record<string, string>;
 
 function statements(sql: string): string[] {
+  // Strip comment lines FIRST — a ';' inside a comment would otherwise split
+  // the file mid-comment and corrupt the following statement.
   return sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n")
     .split(";")
-    .map((chunk) =>
-      chunk
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("--"))
-        .join("\n")
-        .trim()
-    )
+    .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
+
+const BENIGN = /duplicate column name|already exists/i;
 
 beforeAll(async () => {
   for (const stmt of statements(schemaSql)) {
@@ -41,8 +41,9 @@ beforeAll(async () => {
     for (const stmt of statements(migrationModules[file]!)) {
       try {
         await env.DB.prepare(stmt).run();
-      } catch {
-        // Tolerated until the migration chain is replayable (T5.1-T5.3).
+      } catch (err) {
+        if (BENIGN.test(String(err))) continue;
+        throw new Error(`Migration ${file} is no longer replayable: ${String(err)}\nStatement: ${stmt.slice(0, 200)}`);
       }
     }
   }
