@@ -50,3 +50,12 @@ Cloudflare Queues `delaySeconds` max is 43200 (12h); reminders are typically 24h
 
 ## Self-review
 T6.1✓(1) T6.2✓(2) T6.3✓(5) T6.4✓(5) T6.5✓(4) T6.6✓(3). Queue retry budget interaction called out (max_retries raised). Web verification limitation stated, not hidden.
+
+## Adversarial review outcome (post-implementation)
+A 6-dimension adversarial-verify workflow reviewed the full diff. safe-json, promise-cache, web-boundaries, and migration-schema dimensions: zero confirmed defects. Three defects confirmed and fixed (with reproducing regression tests):
+
+1. **Slot/conflict UTC-date join key (high, exposed by this phase's TZ work):** availability and `checkSlotConflict` filtered bookings on a single UTC `booking_date`; a shop-local slot can land on a different UTC date for non-UTC shops → booked slots shown free, and a reachable silent double-book across UTC midnight. Both queries are now instant-overlap based.
+2. **Weekday convention off-by-one (high, pre-existing):** admin editor writes `day_of_week` Monday-first; `slots.ts` and booking-worker `day.ts` read it with `getUTCDay()` (Sunday-first) → wrong day's hours. Readers convert; tests previously passed only because the seed mirrored the bug.
+3. **Reminders never fire for pending bookings (critical, pre-existing):** self-service bookings stay `pending` (no auto-confirm) but both reminder paths required `confirmed`. Predicates now include `pending`.
+
+Note on the far-future reminder concern raised pre-review: the workflow confirmed the 12h-hop × 10-retry queue budget is backstopped by the daily 08:00 cron (`getBookingsDueForReminder` for `booking_date = now+1 day`), so far-future bookings are still reminded the day before regardless of queue exhaustion.
