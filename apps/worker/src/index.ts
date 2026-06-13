@@ -21,7 +21,7 @@ import waitlistRouter from "./routes/waitlist.js";
 import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
-import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import { processReminder, reminderDelaySeconds, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
 import { sendEodAlert } from "./services/email.js";
 import { walkinRouter, adminWalkinRouter } from "./routes/walkin.js";
 import {
@@ -256,7 +256,7 @@ export default {
   async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
     const q = batch.queue;
 
-    if (q === "pivot-parlor-reminders") {
+    if (q === "pivot-parlor-reminders" || q === "pivot-parlor-reminders-staging") {
       for (const msg of batch.messages) {
         try {
           const body = msg.body as ReminderPayload;
@@ -264,7 +264,10 @@ export default {
           const sendAt = new Date(body.sendAt);
 
           if (sendAt > now) {
-            msg.ack();
+            // Not due yet (delaySeconds caps at 12h, so >12h reminders arrive
+            // early). Re-delay the remainder instead of dropping the message —
+            // acking here silently lost every reminder more than one queue-hop out.
+            msg.retry({ delaySeconds: Math.max(60, reminderDelaySeconds(sendAt, now)) });
             continue;
           }
 

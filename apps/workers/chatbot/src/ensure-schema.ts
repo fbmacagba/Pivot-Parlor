@@ -57,6 +57,13 @@ export async function ensureChatbotSchema(db: D1Database): Promise<void> {
 let schemaReady: Promise<void> | null = null;
 
 export function withChatbotSchema<T extends { DB: D1Database }>(env: T, fn: () => Promise<Response>): Promise<Response> {
-  if (!schemaReady) schemaReady = ensureChatbotSchema(env.DB);
+  if (!schemaReady) {
+    // Clear on rejection so the next request retries instead of replaying
+    // the cached failure until the isolate restarts.
+    schemaReady = ensureChatbotSchema(env.DB).catch((err) => {
+      schemaReady = null;
+      throw err;
+    });
+  }
   return schemaReady.then(() => fn());
 }

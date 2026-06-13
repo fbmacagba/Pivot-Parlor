@@ -33,7 +33,9 @@ queue = "pivot-parlor-reminders"
 queue = "pivot-parlor-reminders"
 max_batch_size = 10
 max_batch_timeout = 30
-max_retries = 3
+# Retries double as scheduling hops for >12h reminders (delaySeconds caps at
+# 12h per hop), so the budget must cover hops + genuine failure retries.
+max_retries = 10
 
 # Site generation pipeline
 [[queues.producers]]
@@ -99,7 +101,7 @@ queue = "pivot-parlor-reminders-staging"
 queue = "pivot-parlor-reminders-staging"
 max_batch_size = 10
 max_batch_timeout = 30
-max_retries = 3
+max_retries = 10
 
 [[env.staging.queues.producers]]
 binding = "site_research_queue"

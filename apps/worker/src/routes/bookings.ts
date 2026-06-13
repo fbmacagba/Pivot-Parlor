@@ -6,6 +6,7 @@ import {
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js";
+import { reminderDelaySeconds } from "../services/reminder.js";
 import { requireShop } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
@@ -206,8 +207,12 @@ publicBookings.post(
     const hoursBeforeNum = settingsRow?.reminder_hours_before ?? 24;
     const hoursBefore = Number.isFinite(hoursBeforeNum) && hoursBeforeNum > 0 ? hoursBeforeNum : 24;
     if (reminderEnabled) {
-      const sendAt = new Date(startDate.getTime() - hoursBefore * 60 * 60_000).toISOString();
-      await c.env.QUEUE?.send({ bookingId: id, sendAt });
+      const sendAtDate = new Date(startDate.getTime() - hoursBefore * 60 * 60_000);
+      // delaySeconds caps at 12h; the consumer re-delays the remainder in hops.
+      await c.env.QUEUE?.send(
+        { bookingId: id, sendAt: sendAtDate.toISOString() },
+        { delaySeconds: reminderDelaySeconds(sendAtDate, new Date()) }
+      );
     }
   } catch (err) {
     console.warn("[Queue] Could not enqueue reminder (non-fatal):", err);
