@@ -11,6 +11,7 @@ import {
   ensureE2ePlaywrightInviteReady,
   E2E_PLAYWRIGHT_INVITE_TOKEN,
 } from "../db/queries.js";
+import { e2eMockAllowed } from "../lib/e2e.js";
 
 const invites = new Hono<{ Bindings: Bindings }>();
 
@@ -40,7 +41,7 @@ async function hashPassword(password: string): Promise<string> {
 
 invites.get("/:token", async (c) => {
   const { token } = c.req.param();
-  const e2eMock = c.req.header("X-E2E-Test-Mock") === "1";
+  const e2eMock = e2eMockAllowed(c.env, c.req.header("X-E2E-Test-Mock"));
   if (e2eMock && token === E2E_PLAYWRIGHT_INVITE_TOKEN) {
     await ensureE2ePlaywrightInviteReady(c.env.DB);
   }

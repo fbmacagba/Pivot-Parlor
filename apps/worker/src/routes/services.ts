@@ -57,9 +57,16 @@ services.get("/", async (c) => {
 // ─── GET /api/shops/:shopId/services/:serviceId ───────────────────────────────
 
 services.get("/:serviceId", async (c) => {
+  const shopIdParam = c.req.param("shopId")!;
   const serviceId = c.req.param("serviceId")!;
+  // :shopId may be a slug or an id, same as GET / above.
+  const shop =
+    (await getShopBySlug(c.env.DB, shopIdParam)) ?? (await getShopById(c.env.DB, shopIdParam));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
   const svc = await getServiceById(c.env.DB, serviceId);
-  if (!svc) return c.json({ success: false, error: "Service not found" }, 404);
+  if (!svc || svc.shop_id !== shop.id) {
+    return c.json({ success: false, error: "Service not found" }, 404);
+  }
   return c.json({ success: true, data: svc });
 });
 

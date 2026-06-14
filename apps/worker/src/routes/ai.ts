@@ -1,7 +1,9 @@
 import { Hono } from "hono";
+import { safeJsonParse } from "@repo/utils";
 import type { Bindings } from "../bindings.js";
-import { authMiddleware } from "../middleware/auth.js";
+import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { generateShopTheme } from "../services/ai-generator.js";
 import { MODEL_REGISTRY } from "../services/model-registry.js";
 
@@ -9,6 +11,17 @@ const ai = new Hono<{ Bindings: Bindings }>();
 
 // All AI routes require developer role
 ai.use("*", authMiddleware, requireRole("developer"));
+
+// AI generation is expensive — cap per user (cost abuse brake, NFR-S4)
+ai.use(
+  "*",
+  rateLimit({
+    name: "ai",
+    limit: 10,
+    windowS: 3600,
+    key: (c) => getUser(c)?.sub ?? clientIp(c),
+  })
+);
 
 // ─── GET /api/ai/models — return full model registry ─────────────────────────
 
@@ -40,14 +53,16 @@ ai.post("/generate-theme", async (c) => {
 
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  // Return cached theme unless regenerate=true
+  // Return cached theme unless regenerate=true. A corrupt cache/stored value
+  // falls through to regeneration rather than crashing.
   if (!body.regenerate) {
-    const cached = await c.env.KV.get(`shop:theme:${shop.id}`);
+    const cached = safeJsonParse(await c.env.KV.get(`shop:theme:${shop.id}`));
     if (cached) {
-      return c.json({ success: true, data: JSON.parse(cached), cached: true, model_used: modelId });
+      return c.json({ success: true, data: cached, cached: true, model_used: modelId });
     }
-    if (shop.ai_theme) {
-      return c.json({ success: true, data: JSON.parse(shop.ai_theme), cached: true, model_used: modelId });
+    const stored = safeJsonParse(shop.ai_theme);
+    if (stored) {
+      return c.json({ success: true, data: stored, cached: true, model_used: modelId });
     }
   }
 

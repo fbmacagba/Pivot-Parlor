@@ -1,5 +1,5 @@
 name = "pivot-parlor-web"
-compatibility_date = "2024-09-23"
+compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./build/client"
 

@@ -6,13 +6,12 @@ import {
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js";
+import { reminderDelaySeconds } from "../services/reminder.js";
 import { requireShop } from "../middleware/rbac.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { addMinutes } from "@repo/utils";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
-
-function addMinutes(date: Date, minutes: number): Date {
-  return new Date(date.getTime() + minutes * 60_000);
-}
 
 function toDateString(iso: string): string {
   return iso.slice(0, 10); // "YYYY-MM-DD"
@@ -86,7 +85,10 @@ bookings.put("/:bookingId/status", async (c) => {
 
 const publicBookings = new Hono<{ Bindings: Bindings }>();
 
-publicBookings.post("/", async (c) => {
+publicBookings.post(
+  "/",
+  rateLimit({ name: "public-booking", limit: 30, windowS: 3600, key: clientIp }),
+  async (c) => {
   const body = await c.req.json<{
     shop_id?: string;
     staff_id?: string;
@@ -116,14 +118,23 @@ publicBookings.post("/", async (c) => {
     return c.json({ success: false, error: "Service not found" }, 404);
   }
 
+  // Validate staff — body input, so shop ownership is not covered by URL scoping
+  const bookedStaff = await getStaffById(c.env.DB, staff_id);
+  if (!bookedStaff || bookedStaff.shop_id !== shop_id || bookedStaff.is_active !== 1) {
+    return c.json({ success: false, error: "Staff member not found" }, 404);
+  }
+
   const startDate = new Date(start_time);
+  if (Number.isNaN(startDate.getTime())) {
+    return c.json({ success: false, error: "start_time must be a valid ISO date-time" }, 400);
+  }
   const endDate = addMinutes(startDate, service.duration_min);
   const bookingDate = toDateString(startDate.toISOString());
   const startISO = startDate.toISOString();
   const endISO = endDate.toISOString();
 
   // Check slot availability
-  const conflict = await checkSlotConflict(c.env.DB, staff_id, bookingDate, startISO, endISO);
+  const conflict = await checkSlotConflict(c.env.DB, staff_id, startISO, endISO);
   if (conflict) {
     return c.json({ success: false, error: "This time slot is no longer available" }, 409);
   }
@@ -131,21 +142,30 @@ publicBookings.post("/", async (c) => {
   const commission = Math.round(service.price * shop.commission_rate * 100) / 100;
   const id = crypto.randomUUID();
 
-  await createBooking(c.env.DB, {
-    id,
-    shop_id,
-    staff_id,
-    service_id,
-    customer_name,
-    customer_email,
-    customer_phone: body.customer_phone ?? null,
-    booking_date: bookingDate,
-    start_time: startISO,
-    end_time: endISO,
-    notes: body.notes ?? null,
-    amount: service.price,
-    commission,
-  });
+  try {
+    await createBooking(c.env.DB, {
+      id,
+      shop_id,
+      staff_id,
+      service_id,
+      customer_name,
+      customer_email,
+      customer_phone: body.customer_phone ?? null,
+      booking_date: bookingDate,
+      start_time: startISO,
+      end_time: endISO,
+      notes: body.notes ?? null,
+      amount: service.price,
+      commission,
+    });
+  } catch (err) {
+    // idx_bookings_active_slot (migration 018): a concurrent request won the
+    // slot between checkSlotConflict and this INSERT.
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+    }
+    throw err;
+  }
 
   // Send booking confirmation email — fire-and-forget, never block booking creation
   try {
@@ -184,8 +204,12 @@ publicBookings.post("/", async (c) => {
     const hoursBeforeNum = settingsRow?.reminder_hours_before ?? 24;
     const hoursBefore = Number.isFinite(hoursBeforeNum) && hoursBeforeNum > 0 ? hoursBeforeNum : 24;
     if (reminderEnabled) {
-      const sendAt = new Date(startDate.getTime() - hoursBefore * 60 * 60_000).toISOString();
-      await c.env.QUEUE?.send({ bookingId: id, sendAt });
+      const sendAtDate = new Date(startDate.getTime() - hoursBefore * 60 * 60_000);
+      // delaySeconds caps at 12h; the consumer re-delays the remainder in hops.
+      await c.env.QUEUE?.send(
+        { bookingId: id, sendAt: sendAtDate.toISOString() },
+        { delaySeconds: reminderDelaySeconds(sendAtDate, new Date()) }
+      );
     }
   } catch (err) {
     console.warn("[Queue] Could not enqueue reminder (non-fatal):", err);

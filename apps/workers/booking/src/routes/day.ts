@@ -39,7 +39,9 @@ r.post("/:shopId/open", async (c) => {
     .bind(businessDayId, shopId, date, now)
     .run();
 
-  const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
+  // schedules.day_of_week is Monday-first (0=Mon..6=Sun, written by the admin
+  // editor); getUTCDay() is Sunday-first, so convert or the wrong day is read.
+  const dow = (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7;
   const schedRes = await db
     .prepare(
       "SELECT staff_id, start_time, end_time FROM schedules WHERE shop_id = ? AND day_of_week = ? AND is_active = 1"

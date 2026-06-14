@@ -184,7 +184,12 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
 
 export function withSchema<T extends { DB: D1Database }>(env: T, fn: () => Promise<Response> | Response): Promise<Response> {
   if (!schemaReady) {
-    schemaReady = ensureBookingSchema(env.DB);
+    // Clear on rejection so the next request retries instead of replaying
+    // the cached failure until the isolate restarts.
+    schemaReady = ensureBookingSchema(env.DB).catch((err) => {
+      schemaReady = null;
+      throw err;
+    });
   }
   return schemaReady.then(() => fn()) as Promise<Response>;
 }

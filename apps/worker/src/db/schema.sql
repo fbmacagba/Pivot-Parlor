@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS shops (
   is_active       INTEGER NOT NULL DEFAULT 1,
   status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','suspended')),
   plan            TEXT NOT NULL DEFAULT 'standard',
+  timezone        TEXT NOT NULL DEFAULT 'Europe/London',
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -82,7 +83,7 @@ CREATE TABLE IF NOT EXISTS bookings (
   start_time      TEXT NOT NULL,
   end_time        TEXT NOT NULL,
   status          TEXT NOT NULL DEFAULT 'pending'
-                  CHECK(status IN ('pending','confirmed','completed','cancelled','no_show')),
+                  CHECK(status IN ('pending','confirmed','in_progress','completed','cancelled','no_show')),
   notes           TEXT,
   amount          REAL NOT NULL,
   commission      REAL NOT NULL,

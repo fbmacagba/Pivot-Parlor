@@ -1,4 +1,6 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+import { addMinutes, rangesOverlap, safeJsonParse } from "@repo/utils";
+import { zonedTimeToUtc } from "../lib/timezone.js";
 
 export interface SlotResult {
   staff_id: string;
@@ -22,14 +24,6 @@ interface BookingRow {
 const SLOT_STEP_MIN = 30;         // slot start interval
 const KV_TTL_SECONDS = 5 * 60;   // 5 minute cache
 
-function addMinutes(date: Date, minutes: number): Date {
-  return new Date(date.getTime() + minutes * 60_000);
-}
-
-function rangesOverlap(s1: Date, e1: Date, s2: Date, e2: Date): boolean {
-  return s1 < e2 && e1 > s2;
-}
-
 /**
  * Returns available time slots for a given shop/staff/date.
  *
@@ -52,15 +46,25 @@ export async function getAvailableSlots(
 ): Promise<SlotResult[]> {
   const cacheKey = `slots:${shopId}:${staffId ?? "any"}:${date}:${durationMin}`;
 
-  // 1. KV cache check
-  const cached = await kv.get(cacheKey);
+  // 1. KV cache check (a corrupt cache value degrades to a miss, not a crash)
+  const cached = safeJsonParse<SlotResult[]>(await kv.get(cacheKey));
   if (cached) {
-    return JSON.parse(cached) as SlotResult[];
+    return cached;
   }
 
-  // 2. Query schedules for this date's day_of_week
-  //    date("YYYY-MM-DD") → JS Date → getUTCDay() where 0=Sun
-  const jsDay = new Date(`${date}T00:00:00Z`).getUTCDay();
+  // 2. Resolve the shop's timezone — schedule times are shop-local wall clock,
+  //    slots are UTC instants. (Falls back to Europe/London, the column default.)
+  const shopRow = await db
+    .prepare("SELECT timezone FROM shops WHERE id = ? LIMIT 1")
+    .bind(shopId)
+    .first<{ timezone: string | null }>();
+  const tz = shopRow?.timezone || "Europe/London";
+
+  // Query schedules for this date's day_of_week. schedules.day_of_week uses a
+  // Monday-first convention (0=Mon..6=Sun) — that's what the admin schedule
+  // editor writes. JS getUTCDay() is Sunday-first (0=Sun), so convert, or every
+  // weekday's schedule is looked up one day off.
+  const jsDay = (new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7;
 
   let scheduleQuery =
     `SELECT sc.staff_id, sc.start_time, sc.end_time
@@ -83,12 +87,23 @@ export async function getAvailableSlots(
     return [];
   }
 
-  // 3. Query existing bookings for that date
+  // 3. Query existing bookings overlapping this local day's UTC window.
+  //    booking_date is stored as the UTC calendar date of the instant, which
+  //    can differ from the shop-local date for non-UTC shops (a local evening
+  //    slot can land on the next UTC date). Filtering by the UTC instant window
+  //    avoids missing those bookings; the in-memory rangesOverlap below still
+  //    does the exact per-slot filtering.
+  const dayStartUtc = zonedTimeToUtc(date, "00:00", tz).toISOString();
+  const nextDateObj = new Date(`${date}T00:00:00Z`);
+  nextDateObj.setUTCDate(nextDateObj.getUTCDate() + 1);
+  const dayEndUtc = zonedTimeToUtc(nextDateObj.toISOString().slice(0, 10), "00:00", tz).toISOString();
+
   let bookingQuery =
     `SELECT staff_id, start_time, end_time FROM bookings
-     WHERE shop_id = ? AND booking_date = ?
-       AND status NOT IN ('cancelled', 'no_show')`;
-  const bookingParams: unknown[] = [shopId, date];
+     WHERE shop_id = ?
+       AND status NOT IN ('cancelled', 'no_show')
+       AND start_time < ? AND end_time > ?`;
+  const bookingParams: unknown[] = [shopId, dayEndUtc, dayStartUtc];
   if (staffId) {
     bookingQuery += " AND staff_id = ?";
     bookingParams.push(staffId);
@@ -106,8 +121,8 @@ export async function getAvailableSlots(
     const [startH, startM] = schedule.start_time.split(":").map(Number) as [number, number];
     const [endH, endM] = schedule.end_time.split(":").map(Number) as [number, number];
 
-    let current = new Date(`${date}T${pad(startH)}:${pad(startM)}:00Z`);
-    const windowEnd = new Date(`${date}T${pad(endH)}:${pad(endM)}:00Z`);
+    let current = zonedTimeToUtc(date, `${pad(startH)}:${pad(startM)}`, tz);
+    const windowEnd = zonedTimeToUtc(date, `${pad(endH)}:${pad(endM)}`, tz);
 
     while (current < windowEnd) {
       const slotEnd = addMinutes(current, durationMin);

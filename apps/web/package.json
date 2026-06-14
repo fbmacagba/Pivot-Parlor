@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "remix vite:dev",
+    "predev": "node scripts/clean-app-js.mjs",
     "clean": "node scripts/clean-build.mjs",
+    "clean:js": "node scripts/clean-app-js.mjs",
+    "prebuild": "node scripts/clean-app-js.mjs",
     "build": "remix vite:build",
     "postbuild": "node scripts/copy-public.mjs",
     "start": "wrangler pages dev ./build/client",

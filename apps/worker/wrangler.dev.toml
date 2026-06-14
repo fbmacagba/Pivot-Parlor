@@ -1,6 +1,6 @@
 name = "pivot-parlor-api"
 main = "src/index.ts"
-compatibility_date = "2024-10-22"
+compatibility_date = "2025-06-01"
 
 [[d1_databases]]
 binding = "DB"
@@ -31,5 +31,7 @@ max_batch_timeout = 30
 
 [vars]
 ENVIRONMENT = "development"
+# Enables E2E mock/fixture request paths. Dev/staging only — never set in production.
+E2E_FIXTURES = "true"
 JWT_SECRET = "dev-jwt-secret-change-in-production-min32chars"
 ANTHROPIC_API_KEY = "sk-ant-placeholder"

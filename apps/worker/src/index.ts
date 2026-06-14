@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { secureHeaders } from "hono/secure-headers";
 import type { MessageBatch } from "@cloudflare/workers-types";
 
 import type { Bindings } from "./bindings.js";
@@ -20,7 +21,7 @@ import waitlistRouter from "./routes/waitlist.js";
 import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
-import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import { processReminder, reminderDelaySeconds, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
 import { sendEodAlert } from "./services/email.js";
 import { walkinRouter, adminWalkinRouter } from "./routes/walkin.js";
 import {
@@ -48,6 +49,17 @@ stripeWebhookApp.route("/api/webhooks", webhooksRouter);
 // ─── Global middleware ────────────────────────────────────────────────────────
 
 app.use("*", logger());
+
+// API security headers (NFR-S7). The web app's headers live in apps/web/public/_headers.
+app.use(
+  "*",
+  secureHeaders({
+    xFrameOptions: "DENY",
+    xContentTypeOptions: "nosniff",
+    strictTransportSecurity: "max-age=63072000; includeSubDomains",
+    referrerPolicy: "no-referrer",
+  })
+);
 
 app.use(
   "*",
@@ -165,7 +177,8 @@ app.route("/contact", contactRouter);
 
 app.notFound((c) => c.json({ success: false, error: "Not found" }, 404));
 app.onError((err, c) => {
-  console.error("[Worker Error]", err);
+  // Include request context so 500s are diagnosable from logs.
+  console.error(`[Worker Error] ${c.req.method} ${c.req.path} —`, err);
   return c.json({ success: false, error: "Internal server error" }, 500);
 });
 
@@ -244,7 +257,7 @@ export default {
   async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
     const q = batch.queue;
 
-    if (q === "pivot-parlor-reminders") {
+    if (q === "pivot-parlor-reminders" || q === "pivot-parlor-reminders-staging") {
       for (const msg of batch.messages) {
         try {
           const body = msg.body as ReminderPayload;
@@ -252,7 +265,10 @@ export default {
           const sendAt = new Date(body.sendAt);
 
           if (sendAt > now) {
-            msg.ack();
+            // Not due yet (delaySeconds caps at 12h, so >12h reminders arrive
+            // early). Re-delay the remainder instead of dropping the message —
+            // acking here silently lost every reminder more than one queue-hop out.
+            msg.retry({ delaySeconds: Math.max(60, reminderDelaySeconds(sendAt, now)) });
             continue;
           }
 

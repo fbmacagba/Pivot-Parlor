@@ -1,6 +1,6 @@
 name = "pivot-parlor-api"
 main = "src/index.ts"
-compatibility_date = "2024-10-22"
+compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
@@ -33,7 +33,9 @@ queue = "pivot-parlor-reminders"
 queue = "pivot-parlor-reminders"
 max_batch_size = 10
 max_batch_timeout = 30
-max_retries = 3
+# Retries double as scheduling hops for >12h reminders (delaySeconds caps at
+# 12h per hop), so the budget must cover hops + genuine failure retries.
+max_retries = 10
 
 # Site generation pipeline
 [[queues.producers]]
@@ -62,3 +64,48 @@ local_protocol = "http"
 #   FACEBOOK_OAUTH_APP_SECRET
 #   LINKEDIN_OAUTH_CLIENT_ID
 #   LINKEDIN_OAUTH_CLIENT_SECRET
+
+# ─── Staging ──────────────────────────────────────────────────────────────────
+# Deploy:   npx wrangler deploy --env staging
+# Migrate:  node ../../scripts/migrate.mjs --remote --db pivot-parlor-db-staging
+# Secrets:  npx wrangler secret put JWT_SECRET --env staging   (staging-only values)
+# E2E fixtures are enabled here; NEVER set E2E_FIXTURES in production above.
+
+[env.staging]
+name = "pivot-parlor-api-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+E2E_FIXTURES = "true"
+ASSET_BASE_URL = "https://pivot-parlor-api-staging.bmorris0565.workers.dev"
+APP_URL = "https://pivot-parlor-api-staging.bmorris0565.workers.dev"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "pivot-parlor-db-staging"
+database_id = "87305736-6077-42a4-ae2b-86a5203ab4c4"
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "39a1e52d5dd34cc7bdf19b30d4b7212d"
+
+[[env.staging.r2_buckets]]
+binding = "ASSETS"
+bucket_name = "pivot-parlor-assets-staging"
+
+[[env.staging.queues.producers]]
+binding = "QUEUE"
+queue = "pivot-parlor-reminders-staging"
+
+[[env.staging.queues.consumers]]
+queue = "pivot-parlor-reminders-staging"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 10
+
+[[env.staging.queues.producers]]
+binding = "site_research_queue"
+queue = "site-research-queue-staging"
+
+[env.staging.triggers]
+crons = ["0 8 * * *", "0 20 * * *"]

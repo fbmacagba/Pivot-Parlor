@@ -18,14 +18,18 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   }
 
   const headers = buildWorkerUpstreamHeaders(request, token);
-  const res = await fetch(`${env.API_URL}/api/shops/${shopId}/generation-prefs`, {
-    headers,
-  });
-  if (!res.ok || !workerResponseLooksLikeJson(res)) {
-    return json({ error: "API request failed", status: res.status }, { status: res.status });
+  try {
+    const res = await fetch(`${env.API_URL}/api/shops/${shopId}/generation-prefs`, {
+      headers,
+    });
+    if (!res.ok || !workerResponseLooksLikeJson(res)) {
+      return json({ error: "API request failed", status: res.status }, { status: res.status });
+    }
+    const body = (await res.json()) as unknown;
+    return json(body, { status: res.status });
+  } catch {
+    return json({ success: false, error: "Generation prefs service is unavailable" }, 502);
   }
-  const body = (await res.json()) as unknown;
-  return json(body, { status: res.status });
 }
 
 export default function GenerationPrefsApi() {

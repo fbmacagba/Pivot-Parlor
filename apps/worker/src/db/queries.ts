@@ -841,19 +841,22 @@ export function markReminderSent(db: D1Database, id: string) {
 export async function checkSlotConflict(
   db: D1Database,
   staffId: string,
-  bookingDate: string,
   startTime: string,
   endTime: string
 ): Promise<boolean> {
+  // Overlap is a pure instant-range comparison — do NOT gate on booking_date.
+  // booking_date is the UTC calendar date, so an overlapping booking whose
+  // instant straddles UTC midnight onto an adjacent date would be missed by a
+  // single-date filter, letting two different-start bookings double-book.
   const row = await db
     .prepare(
       `SELECT 1 FROM bookings
-       WHERE staff_id = ? AND booking_date = ?
+       WHERE staff_id = ?
          AND status NOT IN ('cancelled', 'no_show')
          AND start_time < ? AND end_time > ?
        LIMIT 1`
     )
-    .bind(staffId, bookingDate, endTime, startTime)
+    .bind(staffId, endTime, startTime)
     .first();
   return !!row;
 }
@@ -964,7 +967,7 @@ export async function getBookingsDueForReminder(db: D1Database) {
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
        JOIN shops sh ON sh.id = b.shop_id
-       WHERE b.status = 'confirmed'
+       WHERE b.status IN ('pending', 'confirmed')
          AND b.reminder_sent = 0
          AND b.booking_date = date('now', '+1 day')`
     )

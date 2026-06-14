@@ -4,7 +4,7 @@
     "**/*.tsx",
     "**/*.d.ts"
   ],
-  "exclude": ["node_modules", "build", ".cache"],
+  "exclude": ["node_modules", "build", ".cache", "functions"],
   "compilerOptions": {
     "noEmit": true,
     "lib": ["DOM", "DOM.Iterable", "ES2022"],

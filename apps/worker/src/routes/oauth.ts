@@ -1,6 +1,14 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { sign } from "hono/jwt";
 import type { Bindings } from "../bindings.js";
+import {
+  buildState,
+  clearNonceCookie,
+  nonceCookie,
+  readNonceCookie,
+  validateState,
+} from "../lib/oauth-state.js";
 
 const oauth = new Hono<{ Bindings: Bindings }>();
 
@@ -8,16 +16,27 @@ const SESSION_TTL_S = 60 * 60 * 24 * 7; // 7 days
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function oauthState(redirectTo = "/"): string {
-  return btoa(JSON.stringify({ redirectTo, ts: Date.now() }));
+type Ctx = Context<{ Bindings: Bindings }>;
+
+/** Mint nonce + state for an initiation route and set the nonce cookie. */
+function beginOAuth(c: Ctx): string {
+  const redirectTo = c.req.query("redirect") ?? "/";
+  const nonce = crypto.randomUUID();
+  c.header("Set-Cookie", nonceCookie(nonce, isProduction(c.env)), { append: true });
+  return buildState(redirectTo, nonce);
 }
 
-function parseState(state: string): { redirectTo: string } {
-  try {
-    return JSON.parse(atob(state));
-  } catch {
-    return { redirectTo: "/" };
-  }
+/**
+ * Validate state against the nonce cookie BEFORE any token exchange.
+ * Returns the safe redirect target, or null after writing the 400 response.
+ */
+function checkCallbackState(c: Ctx): { redirectTo: string } | null {
+  const state = c.req.query("state") ?? "";
+  const cookieNonce = readNonceCookie(c.req.header("Cookie"));
+  const result = validateState(state, cookieNonce, Date.now());
+  c.header("Set-Cookie", clearNonceCookie(isProduction(c.env)), { append: true });
+  if (!result.ok) return null;
+  return { redirectTo: result.redirectTo };
 }
 
 async function issueToken(
@@ -128,8 +147,7 @@ function isProduction(env: Bindings): boolean {
 // ─── GOOGLE ───────────────────────────────────────────────────────────────────
 
 oauth.get("/google", (c) => {
-  const redirectTo = c.req.query("redirect") ?? "/";
-  const state = oauthState(redirectTo);
+  const state = beginOAuth(c);
   const params = new URLSearchParams({
     client_id: c.env.GOOGLE_OAUTH_CLIENT_ID ?? "",
     redirect_uri: `${c.env.APP_URL ?? "https://pivotparlor.com"}/auth/google/callback`,
@@ -143,10 +161,11 @@ oauth.get("/google", (c) => {
 
 oauth.get("/google/callback", async (c) => {
   const code = c.req.query("code");
-  const state = c.req.query("state") ?? "";
   if (!code) return c.json({ success: false, error: "Missing code" }, 400);
 
-  const { redirectTo } = parseState(state);
+  const stateCheck = checkCallbackState(c);
+  if (!stateCheck) return c.json({ success: false, error: "Invalid or expired OAuth state" }, 400);
+  const { redirectTo } = stateCheck;
 
   // Exchange code for tokens
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -170,10 +189,15 @@ oauth.get("/google/callback", async (c) => {
   const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
     headers: { Authorization: `Bearer ${tokenData.access_token}` },
   });
-  const profile = await profileRes.json<{ sub?: string; email?: string; name?: string; picture?: string }>();
+  const profile = await profileRes.json<{
+    sub?: string; email?: string; email_verified?: boolean; name?: string; picture?: string;
+  }>();
 
   if (!profile.sub || !profile.email) {
     return c.json({ success: false, error: "Could not fetch Google profile" }, 400);
+  }
+  if (profile.email_verified === false) {
+    return c.json({ success: false, error: "Email address is not verified with Google" }, 403);
   }
 
   const user = await upsertOAuthUser(
@@ -190,8 +214,7 @@ oauth.get("/google/callback", async (c) => {
 // ─── FACEBOOK ─────────────────────────────────────────────────────────────────
 
 oauth.get("/facebook", (c) => {
-  const redirectTo = c.req.query("redirect") ?? "/";
-  const state = oauthState(redirectTo);
+  const state = beginOAuth(c);
   const params = new URLSearchParams({
     client_id: c.env.FACEBOOK_OAUTH_APP_ID ?? "",
     redirect_uri: `${c.env.APP_URL ?? "https://pivotparlor.com"}/auth/facebook/callback`,
@@ -204,10 +227,12 @@ oauth.get("/facebook", (c) => {
 
 oauth.get("/facebook/callback", async (c) => {
   const code = c.req.query("code");
-  const state = c.req.query("state") ?? "";
   if (!code) return c.json({ success: false, error: "Missing code" }, 400);
 
-  const { redirectTo } = parseState(state);
+  // Facebook sends no email_verified claim; Graph API emails are platform-verified.
+  const stateCheck = checkCallbackState(c);
+  if (!stateCheck) return c.json({ success: false, error: "Invalid or expired OAuth state" }, 400);
+  const { redirectTo } = stateCheck;
 
   const tokenRes = await fetch(
     `https://graph.facebook.com/v19.0/oauth/access_token?${new URLSearchParams({
@@ -245,8 +270,7 @@ oauth.get("/facebook/callback", async (c) => {
 // ─── LINKEDIN ─────────────────────────────────────────────────────────────────
 
 oauth.get("/linkedin", (c) => {
-  const redirectTo = c.req.query("redirect") ?? "/";
-  const state = oauthState(redirectTo);
+  const state = beginOAuth(c);
   const params = new URLSearchParams({
     response_type: "code",
     client_id: c.env.LINKEDIN_OAUTH_CLIENT_ID ?? "",
@@ -259,10 +283,11 @@ oauth.get("/linkedin", (c) => {
 
 oauth.get("/linkedin/callback", async (c) => {
   const code = c.req.query("code");
-  const state = c.req.query("state") ?? "";
   if (!code) return c.json({ success: false, error: "Missing code" }, 400);
 
-  const { redirectTo } = parseState(state);
+  const stateCheck = checkCallbackState(c);
+  if (!stateCheck) return c.json({ success: false, error: "Invalid or expired OAuth state" }, 400);
+  const { redirectTo } = stateCheck;
 
   const tokenRes = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
     method: "POST",
@@ -285,10 +310,16 @@ oauth.get("/linkedin/callback", async (c) => {
   const profileRes = await fetch("https://api.linkedin.com/v2/userinfo", {
     headers: { Authorization: `Bearer ${tokenData.access_token}` },
   });
-  const profile = await profileRes.json<{ sub?: string; email?: string; name?: string; picture?: string }>();
+  const profile = await profileRes.json<{
+    sub?: string; email?: string; email_verified?: boolean | string; name?: string; picture?: string;
+  }>();
 
   if (!profile.sub || !profile.email) {
     return c.json({ success: false, error: "Could not fetch LinkedIn profile" }, 400);
+  }
+  // LinkedIn OIDC may send email_verified as a boolean or "true"/"false" string.
+  if (profile.email_verified === false || profile.email_verified === "false") {
+    return c.json({ success: false, error: "Email address is not verified with LinkedIn" }, 403);
   }
 
   const user = await upsertOAuthUser(

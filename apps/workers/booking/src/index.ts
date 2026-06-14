@@ -13,7 +13,12 @@ const root = new Hono<{ Bindings: Env }>();
 let schemaOnce: Promise<void> | null = null;
 root.use("*", async (c, next) => {
   if (!schemaOnce) {
-    schemaOnce = ensureBookingSchema(c.env.DB);
+    // Clear on rejection — caching a rejected promise poisons every later
+    // request until the isolate restarts.
+    schemaOnce = ensureBookingSchema(c.env.DB).catch((err) => {
+      schemaOnce = null;
+      throw err;
+    });
   }
   await schemaOnce;
   await next();

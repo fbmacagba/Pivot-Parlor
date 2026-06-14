@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
   getScheduleByShop, getScheduleByStaff, upsertSchedule, deactivateScheduleDay,
+  getStaffById,
 } from "../db/queries.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShop } from "../middleware/rbac.js";
@@ -28,7 +29,12 @@ schedule.get("/", async (c) => {
 // ─── GET /api/shops/:shopId/schedule/:staffId ─────────────────────────────────
 
 schedule.get("/:staffId", async (c) => {
+  const shopId = c.req.param("shopId")!;
   const staffId = c.req.param("staffId")!;
+  const member = await getStaffById(c.env.DB, staffId);
+  if (!member || member.shop_id !== shopId) {
+    return c.json({ success: false, error: "Staff member not found" }, 404);
+  }
   const rows = await getScheduleByStaff(c.env.DB, staffId);
   return c.json({ success: true, data: rows });
 });
@@ -51,6 +57,15 @@ schedule.put("/", async (c) => {
 
   if (!Array.isArray(body.entries) || body.entries.length === 0) {
     return c.json({ success: false, error: "entries array is required" }, 400);
+  }
+
+  // Every staff_id in the payload must belong to the shop in the URL.
+  const staffIds = [...new Set(body.entries.map((e) => e.staff_id).filter(Boolean))];
+  for (const staffId of staffIds) {
+    const member = await getStaffById(c.env.DB, staffId);
+    if (!member || member.shop_id !== shopId) {
+      return c.json({ success: false, error: "staff_id does not belong to this shop" }, 400);
+    }
   }
 
   const DAYS = [0, 1, 2, 3, 4, 5, 6];

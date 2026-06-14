@@ -1,11 +1,15 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
 const contact = new Hono<{ Bindings: Bindings }>();
 
 // ─── POST /api/contact — public form submission ───────────────────────────────
 
-contact.post("/", async (c) => {
+contact.post(
+  "/",
+  rateLimit({ name: "contact", limit: 5, windowS: 3600, key: clientIp }),
+  async (c) => {
   try {
     const body = await c.req.json<{
       full_name?: string;
@@ -16,7 +20,14 @@ contact.post("/", async (c) => {
       message?: string;
     }>();
 
-    console.log("[worker contact] incoming body", body);
+    // Log structured fields, not the raw body (avoids dumping the free-text
+    // message / PII blob and any control chars into logs).
+    console.log("[worker contact] incoming", {
+      full_name: body.full_name,
+      email: body.email,
+      shop_name: body.shop_name,
+      has_message: !!body.message,
+    });
 
     if (!body.full_name?.trim()) {
       console.warn("[worker contact] missing full_name");
@@ -77,9 +88,15 @@ import { authMiddleware } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 
 contact.get("/", authMiddleware, requireRole("developer"), async (c) => {
+  // Backward-compatible pagination: default limit 100 (the previous fixed cap,
+  // so existing callers are unchanged) + offset to reach older enquiries.
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 200);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
   const { results } = await c.env.DB.prepare(
-    "SELECT * FROM contacts ORDER BY created_at DESC LIMIT 100"
-  ).all();
+    "SELECT * FROM contacts ORDER BY created_at DESC LIMIT ? OFFSET ?"
+  )
+    .bind(limit, offset)
+    .all();
   return c.json({ success: true, data: results });
 });
 

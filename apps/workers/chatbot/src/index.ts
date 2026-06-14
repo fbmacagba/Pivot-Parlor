@@ -144,7 +144,13 @@ const app = new Hono<{ Bindings: Env }>();
 
 let schemaOnce: Promise<void> | null = null;
 app.use("*", async (c, next) => {
-  if (!schemaOnce) schemaOnce = ensureChatbotSchema(c.env.DB);
+  if (!schemaOnce) {
+    // Clear on rejection — a cached rejected promise poisons every later request.
+    schemaOnce = ensureChatbotSchema(c.env.DB).catch((err) => {
+      schemaOnce = null;
+      throw err;
+    });
+  }
   await schemaOnce;
   await next();
 });

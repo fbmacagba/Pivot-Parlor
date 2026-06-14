@@ -1,6 +1,7 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
 import tailwindStylesheet from "~/tailwind.css?url";
 import { PlatformCookieBanner } from "~/components/PlatformCookieBanner";
+import { ErrorScreen } from "~/components/ErrorScreen";
 
 export const links = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -44,4 +45,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return <Outlet />;
+}
+
+// Top-level fallback: renders inside <Layout> for any error not caught by a
+// nested route boundary (loader/action throws, render error, unmatched route).
+export function ErrorBoundary() {
+  return <ErrorScreen fullscreen />;
 }

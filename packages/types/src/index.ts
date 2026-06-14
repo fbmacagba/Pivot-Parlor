@@ -1,3 +1,11 @@
+// @repo/types is the SHARED, frontend-facing contract: camelCase fields shaped
+// for UI/API consumption. It is intentionally NOT the database row shape — the
+// worker uses its own snake_case `DB*` interfaces in apps/worker/src/db/queries.ts
+// (e.g. Booking here uses customerId/price/startTime; the bookings table stores
+// customer_name/customer_email/amount/start_time). Keep BookingStatus and the
+// status enums in sync with the DB CHECK constraints; the field-name divergence
+// is by design, not drift.
+
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 export type UserRole = "developer" | "admin" | "staff" | "customer";
@@ -80,7 +88,7 @@ export interface StaffMember {
 
 export interface StaffAvailability {
   staffId: string;
-  dayOfWeek: number; // 0=Sunday … 6=Saturday
+  dayOfWeek: number; // Monday-first: 0=Monday … 6=Sunday (matches the admin schedule editor and the schedules table)
   startTime: string; // "HH:MM"
   endTime: string;
   isAvailable: boolean;

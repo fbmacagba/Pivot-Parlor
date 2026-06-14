@@ -28,6 +28,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Type check
+        run: npm run check-types --workspace=web
+
+      - name: Lint
+        run: npm run lint --workspace=web
+
       - name: Build Remix app
         run: npm run build --workspace=apps/web
 
