@@ -48,6 +48,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Database backups / D1 exports (may contain production data — never commit)
+*-backup-*.sql
+apps/worker/pivot-parlor-db*.sql
+
 # Misc
 .DS_Store
 *.pem
