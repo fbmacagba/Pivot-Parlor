@@ -61,7 +61,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ error: "Email and password are required." }, { status: 400 });
   }
 
-  const api = createApiClient(env.API_URL);
+  // Forward the E2E test header so the Worker can recognise fixture traffic
+  // (it only honours it when E2E_FIXTURES=true, i.e. staging). Harmless in prod.
+  const e2eMock = request.headers.get("X-E2E-Test-Mock");
+  const api = createApiClient(
+    env.API_URL,
+    null,
+    e2eMock ? { "X-E2E-Test-Mock": e2eMock } : undefined
+  );
 
   try {
     const result = await api.post<{ token: string; role: string; shop_id?: string | null }>(

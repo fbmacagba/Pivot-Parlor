@@ -4,6 +4,7 @@ import type { Bindings } from "../bindings.js";
 import { getUserByEmail, getUserById, createUser } from "../db/queries.js";
 import { authMiddleware, extractSessionJwt, getUser, type JWTUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { e2eMockAllowed } from "../lib/e2e.js";
 
 const auth = new Hono<{ Bindings: Bindings }>();
 
@@ -55,7 +56,15 @@ const loginRateLimit = rateLimit({
   },
 });
 
-auth.post("/login", loginRateLimit, async (c) => {
+// The E2E suite drives many logins from one IP and would trip the brute-force
+// brake. Skip it ONLY for requests that both run on a fixtures-enabled env
+// (E2E_FIXTURES=true, i.e. staging) AND carry the X-E2E-Test-Mock:1 header — so
+// ordinary anonymous traffic to the staging URL stays fully rate-limited, and
+// production (E2E_FIXTURES unset) always enforces the brake.
+const loginRateLimitUnlessE2E = (c: Parameters<typeof loginRateLimit>[0], next: Parameters<typeof loginRateLimit>[1]) =>
+  e2eMockAllowed(c.env, c.req.header("X-E2E-Test-Mock")) ? next() : loginRateLimit(c, next);
+
+auth.post("/login", loginRateLimitUnlessE2E, async (c) => {
   const body = await c.req.json<{ email?: string; password?: string }>();
   if (!body.email || !body.password) {
     return c.json({ success: false, error: "email and password are required" }, 400);

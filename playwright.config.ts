@@ -26,6 +26,10 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     baseURL: process.env.E2E_BASE_URL,
+    // Marks browser traffic as E2E so the staging Worker (E2E_FIXTURES=true)
+    // exempts these requests from the login brute-force brake. Ignored by
+    // production (E2E_FIXTURES unset), so real users are always rate-limited.
+    extraHTTPHeaders: { 'X-E2E-Test-Mock': '1' },
     headless: true,
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
