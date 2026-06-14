@@ -1,0 +1,102 @@
+name: E2E (staging)
+
+# Pre-merge PR gate (NOT a post-merge smoke test): deploys the PR's worker + the
+# PR's frontend to STAGING, resets staging to a clean slate, then runs the stable
+# Playwright subset against the staging frontend.
+#
+# Gated by the `e2e` label (or manual dispatch) so the single shared staging
+# worker + D1 only gets redeployed/tested when a reviewer opts a PR in. Add the
+# `e2e` label to a PR to run it; push new commits to re-run; remove to stop.
+#
+# Required repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, DEV_PASSWORD.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+# Serialize: one shared staging worker + DB cannot take concurrent E2E runs.
+concurrency:
+  group: e2e-staging
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: E2E against staging
+    # Only run on manual dispatch, or when the PR carries the `e2e` label.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DEV_PASSWORD: ${{ secrets.DEV_PASSWORD }}
+      # The staging Pages preview (set by the deploy step below) and the staging worker.
+      E2E_BASE_URL: https://staging.pivot-parlor-web.pages.dev
+      API_BASE: https://pivot-parlor-api-staging.bmorris0565.workers.dev
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Deploy the PR's worker code to staging (so the gate tests PR code) ──
+      - name: Run staging D1 migrations
+        run: node scripts/migrate.mjs --remote --db pivot-parlor-db-staging
+
+      - name: Deploy staging worker
+        run: npx wrangler deploy --config apps/worker/wrangler.toml --env staging
+
+      # ── Build + deploy the PR's frontend to the staging Pages preview branch ──
+      # ci-set-web-staging-vars rewrites apps/web/wrangler.toml [vars] (API_URL →
+      # staging worker, APP_DOMAIN → localhost for a host-only cookie). The CI
+      # checkout is throwaway, so it is never committed; --branch=staging writes
+      # preview-scope Pages vars and does NOT touch production.
+      - name: Point web at staging (ephemeral)
+        run: node scripts/ci-set-web-staging-vars.mjs
+
+      - name: Build Remix app
+        run: npm run build --workspace=apps/web
+
+      - name: Prepare Pages bundle (.pages-dist)
+        run: node scripts/prepare-pages-deploy.mjs
+        working-directory: apps/web
+
+      - name: Deploy staging frontend (preview branch)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/web
+          command: pages deploy ./.pages-dist --project-name=pivot-parlor-web --branch=staging --commit-dirty=true
+        env:
+          # Explicit env — wrangler-action sometimes skips apiToken injection for custom commands (#246).
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # ── Reset staging to a clean slate, then run the stable subset ──
+      - name: Reset staging shops (e2e-* only)
+        run: node scripts/cleanup-e2e-shops.mjs
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run stable E2E subset
+        run: npx playwright test tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/stripe-payment.spec.ts --workers=1
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
