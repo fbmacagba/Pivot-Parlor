@@ -55,7 +55,13 @@ const loginRateLimit = rateLimit({
   },
 });
 
-auth.post("/login", loginRateLimit, async (c) => {
+// Staging/E2E (E2E_FIXTURES=true) drives many logins from one IP; skip the
+// brute-force brake there so the suite isn't throttled. Production leaves
+// E2E_FIXTURES unset, so the rate limit stays fully active.
+const loginRateLimitUnlessE2E = (c: Parameters<typeof loginRateLimit>[0], next: Parameters<typeof loginRateLimit>[1]) =>
+  c.env.E2E_FIXTURES === "true" ? next() : loginRateLimit(c, next);
+
+auth.post("/login", loginRateLimitUnlessE2E, async (c) => {
   const body = await c.req.json<{ email?: string; password?: string }>();
   if (!body.email || !body.password) {
     return c.json({ success: false, error: "email and password are required" }, 400);
