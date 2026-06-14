@@ -57,4 +57,7 @@ Names in use are listed as comments in `apps/worker/wrangler.toml`.
 
 | Date | Secret | Reason | By |
 |------|--------|--------|-----|
-| _pending_ | JWT_SECRET + DEV_PASSWORD | Stored in plaintext `.env` during early development; precautionary rotation ordered by the June 2026 security review (T0.2) | — |
+| 2026-06-14 | JWT_SECRET | T0.2 precautionary rotation. Fresh random set on Worker + Pages (production) via Wrangler **only** — deliberately NOT written to `.env` (re-copying the prod value into plaintext would defeat the rotation). Local `.env`/`.dev.vars` got a **separate** dev-only value. Verified: pre-rotation token → 401, fresh login → 200. | Claude |
+| _pending_ | DEV_PASSWORD | T0.2 precautionary rotation. Awaiting the operator's chosen password, then `reset-dev-password.mjs` → apply UPSERT to prod D1 → verify login. | — |
+
+> Note on step 4 ("Update your local `.env`") above: prefer giving local dev a **distinct** JWT_SECRET rather than copying the prod value into a plaintext file. The Worker and Pages **production** secrets must match each other; local dev does not need to match prod.

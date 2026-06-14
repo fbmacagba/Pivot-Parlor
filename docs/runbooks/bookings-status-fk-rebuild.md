@@ -1,7 +1,17 @@
 # Runbook: Bookings table rebuild (`in_progress` status)
 
-**Status:** ready, operator-gated. NOT auto-applied by CI or `migrate.mjs`.
+**Status:** ✅ APPLIED TO PRODUCTION 2026-06-14 (via the prod-specific variant — see below). Operator-gated; NOT auto-applied by CI or `migrate.mjs`.
 **Why decoupled:** this is the single most destructive operation in the remediation. It must be backup-first and applied deliberately, never folded into a routine migration run.
+
+## ⚠️ Production diverges from `schema.sql` — use `rebuild-bookings-prod.sql` on prod
+
+The committed [rebuild-bookings.sql](../../apps/worker/src/db/rebuild-bookings.sql) recreates `bookings` with the **16 canonical columns** from `schema.sql`. **Production's `bookings` table actually has 26 columns** — the canonical 16 plus 10 columns added at runtime by the booking worker's `ensure-schema` that are NOT in `schema.sql` or any migration: `booking_type, deposit_amount, total_amount, stripe_payment_intent_id, qr_code_data, promo_code, promo_discount_percent, checked_in_at, completed_at, updated_at`.
+
+Running the 16-column `rebuild-bookings.sql` on prod would **silently DROP those 10 payment/Stripe columns**. (It "validated on staging" only because staging's `bookings`, built from the migration chain, also has 16 columns.) For production use [rebuild-bookings-prod.sql](../../apps/worker/src/db/rebuild-bookings-prod.sql), which mirrors prod's full 26-column schema exactly and changes only the status CHECK.
+
+**Applied 2026-06-14:** prod `bookings` was empty (0 rows). Backed up first (`pivot-parlor-db-backup-20260614.sql`, gitignored), validated end-to-end with `node:sqlite`, applied via `--file`. Verified after: 26 columns, `in_progress` present in the CHECK, 3 `idx_` indexes recreated, children unchanged (bookings 0, reviews 9, booking_items 0).
+
+**Follow-up (separate):** reconcile the drift with a tracked migration (021) + `schema.sql` update so fresh DBs and staging gain the 10 columns and match prod. Until then fresh DBs get them lazily via the booking worker's `ensure-schema`.
 
 ## The bug
 
