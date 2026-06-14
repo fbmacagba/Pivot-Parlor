@@ -40,7 +40,14 @@ npx playwright test tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.t
 
 ## Login rate-limit bypass (why a worker change was needed)
 
-`/auth/login` has a brute-force brake (5/15min per email+IP, NFR-S4). The suite logs in per test and blew through it → `429`s that looked like flaky failures. `apps/worker/src/routes/auth.ts` now skips that rate limit **only when `E2E_FIXTURES==="true"`** (staging). Production leaves `E2E_FIXTURES` unset, so the brake stays fully active there.
+`/auth/login` has a brute-force brake (5/15min per email+IP, NFR-S4). The suite logs in per test and blew through it → `429`s that looked like flaky failures.
+
+The bypass is **double-gated** so it can't weaken real security: `apps/worker/src/routes/auth.ts` skips the brake only when **both** `E2E_FIXTURES==="true"` (staging) **and** the request carries `X-E2E-Test-Mock: 1` (via the existing `e2eMockAllowed` helper). Plumbing:
+
+- Playwright sends the header on every request (`playwright.config.ts` → `use.extraHTTPHeaders`).
+- The BFF login action forwards it to the Worker (`apps/web/app/routes/login.tsx` → `createApiClient(..., { "X-E2E-Test-Mock": … })`).
+
+So **anonymous traffic to the staging login URL (no header) stays fully rate-limited**, and production (`E2E_FIXTURES` unset) ignores the header entirely — the brake is always active there. Verified: 8 header-less logins → `200×5` then `429`; 8 header-bearing logins → all `200`.
 
 ## Spec status
 
