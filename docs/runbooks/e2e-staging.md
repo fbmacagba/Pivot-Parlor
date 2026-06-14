@@ -36,7 +36,12 @@ npx playwright test tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.t
 ```
 
 - **`--workers=1` is required.** The single staging worker can't take the full parallel fan-out, and several specs share staging DB state (e.g. the stripe "unpaid shop" assertions). Serial = reliable; the subset runs in ~30s.
-- **Start from a clean staging.** The specs create shops without cleaning up. Reset first by logging in as dev and `POST /api/shops/:id/delete` for each shop (see the reset snippet used during setup).
+- **Start from a clean staging.** The specs create shops without cleaning up. Reset first with the cleanup script (deletes `e2e-*` shops only; defaults to the staging worker):
+  ```bash
+  node scripts/cleanup-e2e-shops.mjs            # staging (default), DEV_PASSWORD from .env
+  node scripts/cleanup-e2e-shops.mjs --dry-run  # list targets without deleting
+  ```
+  The same script cleans prod junk with `API_BASE=https://api.pivotparlor.com node scripts/cleanup-e2e-shops.mjs --allow-prod` (the `--allow-prod` flag is required for any `*.pivotparlor.com` host).
 
 ## Login rate-limit bypass (why a worker change was needed)
 
@@ -56,10 +61,18 @@ So **anonymous traffic to the staging login URL (no header) stays fully rate-lim
   - `site-generation.spec.ts` — drives the real AI workers (builder/research/text/images) end to end: slow and burns AI credits. Run manually when validating generation.
   - `dev-shop-delete-repro.spec.ts` — a headed debugging repro, not a regression guard.
 
-## Known issue: production was polluted by past E2E runs
+## Resolved: production was polluted by past E2E runs
 
-Production currently holds ~22 `e2e-*` shops (e.g. `e2e-luxury-…`, `e2e-test-shop-…`, `e2e-design-notes-…`, `e2e-logo-upload-…`) created by E2E runs that targeted prod before this staging setup existed. They are test junk and should be cleaned (keep real shops such as `ferdyms-barber-shop`). Clean via dev-authenticated `POST /api/shops/:id/delete` for each `e2e-*` slug, backup-first.
+Production held 22 `e2e-*` shops created by E2E runs that targeted prod before this staging setup existed. **Cleaned 2026-06-14** (backup `pivot-parlor-db-backup-precleanup-20260614.sql` first; only `ferdyms-barber-shop` remained; zero orphan child rows) via `API_BASE=https://api.pivotparlor.com node scripts/cleanup-e2e-shops.mjs --allow-prod`. Now that E2E only targets staging, this should not recur.
 
-## Suggested CI job (not yet wired)
+## CI job (wired)
 
-A CI E2E job would: deploy a staging frontend from the PR's code → reset staging shops → run the stable subset with `--workers=1` → tear down. It needs `E2E_BASE_URL` + `DEV_PASSWORD` as repo secrets. Left as a follow-up.
+`.github/workflows/e2e.yml` automates the whole flow as a **pre-merge PR gate** (PR code → staging → test, not a post-merge smoke test):
+
+1. Deploy the PR's worker to staging (`wrangler deploy --env staging`) + run staging D1 migrations.
+2. Rewrite `apps/web/wrangler.toml` to staging (`scripts/ci-set-web-staging-vars.mjs`), build, and deploy the PR's frontend to the `staging` Pages preview branch (preview-scope vars — never touches production).
+3. Reset staging (`scripts/cleanup-e2e-shops.mjs`) → run the stable subset with `--workers=1` → upload the Playwright report artifact.
+
+**How to run it:** add the **`e2e` label** to a PR (or trigger it manually via the Actions tab → "E2E (staging)" → Run workflow). New commits to a labeled PR re-run it; remove the label to stop. A `concurrency` group serializes runs so the single shared staging worker/DB is never hit by two runs at once.
+
+**Required repo secrets:** `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DEV_PASSWORD` (all set). `E2E_BASE_URL` + `API_BASE` are hardcoded in the workflow env (the fixed staging URLs), not secrets.
