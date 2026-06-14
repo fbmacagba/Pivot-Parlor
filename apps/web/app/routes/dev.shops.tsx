@@ -1,7 +1,7 @@
 import { useFetcher, useLoaderData, Link, useNavigate, useRevalidator, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { Bot, Check, Circle, Copy, ExternalLink, Loader2, Plus, Sparkles, Trash2, XCircle } from "lucide-react";
+import { Bot, Check, Copy, ExternalLink, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
@@ -17,228 +17,23 @@ import {
   DialogTrigger,
 } from "~/components/ui/Dialog";
 import type { DevGenerationPrefs } from "./dev.shops.$shopId";
-
-const DEFAULT_TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
-const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
-
-const TEXT_MODEL_OPTIONS: { value: string; label: string }[] = [
-  {
-    value: "google/gemini-3.1-flash-lite-preview",
-    label:
-      "Gemini 3.1 Flash Lite — $0.25/1M in · $1.50/1M out (default)",
-  },
-  {
-    value: "google/gemini-3-flash-preview",
-    label: "Gemini 3 Flash Preview — $0.50/1M in · $3.00/1M out",
-  },
-  {
-    value: "google/gemini-3.1-pro-preview",
-    label: "Gemini 3.1 Pro Preview — $2.00/1M in · $12.00/1M out",
-  },
-  {
-    value: "anthropic/claude-haiku-4-5",
-    label: "Claude Haiku 4.5 — $0.80/1M in · $4.00/1M out",
-  },
-  {
-    value: "anthropic/claude-sonnet-4-6",
-    label: "Claude Sonnet 4.6 — $3.00/1M in · $15.00/1M out",
-  },
-  {
-    value: "meta-llama/llama-3.3-70b-instruct",
-    label: "Llama 3.3 70B — FREE",
-  },
-];
-
-const IMAGE_MODEL_OPTIONS: { value: string; label: string }[] = [
-  {
-    value: "google/gemini-3.1-flash-image-preview",
-    label:
-      "Gemini 3.1 Flash Image (Nano Banana 2) — $0.50/1M in · $3.00/1M out (default)",
-  },
-  {
-    value: "google/gemini-2.5-flash-preview:thinking",
-    label:
-      "Gemini 2.5 Flash Image (Nano Banana) — $0.50/1M in · $3.00/1M out",
-  },
-  {
-    value: "black-forest-labs/flux-1.1-pro",
-    label: "FLUX 1.1 Pro — ~$0.04/image",
-  },
-  {
-    value: "black-forest-labs/flux-schnell",
-    label: "FLUX Schnell — FREE",
-  },
-];
-
-interface Shop {
-  id: string;
-  shop_number: number;
-  name: string;
-  slug: string;
-  type: string;
-  owner_name: string;
-  owner_email: string;
-  bookings_count?: number;
-  revenue?: number;
-  commission?: number;
-  ai_model?: string;
-  is_active: number;
-  status: string;
-  plan: string;
-  has_site?: number | null;
-  stripe_payment_status?: string;
-  stripe_checkout_url?: string | null;
-  website_status?: string | null;
-  hero_image_url?: string | null;
-  logo_url?: string | null;
-}
-
-/** SSR-only mock for Playwright (page.route cannot intercept loader fetches to API_URL). */
-const E2E_STRIPE_LIST_SHOPS: Shop[] = [
-  {
-    id: "e2e-mock-unpaid",
-    shop_number: 999,
-    name: "E2E Unpaid Shop",
-    slug: "e2e-unpaid-999",
-    type: "beauty_parlor",
-    owner_name: "",
-    owner_email: "e2e@example.com",
-    is_active: 0,
-    status: "awaiting_payment",
-    plan: "standard",
-    has_site: null,
-    stripe_payment_status: "unpaid",
-    stripe_checkout_url: "https://checkout.stripe.com/e2e-mock-session",
-  },
-];
-
-interface GenerateSiteActionResult {
-  success: boolean;
-  generateJobId?: string;
-  generateShopSlug?: string;
-  generateShopId?: string;
-  generateSite?: { template: string; slug: string } | null;
-  error?: string | null;
-}
-
-interface OnboardResult {
-  shop: { id: string; slug: string; name: string };
-  invite_token?: string;
-  checkout_url?: string;
-}
-
-const REGEN_STEP_LABELS = [
-  "Researching brand & style",
-  "Generating website content",
-  "Creating hero background image",
-  "Creating shop logo",
-  "Creating service images",
-  "Assembling website",
-  "Complete",
-] as const;
-
-type RegenStepUiState = "pending" | "active" | "done" | "failed";
-
-/** Map Worker job status/stage to the 7-row progress UI (indices 0–6). */
-function regenJobStepStates(status: string, stage: string): RegenStepUiState[] {
-  const st = (status || "").toLowerCase();
-  const sg = (stage || "").toLowerCase();
-  const out: RegenStepUiState[] = Array(7).fill("pending") as RegenStepUiState[];
-
-  if (st === "failed") {
-    if (sg === "research") {
-      out[0] = "failed";
-      return out;
-    }
-    if (sg === "parallel") {
-      out[0] = "done";
-      out[1] = "failed";
-      return out;
-    }
-    if (sg === "assemble" || sg === "assembling" || sg === "audit") {
-      for (let i = 0; i < 5; i++) out[i] = "done";
-      out[5] = "failed";
-      return out;
-    }
-    out[0] = "failed";
-    return out;
-  }
-
-  if (st === "complete" || sg === "complete" || sg === "done") {
-    return Array(7).fill("done") as RegenStepUiState[];
-  }
-
-  if (sg === "assemble" || sg === "assembling") {
-    for (let i = 0; i < 5; i++) out[i] = "done";
-    out[5] = "active";
-    return out;
-  }
-
-  if (sg === "parallel") {
-    out[0] = "done";
-    out[1] = "active";
-    out[2] = "active";
-    out[3] = "active";
-    out[4] = "active";
-    return out;
-  }
-
-  if (sg === "audit" && st === "running") {
-    for (let i = 0; i < 5; i++) out[i] = "done";
-    out[5] = "active";
-    return out;
-  }
-
-  if (sg === "research" && (st === "queued" || st === "running" || st === "processing")) {
-    out[0] = "active";
-    return out;
-  }
-
-  out[0] = "active";
-  return out;
-}
-
-function RegenStepRow({
-  label,
-  state,
-  index,
-}: {
-  label: string;
-  state: RegenStepUiState;
-  index: number;
-}) {
-  const icon =
-    state === "done" ? (
-      <Check className="h-4 w-4 shrink-0 text-emerald-400" strokeWidth={2.5} aria-hidden />
-    ) : state === "active" ? (
-      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gold" aria-hidden />
-    ) : state === "failed" ? (
-      <XCircle className="h-4 w-4 shrink-0 text-red-400" aria-hidden />
-    ) : (
-      <Circle className="h-4 w-4 shrink-0 text-white/25" aria-hidden />
-    );
-
-  const labelClass =
-    state === "pending"
-      ? "text-white/45"
-      : state === "active"
-        ? "text-white"
-        : state === "failed"
-          ? "text-red-200"
-          : "text-white/90";
-
-  return (
-    <li
-      className="flex items-start gap-3 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2.5 transition-[opacity,transform,border-color] duration-300 ease-out"
-      style={{ transitionDelay: `${Math.min(index, 6) * 45}ms` }}
-    >
-      <span className="mt-0.5 shrink-0" aria-hidden>
-        {icon}
-      </span>
-      <span className={`text-sm leading-snug ${labelClass}`}>{label}</span>
-    </li>
-  );
-}
+import type { Shop, GenerateSiteActionResult, OnboardResult } from "~/components/dev-shops/types";
+import {
+  DEFAULT_TEXT_MODEL,
+  DEFAULT_IMAGE_MODEL,
+  TEXT_MODEL_OPTIONS,
+  IMAGE_MODEL_OPTIONS,
+  REGEN_STEP_LABELS,
+  E2E_STRIPE_LIST_SHOPS,
+} from "~/components/dev-shops/constants";
+import {
+  regenJobStepStates,
+  toSlug,
+  resolvePublicAssetImageUrl,
+  withImageCacheBust,
+} from "~/components/dev-shops/helpers";
+import { RegenStepRow } from "~/components/dev-shops/RegenStepRow";
+import { StatusBadge } from "~/components/dev-shops/StatusBadge";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -313,33 +108,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const msg = err instanceof Error ? err.message : "Failed to create shop";
     return json({ success: false, result: null, error: msg });
   }
-}
-
-function toSlug(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-}
-
-/** If worker returns a root-relative asset URL, resolve against API origin (Pages origin would 404). */
-function resolvePublicAssetImageUrl(raw: string, apiBase: string | undefined): string {
-  const t = raw.trim();
-  if (!t) return t;
-  if (/^https?:\/\//i.test(t)) return t;
-  const base = (apiBase ?? "").trim().replace(/\/$/, "");
-  if (!base) return t;
-  if (t.startsWith("/")) return `${base}${t}`;
-  return t;
-}
-
-/** Append cache-bust query so the browser reloads after upload/save. */
-function withImageCacheBust(url: string, bust: number): string {
-  if (!url || bust <= 0) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}t=${bust}`;
 }
 
 export default function DevShops() {
@@ -873,15 +641,6 @@ export default function DevShops() {
     });
   }
 
-  const statusBadge = (shop: Shop) => {
-    if (shop.status === "active") return <Badge variant="success">Active</Badge>;
-    if (shop.status === "suspended") return <Badge variant="error">Suspended</Badge>;
-    if (shop.status === "awaiting_payment" || shop.stripe_payment_status === "unpaid") {
-      return <Badge variant="warning">Awaiting Payment</Badge>;
-    }
-    if (shop.stripe_payment_status === "paid") return <Badge variant="success">Paid</Badge>;
-    return <Badge variant="warning">Pending</Badge>;
-  };
 
   return (
     <div>
@@ -1214,7 +973,7 @@ export default function DevShops() {
                           <span className="text-white/30">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">{statusBadge(shop)}</td>
+                      <td className="px-4 py-3">{<StatusBadge shop={shop} />}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1.5">
                           <div className="flex flex-wrap items-center gap-2">
