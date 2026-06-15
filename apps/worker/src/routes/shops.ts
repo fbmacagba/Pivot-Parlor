@@ -23,7 +23,7 @@ import {
 } from "../db/queries.js";
 import { safeJsonParse } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
-import { requireRole } from "../middleware/rbac.js";
+import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
 
@@ -1262,13 +1262,8 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
 
 // ─── PATCH /api/shops/:shopId — update shop (developer/admin) ────────────────
 
-shops.patch("/:shopId", authMiddleware, async (c) => {
-  const user = getUser(c);
+shops.patch("/:shopId", authMiddleware, requireShopRole("admin"), async (c) => {
   const { shopId } = c.req.param();
-
-  if (user.role !== "developer" && user.shop_id !== shopId) {
-    return c.json({ success: false, error: "Forbidden" }, 403);
-  }
 
   const body = await c.req.json<{
     name?: string;

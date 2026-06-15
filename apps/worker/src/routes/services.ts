@@ -10,7 +10,7 @@ import {
   getShopById,
 } from "../db/queries.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { requireShop } from "../middleware/rbac.js";
+import { requireShopRole } from "../middleware/rbac.js";
 
 const services = new Hono<{ Bindings: Bindings }>();
 
@@ -70,13 +70,13 @@ services.get("/:serviceId", async (c) => {
   return c.json({ success: true, data: svc });
 });
 
-// Protected mutations below. Each handler applies authMiddleware + requireShop()
+// Protected mutations below. Each handler applies authMiddleware + requireShopRole("admin")
 // inline (the prior services.use("POST, PUT, ...") line was a no-op: Hono treats
 // the method-prefixed string as a literal path that never matches).
 
 // ─── POST /api/shops/:shopId/services ────────────────────────────────────────
 
-services.post("/", authMiddleware, requireShop(), async (c) => {
+services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const body = await c.req.json<{
     name?: string;
@@ -105,7 +105,7 @@ services.post("/", authMiddleware, requireShop(), async (c) => {
 
 // ─── PUT /api/shops/:shopId/services/:serviceId ───────────────────────────────
 
-services.put("/:serviceId", authMiddleware, requireShop(), async (c) => {
+services.put("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!; const serviceId = c.req.param("serviceId")!;
   const svc = await getServiceById(c.env.DB, serviceId);
   if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);
@@ -124,7 +124,7 @@ services.put("/:serviceId", authMiddleware, requireShop(), async (c) => {
 
 // ─── DELETE /api/shops/:shopId/services/:serviceId (soft-delete) ──────────────
 
-services.delete("/:serviceId", authMiddleware, requireShop(), async (c) => {
+services.delete("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!; const serviceId = c.req.param("serviceId")!;
   const svc = await getServiceById(c.env.DB, serviceId);
   if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);

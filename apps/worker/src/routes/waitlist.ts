@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { getWaitlistByShop, createWaitlistEntry } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
-import { requireShop } from "../middleware/rbac.js";
+import { requireShopRole } from "../middleware/rbac.js";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
 
@@ -43,7 +43,7 @@ waitlist.post("/", async (c) => {
 
 // ─── GET /api/waitlist?shop_id= — admin/developer view ───────────────────────
 
-waitlist.get("/", authMiddleware, requireShop(), async (c) => {
+waitlist.get("/", authMiddleware, requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.query("shop_id") ?? c.req.param("shopId");
   if (!shopId) return c.json({ success: false, error: "shop_id is required" }, 400);
 

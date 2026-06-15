@@ -2,7 +2,7 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
-import { requireShop } from "../middleware/rbac.js";
+import { requireShopRole } from "../middleware/rbac.js";
 import { getShopById, getShopBySlug } from "../db/queries.js";
 
 const walkin = new Hono<{ Bindings: Bindings }>();
@@ -112,7 +112,8 @@ walkin.get("/:shopSlug/queue", async (c) => {
 // ─── ADMIN: routes below require auth + shop scope ───────────────────────────
 
 const adminWalkin = new Hono<{ Bindings: Bindings }>();
-adminWalkin.use("*", authMiddleware, requireShop());
+// Operational: admins and staff of the shop (developers bypass). Excludes customers.
+adminWalkin.use("*", authMiddleware, requireShopRole("admin", "staff"));
 
 // GET /api/shops/:shopId/walkin — full queue for admin
 adminWalkin.get("/", async (c) => {
