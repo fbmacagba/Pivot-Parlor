@@ -138,14 +138,15 @@ export async function requireRole(
     return payload;
   }
   if (payload.role !== role) {
-    // Redirect to the user's correct dashboard, not root
+    // Redirect to the user's correct dashboard. Fall back to "/" (not "/login")
+    // for an unrecognised role so we never bounce into a /login redirect loop.
     const dashMap: Record<UserRole, string> = {
       developer: "/dev/dashboard",
       admin: "/admin",
       staff: "/staff",
       customer: "/account",
     };
-    throw redirect(dashMap[payload.role] ?? "/login");
+    throw redirect(dashMap[payload.role] ?? "/");
   }
   return payload;
 }

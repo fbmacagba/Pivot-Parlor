@@ -19,13 +19,16 @@ function safeRedirectPath(raw: string | null): string | null {
   return t;
 }
 
-function dashboardForRole(role: string): string {
+/** Maps a known role to its dashboard. Returns null for an unrecognised role so
+ *  callers never redirect to /login — which would loop forever for an already
+ *  signed-in visitor whose role the frontend doesn't recognise. */
+function dashboardForRole(role: string): string | null {
   switch (role) {
     case "developer": return "/dev/dashboard";
     case "admin": return "/admin";
     case "staff": return "/staff";
     case "customer": return "/account";
-    default: return "/login";
+    default: return null;
   }
 }
 
@@ -45,7 +48,9 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       const api = createApiClient(env.API_URL, token);
       const me = await api.get<{ id: string; role: string }>("/auth/me");
       const dest = redirectParam ?? dashboardForRole(me.role);
-      return redirect(dest);
+      // Unknown role => dest is null: fall through and render the form instead
+      // of redirecting to /login (which would loop).
+      if (dest) return redirect(dest);
     } catch {
       /* invalid or expired session — show login */
     }
@@ -82,7 +87,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     const role = result.role;
-    const defaultDash = dashboardForRole(role);
+    // Unknown role falls back to "/" (a safe, non-looping landing).
+    const defaultDash = dashboardForRole(role) ?? "/";
     const dest =
       redirectAfter && canUseRedirectForRole(redirectAfter, role)
         ? redirectAfter
@@ -152,7 +158,7 @@ export default function LoginPage() {
 
   // Social login URLs go to the Worker OAuth endpoints
   const socialBase = apiBase || "https://api.pivotparlor.com";
-  const redirectParam = redirectTo ? `&redirect=${encodeURIComponent(redirectTo)}` : "";
+  const redirectQuery = redirectTo ? `?redirect=${encodeURIComponent(redirectTo)}` : "";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-dark px-4">
@@ -182,21 +188,21 @@ export default function LoginPage() {
           {/* Social login buttons */}
           <div className="space-y-3">
             <a
-              href={`${socialBase}/auth/google?${redirectParam}`}
+              href={`${socialBase}/auth/google${redirectQuery}`}
               className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/20 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               <GoogleIcon />
               Continue with Google
             </a>
             <a
-              href={`${socialBase}/auth/facebook?${redirectParam}`}
+              href={`${socialBase}/auth/facebook${redirectQuery}`}
               className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/20 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               <FacebookIcon />
               Continue with Facebook
             </a>
             <a
-              href={`${socialBase}/auth/linkedin?${redirectParam}`}
+              href={`${socialBase}/auth/linkedin${redirectQuery}`}
               className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/20 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               <LinkedInIcon />
