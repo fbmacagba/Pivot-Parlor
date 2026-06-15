@@ -65,7 +65,7 @@ export function VibrantTemplate({ shop, site }: SiteTemplateProps) {
               {site.catalog_images[i] && (
                 <img
                   src={site.catalog_images[i]}
-                  alt=""
+                  alt={s.name}
                   className="mb-4 h-24 w-24 rounded-lg object-cover"
                 />
               )}

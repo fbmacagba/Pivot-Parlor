@@ -4,7 +4,7 @@ import type {
   MetaFunction,
 } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
-import { useActionData, useLoaderData } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, sessionCookieHeaders } from "~/lib/auth";
 
@@ -137,6 +137,8 @@ function LinkedInIcon() {
 export default function LoginPage() {
   const { redirectTo } = useLoaderData<typeof loader>();
   const data = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const submitting = navigation.state !== "idle";
 
   const apiBase =
     typeof window !== "undefined"
@@ -234,9 +236,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              className="flex h-10 w-full items-center justify-center rounded-lg bg-gold text-sm font-semibold text-black transition-colors hover:bg-gold-light"
+              disabled={submitting}
+              className="flex h-10 w-full items-center justify-center rounded-lg bg-gold text-sm font-semibold text-dark transition-colors hover:bg-gold-light disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Sign in
+              {submitting ? "Signing in..." : "Sign in"}
             </button>
           </form>
         </div>

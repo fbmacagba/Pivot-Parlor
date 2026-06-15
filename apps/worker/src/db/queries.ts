@@ -767,6 +767,14 @@ export async function getBookingsByShop(
   if (opts.staffId) { conds.push("b.staff_id = ?"); vals.push(opts.staffId); }
   if (opts.status) { conds.push("b.status = ?"); vals.push(opts.status); }
 
+  // Bind LIMIT/OFFSET as parameters (never interpolate). Coerce to bounded
+  // integers so a non-numeric value can never reach the SQL text.
+  const rawLimit = Number(opts.limit ?? 200);
+  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(Math.trunc(rawLimit), 1000)) : 200;
+  const rawOffset = Number(opts.offset ?? 0);
+  const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0;
+  vals.push(limit, offset);
+
   const sql = `
     SELECT b.*, sv.name AS service_name, sv.duration_min,
            st.display_name AS staff_name
@@ -775,7 +783,7 @@ export async function getBookingsByShop(
     JOIN staff st ON st.id = b.staff_id
     WHERE ${conds.join(" AND ")}
     ORDER BY b.booking_date, b.start_time
-    LIMIT ${opts.limit ?? 200} OFFSET ${opts.offset ?? 0}
+    LIMIT ? OFFSET ?
   `;
 
   const { results } = await db.prepare(sql).bind(...vals).all<

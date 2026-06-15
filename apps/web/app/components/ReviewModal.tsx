@@ -140,7 +140,7 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
             <button
               type="button"
               onClick={onClose}
-              className="mt-6 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-black outline-none transition-colors hover:bg-gold-light focus-visible:ring-2 focus-visible:ring-gold-light focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100"
+              className="mt-6 rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-dark outline-none transition-colors hover:bg-gold-light focus-visible:ring-2 focus-visible:ring-gold-light focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100"
             >
               Close
             </button>
@@ -201,7 +201,7 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
               type="button"
               onClick={() => void submit()}
               disabled={state === "submitting"}
-              className="w-full rounded-lg bg-gold py-3 text-sm font-semibold text-black outline-none transition-colors hover:bg-gold-light focus-visible:ring-2 focus-visible:ring-gold-light focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-lg bg-gold py-3 text-sm font-semibold text-dark outline-none transition-colors hover:bg-gold-light focus-visible:ring-2 focus-visible:ring-gold-light focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {state === "submitting" ? "Submitting..." : "Submit review"}
             </button>

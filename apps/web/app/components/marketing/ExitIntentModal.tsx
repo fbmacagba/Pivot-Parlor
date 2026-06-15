@@ -47,7 +47,7 @@ export function ExitIntentModal() {
         </button>
         <div className="mb-4 text-4xl">✂️</div>
         <h2 className="font-heading text-2xl font-bold text-white">
-          Before you go —
+          Before you go...
         </h2>
         <p className="mt-2 text-white/70">
           Get your shop&apos;s AI-branded booking page live for a{" "}

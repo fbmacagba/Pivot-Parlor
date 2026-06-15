@@ -12,7 +12,7 @@ export const links = () => [
   },
   {
     rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap",
+    href: "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap",
   },
   { rel: "stylesheet", href: tailwindStylesheet },
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },

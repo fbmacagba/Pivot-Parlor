@@ -17,7 +17,7 @@ export function ErrorScreen({ fullscreen = false }: ErrorScreenProps) {
   let status = 500;
   let title = "Something went wrong";
   let message =
-    "An unexpected error occurred. Please try again — if it keeps happening, get in touch and we'll sort it out.";
+    "An unexpected error occurred. Please try again. If it keeps happening, get in touch and we'll sort it out.";
 
   if (isRouteErrorResponse(error)) {
     status = error.status;
@@ -30,7 +30,7 @@ export function ErrorScreen({ fullscreen = false }: ErrorScreenProps) {
     } else if (status >= 500) {
       title = "Service unavailable";
       message =
-        "We're having trouble loading this right now. This is usually temporary — please try again in a moment.";
+        "We're having trouble loading this right now. This is usually temporary. Please try again in a moment.";
     } else {
       title = error.statusText || title;
     }

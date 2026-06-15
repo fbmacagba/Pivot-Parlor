@@ -70,9 +70,9 @@ services.get("/:serviceId", async (c) => {
   return c.json({ success: true, data: svc });
 });
 
-// Protected mutations below ───────────────────────────────────────────────────
-
-services.use("POST, PUT, PATCH, DELETE /*", authMiddleware, requireShop());
+// Protected mutations below. Each handler applies authMiddleware + requireShop()
+// inline (the prior services.use("POST, PUT, ...") line was a no-op: Hono treats
+// the method-prefixed string as a literal path that never matches).
 
 // ─── POST /api/shops/:shopId/services ────────────────────────────────────────
 
