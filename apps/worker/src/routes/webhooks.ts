@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import Stripe from "stripe";
+import type { D1Database } from "@cloudflare/workers-types";
 import type { Bindings } from "../bindings.js";
 import {
   getShopByCheckoutSessionId,
@@ -8,6 +9,31 @@ import {
 } from "../db/queries.js";
 
 const webhooks = new Hono<{ Bindings: Bindings }>();
+
+/**
+ * Apply a Stripe `checkout.session.completed` event: mark the shop paid and
+ * activate its invite. Extracted from the route so the revenue path can be
+ * unit-tested without Stripe signature verification.
+ */
+export async function handleCheckoutSessionCompleted(
+  db: D1Database,
+  session: { id: string; metadata?: Record<string, string | undefined> | null }
+): Promise<{ activated: boolean; reason?: "missing_metadata" | "shop_not_found" }> {
+  const shopId = session.metadata?.shop_id;
+  const inviteId = session.metadata?.invite_id;
+  if (!shopId || !inviteId) {
+    console.error("[Webhook] Missing metadata in checkout.session.completed", session.id);
+    return { activated: false, reason: "missing_metadata" };
+  }
+  const shop = await getShopByCheckoutSessionId(db, session.id);
+  if (!shop) {
+    console.error("[Webhook] Shop not found for session", session.id);
+    return { activated: false, reason: "shop_not_found" };
+  }
+  await updateShopPaymentComplete(db, shopId);
+  await setInviteActive(db, inviteId);
+  return { activated: true };
+}
 
 // ─── POST /api/webhooks/stripe — Stripe webhook handler ───────────────────────
 
@@ -36,23 +62,7 @@ webhooks.post("/stripe", async (c) => {
   }
 
   if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const shopId = session.metadata?.shop_id;
-    const inviteId = session.metadata?.invite_id;
-
-    if (!shopId || !inviteId) {
-      console.error("[Webhook] Missing metadata in checkout.session.completed", session.id);
-      return c.json({ received: true });
-    }
-
-    const shop = await getShopByCheckoutSessionId(c.env.DB, session.id);
-    if (!shop) {
-      console.error("[Webhook] Shop not found for session", session.id);
-      return c.json({ received: true });
-    }
-
-    await updateShopPaymentComplete(c.env.DB, shopId);
-    await setInviteActive(c.env.DB, inviteId);
+    await handleCheckoutSessionCompleted(c.env.DB, event.data.object as Stripe.Checkout.Session);
   }
 
   return c.json({ received: true });
