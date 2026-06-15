@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
   getStaffByShop, getStaffById, createStaffMember, updateStaffMember,
-  addStaffService, getStaffServices, createUser,
+  addStaffService, getStaffServices, createUser, getUserByEmail,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireShop } from "../middleware/rbac.js";
@@ -54,6 +54,13 @@ staff.post("/", async (c) => {
 
   if (!body.display_name || !body.email) {
     return c.json({ success: false, error: "display_name and email are required" }, 400);
+  }
+
+  // Reject a duplicate email up front with a clear 409 instead of letting the
+  // createUser unique-constraint violation surface as an opaque 500.
+  const existingUser = await getUserByEmail(c.env.DB, body.email);
+  if (existingUser) {
+    return c.json({ success: false, error: "Email already registered" }, 409);
   }
 
   // Create a platform_users account for the staff member

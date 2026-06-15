@@ -22,7 +22,7 @@ export function Footer() {
                 href="https://www.linkedin.com/in/fbmacagba"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-full border border-gold px-4 py-2 text-sm text-gold transition-colors hover:bg-gold hover:text-black"
+                className="flex items-center gap-2 rounded-full border border-gold px-4 py-2 text-sm text-gold transition-colors hover:bg-gold hover:text-dark"
               >
                 <LinkedInIcon /> DM us on LinkedIn
               </a>

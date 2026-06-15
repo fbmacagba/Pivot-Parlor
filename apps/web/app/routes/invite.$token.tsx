@@ -216,7 +216,7 @@ export default function InviteAccept() {
 
             <button
               type="submit"
-              className="h-11 w-full rounded-lg bg-gold text-sm font-semibold text-black transition-colors hover:bg-gold-light"
+              className="h-11 w-full rounded-lg bg-gold text-sm font-semibold text-dark transition-colors hover:bg-gold-light"
             >
               Activate account →
             </button>

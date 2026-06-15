@@ -351,7 +351,7 @@ export default function TemplateSelect() {
                 type="file"
                 name="logo_file"
                 accept=".png,.jpg,.svg"
-                className="mt-1 block w-full text-sm text-white/80 file:mr-4 file:rounded file:border-0 file:bg-gold file:px-4 file:py-2 file:text-sm file:font-semibold file:text-black"
+                className="mt-1 block w-full text-sm text-white/80 file:mr-4 file:rounded file:border-0 file:bg-gold file:px-4 file:py-2 file:text-sm file:font-semibold file:text-dark"
               />
             </div>
           </div>
@@ -365,7 +365,7 @@ export default function TemplateSelect() {
           <button
             type="submit"
             disabled={isSubmitting || !selectedTemplate || isPolling || redirecting || !!jobError}
-            className="w-full rounded-lg bg-gold py-4 text-sm font-semibold text-black transition hover:bg-gold-light disabled:opacity-50"
+            className="w-full rounded-lg bg-gold py-4 text-sm font-semibold text-dark transition hover:bg-gold-light disabled:opacity-50"
           >
             {isSubmitting
               ? "Starting generation..."

@@ -25,7 +25,7 @@ export function FreshTemplate({ shop, site }: SiteTemplateProps) {
           {site.hero_image_url && (
             <img
               src={site.hero_image_url}
-              alt=""
+              alt={site.headline}
               className="mb-8 w-full rounded-[16px] object-cover opacity-90"
               style={{ maxHeight: 320 }}
             />

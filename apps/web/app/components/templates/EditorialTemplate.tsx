@@ -24,7 +24,7 @@ export function EditorialTemplate({ shop, site }: SiteTemplateProps) {
           {site.hero_image_url && (
             <img
               src={site.hero_image_url}
-              alt=""
+              alt={site.headline}
               className="mb-12 w-full rounded-lg object-cover opacity-90"
               style={{ maxHeight: 320 }}
             />

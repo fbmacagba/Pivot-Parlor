@@ -20,7 +20,7 @@ export function AnnouncementBar() {
       role="banner"
     >
       <span>
-        Limited spots available —{" "}
+        Limited spots available:{" "}
         <a href="/contact" className="underline underline-offset-2 font-semibold">
           get your shop live for £100
         </a>
