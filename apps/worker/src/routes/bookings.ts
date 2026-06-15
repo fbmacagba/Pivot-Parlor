@@ -2,13 +2,14 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
   getBookingsByShop, getBookingById, createBooking,
-  updateBookingStatus, checkSlotConflict, getServiceById, getShopById, getStaffById,
+  updateBookingStatus, checkSlotConflict, getServiceById, getShopById, getShopBySlug, getStaffById,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js";
 import { reminderDelaySeconds } from "../services/reminder.js";
 import { requireShop } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { getAvailableSlots } from "../services/slots.js";
 import { addMinutes } from "@repo/utils";
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -91,50 +92,94 @@ publicBookings.post(
   async (c) => {
   const body = await c.req.json<{
     shop_id?: string;
+    shop_slug?: string;
     staff_id?: string;
     service_id?: string;
     customer_name?: string;
     customer_email?: string;
     customer_phone?: string;
     start_time?: string;   // ISO string
+    date?: string;         // shop-local YYYY-MM-DD the slot was offered for
     notes?: string;
   }>();
 
-  const { shop_id, staff_id, service_id, customer_name, customer_email, start_time } = body;
-  if (!shop_id || !staff_id || !service_id || !customer_name || !customer_email || !start_time) {
+  const { shop_id, shop_slug, staff_id, service_id, customer_name, customer_email, start_time } = body;
+  if ((!shop_id && !shop_slug) || !staff_id || !service_id || !customer_name || !customer_email || !start_time) {
     return c.json(
-      { success: false, error: "shop_id, staff_id, service_id, customer_name, customer_email and start_time are required" },
+      {
+        success: false,
+        error:
+          "shop_id (or shop_slug), staff_id, service_id, customer_name, customer_email and start_time are required",
+      },
       400
     );
   }
 
-  // Validate shop
-  const shop = await getShopById(c.env.DB, shop_id);
+  // Validate shop — accept either id or slug (the booking UI sends the slug)
+  const shop = shop_id
+    ? await getShopById(c.env.DB, shop_id)
+    : await getShopBySlug(c.env.DB, shop_slug!);
   if (!shop || !shop.is_active) return c.json({ success: false, error: "Shop not found" }, 404);
 
   // Validate service
   const service = await getServiceById(c.env.DB, service_id);
-  if (!service || service.shop_id !== shop_id) {
+  if (!service || service.shop_id !== shop.id) {
     return c.json({ success: false, error: "Service not found" }, 404);
   }
 
-  // Validate staff — body input, so shop ownership is not covered by URL scoping
-  const bookedStaff = await getStaffById(c.env.DB, staff_id);
-  if (!bookedStaff || bookedStaff.shop_id !== shop_id || bookedStaff.is_active !== 1) {
-    return c.json({ success: false, error: "Staff member not found" }, 404);
-  }
-
+  // Parse + range-check the requested time
   const startDate = new Date(start_time);
   if (Number.isNaN(startDate.getTime())) {
     return c.json({ success: false, error: "start_time must be a valid ISO date-time" }, 400);
   }
-  const endDate = addMinutes(startDate, service.duration_min);
-  const bookingDate = toDateString(startDate.toISOString());
+  if (startDate.getTime() <= Date.now()) {
+    return c.json({ success: false, error: "start_time must be in the future" }, 400);
+  }
   const startISO = startDate.toISOString();
+
+  // For a specific staff request, validate the staff up front so an invalid or
+  // cross-shop staff_id returns a precise 404 (rather than a generic slot 409).
+  if (staff_id !== "any") {
+    const reqStaff = await getStaffById(c.env.DB, staff_id);
+    if (!reqStaff || reqStaff.shop_id !== shop.id || reqStaff.is_active !== 1) {
+      return c.json({ success: false, error: "Staff member not found" }, 404);
+    }
+  }
+
+  // Validate the time is a real, available slot in the staff schedule. Reuses
+  // the same computation the booking UI reads, so any offered slot is accepted
+  // while arbitrary / off-schedule / misaligned times are rejected. For an
+  // "any available" request, adopt the staff_id of the matching free slot.
+  const slotDate =
+    body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : toDateString(startISO);
+  const requestedStaff = staff_id === "any" ? null : staff_id;
+  const slotList = await getAvailableSlots(
+    shop.id,
+    requestedStaff,
+    slotDate,
+    service.duration_min,
+    c.env.DB,
+    c.env.KV
+  );
+  const matchingSlot = slotList.find((s) => s.start_time === startISO && s.is_available);
+  if (!matchingSlot) {
+    return c.json({ success: false, error: "Selected time is not available" }, 409);
+  }
+  const resolvedStaffId = matchingSlot.staff_id;
+
+  // Defensive: confirm the resolved staff belongs to this shop and is active
+  const bookedStaff = await getStaffById(c.env.DB, resolvedStaffId);
+  if (!bookedStaff || bookedStaff.shop_id !== shop.id || bookedStaff.is_active !== 1) {
+    return c.json({ success: false, error: "Staff member not found" }, 404);
+  }
+
+  const endDate = addMinutes(startDate, service.duration_min);
+  const bookingDate = toDateString(startISO);
   const endISO = endDate.toISOString();
 
-  // Check slot availability
-  const conflict = await checkSlotConflict(c.env.DB, staff_id, startISO, endISO);
+  // Defense-in-depth against the read->write race (the unique active-slot index
+  // from migration 018 is the real guard; see the createBooking catch below).
+  const conflict = await checkSlotConflict(c.env.DB, resolvedStaffId, startISO, endISO);
   if (conflict) {
     return c.json({ success: false, error: "This time slot is no longer available" }, 409);
   }
@@ -145,8 +190,8 @@ publicBookings.post(
   try {
     await createBooking(c.env.DB, {
       id,
-      shop_id,
-      staff_id,
+      shop_id: shop.id,
+      staff_id: resolvedStaffId,
       service_id,
       customer_name,
       customer_email,
@@ -171,10 +216,10 @@ publicBookings.post(
   try {
     const confirmPref = await c.env.DB
       .prepare("SELECT booking_confirmation_email FROM shop_settings WHERE shop_id = ? LIMIT 1")
-      .bind(shop_id)
+      .bind(shop.id)
       .first<{ booking_confirmation_email: number | null }>();
     if (c.env.RESEND_API_KEY && confirmPref?.booking_confirmation_email !== 0) {
-      const staffMember = await getStaffById(c.env.DB, staff_id);
+      const staffMember = bookedStaff;
       await sendBookingConfirmation(c.env.RESEND_API_KEY, {
         customer_name,
         customer_email,
@@ -198,7 +243,7 @@ publicBookings.post(
     // Use shop's configured reminder_hours_before (default 24h)
     const settingsRow = await c.env.DB
       .prepare("SELECT booking_reminder_email, reminder_hours_before FROM shop_settings WHERE shop_id = ? LIMIT 1")
-      .bind(shop_id)
+      .bind(shop.id)
       .first<{ booking_reminder_email: number | null; reminder_hours_before: number | null }>();
     const reminderEnabled = settingsRow?.booking_reminder_email !== 0;
     const hoursBeforeNum = settingsRow?.reminder_hours_before ?? 24;
@@ -219,8 +264,8 @@ publicBookings.post(
     success: true,
     data: {
       id,
-      shop_id,
-      staff_id,
+      shop_id: shop.id,
+      staff_id: resolvedStaffId,
       service_id,
       customer_name,
       customer_email,
