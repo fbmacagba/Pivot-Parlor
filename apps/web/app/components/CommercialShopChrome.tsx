@@ -290,6 +290,15 @@ export function CommercialShopChrome({
           </nav>
 
           <div className="hidden items-center gap-4 md:flex">
+            {/* Single sign-in for owners, staff and customers — /login routes each
+                role to its own dashboard (and sends already-signed-in visitors
+                straight there). ?shop= powers a "back to shop" link on /login. */}
+            <Link
+              to={`/login?shop=${encodeURIComponent(shopSlug)}`}
+              className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/40 px-5 pp-heading text-sm font-semibold text-white/90 transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]"
+            >
+              Sign in
+            </Link>
             {bookingEnabled ? (
               <Link to={`/${shopSlug}/book`} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-black">
                 Book Now →
@@ -319,6 +328,9 @@ export function CommercialShopChrome({
               {bookingEnabled ? (
                 <Link to={`/${shopSlug}/book`} className="min-h-12 rounded-lg px-4 py-3 text-left font-medium text-white/90" onClick={closeNav}>Book</Link>
               ) : null}
+              {/* Owner / staff / customer sign-in — /login role-routes each to its own dashboard. */}
+              <div className="my-1 border-t border-white/10" aria-hidden />
+              <Link to={`/login?shop=${encodeURIComponent(shopSlug)}`} className="min-h-12 rounded-lg px-4 py-3 text-left font-medium text-white/90" onClick={closeNav}>Sign in</Link>
               {bookingEnabled ? (
                 <Link to={`/${shopSlug}/book`} className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-black" onClick={closeNav}>Book Now →</Link>
               ) : (
