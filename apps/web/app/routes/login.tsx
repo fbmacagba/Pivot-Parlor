@@ -4,7 +4,7 @@ import type {
   MetaFunction,
 } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
-import { useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, sessionCookieHeaders } from "~/lib/auth";
 
@@ -34,6 +34,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const redirectParam = safeRedirectPath(url.searchParams.get("redirect"));
 
+  // When a visitor arrives from a shop site (?shop=<slug>), surface a safe
+  // "back to shop" link so they aren't stranded on the global sign-in page.
+  const shopParam = url.searchParams.get("shop");
+  const backToShop = shopParam && /^[a-z0-9-]+$/.test(shopParam) ? shopParam : "";
+
   const token = getSessionToken(request);
   if (token) {
     try {
@@ -46,7 +51,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
   }
 
-  return json({ redirectTo: redirectParam ?? "" });
+  return json({ redirectTo: redirectParam ?? "", backToShop });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -135,7 +140,7 @@ function LinkedInIcon() {
 // ─── Page component ───────────────────────────────────────────────────────────
 
 export default function LoginPage() {
-  const { redirectTo } = useLoaderData<typeof loader>();
+  const { redirectTo, backToShop } = useLoaderData<typeof loader>();
   const data = useActionData<typeof action>();
   const navigation = useNavigation();
   const submitting = navigation.state !== "idle";
@@ -152,6 +157,16 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-dark px-4">
       <div className="w-full max-w-sm">
+        {backToShop ? (
+          <div className="mb-6">
+            <Link
+              to={`/${backToShop}`}
+              className="inline-flex items-center gap-1 text-sm text-white/55 transition hover:text-gold"
+            >
+              <span aria-hidden>←</span> Back to shop
+            </Link>
+          </div>
+        ) : null}
         {/* Header */}
         <div className="mb-8 text-center">
           <p className="font-heading text-2xl font-bold text-white">
