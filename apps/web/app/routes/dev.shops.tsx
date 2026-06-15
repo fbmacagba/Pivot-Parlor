@@ -34,6 +34,7 @@ import {
 } from "~/components/dev-shops/helpers";
 import { RegenStepRow } from "~/components/dev-shops/RegenStepRow";
 import { StatusBadge } from "~/components/dev-shops/StatusBadge";
+import { DeleteShopDialog, type DeleteShopResult } from "~/components/dev-shops/DeleteShopDialog";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -133,12 +134,7 @@ export default function DevShops() {
   const expandedGenFetcher = useFetcher<{ success?: boolean; data?: { jobId?: string } }>();
   const activateActFetcher = useFetcher();
   const pauseActFetcher = useFetcher();
-  const deleteShopFetcher = useFetcher<{
-    success?: boolean;
-    error?: string;
-    deletedShopId?: string;
-    data?: { id?: string };
-  }>();
+  const deleteShopFetcher = useFetcher<DeleteShopResult>();
   const wasExpandedGenSubmittingRef = useRef(false);
   const pendingUploadTypeRef = useRef<"logo" | "hero" | null>(null);
   const pendingSaveTypeRef = useRef<"logo" | "hero" | null>(null);
@@ -810,56 +806,11 @@ export default function DevShops() {
         </Dialog>
       </div>
 
-      <Dialog open={shopToDelete !== null} onOpenChange={(open) => !open && setShopToDelete(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete shop</DialogTitle>
-          </DialogHeader>
-          {shopToDelete && (
-            <>
-              <p className="text-sm text-white/70">
-                Permanently delete{" "}
-                <span className="font-medium text-white">{shopToDelete.name}</span> ({shopToDelete.slug})? This
-                removes onboarding data and linked records. This cannot be undone.
-              </p>
-              {deleteShopFetcher.data &&
-              typeof deleteShopFetcher.data === "object" &&
-              deleteShopFetcher.data.success === false &&
-              "error" in deleteShopFetcher.data &&
-              typeof (deleteShopFetcher.data as { error?: string }).error === "string" ? (
-                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                  {(deleteShopFetcher.data as { error: string }).error}
-                </div>
-              ) : null}
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setShopToDelete(null)}>
-                  Cancel
-                </Button>
-                <deleteShopFetcher.Form method="post" action={`/api/shops/${shopToDelete.id}/delete`}>
-                  <Button
-                    type="submit"
-                    size="sm"
-                    className="bg-red-600 hover:bg-red-500"
-                    disabled={deleteShopFetcher.state !== "idle"}
-                  >
-                    {deleteShopFetcher.state !== "idle" ? (
-                      <>
-                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                        Deleting…
-                      </>
-                    ) : (
-                      <>
-                        <Trash2 className="mr-1 h-3.5 w-3.5" />
-                        Delete shop
-                      </>
-                    )}
-                  </Button>
-                </deleteShopFetcher.Form>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <DeleteShopDialog
+        shop={shopToDelete}
+        onClose={() => setShopToDelete(null)}
+        fetcher={deleteShopFetcher}
+      />
 
       <div className="mb-4">
         <Input
