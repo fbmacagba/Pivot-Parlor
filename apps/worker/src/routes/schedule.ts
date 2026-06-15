@@ -5,16 +5,17 @@ import {
   getStaffById,
 } from "../db/queries.js";
 import { authMiddleware } from "../middleware/auth.js";
-import { requireShop } from "../middleware/rbac.js";
+import { requireShopRole } from "../middleware/rbac.js";
 
 const schedule = new Hono<{ Bindings: Bindings }>();
 
-schedule.use("*", authMiddleware, requireShop());
+// Auth for all; reads are admin+staff, schedule edits are admin-only.
+schedule.use("*", authMiddleware);
 
 // ─── GET /api/shops/:shopId/schedule ─────────────────────────────────────────
 // Returns all schedules for the shop, keyed by staffId
 
-schedule.get("/", async (c) => {
+schedule.get("/", requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const rows = await getScheduleByShop(c.env.DB, shopId);
 
@@ -28,7 +29,7 @@ schedule.get("/", async (c) => {
 
 // ─── GET /api/shops/:shopId/schedule/:staffId ─────────────────────────────────
 
-schedule.get("/:staffId", async (c) => {
+schedule.get("/:staffId", requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const staffId = c.req.param("staffId")!;
   const member = await getStaffById(c.env.DB, staffId);
@@ -43,7 +44,7 @@ schedule.get("/:staffId", async (c) => {
 // Body: { entries: Array<{ staff_id, day_of_week, start_time, end_time, off? }> }
 // Upserts all provided entries; sets is_active=0 for entries with off=true
 
-schedule.put("/", async (c) => {
+schedule.put("/", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const body = await c.req.json<{
     entries?: Array<{

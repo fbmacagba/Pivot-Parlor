@@ -5,16 +5,17 @@ import {
   addStaffService, getStaffServices, createUser, getUserByEmail,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
-import { requireShop } from "../middleware/rbac.js";
+import { requireShopRole } from "../middleware/rbac.js";
 
 const staff = new Hono<{ Bindings: Bindings }>();
 
-// All routes require auth + shop ownership
-staff.use("*", authMiddleware, requireShop());
+// All routes require auth; reads are admin+staff, mutations are admin-only
+// (staff manage their own data via /api/staff/me, not these shop-scoped routes).
+staff.use("*", authMiddleware);
 
 // ─── GET /api/shops/:shopId/staff ─────────────────────────────────────────────
 
-staff.get("/", async (c) => {
+staff.get("/", requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const members = await getStaffByShop(c.env.DB, shopId);
   const enriched = await Promise.all(
@@ -28,7 +29,7 @@ staff.get("/", async (c) => {
 
 // ─── GET /api/shops/:shopId/staff/:staffId ────────────────────────────────────
 
-staff.get("/:staffId", async (c) => {
+staff.get("/:staffId", requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const staffId = c.req.param("staffId")!;
   const member = await getStaffById(c.env.DB, staffId);
@@ -42,7 +43,7 @@ staff.get("/:staffId", async (c) => {
 // ─── POST /api/shops/:shopId/staff ───────────────────────────────────────────
 // Creates a user account then a staff record
 
-staff.post("/", async (c) => {
+staff.post("/", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const body = await c.req.json<{
     display_name?: string;
@@ -103,7 +104,7 @@ staff.post("/", async (c) => {
 
 // ─── PUT /api/shops/:shopId/staff/:staffId ────────────────────────────────────
 
-staff.put("/:staffId", async (c) => {
+staff.put("/:staffId", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!; const staffId = c.req.param("staffId")!;
   const member = await getStaffById(c.env.DB, staffId);
   if (!member || member.shop_id !== shopId) {
@@ -132,7 +133,7 @@ staff.put("/:staffId", async (c) => {
 
 // ─── DELETE /api/shops/:shopId/staff/:staffId (soft-delete) ──────────────────
 
-staff.delete("/:staffId", async (c) => {
+staff.delete("/:staffId", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!; const staffId = c.req.param("staffId")!;
   const member = await getStaffById(c.env.DB, staffId);
   if (!member || member.shop_id !== shopId) {
@@ -144,7 +145,7 @@ staff.delete("/:staffId", async (c) => {
 
 // ─── POST /api/shops/:shopId/staff/:staffId/avatar ────────────────────────────
 
-staff.post("/:staffId/avatar", async (c) => {
+staff.post("/:staffId/avatar", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const staffId = c.req.param("staffId")!;
 

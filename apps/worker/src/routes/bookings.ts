@@ -7,7 +7,7 @@ import {
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js";
 import { reminderDelaySeconds } from "../services/reminder.js";
-import { requireShop } from "../middleware/rbac.js";
+import { requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { addMinutes } from "@repo/utils";
 
@@ -20,7 +20,8 @@ function toDateString(iso: string): string {
 // ─── Router: /api/shops/:shopId/bookings (authenticated, requireShop) ─────────
 
 const bookings = new Hono<{ Bindings: Bindings }>();
-bookings.use("*", authMiddleware, requireShop());
+// Operational: admins and staff of the shop (developers bypass). Excludes customers.
+bookings.use("*", authMiddleware, requireShopRole("admin", "staff"));
 
 bookings.get("/", async (c) => {
   const shopId = c.req.param("shopId")!;
