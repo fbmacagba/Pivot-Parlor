@@ -48,6 +48,19 @@ stripeWebhookApp.route("/api/webhooks", webhooksRouter);
 
 // ─── Global middleware ────────────────────────────────────────────────────────
 
+// Public shop images under /assets/* are embedded cross-origin — by the dev
+// dashboard and by the live shop sites, both served from a different origin than
+// this API host. secureHeaders() below defaults Cross-Origin-Resource-Policy to
+// "same-origin", which makes browsers refuse those <img> loads (curl still 200,
+// the browser shows a broken image). Relax CORP to "cross-origin" for assets only.
+// MUST be registered before secureHeaders(): middleware unwinds last-registered-
+// first, so this outer post-response runs AFTER secureHeaders' and wins. The
+// targeting (assets only) is guarded by test/assets-cors.test.ts.
+app.use("/assets/*", async (c, next) => {
+  await next();
+  c.header("Cross-Origin-Resource-Policy", "cross-origin");
+});
+
 app.use("*", logger());
 
 // API security headers (NFR-S7). The web app's headers live in apps/web/public/_headers.
