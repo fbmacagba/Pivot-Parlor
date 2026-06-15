@@ -32,7 +32,7 @@ If it's 200 on prod, STOP — the frontend is pointed at production and the test
 ## Running
 
 ```bash
-npx playwright test tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/stripe-payment.spec.ts --workers=1
+npx playwright test tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts --workers=1
 ```
 
 - **`--workers=1` is required.** The single staging worker can't take the full parallel fan-out, and several specs share staging DB state (e.g. the stripe "unpaid shop" assertions). Serial = reliable; the subset runs in ~30s.
@@ -56,7 +56,7 @@ So **anonymous traffic to the staging login URL (no header) stays fully rate-lim
 
 ## Spec status
 
-- **Stable (run in CI):** `dev-login`, `shop-onboarding`, `stripe-payment` — 12 tests, green. (`stripe-payment` uses the `X-E2E-Test-Mock*` fixture headers, so no real Stripe is needed.)
+- **Stable (run in CI):** `dev-login`, `shop-onboarding`, `dev-dashboard`, `stripe-payment` — green. (`stripe-payment` uses the `X-E2E-Test-Mock*` fixture headers, so no real Stripe is needed.) `dev-dashboard` covers the shops-table surface (render, status badge, search, delete) — the runtime net for refactoring the `dev.shops` route; it does NOT cover the active-only regen/image panel (that needs `site-generation`).
 - **Excluded from the stable run:**
   - `site-generation.spec.ts` — drives the real AI workers (builder/research/text/images) end to end: slow and burns AI credits. Run manually when validating generation.
   - `dev-shop-delete-repro.spec.ts` — a headed debugging repro, not a regression guard.
