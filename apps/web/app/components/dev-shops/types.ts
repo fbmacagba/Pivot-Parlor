@@ -40,3 +40,9 @@ export interface OnboardResult {
 }
 
 export type RegenStepUiState = "pending" | "active" | "done" | "failed";
+
+export type OnboardActionJson =
+  | { success: true; result: OnboardResult; error: null }
+  | { success: false; result: null; error: string };
+
+export type DevShopsActionJson = OnboardActionJson | GenerateSiteActionResult;

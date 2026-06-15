@@ -1,7 +1,7 @@
 import { useFetcher, useLoaderData, Link, useNavigate, useRevalidator, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { Bot, Check, Copy, ExternalLink, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Bot, Check, Copy, ExternalLink, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
@@ -14,10 +14,9 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "~/components/ui/Dialog";
 import type { DevGenerationPrefs } from "./dev.shops.$shopId";
-import type { Shop, GenerateSiteActionResult, OnboardResult } from "~/components/dev-shops/types";
+import type { Shop, GenerateSiteActionResult, OnboardResult, DevShopsActionJson } from "~/components/dev-shops/types";
 import {
   DEFAULT_TEXT_MODEL,
   DEFAULT_IMAGE_MODEL,
@@ -35,6 +34,7 @@ import {
 import { RegenStepRow } from "~/components/dev-shops/RegenStepRow";
 import { StatusBadge } from "~/components/dev-shops/StatusBadge";
 import { DeleteShopDialog, type DeleteShopResult } from "~/components/dev-shops/DeleteShopDialog";
+import { OnboardShopDialog } from "~/components/dev-shops/OnboardShopDialog";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -457,11 +457,6 @@ export default function DevShops() {
     }
   }, [regenPrefsFetcher.state, regenPrefsFetcher.data, regenShopId]);
 
-  type OnboardActionJson =
-    | { success: true; result: OnboardResult; error: null }
-    | { success: false; result: null; error: string };
-  type DevShopsActionJson = OnboardActionJson | GenerateSiteActionResult;
-
   const fetcher = useFetcher<DevShopsActionJson>();
   const generateFetcher = useFetcher<typeof action>();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -642,168 +637,25 @@ export default function DevShops() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="font-heading text-2xl font-bold text-white">Shops</h1>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-1" /> New Shop
-            </Button>
-          </DialogTrigger>
-
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Onboard new shop</DialogTitle>
-            </DialogHeader>
-
-            {/* ── Success state — show payment link or invite link ── */}
-            {checkoutUrl ? (
-              <div className="space-y-4">
-                <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
-                  Shop created! Send the £100 payment link to the owner. Once paid, the invite link will activate.
-                </div>
-                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-                  <p className="mb-2 text-xs font-medium text-white/50 uppercase tracking-wider">
-                    Payment link (£100)
-                  </p>
-                  <p className="break-all text-sm text-white font-mono">{checkoutUrl}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => copyPaymentUrl(checkoutUrl)}
-                  >
-                    <Copy className="h-3.5 w-3.5 mr-1" />
-                    {copied ? "Copied!" : "Copy Payment Link"}
-                  </Button>
-                  <a
-                    href={checkoutUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1"
-                  >
-                    <Button type="button" variant="ghost" size="sm" className="w-full">
-                      <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open
-                    </Button>
-                  </a>
-                </div>
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={() => setDialogOpen(false)}
-                >
-                  Done
-                </Button>
-              </div>
-            ) : inviteUrl ? (
-              <div className="space-y-4">
-                <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
-                  Shop created! Send the invite link to the owner so they can set
-                  their password and activate the shop.
-                </div>
-                <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-                  <p className="mb-2 text-xs font-medium text-white/50 uppercase tracking-wider">
-                    Invite link
-                  </p>
-                  <p className="break-all text-sm text-white font-mono">{inviteUrl}</p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="flex-1"
-                    onClick={copyInviteUrl}
-                  >
-                    <Copy className="h-3.5 w-3.5 mr-1" />
-                    {copied ? "Copied!" : "Copy link"}
-                  </Button>
-                  <a
-                    href={inviteUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1"
-                  >
-                    <Button type="button" variant="ghost" size="sm" className="w-full">
-                      <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open
-                    </Button>
-                  </a>
-                </div>
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={() => setDialogOpen(false)}
-                >
-                  Done
-                </Button>
-              </div>
-            ) : (
-              /* ── Form state ── */
-              <fetcher.Form method="post" className="space-y-4">
-                {result?.error && (
-                  <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                    {result.error}
-                  </div>
-                )}
-
-                <Input
-                  ref={nameRef}
-                  label="Shop name"
-                  name="name"
-                  required
-                  onChange={handleNameChange}
-                />
-
-                <div>
-                  <label className="block text-sm font-medium text-white/80 mb-1.5">
-                    Slug
-                    <span className="ml-1.5 text-xs text-white/40">(auto-generated, editable)</span>
-                  </label>
-                  <input
-                    name="slug"
-                    value={slug}
-                    onChange={(e) => {
-                      setSlug(e.target.value);
-                      setSlugManuallyEdited(true);
-                    }}
-                    placeholder="my-shop"
-                    className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
-                  />
-                  <p className="mt-1 text-xs text-white/30">
-                    Final URL: pivotparlor.com/
-                    <span className="text-white/50">{slug || "my-shop"}</span>-001
-                  </p>
-                </div>
-
-                <Input
-                  label="Owner email"
-                  name="owner_email"
-                  type="email"
-                  required
-                />
-
-                <div>
-                  <label className="block text-sm font-medium text-white/80 mb-1.5">
-                    Shop type
-                  </label>
-                  <select
-                    name="type"
-                    className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-                  >
-                    <option value="beauty_parlor" className="bg-dark">Beauty parlour</option>
-                    <option value="barber_shop" className="bg-dark">Barber shop</option>
-                    <option value="both" className="bg-dark">Both</option>
-                  </select>
-                </div>
-
-                <Button type="submit" className="w-full" disabled={submitting}>
-                  {submitting ? "Creating…" : "Create shop & generate invite →"}
-                </Button>
-              </fetcher.Form>
-            )}
-          </DialogContent>
-        </Dialog>
+        <OnboardShopDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          fetcher={fetcher}
+          errorMessage={result?.error ?? null}
+          submitting={submitting}
+          checkoutUrl={checkoutUrl ?? null}
+          inviteUrl={inviteUrl}
+          copied={copied}
+          onCopyInvite={copyInviteUrl}
+          onCopyPayment={copyPaymentUrl}
+          slug={slug}
+          onSlugChange={(value) => {
+            setSlug(value);
+            setSlugManuallyEdited(true);
+          }}
+          onNameChange={handleNameChange}
+          nameRef={nameRef}
+        />
       </div>
 
       <DeleteShopDialog
