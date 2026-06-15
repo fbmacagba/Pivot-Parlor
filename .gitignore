@@ -55,3 +55,6 @@ apps/worker/pivot-parlor-db*.sql
 # Misc
 .DS_Store
 *.pem
+
+# graphify knowledge-graph output (large generated artifact)
+graphify-out/
