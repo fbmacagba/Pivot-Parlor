@@ -177,6 +177,10 @@ export default function Contact() {
             <p className="text-center text-xs text-white/40">
               £100 one-time setup · No monthly fees · Live in 24 hours
             </p>
+            <p className="text-center text-xs text-white/40">
+              By submitting, you agree to our{" "}
+              <a href="/privacy" className="underline hover:text-white/70">Privacy Policy</a>.
+            </p>
           </Form>
         )}
       </div>

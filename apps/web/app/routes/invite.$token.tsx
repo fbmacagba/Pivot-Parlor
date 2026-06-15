@@ -214,6 +214,21 @@ export default function InviteAccept() {
               />
             </div>
 
+            <label className="flex items-start gap-2 text-xs text-white/60">
+              <input
+                type="checkbox"
+                name="accept_terms"
+                required
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/30 bg-white/5 accent-gold"
+              />
+              <span>
+                I agree to the{" "}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/90">Terms of Service</a>,{" "}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/90">Privacy Policy</a>, and{" "}
+                <a href="/dpa" target="_blank" rel="noopener noreferrer" className="underline hover:text-white/90">Data Processing Agreement</a>.
+              </span>
+            </label>
+
             <button
               type="submit"
               className="h-11 w-full rounded-lg bg-gold text-sm font-semibold text-dark transition-colors hover:bg-gold-light"

@@ -31,9 +31,12 @@ export default function ShopPrivacyPolicy() {
         {/* 1. Who we are */}
         <h2 className="text-lg font-semibold text-white/90">1. Who We Are</h2>
         <p>
-          <strong>{shopName}</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) is the data
-          controller responsible for your personal data collected through this website and booking service, which is
-          operated in partnership with Pivot Parlor.
+          <strong>{shopName}</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) and Pivot Parlor
+          (operated by BytesFX Ltd) act as <strong>joint data controllers</strong> for the personal data collected
+          through this website and booking service: {shopName} fulfils your booking, while Pivot Parlor provides and
+          operates the booking platform and uses booking data for platform operation, commission, security, and
+          service improvement. Pivot Parlor also acts as our data processor for certain platform operations under a
+          Data Processing Agreement.
           {address ? (
             <> Our registered business address is: <strong>{address}</strong>.</>
           ) : null}
@@ -113,9 +116,10 @@ export default function ShopPrivacyPolicy() {
         </p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
-            <strong>Pivot Parlor</strong> — our booking platform provider, which hosts and processes booking
-            data on our behalf as a data processor. Pivot Parlor operates under Cloudflare infrastructure based
-            in the UK/EEA region.
+            <strong>Pivot Parlor (BytesFX Ltd)</strong> — our booking platform provider and joint controller for
+            booking data, which also processes data on our behalf as our data processor for platform operations
+            under a Data Processing Agreement. Pivot Parlor hosts data on Cloudflare infrastructure in the UK/EEA
+            region.
           </li>
           <li>
             <strong>Payment processors</strong> — Stripe Inc., to process payments securely. Stripe is

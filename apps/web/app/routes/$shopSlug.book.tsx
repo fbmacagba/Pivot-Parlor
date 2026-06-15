@@ -277,6 +277,10 @@ export default function BookingWizard() {
                   {nav.state === "submitting" ? "Confirming…" : "Confirm booking →"}
                 </Button>
               </div>
+              <p className="text-center text-xs text-white/40">
+                By confirming, you agree to our{" "}
+                <a href={`/${slug}/privacy`} className="underline hover:text-white/70">Privacy Policy</a>.
+              </p>
             </Form>
           )}
         </div>

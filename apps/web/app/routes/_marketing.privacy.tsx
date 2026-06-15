@@ -28,9 +28,12 @@ export default function Privacy() {
             <p className="mt-2">
               Pivot Parlor (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) is a booking platform
               for beauty parlours and barber shops, operated by BytesFX Ltd, registered in England and Wales.
-              We act as data controller for personal data collected through this website (pivotparlor.com) and
-              our platform. We are committed to protecting your personal data in accordance with the UK General
-              Data Protection Regulation (UK GDPR) and the Data Protection Act 2018.
+              We act as data controller for account, enquiry, and platform-operation data collected through this
+              website (pivotparlor.com) and our platform. For customer booking data submitted through shops on our
+              platform, we act as a <strong>joint controller</strong> alongside the relevant shop (and, for certain
+              platform operations, as that shop&rsquo;s data processor under a Data Processing Agreement). We are
+              committed to protecting your personal data in accordance with the UK General Data Protection
+              Regulation (UK GDPR) and the Data Protection Act 2018.
             </p>
           </section>
 
@@ -41,7 +44,7 @@ export default function Privacy() {
               <li><strong>Enquiry and contact data:</strong> your name, email address, phone number, shop name, and message when you submit a contact or onboarding enquiry.</li>
               <li><strong>Account data:</strong> email address and hashed password if you register as a shop admin or staff member, or your name and email if you sign in via a social provider (Google or LinkedIn).</li>
               <li><strong>Shop and business data:</strong> your shop name, type, address, services, pricing, and staff information provided during onboarding and platform use.</li>
-              <li><strong>Customer booking data:</strong> customer names, email addresses, phone numbers, appointment details, and service records processed on behalf of shops using the platform.</li>
+              <li><strong>Customer booking data:</strong> customer names, email addresses, phone numbers, appointment details, and service records, for which we act as a joint controller alongside the relevant shop.</li>
               <li><strong>Payment data:</strong> transaction amounts and booking IDs. Full payment card details are processed by Stripe and are never stored on our systems.</li>
               <li><strong>Technical data:</strong> IP address, browser type and version, device type, time zone, and operating system, collected automatically when you access our website.</li>
               <li><strong>Usage data:</strong> pages viewed, links clicked, and interactions with our platform, collected to improve our service.</li>
