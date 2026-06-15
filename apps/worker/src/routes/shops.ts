@@ -6,6 +6,8 @@ import {
   getAllShops,
   getShopById,
   getShopBySlug,
+  ensureE2eBookableShop,
+  E2E_BOOKABLE_SLUG,
   createShop,
   createShopSite,
   getNextShopNumber,
@@ -1082,6 +1084,10 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
 
 shops.get("/:shopId", async (c) => {
   const { shopId } = c.req.param();
+  // E2E: lazily provision the bookable fixture shop the booking spec uses.
+  if (c.env.E2E_FIXTURES === "true" && shopId === E2E_BOOKABLE_SLUG) {
+    await ensureE2eBookableShop(c.env.DB);
+  }
   // Try by slug first (for customer-facing URLs), fall back to ID
   const shop = await getShopBySlug(c.env.DB, shopId) ?? await getShopById(c.env.DB, shopId);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);

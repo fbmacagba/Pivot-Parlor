@@ -1,4 +1,4 @@
-import { Form, useLoaderData, useNavigation } from "@remix-run/react";
+import { Form, useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { useState } from "react";
@@ -8,19 +8,24 @@ import { Input } from "~/components/ui/Input";
 import type { Service } from "@repo/types";
 
 interface Staff { id: string; display_name: string; bio?: string }
+interface Slot { staff_id: string; start_time: string; end_time: string; is_available: boolean }
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
   const url = new URL(request.url);
   const date = url.searchParams.get("date");
+  const serviceId = url.searchParams.get("service_id");
+  const staffId = url.searchParams.get("staff_id");
 
   let services: Service[] = [];
   let staff: Staff[] = [];
-  let slots: string[] = [];
+  let slots: Slot[] = [];
+  let shopTimezone = "Europe/London";
 
   try {
-    const shopRes = await api.get<{ id: string }>(`/api/shops/${params.shopSlug}`);
+    const shopRes = await api.get<{ id: string; timezone?: string }>(`/api/shops/${params.shopSlug}`);
+    shopTimezone = shopRes.timezone || "Europe/London";
     // Do not use Promise.all: /staff requires auth and would reject the whole loader, clearing services.
     const [svcResult, staffResult] = await Promise.allSettled([
       api.get<Service[]>(`/api/shops/${shopRes.id}/services`),
@@ -28,16 +33,22 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     ]);
     services = svcResult.status === "fulfilled" ? svcResult.value : [];
     staff = staffResult.status === "fulfilled" ? staffResult.value : [];
-    if (date) {
+    // The slots endpoint requires date + service_id; a specific staff scopes
+    // the result, "any" (no staff_id) returns all staff (deduped client-side).
+    if (date && serviceId) {
+      const staffParam =
+        staffId && staffId !== "any" ? `&staff_id=${encodeURIComponent(staffId)}` : "";
       try {
-        slots = await api.get<string[]>(`/api/shops/${shopRes.id}/slots?date=${date}`);
+        slots = await api.get<Slot[]>(
+          `/api/shops/${shopRes.id}/slots?date=${encodeURIComponent(date)}&service_id=${encodeURIComponent(serviceId)}${staffParam}`
+        );
       } catch {
         slots = [];
       }
     }
   } catch { /* empty */ }
 
-  return json({ slug: params.shopSlug, services, staff, slots });
+  return json({ slug: params.shopSlug, services, staff, slots, shopTimezone });
 }
 
 export async function action({ params, request, context }: ActionFunctionArgs) {
@@ -63,8 +74,9 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
 const STEPS = ["Service", "Staff", "Date & Time", "Your Details", "Review"];
 
 export default function BookingWizard() {
-  const { services, staff, slots } = useLoaderData<typeof loader>();
+  const { slug, services, staff, slots, shopTimezone } = useLoaderData<typeof loader>();
   const nav = useNavigation();
+  const slotsFetcher = useFetcher<typeof loader>();
   const [step, setStep] = useState(0);
   const [selection, setSelection] = useState({
     service: null as Service | null,
@@ -76,6 +88,14 @@ export default function BookingWizard() {
     phone: "",
     notes: "",
   });
+
+  // Slots come from the client-side fetcher once a date is picked; fall back to
+  // the loader's slots. Dedupe by start_time (for "any staff", several staff can
+  // be free at the same time) and keep only available ones.
+  const rawSlots = (slotsFetcher.data?.slots ?? slots) as Slot[];
+  const availableSlots = [
+    ...new Map(rawSlots.filter((s) => s.is_available).map((s) => [s.start_time, s])).values(),
+  ].sort((a, b) => a.start_time.localeCompare(b.start_time));
 
   return (
     <div className="min-h-screen bg-dark px-4 py-12 sm:px-6">
@@ -159,29 +179,49 @@ export default function BookingWizard() {
                 label="Date"
                 type="date"
                 value={selection.date}
-                onChange={(e) => setSelection((p) => ({ ...p, date: e.target.value }))}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => {
+                  const date = e.target.value;
+                  setSelection((p) => ({ ...p, date, slot: "" }));
+                  if (date && selection.service) {
+                    const staffParam =
+                      selection.staffId && selection.staffId !== "any"
+                        ? `&staff_id=${encodeURIComponent(selection.staffId)}`
+                        : "";
+                    slotsFetcher.load(
+                      `/${slug}/book?date=${encodeURIComponent(date)}&service_id=${encodeURIComponent(selection.service.id)}${staffParam}`
+                    );
+                  }
+                }}
               />
-              {slots.length > 0 && (
+
+              {slotsFetcher.state === "loading" && (
+                <p className="text-sm text-white/40">Loading available slots…</p>
+              )}
+
+              {availableSlots.length > 0 && (
                 <div>
                   <p className="text-sm font-medium text-white/80 mb-2">Available slots</p>
                   <div className="grid grid-cols-3 gap-2">
-                    {slots.map((slot) => (
+                    {availableSlots.map((slot) => (
                       <button
-                        key={slot}
-                        onClick={() => { setSelection((p) => ({ ...p, slot })); setStep(3); }}
+                        key={slot.start_time}
+                        onClick={() => setSelection((p) => ({ ...p, slot: slot.start_time }))}
                         className={`rounded-lg border py-2 text-sm transition-colors ${
-                          selection.slot === slot ? "border-gold bg-gold/20 text-gold" : "border-white/20 text-white/70 hover:border-gold/40"
+                          selection.slot === slot.start_time ? "border-gold bg-gold/20 text-gold" : "border-white/20 text-white/70 hover:border-gold/40"
                         }`}
                       >
-                        {slot}
+                        {formatSlotTime(slot.start_time, shopTimezone)}
                       </button>
                     ))}
                   </div>
                 </div>
               )}
-              {selection.date && slots.length === 0 && (
+
+              {selection.date && slotsFetcher.state !== "loading" && availableSlots.length === 0 && (
                 <p className="text-sm text-white/40">No slots available for this date.</p>
               )}
+
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
                 <Button disabled={!selection.slot} onClick={() => setStep(3)}>Next →</Button>
@@ -227,7 +267,7 @@ export default function BookingWizard() {
                 <Row label="Service" value={selection.service?.name ?? "—"} />
                 <Row label="Price" value={`£${selection.service?.price ?? 0}`} />
                 <Row label="Date" value={selection.date} />
-                <Row label="Time" value={selection.slot} />
+                <Row label="Time" value={selection.slot ? formatSlotTime(selection.slot, shopTimezone) : "—"} />
                 <Row label="Name" value={selection.name} />
                 <Row label="Email" value={selection.email} />
               </div>
@@ -243,6 +283,14 @@ export default function BookingWizard() {
       </div>
     </div>
   );
+}
+
+function formatSlotTime(iso: string, tz: string): string {
+  return new Date(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: tz,
+  });
 }
 
 function Row({ label, value }: { label: string; value: string }) {

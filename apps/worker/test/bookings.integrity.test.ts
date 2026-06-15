@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { seedShop, seedStaff } from "./helpers";
+import { seedShop, seedStaff, seedScheduleDay } from "./helpers";
 import { dispatch } from "./request";
-import { createBooking } from "../src/db/queries";
+import { createBooking, checkSlotConflict } from "../src/db/queries";
 
 let shopA: string, shopB: string;
 let staffA: string, staffB: string;
@@ -53,6 +53,9 @@ beforeAll(async () => {
   staffA = await seedStaff(shopA);
   staffB = await seedStaff(shopB);
   serviceA = await seedService(shopA, "Cut A");
+  // Working hours for staffA every weekday so the route's slot validation
+  // accepts the on-grid 09:00-17:00 (winter UTC) slots used below.
+  for (let d = 0; d < 7; d++) await seedScheduleDay(shopA, staffA, d);
 });
 
 describe("booking input validation", () => {
@@ -104,7 +107,9 @@ describe("double-booking prevention", () => {
     });
     expect(second.status).toBe(409);
     const body = (await second.json()) as { success: boolean; error: string };
-    expect(body.error).toMatch(/no longer available/);
+    // Either the slot reads as unavailable, or the unique-index catch fires —
+    // both are correct rejections of the same-slot rebooking.
+    expect(body.error).toMatch(/available/);
   });
 
   it("a cancelled booking frees its slot", async () => {
@@ -130,21 +135,23 @@ describe("double-booking prevention", () => {
     expect(row?.status).toBe("in_progress");
   });
 
-  it("rejects an overlapping booking whose instant straddles UTC midnight onto a different date", async () => {
-    // Booking A ends just after UTC midnight; booking B starts just before A ends.
-    // They overlap but have different start_times (so the unique index doesn't
-    // catch it) and different booking_date values (so a single-UTC-date conflict
-    // query would miss the overlap — the bug this guards).
-    const a = await dispatch("POST", "/api/bookings", {
-      body: bookingPayload({ start_time: "2027-03-15T23:45:00.000Z" }), // booking_date 2027-03-15
+  it("checkSlotConflict catches an overlap that straddles UTC midnight onto a different date", async () => {
+    // Booking A spans 23:45-00:15 (booking_date 2027-03-15); a candidate B at
+    // 00:00-00:30 has a different start_time (so the unique index won't catch
+    // it) and a different UTC booking_date (so a single-UTC-date conflict query
+    // would miss the overlap). checkSlotConflict must still detect it. Tested at
+    // the DB layer: 23:45 is intentionally off the bookable 30-min slot grid.
+    await createBooking(env.DB, {
+      ...directBooking(staffA, "2027-03-15T23:45:00.000Z"),
+      end_time: "2027-03-16T00:15:00.000Z",
+      booking_date: "2027-03-15",
     });
-    expect(a.status).toBe(201);
-
-    const b = await dispatch("POST", "/api/bookings", {
-      body: bookingPayload({ start_time: "2027-03-16T00:00:00.000Z" }), // booking_date 2027-03-16
-    });
-    expect(b.status).toBe(409);
-    const body = (await b.json()) as { error: string };
-    expect(body.error).toMatch(/no longer available/);
+    const conflict = await checkSlotConflict(
+      env.DB,
+      staffA,
+      "2027-03-16T00:00:00.000Z",
+      "2027-03-16T00:30:00.000Z"
+    );
+    expect(conflict).toBeTruthy();
   });
 });
