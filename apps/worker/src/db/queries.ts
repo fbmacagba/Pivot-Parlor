@@ -293,6 +293,64 @@ export async function ensureE2ePlaywrightInviteReady(db: D1Database): Promise<vo
   });
 }
 
+// ─── E2E: a fully bookable fixture shop (active + service + staff + schedule) ──
+// Lazily created (idempotent) when the public booking flow reads the slug under
+// E2E_FIXTURES. Lets the gated booking spec complete a real booking without a
+// multi-step admin setup. Cleaned by cleanup-e2e-shops (e2e-* prefix) and
+// recreated fresh on next access, so each gate run starts with no bookings.
+export const E2E_BOOKABLE_SLUG = "e2e-bookable-shop";
+const E2E_BOOKABLE_SHOP_ID = "e2e00000-0000-4000-8000-0000000000b0";
+const E2E_BOOKABLE_USER_ID = "e2e00000-0000-4000-8000-0000000000b1";
+const E2E_BOOKABLE_STAFF_ID = "e2e00000-0000-4000-8000-0000000000b2";
+const E2E_BOOKABLE_SERVICE_ID = "e2e00000-0000-4000-8000-0000000000b3";
+
+export async function ensureE2eBookableShop(db: D1Database): Promise<void> {
+  if (await getShopById(db, E2E_BOOKABLE_SHOP_ID)) return;
+
+  const shopNumber = await getNextShopNumber(db);
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO shops (id, shop_number, slug, name, owner_email, is_active, status)
+       VALUES (?, ?, ?, 'E2E Bookable Shop', ?, 1, 'active')`
+    )
+    .bind(E2E_BOOKABLE_SHOP_ID, shopNumber, E2E_BOOKABLE_SLUG, "e2e-bookable@pivotparlor.internal")
+    .run();
+
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO platform_users (id, name, email, password_hash, role, shop_id)
+       VALUES (?, 'E2E Stylist', ?, 'x', 'staff', ?)`
+    )
+    .bind(E2E_BOOKABLE_USER_ID, "e2e-bookable-staff@pivotparlor.internal", E2E_BOOKABLE_SHOP_ID)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO staff (id, shop_id, user_id, display_name, is_active)
+       VALUES (?, ?, ?, 'E2E Stylist', 1)`
+    )
+    .bind(E2E_BOOKABLE_STAFF_ID, E2E_BOOKABLE_SHOP_ID, E2E_BOOKABLE_USER_ID)
+    .run();
+
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO services (id, shop_id, name, duration_min, price, is_active)
+       VALUES (?, ?, 'E2E Haircut', 30, 25, 1)`
+    )
+    .bind(E2E_BOOKABLE_SERVICE_ID, E2E_BOOKABLE_SHOP_ID)
+    .run();
+
+  for (let d = 0; d < 7; d++) {
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time, is_active)
+         VALUES (?, ?, ?, ?, '09:00', '17:00', 1)`
+      )
+      .bind(`${E2E_BOOKABLE_STAFF_ID}-sch-${d}`, E2E_BOOKABLE_SHOP_ID, E2E_BOOKABLE_STAFF_ID, d)
+      .run();
+  }
+}
+
 export function getInviteByToken(db: D1Database, token: string) {
   return db
     .prepare("SELECT * FROM invites WHERE token = ? LIMIT 1")
