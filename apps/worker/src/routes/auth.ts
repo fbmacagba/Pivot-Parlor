@@ -106,8 +106,10 @@ auth.post("/login", loginRateLimitUnlessE2E, async (c) => {
 
 // ─── POST /auth/register ──────────────────────────────────────────────────────
 //
-// Public: admin / customer can self-register (no token required).
-// Authenticated developer: can create any role including staff / developer.
+// Public (no token): may self-register ONLY as an unbound customer.
+// Authenticated developer: may create any role and bind it to a shop_id.
+// Admins/staff are onboarded via signed invite tokens (see routes/invites.ts),
+// never via self-registration.
 
 auth.post(
   "/register",
@@ -139,20 +141,24 @@ auth.post(
     return c.json({ success: false, error: "name is required" }, 400);
   }
 
-  const requestedRole = body.role ?? "customer";
+  // Privilege boundary (SEC-1): only an authenticated developer may choose a
+  // role or bind the account to a shop. A public (non-developer) caller may
+  // ONLY create an unbound customer; attempting to self-assign a privileged
+  // role or attach to a shop_id is rejected. This closes the unauthenticated
+  // shop-takeover vector (register role=admin + victim shop_id).
+  const isDeveloper = caller?.role === "developer";
 
-  // Public (unauthenticated) registration is limited to admin + customer.
-  const publicRoles = ["admin", "customer"];
-  const privilegedRoles = ["staff", "developer"];
-
-  if (privilegedRoles.includes(requestedRole) && caller?.role !== "developer") {
+  if (!isDeveloper && ((body.role && body.role !== "customer") || body.shop_id)) {
     return c.json(
-      { success: false, error: `Only a developer can create ${requestedRole} accounts` },
+      { success: false, error: "Public registration can only create a customer account" },
       403
     );
   }
 
-  const allValidRoles = [...publicRoles, ...privilegedRoles];
+  const requestedRole = isDeveloper ? body.role ?? "customer" : "customer";
+  const shopId = isDeveloper ? body.shop_id ?? null : null;
+
+  const allValidRoles = ["customer", "admin", "staff", "developer"];
   if (!allValidRoles.includes(requestedRole)) {
     return c.json({ success: false, error: "Invalid role" }, 400);
   }
@@ -169,7 +175,7 @@ auth.post(
     email: body.email,
     password_hash,
     role: requestedRole,
-    shop_id: body.shop_id ?? null,
+    shop_id: shopId,
   });
 
   return c.json({ success: true, data: { id, name: body.name.trim(), email: body.email, role: requestedRole } }, 201);
