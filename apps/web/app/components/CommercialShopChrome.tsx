@@ -310,10 +310,19 @@ export function CommercialShopChrome({
             )}
           </div>
 
-          <button type="button" className="flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-lg border border-white/20 md:hidden"
-            aria-label="Open menu" onClick={() => setNavOpen(true)}>
-            <span className="text-2xl">☰</span>
-          </button>
+          {/* Mobile: keep a booking CTA always in reach, plus the menu trigger. */}
+          <div className="flex items-center gap-2 md:hidden">
+            {bookingEnabled ? (
+              <Link to={`/${shopSlug}/book`} onClick={closeNav}
+                className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black">
+                Book
+              </Link>
+            ) : null}
+            <button type="button" className="flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-lg border border-white/20"
+              aria-label="Open menu" onClick={() => setNavOpen(true)}>
+              <span className="text-2xl">☰</span>
+            </button>
+          </div>
         </div>
 
         {navOpen ? (
@@ -453,7 +462,7 @@ export function CommercialShopChrome({
                           className="flex items-center justify-between rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-left text-sm transition hover:border-[color:var(--color-accent)]/50 hover:bg-white/10 active:scale-[0.98]">
                           <span className="font-medium text-white/90">{svc.name}</span>
                           <span className="ml-3 shrink-0 font-semibold text-[color:var(--color-accent)]">
-                            £{Number(svc.price_gbp).toFixed(0)}
+                            £{Number.isInteger(Number(svc.price_gbp)) ? Number(svc.price_gbp).toFixed(0) : Number(svc.price_gbp).toFixed(2)}
                           </span>
                         </button>
                       ))}

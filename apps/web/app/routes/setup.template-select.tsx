@@ -4,6 +4,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json, redirect } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { COLOR_PALETTES, DEFAULT_PALETTE } from "~/lib/color-palettes";
 
 const TEMPLATES = [
   {
@@ -159,8 +160,8 @@ export default function TemplateSelect() {
   const fetcher = useFetcher<typeof action>();
   const navigate = useNavigate();
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
-  const [colorPrimary, setColorPrimary] = useState("#8B0000");
-  const [colorAccent, setColorAccent] = useState("#1a1f3a");
+  const [paletteId, setPaletteId] = useState<string>(DEFAULT_PALETTE.id);
+  const palette = COLOR_PALETTES.find((p) => p.id === paletteId) ?? DEFAULT_PALETTE;
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStage, setJobStage] = useState<string>("");
   const [jobStatus, setJobStatus] = useState<string>("");
@@ -306,32 +307,43 @@ export default function TemplateSelect() {
           {/* Owner customisation panel */}
           <div className="rounded-xl border border-white/10 bg-white/5 p-6">
             <h2 className="mb-4 text-lg font-semibold text-white">Owner customisation</h2>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm text-white/80">Primary colour</label>
-                <div className="mt-1 flex items-center gap-2">
-                  <input
-                    type="color"
-                    name="color_primary"
-                    value={colorPrimary}
-                    onChange={(e) => setColorPrimary(e.target.value)}
-                    className="h-10 w-14 cursor-pointer rounded border-0 bg-transparent p-0"
-                  />
-                  <span className="font-mono text-sm text-white">{colorPrimary}</span>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-white/80">Accent colour</label>
-                <div className="mt-1 flex items-center gap-2">
-                  <input
-                    type="color"
-                    name="color_accent"
-                    value={colorAccent}
-                    onChange={(e) => setColorAccent(e.target.value)}
-                    className="h-10 w-14 cursor-pointer rounded border-0 bg-transparent p-0"
-                  />
-                  <span className="font-mono text-sm text-white">{colorAccent}</span>
-                </div>
+            <div>
+              <p className="text-sm text-white/80">Colour palette</p>
+              <p className="mt-0.5 text-xs text-white/55">Tap a palette to set your site&apos;s colours.</p>
+              <input type="hidden" name="color_primary" value={palette.primary} />
+              <input type="hidden" name="color_accent" value={palette.accent} />
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {COLOR_PALETTES.map((p) => {
+                  const isSel = p.id === paletteId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPaletteId(p.id)}
+                      aria-pressed={isSel}
+                      aria-label={`Use the ${p.name} colour palette`}
+                      className={`group relative flex flex-col items-start gap-2 rounded-xl border-2 p-3 text-left transition ${
+                        isSel ? "border-gold bg-white/[0.06]" : "border-white/15 hover:border-white/40"
+                      }`}
+                    >
+                      <span
+                        className="relative h-12 w-full overflow-hidden rounded-lg ring-1 ring-inset ring-white/10"
+                        style={{ backgroundColor: p.primary }}
+                      >
+                        <span
+                          className="absolute bottom-1.5 left-1.5 right-1.5 h-3 rounded-full"
+                          style={{ backgroundColor: p.accent }}
+                        />
+                      </span>
+                      <span className="text-xs font-medium leading-tight text-white">{p.name}</span>
+                      {isSel && (
+                        <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-[0.65rem] font-bold text-dark">
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
             <div className="mt-4">
