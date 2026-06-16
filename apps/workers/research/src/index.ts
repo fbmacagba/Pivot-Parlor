@@ -237,15 +237,24 @@ async function openRouterJson(apiKey: string, model: string, system: string, use
   if (!res.ok) {
     throw new Error(`OpenRouter error ${res.status}: ${await res.text()}`);
   }
-  const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
-  return (data.choices[0]?.message?.content ?? "{}").trim().replace(/```json|```/g, "").trim();
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: unknown;
+  };
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    // A 200 with no usable content (provider error, empty completion) must not
+    // be silently turned into "{}" — surface it so the caller can retry/log.
+    throw new Error(`OpenRouter returned no content: ${JSON.stringify(data).slice(0, 300)}`);
+  }
+  return content.trim().replace(/```json|```/g, "").trim();
 }
 
 function isHexColor(s: unknown): s is string {
   return typeof s === "string" && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(s.trim());
 }
 
-function validateResearchSpec(raw: unknown, serviceCount: number): raw is ResearchSpec {
+function validateResearchSpec(raw: unknown): raw is ResearchSpec {
   if (!raw || typeof raw !== "object") return false;
   const o = raw as Record<string, unknown>;
   const palette = o.palette;
@@ -275,15 +284,17 @@ function validateResearchSpec(raw: unknown, serviceCount: number): raw is Resear
   for (const k of strKeys) {
     if (typeof c[k] !== "string") return false;
   }
-  if (!Array.isArray(c.trust_signals) || c.trust_signals.length !== 3) return false;
+  // Counts are coerced post-validation (see coerceSpecCounts), so accept any
+  // non-empty string array here instead of hard-rejecting on an off-by-N count.
+  if (!Array.isArray(c.trust_signals) || c.trust_signals.length < 1) return false;
   if (!c.trust_signals.every((x) => typeof x === "string")) return false;
-  if (!Array.isArray(c.unique_selling_points) || c.unique_selling_points.length !== 3) return false;
+  if (!Array.isArray(c.unique_selling_points) || c.unique_selling_points.length < 1) return false;
   if (!c.unique_selling_points.every((x) => typeof x === "string")) return false;
   const img = o.image_prompts;
   if (!img || typeof img !== "object") return false;
   const im = img as Record<string, unknown>;
   if (typeof im.hero !== "string" || typeof im.logo !== "string") return false;
-  if (!Array.isArray(im.catalog) || im.catalog.length !== serviceCount) return false;
+  if (!Array.isArray(im.catalog) || im.catalog.length < 1) return false;
   if (!im.catalog.every((x) => typeof x === "string")) return false;
   const legal = o.legal_content;
   if (!legal || typeof legal !== "object") return false;
@@ -293,6 +304,39 @@ function validateResearchSpec(raw: unknown, serviceCount: number): raw is Resear
   }
   if (!o.social_stubs || typeof o.social_stubs !== "object") return false;
   return true;
+}
+
+/** Pad/truncate a string array to exactly `n` items, filling gaps via `fill`. */
+function fitArray(arr: string[], n: number, fill: (i: number) => string): string[] {
+  const out = arr.filter((x) => typeof x === "string" && x.trim()).slice(0, n);
+  while (out.length < n) out.push(fill(out.length));
+  return out;
+}
+
+/**
+ * Coerce the count-sensitive arrays to exactly what downstream expects, so a
+ * model that returns e.g. 5 catalog prompts for 6 services (or 2 trust signals
+ * instead of 3) yields a usable site instead of failing the whole job. The
+ * image worker maps catalog[i] → services[i], so catalog must match 1:1.
+ */
+function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[]): void {
+  spec.content.trust_signals = fitArray(
+    spec.content.trust_signals,
+    3,
+    (i) => ["Trusted by local clients", "Easy online booking", "Friendly expert team"][i] ?? "Quality service"
+  );
+  spec.content.unique_selling_points = fitArray(
+    spec.content.unique_selling_points,
+    3,
+    (i) =>
+      ["Experienced professionals", "Convenient online booking", "Welcoming atmosphere"][i] ?? "Great value"
+  );
+  spec.image_prompts.catalog = fitArray(
+    spec.image_prompts.catalog,
+    services.length,
+    (i) =>
+      `Professional product photo for ${services[i]?.name ?? "service"}, square format, studio lighting, clean background`
+  );
 }
 
 function templateFromLayoutMood(layoutMood: string): string {
@@ -372,37 +416,53 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
 
     const userPrompt = buildUserPrompt(input);
     console.log(`[${jobId}] [pivot-parlor-research] text model=${input.text_model}`);
-    const rawText = await openRouterJson(apiKey, input.text_model, SYSTEM_PROMPT, userPrompt);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      await updateGenerationJob(env.DB, jobId, {
-        status: "failed",
-        error: "Research worker returned invalid JSON",
-      });
-      await putJobKv(env.KV, jobId, {
-        status: "failed",
-        error: "Research worker returned invalid JSON",
-        shopSlug: input.shopSlug,
-      });
+
+    // Model output is non-deterministic; a single off-spec or empty completion
+    // must not sink the whole job. Retry a few times, logging the raw response
+    // so a persistent failure is diagnosable from the tail.
+    const MAX_ATTEMPTS = 3;
+    let spec: ResearchSpec | null = null;
+    let lastError = "unknown";
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      let rawText: string;
+      try {
+        rawText = await openRouterJson(apiKey, input.text_model, SYSTEM_PROMPT, userPrompt);
+      } catch (e) {
+        lastError = `model call failed: ${errorMessage(e)}`;
+        console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} ${lastError}`);
+        continue;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        lastError = "model returned non-JSON";
+        console.warn(
+          `[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} non-JSON len=${rawText.length} head=${JSON.stringify(rawText.slice(0, 200))}`
+        );
+        continue;
+      }
+      if (!validateResearchSpec(parsed)) {
+        lastError = "model JSON failed schema validation";
+        console.warn(
+          `[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} schema-invalid head=${JSON.stringify(parsed).slice(0, 300)}`
+        );
+        continue;
+      }
+      spec = parsed;
+      console.log(`[${jobId}] [pivot-parlor-research] valid spec on attempt ${attempt}`);
+      break;
+    }
+
+    if (!spec) {
+      const err = `Research worker could not produce a valid spec after ${MAX_ATTEMPTS} attempts (${lastError})`;
+      console.error(`[${jobId}] [pivot-parlor-research] ${err}`);
+      await updateGenerationJob(env.DB, jobId, { status: "failed", error: err });
+      await putJobKv(env.KV, jobId, { status: "failed", error: err, shopSlug: input.shopSlug });
       return;
     }
 
-    if (!validateResearchSpec(parsed, input.services.length)) {
-      await updateGenerationJob(env.DB, jobId, {
-        status: "failed",
-        error: "Research worker returned invalid JSON",
-      });
-      await putJobKv(env.KV, jobId, {
-        status: "failed",
-        error: "Research worker returned invalid JSON",
-        shopSlug: input.shopSlug,
-      });
-      return;
-    }
-
-    const spec = parsed;
+    coerceSpecCounts(spec, input.services);
     // Honour an owner-chosen palette: overwrite the AI palette so the text
     // worker's research fallback and any spec consumer see the chosen colours.
     // The text worker re-applies the same override after its own copy pass,
