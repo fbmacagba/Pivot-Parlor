@@ -50,6 +50,9 @@ interface TextKvPayload {
 interface GenResearchKvPayload {
   spec: { layout_mood?: string };
   template: string;
+  /** Owner-chosen palette override (6-digit hex pair) — persisted to the winning owner_color_* slot. */
+  owner_color_primary?: string;
+  owner_color_accent?: string;
 }
 
 const KV_TTL_SEC = 3600;
@@ -214,10 +217,19 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   await ensureShopSitesSeoColumns(env.DB);
 
   let template = "minimal";
+  // An owner-chosen palette is a deliberate override, so it must land in the
+  // winning owner_color_* slot (the public site reads owner_color || color).
+  const HEX6 = /^#[0-9a-fA-F]{6}$/;
+  let ownerColorPrimary: string | null = null;
+  let ownerColorAccent: string | null = null;
   if (researchRaw) {
     try {
       const r = JSON.parse(researchRaw) as GenResearchKvPayload;
       if (typeof r.template === "string" && r.template) template = r.template;
+      if (HEX6.test(r.owner_color_primary ?? "") && HEX6.test(r.owner_color_accent ?? "")) {
+        ownerColorPrimary = r.owner_color_primary!;
+        ownerColorAccent = r.owner_color_accent!;
+      }
     } catch {
       /* keep default */
     }
@@ -294,6 +306,18 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     console.log(`[${jobId}] [pivot-parlor-assembler] INSERT shop_sites id=${siteId} shopId=${shopId}`);
   } else {
     console.log(`[${jobId}] [pivot-parlor-assembler] UPDATE shop_sites rows=${changed} shopId=${shopId}`);
+  }
+
+  // Persist an owner-chosen palette to the winning slot. Done as an isolated,
+  // override-only write so a normal regeneration never clears an existing
+  // owner override (the main write above leaves owner_color_* untouched).
+  if (ownerColorPrimary && ownerColorAccent) {
+    await env.DB.prepare(
+      "UPDATE shop_sites SET owner_color_primary = ?, owner_color_accent = ? WHERE shop_id = ?"
+    )
+      .bind(ownerColorPrimary, ownerColorAccent, shopId)
+      .run();
+    console.log(`[${jobId}] [pivot-parlor-assembler] set owner palette override shopId=${shopId}`);
   }
 
   await updateGenerationJob(env.DB, jobId, {
