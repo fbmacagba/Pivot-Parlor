@@ -44,6 +44,19 @@ function trimMediaUrl(url: string | undefined | null): string {
   return url.trim();
 }
 
+/** Match the booking/owner UI: show pennies only when the price has them,
+ *  so the figure on the card equals the total shown at checkout. */
+function formatPrice(n: number): string {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "0";
+  return Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2);
+}
+
+/** The normaliser assigns "Service" to uncategorised items; treat it as no category. */
+function isGenericCategory(category?: string | null): boolean {
+  return !category || !category.trim() || category.trim().toLowerCase() === "service";
+}
+
 type HoursRecord = Record<string, string | null | undefined>;
 
 function parseHours(json?: string): HoursRecord | null {
@@ -120,7 +133,8 @@ export default function CommercialTemplate({
   const categories = useMemo(() => {
     const s = new Set<string>();
     for (const svc of services) {
-      if (svc.category?.trim()) s.add(svc.category.trim());
+      // Keep real categories only; the generic "Service" is hidden on cards too.
+      if (!isGenericCategory(svc.category)) s.add(svc.category!.trim());
     }
     return ["All", ...Array.from(s).sort()];
   }, [services]);
@@ -149,9 +163,10 @@ export default function CommercialTemplate({
   const heroTagline = typeof site.tagline === "string" ? site.tagline.trim() : "";
   const aboutText = typeof site.about === "string" ? site.about.trim() : "";
 
-  const statsHappy =
-    reviewCount > 0 ? `${Math.max(10, Math.ceil(reviewCount / 10) * 10)}+` : "500+";
-  const statsRating = typeof site.rating === "number" ? site.rating.toFixed(1) : "4.9";
+  // Only ever show real review data — never invented ratings/counts (trust + ASA/CAP).
+  const hasSocialProof = reviewCount > 0;
+  const statsHappy = `${Math.max(10, Math.ceil(reviewCount / 10) * 10)}+`;
+  const statsRating = typeof site.rating === "number" ? site.rating.toFixed(1) : "5.0";
 
   return (
     <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
@@ -181,8 +196,17 @@ export default function CommercialTemplate({
         <div className="relative z-10 flex min-h-screen w-full flex-col justify-center px-4 pb-6 pt-7 md:px-6 md:pb-8 md:pt-8">
           <div className="mx-auto w-full max-w-7xl translate-y-2 md:translate-y-4 lg:translate-y-[max(1rem,2vh)]">
             <div className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 bg-black/35 px-4 py-2 text-sm text-white/95 backdrop-blur-md">
-              <span className="tracking-tight text-[color:var(--color-accent)]" aria-hidden>⭐⭐⭐⭐⭐</span>
-              <span>Rated 5 stars by our clients{reviewCount > 0 ? ` · ${reviewCount} reviews` : ""}</span>
+              {hasSocialProof ? (
+                <>
+                  <StarRow rating={typeof site.rating === "number" ? site.rating : 5} className="text-sm" />
+                  <span>{statsRating}★ from {reviewCount} review{reviewCount === 1 ? "" : "s"}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[color:var(--color-accent)]" aria-hidden>✓</span>
+                  <span>Online booking · Instant confirmation</span>
+                </>
+              )}
             </div>
 
             <h1 className="mt-8 max-w-[700px] text-5xl font-bold leading-[1.08] tracking-tight text-white md:text-7xl">
@@ -219,14 +243,21 @@ export default function CommercialTemplate({
       {/* Trust line (replaces hero-metric strip) */}
       <section id="stats-bar" className="scroll-mt-24 border-y border-white/10 bg-white/[0.03] py-6">
         <div className="mx-auto max-w-7xl px-4 text-center text-sm text-white/70 md:px-6 md:text-base">
-          <span className="font-semibold text-[color:var(--color-accent)]">{statsRating}★</span>
-          {" "}average · {statsHappy} happy clients · Same-day slots when available
+          {hasSocialProof ? (
+            <>
+              <span className="font-semibold text-[color:var(--color-accent)]">{statsRating}★</span>
+              {" "}average · {statsHappy} happy clients · Same-day slots when available
+            </>
+          ) : (
+            <>Online booking · Instant confirmation · Same-day slots when available</>
+          )}
         </div>
       </section>
 
       {/* Services */}
-      <section id="services" className="scroll-mt-24 px-4 py-16 md:px-6 md:py-24">
-        <div className="mx-auto max-w-7xl">
+      <section id="services" className="relative scroll-mt-24 overflow-hidden px-4 py-16 md:px-6 md:py-24">
+        <div className="pointer-events-none absolute -right-32 top-8 h-72 w-72 rounded-full bg-[color:var(--color-accent)]/[0.07] blur-3xl" aria-hidden />
+        <div className="relative mx-auto max-w-7xl">
           <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">Services</h2>
           <p className="mt-2 max-w-2xl text-white/60">Choose a treatment and book in a few clicks.</p>
 
@@ -260,43 +291,51 @@ export default function CommercialTemplate({
                     </div>
                   </article>
                 ))
-              : filteredServices.map((svc) => (
-                  <article key={svc.id} className="group flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-xl shadow-black/25 transition hover:border-[color:var(--color-accent)]/35">
-                    <div className="relative aspect-[4/3] overflow-hidden bg-[color:var(--color-accent)]/15">
-                      {svc.image_url ? (
-                        <img
-                          src={svc.image_url}
-                          alt={svc.name}
-                          className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
-                        />
-                      ) : (
-                        <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center" aria-hidden>
-                          <span className="text-4xl text-[color:var(--color-accent)] drop-shadow-[0_0_18px_rgba(255,255,255,0.12)]">✦</span>
-                          <span className="text-xs font-medium uppercase tracking-wider text-[color:var(--color-accent)]/80">Service</span>
+              : filteredServices.map((svc) => {
+                  // Only show a real photo; otherwise a short accent header band gives
+                  // the card mass so it reads as an intentional menu item.
+                  const hasImage = typeof svc.image_url === "string" && svc.image_url.trim().length > 0;
+                  // Hide the generic auto-assigned "Service" category; keep real ones
+                  // (mirrors the filter-chip exclusion above).
+                  const showCategory = !isGenericCategory(svc.category);
+                  return (
+                    <article key={svc.id} className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-xl shadow-black/25 transition duration-300 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)]/40 hover:bg-white/[0.06]">
+                      {hasImage ? (
+                        <div className="relative aspect-[16/10] overflow-hidden">
+                          <img
+                            src={svc.image_url}
+                            alt={svc.name}
+                            loading="lazy"
+                            decoding="async"
+                            className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
+                          />
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" aria-hidden />
                         </div>
+                      ) : (
+                        <div className="aspect-[16/5] w-full bg-gradient-to-br from-[color:var(--color-accent)]/25 via-[color:var(--color-accent)]/[0.08] to-transparent" aria-hidden />
                       )}
-                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition group-hover:opacity-100" aria-hidden />
-                    </div>
-                    <div className="flex flex-1 flex-col p-6">
-                      {svc.category && (
-                        <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--color-accent)]">{svc.category}</p>
-                      )}
-                      <h3 className="mt-1 text-xl font-semibold text-white pp-heading">{svc.name}</h3>
-                      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-white/70">
-                        <span className="tabular-nums">{svc.duration_minutes} min</span>
-                        <span className="text-white/35" aria-hidden>·</span>
-                        <span className="pp-heading text-lg font-semibold text-[color:var(--color-accent)]">£{svc.price_gbp.toFixed(0)}</span>
+                      <div className="flex flex-1 flex-col p-6">
+                        {showCategory && (
+                          <p className="mb-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-accent)]">{svc.category}</p>
+                        )}
+                        <div className="flex items-start justify-between gap-3">
+                          <h3 className="pp-heading text-xl font-semibold leading-snug text-white">{svc.name}</h3>
+                          <span className="pp-heading shrink-0 text-2xl font-bold leading-none text-[color:var(--color-accent)]">£{formatPrice(svc.price_gbp)}</span>
+                        </div>
+                        <p className="mt-2 text-sm text-white/55 tabular-nums">{svc.duration_minutes} min</p>
+                        {svc.description ? (
+                          <p className="mt-3 flex-1 text-sm leading-relaxed text-white/55 line-clamp-2">{svc.description}</p>
+                        ) : (
+                          <div className="flex-1" aria-hidden />
+                        )}
+                        <Link to={`/${shopSlug}/book?serviceId=${encodeURIComponent(svc.id)}`}
+                          className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black transition hover:brightness-110">
+                          Book this <span aria-hidden>→</span>
+                        </Link>
                       </div>
-                      {svc.description && (
-                        <p className="mt-3 flex-1 text-sm text-white/50 line-clamp-2">{svc.description}</p>
-                      )}
-                      <Link to={`/${shopSlug}/book?serviceId=${encodeURIComponent(svc.id)}`}
-                        className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black transition hover:brightness-110">
-                        Book This
-                      </Link>
-                    </div>
-                  </article>
-                ))}
+                    </article>
+                  );
+                })}
           </div>
         </div>
       </section>
@@ -371,17 +410,21 @@ export default function CommercialTemplate({
       )}
 
       {/* How it works */}
-      <section className="border-t border-white/10 bg-black/20 px-4 py-16 md:px-6 md:py-24">
-        <div className="mx-auto max-w-7xl">
+      <section className="relative overflow-hidden border-t border-white/10 bg-black/20 px-4 py-16 md:px-6 md:py-24">
+        <div className="pointer-events-none absolute left-1/2 top-0 h-64 w-[40rem] max-w-full -translate-x-1/2 rounded-full bg-[color:var(--color-accent)]/10 blur-3xl" aria-hidden />
+        <div className="relative mx-auto max-w-7xl">
           <h2 className="text-center pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">How it works</h2>
+          <p className="mx-auto mt-3 max-w-md text-center text-white/55">Three steps from browsing to booked, about sixty seconds.</p>
           <div className="mt-12 grid gap-8 md:grid-cols-3">
             {[
-              { n: "1", t: "Choose a service", d: "Browse treatments and pick what suits you.", icon: "✨" },
-              { n: "2", t: "Pick your time", d: "Select a staff member and a slot that fits your diary.", icon: "📅" },
-              { n: "3", t: "Confirm your booking", d: "Lock in your slot instantly. No card required.", icon: "✓" },
+              { n: "1", t: "Choose a service", d: "Browse treatments and pick what suits you.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" /> },
+              { n: "2", t: "Pick your time", d: "Select a staff member and a slot that fits your diary.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5a2.25 2.25 0 0 0 2.25-2.25m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5a2.25 2.25 0 0 1 2.25 2.25v7.5" /> },
+              { n: "3", t: "Confirm your booking", d: "Lock in your slot instantly. No card required.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /> },
             ].map((step) => (
               <div key={step.n} className="text-center">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--color-accent)]/20 text-3xl">{step.icon}</div>
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--color-accent)]/15 text-[color:var(--color-accent)] ring-1 ring-[color:var(--color-accent)]/25">
+                  <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.6} stroke="currentColor">{step.icon}</svg>
+                </div>
                 <p className="mt-4 text-sm font-bold text-[color:var(--color-accent)]">Step {step.n}</p>
                 <h3 className="mt-2 text-xl font-semibold text-white pp-heading">{step.t}</h3>
                 <p className="mt-2 text-sm text-white/60">{step.d}</p>
@@ -439,14 +482,16 @@ export default function CommercialTemplate({
       )}
 
       {/* Final CTA */}
-      <section className="border-t border-white/10 bg-[color:var(--color-accent)]/10 px-4 py-20 md:px-6 md:py-28">
-        <div className="mx-auto max-w-3xl text-center">
+      <section className="relative overflow-hidden border-t border-white/10 bg-[color:var(--color-accent)]/10 px-4 py-20 md:px-6 md:py-28">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-[44rem] max-w-full -translate-x-1/2 -translate-y-1/2 rounded-full bg-[color:var(--color-accent)]/15 blur-3xl" aria-hidden />
+        <div className="relative mx-auto max-w-3xl text-center">
           <h2 className="pp-heading text-[clamp(1.85rem,4.5vw,3rem)] font-bold leading-tight text-white">Ready for your best look?</h2>
           <p className="mt-4 text-lg text-white/70">Book your appointment in 60 seconds.</p>
           <Link to={`/${shopSlug}/book`}
-            className="mt-10 inline-flex min-h-14 min-w-[14rem] items-center justify-center rounded-xl bg-[color:var(--color-accent)] px-12 pp-heading text-lg font-semibold text-black shadow-lg shadow-black/25 transition hover:brightness-110">
+            className="mt-10 inline-flex min-h-14 min-w-[14rem] items-center justify-center rounded-xl bg-[color:var(--color-accent)] px-12 pp-heading text-lg font-semibold text-black shadow-lg shadow-[color:var(--color-accent)]/25 transition hover:brightness-110">
             Book Now →
           </Link>
+          <p className="mt-6 text-sm text-white/55">Book in under a minute · No account needed</p>
         </div>
       </section>
     </CommercialShopChrome>
