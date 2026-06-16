@@ -30,6 +30,9 @@ interface GenResearchKvPayload {
   template: string;
   text_model?: string;
   image_model?: string;
+  /** Owner-chosen palette override (6-digit hex pair) — wins over the AI palette. */
+  owner_color_primary?: string;
+  owner_color_accent?: string;
 }
 
 export interface TextServiceOut {
@@ -262,6 +265,14 @@ If source services are missing or empty, invent exactly 3 plausible services for
   } catch (e) {
     console.error(`[${jobId}] [pivot-parlor-text] OpenRouter failed`, e);
     payload = fallbackFromResearch(research);
+  }
+
+  // An owner-chosen palette must win over the model's colour pick (which is
+  // generated fresh on both the success and fallback paths). Apply it last.
+  if (HEX6.test(research.owner_color_primary ?? "") && HEX6.test(research.owner_color_accent ?? "")) {
+    payload.color_primary = research.owner_color_primary!;
+    payload.color_accent = research.owner_color_accent!;
+    console.log(`[${jobId}] [pivot-parlor-text] applied owner palette override`);
   }
 
   await env.KV.put(genTextKey(jobId), JSON.stringify(payload), { expirationTtl: KV_TTL_SEC });

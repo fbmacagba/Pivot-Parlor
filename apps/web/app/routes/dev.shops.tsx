@@ -17,6 +17,7 @@ import {
 } from "~/components/ui/Dialog";
 import type { DevGenerationPrefs } from "./dev.shops.$shopId";
 import type { Shop, GenerateSiteActionResult, OnboardResult, DevShopsActionJson } from "~/components/dev-shops/types";
+import { COLOR_PALETTES, DEFAULT_PALETTE } from "~/lib/color-palettes";
 import {
   DEFAULT_TEXT_MODEL,
   DEFAULT_IMAGE_MODEL,
@@ -166,6 +167,10 @@ export default function DevShops() {
   const [expHeroSaveFlash, setExpHeroSaveFlash] = useState(false);
   const [expLogoImgBust, setExpLogoImgBust] = useState(0);
   const [expHeroImgBust, setExpHeroImgBust] = useState(0);
+  /** Colour palette chosen for the next site generation (click-only). */
+  const [expPaletteId, setExpPaletteId] = useState<string>(DEFAULT_PALETTE.id);
+  const selectedPalette =
+    COLOR_PALETTES.find((p) => p.id === expPaletteId) ?? DEFAULT_PALETTE;
 
   const [expandedGenJob, setExpandedGenJob] = useState<{
     jobId: string;
@@ -319,6 +324,7 @@ export default function DevShops() {
       setExpHeroSaveFlash(false);
       setExpLogoImgBust(0);
       setExpHeroImgBust(0);
+      setExpPaletteId(DEFAULT_PALETTE.id);
       setExpandedGenJob(null);
       setExpandedGenPoll(null);
       setGenImageLoading(null);
@@ -344,6 +350,7 @@ export default function DevShops() {
     setExpHeroImgBust(Date.now());
     setExpLogoPendingUrl(null);
     setExpHeroPendingUrl(null);
+    setExpPaletteId(DEFAULT_PALETTE.id);
     setExpandedGenJob(null);
     setExpandedGenPoll(null);
   }, [expandedShopId, shops, apiUrl]);
@@ -937,8 +944,8 @@ export default function DevShops() {
                     {isExpanded && isActiveShop ? (
                       <tr className="bg-white/[0.03]">
                         <td colSpan={7} className="px-4 py-6">
-                          <div className="mx-auto max-w-5xl space-y-6">
-                            <div className="grid gap-4 md:grid-cols-2">
+                          <div className="mx-auto max-w-6xl space-y-6">
+                            <div className="grid gap-4 md:grid-cols-3">
                               {/* Logo card */}
                               <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
                                 <div className="mb-2 flex items-center justify-between">
@@ -1115,6 +1122,49 @@ export default function DevShops() {
                                   </Button>
                                 </div>
                               </div>
+                              {/* Colour palette card */}
+                              <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
+                                <div className="mb-2 flex items-center justify-between">
+                                  <h3 className="text-sm font-semibold text-white">Colour palette</h3>
+                                  <span className="text-xs text-white/40">{selectedPalette.name}</span>
+                                </div>
+                                <p className="mb-3 text-xs text-white/45">
+                                  Applied to the site when you generate the website.
+                                </p>
+                                <div
+                                  className="grid grid-cols-4 gap-2"
+                                  role="radiogroup"
+                                  aria-label="Colour palette"
+                                >
+                                  {COLOR_PALETTES.map((p) => {
+                                    const isSel = p.id === expPaletteId;
+                                    return (
+                                      <button
+                                        key={p.id}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={isSel}
+                                        aria-label={p.name}
+                                        title={p.name}
+                                        onClick={() => setExpPaletteId(p.id)}
+                                        className={`relative flex aspect-square flex-col overflow-hidden rounded-lg border transition-colors ${
+                                          isSel
+                                            ? "border-gold ring-2 ring-gold/40"
+                                            : "border-white/15 hover:border-white/35"
+                                        }`}
+                                      >
+                                        <span className="flex-1" style={{ background: p.primary }} />
+                                        <span className="h-2.5 w-full" style={{ background: p.accent }} />
+                                        {isSel ? (
+                                          <span className="absolute right-1 top-1 rounded-full bg-gold p-0.5 text-black">
+                                            <Check className="h-3 w-3" />
+                                          </span>
+                                        ) : null}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
                             </div>
 
                             {genImageError ? (
@@ -1135,7 +1185,11 @@ export default function DevShops() {
                                 }
                                 onClick={() => {
                                   expandedGenFetcher.submit(
-                                    { skip_images: true },
+                                    {
+                                      skip_images: true,
+                                      color_primary: selectedPalette.primary,
+                                      color_accent: selectedPalette.accent,
+                                    },
                                     {
                                       method: "POST",
                                       action: `/api/shops/${shop.id}/generate-site`,

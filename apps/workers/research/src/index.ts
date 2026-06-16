@@ -25,6 +25,9 @@ export interface ResearchQueueMessage {
   text_model: string;
   image_model: string;
   skip_images?: boolean;
+  /** Owner-chosen palette override (6-digit hex). Honoured only as a complete pair. */
+  color_primary?: string;
+  color_accent?: string;
 }
 
 export interface ResearchSpec {
@@ -80,6 +83,9 @@ export interface GenResearchKvPayload {
   template: string;
   text_model: string;
   image_model: string;
+  /** Owner-chosen palette override forwarded to the text worker (6-digit hex pair). */
+  owner_color_primary?: string;
+  owner_color_accent?: string;
 }
 
 const KV_TTL_SEC = 3600;
@@ -315,6 +321,10 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
   const image_model =
     typeof o.image_model === "string" && o.image_model.trim() ? o.image_model.trim() : DEFAULT_IMAGE_MODEL;
   const skip_images = o.skip_images === true;
+  const HEX6 = /^#[0-9a-fA-F]{6}$/;
+  const op = typeof o.color_primary === "string" && HEX6.test(o.color_primary.trim()) ? o.color_primary.trim() : undefined;
+  const oa = typeof o.color_accent === "string" && HEX6.test(o.color_accent.trim()) ? o.color_accent.trim() : undefined;
+  const hasColorOverride = Boolean(op && oa);
   return {
     jobId: o.jobId,
     shopId: o.shopId,
@@ -327,6 +337,7 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     text_model,
     image_model,
     skip_images,
+    ...(hasColorOverride ? { color_primary: op, color_accent: oa } : {}),
   };
 }
 
@@ -392,6 +403,14 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     }
 
     const spec = parsed;
+    // Honour an owner-chosen palette: overwrite the AI palette so the text
+    // worker's research fallback and any spec consumer see the chosen colours.
+    // The text worker re-applies the same override after its own copy pass,
+    // which is what ultimately reaches the builder.
+    if (input.color_primary && input.color_accent) {
+      spec.palette.primary = input.color_primary;
+      spec.palette.accent = input.color_accent;
+    }
     const fullJson = JSON.stringify(spec);
 
     const payload: GenResearchKvPayload = {
@@ -410,6 +429,9 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       template: templateFromLayoutMood(spec.layout_mood),
       text_model: input.text_model,
       image_model: input.image_model,
+      ...(input.color_primary && input.color_accent
+        ? { owner_color_primary: input.color_primary, owner_color_accent: input.color_accent }
+        : {}),
     };
 
     await env.KV.put(genResearchKey(jobId), JSON.stringify(payload), { expirationTtl: KV_TTL_SEC });
