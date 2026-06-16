@@ -17,7 +17,7 @@ import {
 } from "~/components/ui/Dialog";
 import type { DevGenerationPrefs } from "./dev.shops.$shopId";
 import type { Shop, GenerateSiteActionResult, OnboardResult, DevShopsActionJson } from "~/components/dev-shops/types";
-import { COLOR_PALETTES, DEFAULT_PALETTE } from "~/lib/color-palettes";
+import { COLOR_PALETTES } from "~/lib/color-palettes";
 import {
   DEFAULT_TEXT_MODEL,
   DEFAULT_IMAGE_MODEL,
@@ -167,10 +167,12 @@ export default function DevShops() {
   const [expHeroSaveFlash, setExpHeroSaveFlash] = useState(false);
   const [expLogoImgBust, setExpLogoImgBust] = useState(0);
   const [expHeroImgBust, setExpHeroImgBust] = useState(0);
-  /** Colour palette chosen for the next site generation (click-only). */
-  const [expPaletteId, setExpPaletteId] = useState<string>(DEFAULT_PALETTE.id);
-  const selectedPalette =
-    COLOR_PALETTES.find((p) => p.id === expPaletteId) ?? DEFAULT_PALETTE;
+  /** Colour palette chosen for the next site generation (click-only).
+   *  null = no override → the AI picks the palette (the default). */
+  const [expPaletteId, setExpPaletteId] = useState<string | null>(null);
+  const selectedPalette = expPaletteId
+    ? COLOR_PALETTES.find((p) => p.id === expPaletteId) ?? null
+    : null;
 
   const [expandedGenJob, setExpandedGenJob] = useState<{
     jobId: string;
@@ -324,7 +326,7 @@ export default function DevShops() {
       setExpHeroSaveFlash(false);
       setExpLogoImgBust(0);
       setExpHeroImgBust(0);
-      setExpPaletteId(DEFAULT_PALETTE.id);
+      setExpPaletteId(null);
       setExpandedGenJob(null);
       setExpandedGenPoll(null);
       setGenImageLoading(null);
@@ -350,7 +352,7 @@ export default function DevShops() {
     setExpHeroImgBust(Date.now());
     setExpLogoPendingUrl(null);
     setExpHeroPendingUrl(null);
-    setExpPaletteId(DEFAULT_PALETTE.id);
+    setExpPaletteId(null);
     setExpandedGenJob(null);
     setExpandedGenPoll(null);
   }, [expandedShopId, shops, apiUrl]);
@@ -1126,7 +1128,7 @@ export default function DevShops() {
                               <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
                                 <div className="mb-2 flex items-center justify-between">
                                   <h3 className="text-sm font-semibold text-white">Colour palette</h3>
-                                  <span className="text-xs text-white/40">{selectedPalette.name}</span>
+                                  <span className="text-xs text-white/40">{selectedPalette ? selectedPalette.name : "Auto (AI picks)"}</span>
                                 </div>
                                 <p className="mb-3 text-xs text-white/45">
                                   Applied to the site when you generate the website.
@@ -1136,6 +1138,23 @@ export default function DevShops() {
                                   role="radiogroup"
                                   aria-label="Colour palette"
                                 >
+                                  <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selectedPalette === null}
+                                    onClick={() => setExpPaletteId(null)}
+                                    className={`col-span-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                                      selectedPalette === null
+                                        ? "border-gold text-white ring-2 ring-gold/40"
+                                        : "border-white/15 text-white/70 hover:border-white/35"
+                                    }`}
+                                  >
+                                    <Sparkles className="h-4 w-4 shrink-0 text-gold" />
+                                    <span className="flex-1">Let AI choose the palette</span>
+                                    {selectedPalette === null ? (
+                                      <Check className="h-4 w-4 shrink-0 text-gold" />
+                                    ) : null}
+                                  </button>
                                   {COLOR_PALETTES.map((p) => {
                                     const isSel = p.id === expPaletteId;
                                     return (
@@ -1184,18 +1203,20 @@ export default function DevShops() {
                                   (expandedGenJob?.shopId === shop.id && !jobComplete && !jobFailed)
                                 }
                                 onClick={() => {
-                                  expandedGenFetcher.submit(
-                                    {
-                                      skip_images: true,
-                                      color_primary: selectedPalette.primary,
-                                      color_accent: selectedPalette.accent,
-                                    },
-                                    {
-                                      method: "POST",
-                                      action: `/api/shops/${shop.id}/generate-site`,
-                                      encType: "application/json",
-                                    }
-                                  );
+                                  const payload: {
+                                    skip_images: boolean;
+                                    color_primary?: string;
+                                    color_accent?: string;
+                                  } = { skip_images: true };
+                                  if (selectedPalette) {
+                                    payload.color_primary = selectedPalette.primary;
+                                    payload.color_accent = selectedPalette.accent;
+                                  }
+                                  expandedGenFetcher.submit(payload, {
+                                    method: "POST",
+                                    action: `/api/shops/${shop.id}/generate-site`,
+                                    encType: "application/json",
+                                  });
                                 }}
                               >
                                 {expandedGenFetcher.state === "submitting" ? (
