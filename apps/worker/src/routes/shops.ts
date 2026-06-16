@@ -1019,6 +1019,14 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
         ? body.image_model.trim()
         : settingsKv.image_model?.trim() || "google/gemini-3.1-flash-image-preview";
 
+    // Optional owner-chosen palette. Only honour a complete, valid pair so a
+    // partial/garbage value can never override the AI-generated palette.
+    const isHex6 = (v: unknown): v is string =>
+      typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v.trim());
+    const ownerColorPrimary = isHex6(body.color_primary) ? body.color_primary.trim() : undefined;
+    const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
+    const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
+
     const queuePayload = {
       jobId,
       shopId: shop.id,
@@ -1031,6 +1039,9 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       text_model,
       image_model,
       skip_images,
+      ...(hasColorOverride
+        ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
+        : {}),
     };
 
     if (!c.env.site_research_queue) {
