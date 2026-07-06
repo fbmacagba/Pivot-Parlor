@@ -1,19 +1,22 @@
 name: E2E (staging)
 
 # Pre-merge PR gate (NOT a post-merge smoke test): deploys the PR's worker + the
-# PR's frontend to STAGING, resets staging to a clean slate, then runs the stable
-# Playwright subset against the staging frontend.
+# PR's frontend to STAGING, resets staging to a clean slate, then runs Playwright
+# against the staging frontend.
 #
-# Gated by the `e2e` label (or manual dispatch) so the single shared staging
-# worker + D1 only gets redeployed/tested when a reviewer opts a PR in. Add the
-# `e2e` label to a PR to run it; push new commits to re-run; remove to stop.
+# Two tiers (WS-5 — the smoke gate is mandatory, not label-gated):
+#   - SMOKE: runs on EVERY pull request — dev-login + public booking, the
+#     critical auth + revenue flows. Fast and unconditional.
+#   - FULL: opt-in via the `e2e` label or manual dispatch — the complete suite,
+#     including site-generation (drives the AI pipeline on staging, which costs
+#     credits) and the dev-shop-delete repro.
 #
 # Required repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, DEV_PASSWORD.
 
 on:
   workflow_dispatch:
   pull_request:
-    types: [labeled, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
 
 # Serialize: one shared staging worker + DB cannot take concurrent E2E runs.
 concurrency:
@@ -23,10 +26,8 @@ concurrency:
 jobs:
   e2e:
     name: E2E against staging
-    # Only run on manual dispatch, or when the PR carries the `e2e` label.
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e')
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -45,6 +46,19 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Select spec tier (smoke on every PR; full with the e2e label or dispatch)
+        id: specs
+        run: |
+          SMOKE="tests/e2e/dev-login.spec.ts tests/e2e/booking.spec.ts"
+          FULL="tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts tests/e2e/booking.spec.ts tests/e2e/site-generation.spec.ts tests/e2e/dev-shop-delete-repro.spec.ts"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}" = "true" ]; then
+            echo "tier=full" >> "$GITHUB_OUTPUT"
+            echo "specs=$FULL" >> "$GITHUB_OUTPUT"
+          else
+            echo "tier=smoke" >> "$GITHUB_OUTPUT"
+            echo "specs=$SMOKE" >> "$GITHUB_OUTPUT"
+          fi
 
       # ── Deploy the PR's worker code to staging (so the gate tests PR code) ──
       - name: Run staging D1 migrations
@@ -80,15 +94,15 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # ── Reset staging to a clean slate, then run the stable subset ──
+      # ── Reset staging to a clean slate, then run the selected tier ──
       - name: Reset staging shops (e2e-* only)
         run: node scripts/cleanup-e2e-shops.mjs
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      - name: Run stable E2E subset
-        run: npx playwright test tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts tests/e2e/booking.spec.ts --workers=1
+      - name: Run E2E (${{ steps.specs.outputs.tier }} tier)
+        run: npx playwright test ${{ steps.specs.outputs.specs }} --workers=1
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
