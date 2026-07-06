@@ -205,11 +205,14 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       )
       .run();
 
+    // bookings keeps only canonical columns; total_amount lives in
+    // bw_booking_state (updated below) and completion time is captured by
+    // status = 'completed' plus bw_booking_state.updated_at.
     await db
       .prepare(
-        `UPDATE bookings SET status = 'completed', amount = ?, commission = ?, total_amount = ?, completed_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`
+        `UPDATE bookings SET status = 'completed', amount = ?, commission = ? WHERE id = ? AND shop_id = ?`
       )
-      .bind(customerTotal, commissionAmount, customerTotal, bookingId)
+      .bind(customerTotal, commissionAmount, bookingId, shopId)
       .run();
 
     await db
@@ -348,37 +351,40 @@ r.post("/:shopId/bookings", async (c) => {
     slotTime: body.slotTime,
   });
 
-  const promoDiscountInt = promoUsed ? Math.round(promoDiscount) : 0;
-
-  await db
-    .prepare(
-      `INSERT INTO bookings (
-         id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
-         booking_date, start_time, end_time, status, notes, amount, commission,
-         booking_type, deposit_amount, stripe_payment_intent_id, qr_code_data, promo_code, promo_discount_percent, updated_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?, 'online', ?, ?, ?, ?, ?, datetime('now'))`
-    )
-    .bind(
-      bookingId,
-      shopId,
-      body.staffId,
-      body.serviceId,
-      body.customerName,
-      body.customerEmail,
-      body.customerPhone ?? "",
-      body.slotDate,
-      body.slotTime,
-      endTime,
-      priceGbp,
-      commission,
-      depositGbp,
-      paymentIntentId,
-      qrCodeData,
-      promoUsed ?? null,
-      promoDiscountInt
-    )
-    .run();
+  // bookings keeps only canonical columns; deposit/PI/promo/QR state is
+  // written to bw_booking_state below.
+  try {
+    await db
+      .prepare(
+        `INSERT INTO bookings (
+           id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
+           booking_date, start_time, end_time, status, notes, amount, commission
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?)`
+      )
+      .bind(
+        bookingId,
+        shopId,
+        body.staffId,
+        body.serviceId,
+        body.customerName,
+        body.customerEmail,
+        body.customerPhone ?? "",
+        body.slotDate,
+        body.slotTime,
+        endTime,
+        priceGbp,
+        commission
+      )
+      .run();
+  } catch (err) {
+    // idx_bookings_active_slot (migration 018): a concurrent request won the
+    // slot between the availability check and this INSERT.
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+    }
+    throw err;
+  }
 
   const itemId = crypto.randomUUID();
   await db
@@ -484,30 +490,40 @@ r.post("/:shopId/walk-ins", async (c) => {
     slotTime: slot.slot_time,
   });
 
-  await db
-    .prepare(
-      `INSERT INTO bookings (
-         id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
-         booking_date, start_time, end_time, status, notes, amount, commission,
-         booking_type, deposit_amount, updated_at
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?, 'walk_in', 0, datetime('now'))`
-    )
-    .bind(
-      bookingId,
-      shopId,
-      body.staffId,
-      body.serviceId,
-      body.customerName,
-      email,
-      body.customerPhone ?? "",
-      date,
-      slot.slot_time,
-      endTime,
-      priceGbp,
-      commission
-    )
-    .run();
+  // bookings keeps only canonical columns; walk-in state is written to
+  // bw_booking_state below.
+  try {
+    await db
+      .prepare(
+        `INSERT INTO bookings (
+           id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
+           booking_date, start_time, end_time, status, notes, amount, commission
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?)`
+      )
+      .bind(
+        bookingId,
+        shopId,
+        body.staffId,
+        body.serviceId,
+        body.customerName,
+        email,
+        body.customerPhone ?? "",
+        date,
+        slot.slot_time,
+        endTime,
+        priceGbp,
+        commission
+      )
+      .run();
+  } catch (err) {
+    // idx_bookings_active_slot (migration 018): another walk-in or online
+    // booking won this staff/time slot first.
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+    }
+    throw err;
+  }
 
   const itemId = crypto.randomUUID();
   await db
@@ -583,20 +599,19 @@ r.post("/:shopId/check-in", async (c) => {
     return c.json({ success: false, error: "Already checked in" }, 400);
   }
 
+  // checked_in_at lives in bw_booking_state only. Upsert so bookings created
+  // before a state row existed still record their check-in.
   await db
     .prepare(
-      `UPDATE bookings SET checked_in_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND shop_id = ?`
+      `INSERT INTO bw_booking_state (booking_id, shop_id, checked_in_at, updated_at)
+       VALUES (?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(booking_id) DO UPDATE SET checked_in_at = datetime('now'), updated_at = datetime('now')`
     )
     .bind(parsed.bookingId, shopId)
     .run();
 
-  await db
-    .prepare("UPDATE bw_booking_state SET checked_in_at = datetime('now'), updated_at = datetime('now') WHERE booking_id = ?")
-    .bind(parsed.bookingId)
-    .run();
-
   const rowIn = await db
-    .prepare("SELECT checked_in_at FROM bookings WHERE id = ? AND shop_id = ?")
+    .prepare("SELECT checked_in_at FROM bw_booking_state WHERE booking_id = ? AND shop_id = ?")
     .bind(parsed.bookingId, shopId)
     .first<{ checked_in_at: string | null }>();
   const checkedInAt = rowIn?.checked_in_at ?? new Date().toISOString();

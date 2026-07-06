@@ -64,6 +64,11 @@ jobs:
       - name: Run staging D1 migrations
         run: node scripts/migrate.mjs --remote --db pivot-parlor-db-staging
 
+      # Booking worker first: the main staging worker's BOOKING service binding
+      # must resolve to an existing worker (WS-1).
+      - name: Deploy staging booking worker
+        run: npx wrangler deploy --config apps/workers/booking/wrangler.toml --env staging
+
       - name: Deploy staging worker
         run: npx wrangler deploy --config apps/worker/wrangler.toml --env staging
 

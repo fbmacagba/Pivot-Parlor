@@ -1,3 +1,13 @@
+/**
+ * Dynamic slot availability — the canonical model (WS-1).
+ *
+ * Slots are computed on demand from `schedules` + existing `bookings` in the
+ * shop's timezone, KV-cached for 5 minutes. Moved from
+ * apps/worker/src/services/slots.ts; the materialised `bw_availability` table
+ * remains only for the in-shop day (open/close) POS flow — it never serves
+ * online booking, because it only ever holds today's slots after an admin
+ * opens the day.
+ */
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { addMinutes, rangesOverlap, safeJsonParse } from "@repo/utils";
 import { zonedTimeToUtc } from "../lib/timezone.js";

@@ -100,27 +100,9 @@ function baseLayout(content: string, shopName: string): string {
 </html>`;
 }
 
-function confirmationHtml(d: BookingEmailData): string {
-  return baseLayout(`
-    <div class="header">
-      <h1>✅ Booking confirmed</h1>
-      <p>Hi ${d.customer_name}, your appointment is booked.</p>
-    </div>
-    <div class="body">
-      <div class="highlight">
-        <div class="date">${formatDate(d.booking_date)}</div>
-        <div class="time">${formatTime(d.start_time)} · ${d.duration_min} min</div>
-      </div>
-      <div class="detail-row"><span class="detail-label">Service</span><span class="detail-value">${d.service_name}</span></div>
-      <div class="detail-row"><span class="detail-label">With</span><span class="detail-value">${d.staff_name}</span></div>
-      <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${d.shop_name}</span></div>
-      <div class="detail-row"><span class="detail-label">Total</span><span class="detail-value amount">£${d.amount.toFixed(2)}</span></div>
-      <p style="font-size:13px;color:#6b7280;margin-top:20px;">
-        Need to cancel or reschedule? Reply to this email or contact the shop directly.
-      </p>
-    </div>
-  `, d.shop_name);
-}
+// confirmationHtml/sendBookingConfirmation moved to
+// apps/workers/booking/src/services/email.ts (WS-1) — the booking worker owns
+// booking creation and sends the confirmation.
 
 function reminderHtml(d: BookingEmailData): string {
   return baseLayout(`
@@ -144,18 +126,6 @@ function reminderHtml(d: BookingEmailData): string {
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
-
-export async function sendBookingConfirmation(
-  apiKey: string,
-  data: BookingEmailData
-): Promise<void> {
-  await sendEmail(
-    apiKey,
-    data.customer_email,
-    `Booking confirmed — ${data.service_name} at ${data.shop_name}`,
-    confirmationHtml(data)
-  );
-}
 
 export async function sendBookingReminder(
   apiKey: string,

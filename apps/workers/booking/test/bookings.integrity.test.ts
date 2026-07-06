@@ -60,7 +60,7 @@ beforeAll(async () => {
 
 describe("booking input validation", () => {
   it("rejects an unparseable start_time with 400 (was 500)", async () => {
-    const res = await dispatch("POST", "/api/bookings", {
+    const res = await dispatch("POST", "/public/bookings", {
       body: bookingPayload({ start_time: "not-a-date" }),
     });
     expect(res.status).toBe(400);
@@ -69,14 +69,14 @@ describe("booking input validation", () => {
   });
 
   it("rejects a staff_id belonging to a different shop with 404", async () => {
-    const res = await dispatch("POST", "/api/bookings", {
+    const res = await dispatch("POST", "/public/bookings", {
       body: bookingPayload({ staff_id: staffB }),
     });
     expect(res.status).toBe(404);
   });
 
   it("creates a booking for valid input", async () => {
-    const res = await dispatch("POST", "/api/bookings", {
+    const res = await dispatch("POST", "/public/bookings", {
       body: bookingPayload({ start_time: "2027-01-04T09:00:00.000Z" }),
     });
     expect(res.status).toBe(201);
@@ -97,12 +97,12 @@ describe("double-booking prevention", () => {
 
   it("route returns 409 when the slot is already taken", async () => {
     const start = "2027-02-02T10:00:00.000Z";
-    const first = await dispatch("POST", "/api/bookings", {
+    const first = await dispatch("POST", "/public/bookings", {
       body: bookingPayload({ start_time: start }),
     });
     expect(first.status).toBe(201);
 
-    const second = await dispatch("POST", "/api/bookings", {
+    const second = await dispatch("POST", "/public/bookings", {
       body: bookingPayload({ start_time: start }),
     });
     expect(second.status).toBe(409);

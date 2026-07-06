@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "apps/worker/**"
+      - "apps/workers/booking/**"
       - "packages/types/**"
       - "packages/utils/**"
   workflow_dispatch:
@@ -36,10 +37,21 @@ jobs:
       - name: Unit tests
         run: npm test --workspace=worker
 
+      - name: Unit tests (booking worker)
+        run: npm test --workspace=pivot-parlor-booking
+
       # Tracked migrations (schema_migrations table). One-time prerequisite on an
       # existing database: node scripts/migrate.mjs --remote --baseline
       - name: Run D1 migrations
         run: node scripts/migrate.mjs --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # The booking worker deploys FIRST: the main worker's BOOKING service
+      # binding must resolve to an existing worker (WS-1).
+      - name: Deploy Booking Worker
+        run: npx wrangler deploy --config apps/workers/booking/wrangler.toml
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

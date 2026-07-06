@@ -16,6 +16,12 @@ database_id = "515a7270-81b4-4935-b106-15aeee639f57"
 binding = "KV"
 id = "12eca802e7ff47c2a5358da0f985eecd"
 
+# Reminder queue producer — the consumer (and its cron fallback) stays in the
+# main worker; this worker only enqueues on public booking creation (WS-1).
+[[queues.producers]]
+binding = "QUEUE"
+queue = "pivot-parlor-reminders"
+
 [vars]
 ENVIRONMENT = "production"
 PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
@@ -23,3 +29,32 @@ PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 # Secrets:
 #   STRIPE_SECRET_KEY
 #   JWT_SECRET
+#   RESEND_API_KEY   ← booking confirmation emails (WS-1)
+
+# ─── Staging ──────────────────────────────────────────────────────────────────
+# Deploy: npx wrangler deploy --env staging (CI deploys this BEFORE the main
+# staging worker so its BOOKING service binding resolves).
+
+[env.staging]
+name = "pivot-parlor-booking-staging"
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "pivot-parlor-db-staging"
+database_id = "87305736-6077-42a4-ae2b-86a5203ab4c4"
+
+[[env.staging.kv_namespaces]]
+binding = "KV"
+id = "39a1e52d5dd34cc7bdf19b30d4b7212d"
+
+[[env.staging.queues.producers]]
+binding = "QUEUE"
+queue = "pivot-parlor-reminders-staging"
+
+[env.staging.vars]
+ENVIRONMENT = "staging"
+PLATFORM_URL = "https://pivot-parlor-api-staging.bmorris0565.workers.dev"

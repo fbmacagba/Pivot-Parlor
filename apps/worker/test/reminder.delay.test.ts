@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_QUEUE_DELAY_S, reminderDelaySeconds } from "../src/services/reminder";
+import { MAX_QUEUE_DELAY_S, reminderDelaySeconds } from "@repo/utils";
 
 const NOW = new Date("2027-01-04T10:00:00.000Z");
 const at = (h: number) => new Date(NOW.getTime() + h * 3600_000);

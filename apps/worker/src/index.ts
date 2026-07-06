@@ -21,7 +21,8 @@ import waitlistRouter from "./routes/waitlist.js";
 import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
-import { processReminder, reminderDelaySeconds, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import { reminderDelaySeconds } from "@repo/utils";
 import { sendEodAlert } from "./services/email.js";
 import { walkinRouter, adminWalkinRouter } from "./routes/walkin.js";
 import {

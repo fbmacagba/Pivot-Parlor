@@ -35,3 +35,10 @@ ENVIRONMENT = "development"
 E2E_FIXTURES = "true"
 JWT_SECRET = "dev-jwt-secret-change-in-production-min32chars"
 ANTHROPIC_API_KEY = "sk-ant-placeholder"
+
+# Canonical booking system (WS-1). For local dev run the booking worker too:
+#   cd apps/workers/booking && npx wrangler dev --port 8788
+# wrangler connects same-machine dev sessions for service bindings automatically.
+[[services]]
+binding = "BOOKING"
+service = "pivot-parlor-booking"

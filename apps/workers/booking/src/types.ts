@@ -1,4 +1,4 @@
-import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
+import type { D1Database, KVNamespace, Queue } from "@cloudflare/workers-types";
 
 export type Env = {
   DB: D1Database;
@@ -7,6 +7,10 @@ export type Env = {
   STRIPE_SECRET_KEY: string;
   ENVIRONMENT: string;
   PLATFORM_URL: string;
+  /** Reminder queue producer (pivot-parlor-reminders); consumer stays in the main worker. */
+  QUEUE?: Queue;
+  /** Resend key for booking confirmation emails (wrangler secret). */
+  RESEND_API_KEY?: string;
 };
 
 export interface JWTUser {
