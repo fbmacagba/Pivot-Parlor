@@ -48,11 +48,79 @@ interface TextKvPayload {
 }
 
 interface GenResearchKvPayload {
-  spec: { layout_mood?: string };
+  /** Design intent from the research spec (WS-6) — persisted to shop_sites
+   *  so the renderer stops falling back to hardcoded copy. */
+  spec: {
+    layout_mood?: string;
+    brand_voice?: string;
+    palette?: {
+      primary?: string;
+      accent?: string;
+      background?: string;
+      text?: string;
+      muted?: string;
+    };
+    content?: {
+      hero_cta?: string;
+      about_title?: string;
+      trust_signals?: string[];
+      unique_selling_points?: string[];
+    };
+  };
   template: string;
   /** Owner-chosen palette override (6-digit hex pair) — persisted to the winning owner_color_* slot. */
   owner_color_primary?: string;
   owner_color_accent?: string;
+}
+
+/** Sanitized design-intent column values extracted from the research spec. */
+interface DesignIntent {
+  layout_mood: string | null;
+  brand_voice: string | null;
+  hero_cta: string | null;
+  about_title: string | null;
+  trust_signals_json: string | null;
+  usps_json: string | null;
+  palette_json: string | null;
+}
+
+function cleanString(v: unknown, maxLen = 200): string | null {
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return t ? t.slice(0, maxLen) : null;
+}
+
+/** JSON array of non-empty strings, or null when empty — the audit worker
+ *  treats these columns as JSON arrays and warns on empty ones, so an absent
+ *  value must be NULL rather than "[]". */
+function cleanStringArrayJson(v: unknown, maxItems = 5): string | null {
+  if (!Array.isArray(v)) return null;
+  const items = v
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .map((s) => s.trim().slice(0, 160))
+    .slice(0, maxItems);
+  return items.length > 0 ? JSON.stringify(items) : null;
+}
+
+function designIntentFrom(spec: GenResearchKvPayload["spec"] | undefined): DesignIntent {
+  const HEX6 = /^#[0-9a-fA-F]{6}$/;
+  let palette_json: string | null = null;
+  const p = spec?.palette;
+  if (p && typeof p === "object") {
+    const entries = Object.entries(p).filter(
+      ([, v]) => typeof v === "string" && HEX6.test(v)
+    );
+    if (entries.length > 0) palette_json = JSON.stringify(Object.fromEntries(entries));
+  }
+  return {
+    layout_mood: cleanString(spec?.layout_mood, 40),
+    brand_voice: cleanString(spec?.brand_voice, 400),
+    hero_cta: cleanString(spec?.content?.hero_cta, 60),
+    about_title: cleanString(spec?.content?.about_title, 120),
+    trust_signals_json: cleanStringArrayJson(spec?.content?.trust_signals),
+    usps_json: cleanStringArrayJson(spec?.content?.unique_selling_points),
+    palette_json,
+  };
 }
 
 const KV_TTL_SEC = 3600;
@@ -129,6 +197,16 @@ async function ensureShopSitesSeoColumns(db: D1Database): Promise<void> {
   };
   await tryAdd("seo_title", "TEXT");
   await tryAdd("seo_description", "TEXT");
+  // Design-intent columns (WS-6). Canonical DDL: migrations 021 + 023 in the
+  // main worker; these defensive adds only bridge a builder deploy that lands
+  // before the migration has run.
+  await tryAdd("trust_signals_json", "TEXT");
+  await tryAdd("usps_json", "TEXT");
+  await tryAdd("layout_mood", "TEXT");
+  await tryAdd("brand_voice", "TEXT");
+  await tryAdd("hero_cta", "TEXT");
+  await tryAdd("about_title", "TEXT");
+  await tryAdd("palette_json", "TEXT");
 }
 
 async function processOne(body: unknown, env: Env): Promise<void> {
@@ -222,6 +300,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const HEX6 = /^#[0-9a-fA-F]{6}$/;
   let ownerColorPrimary: string | null = null;
   let ownerColorAccent: string | null = null;
+  let intent = designIntentFrom(undefined);
   if (researchRaw) {
     try {
       const r = JSON.parse(researchRaw) as GenResearchKvPayload;
@@ -230,6 +309,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         ownerColorPrimary = r.owner_color_primary!;
         ownerColorAccent = r.owner_color_accent!;
       }
+      intent = designIntentFrom(r.spec);
     } catch {
       /* keep default */
     }
@@ -250,6 +330,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       hero_image_url = ?, logo_url = ?, catalog_images_json = ?,
       color_primary = ?, color_accent = ?, font_heading = ?, font_body = ?,
       seo_title = ?, seo_description = ?,
+      trust_signals_json = ?, usps_json = ?, layout_mood = ?, brand_voice = ?,
+      hero_cta = ?, about_title = ?, palette_json = ?,
       status = 'active', generated_at = ?
     WHERE shop_id = ?`
   )
@@ -267,6 +349,13 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       text.font_body,
       text.seo_title,
       text.seo_description,
+      intent.trust_signals_json,
+      intent.usps_json,
+      intent.layout_mood,
+      intent.brand_voice,
+      intent.hero_cta,
+      intent.about_title,
+      intent.palette_json,
       now,
       shopId
     )
@@ -280,8 +369,10 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         id, shop_id, template, headline, tagline, about, services_json,
         color_primary, color_accent, font_heading, font_body,
         hero_image_url, logo_url, catalog_images_json, generated_at, status,
-        seo_title, seo_description
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+        seo_title, seo_description,
+        trust_signals_json, usps_json, layout_mood, brand_voice,
+        hero_cta, about_title, palette_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         siteId,
@@ -300,7 +391,14 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         catalog_images_json,
         now,
         text.seo_title,
-        text.seo_description
+        text.seo_description,
+        intent.trust_signals_json,
+        intent.usps_json,
+        intent.layout_mood,
+        intent.brand_voice,
+        intent.hero_cta,
+        intent.about_title,
+        intent.palette_json
       )
       .run();
     console.log(`[${jobId}] [pivot-parlor-assembler] INSERT shop_sites id=${siteId} shopId=${shopId}`);

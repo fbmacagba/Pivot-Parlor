@@ -15,6 +15,14 @@ export type SiteData = {
   description?: string;
   rating?: number;
   review_count?: number;
+  /** Per-shop design intent from the generation pipeline (WS-6). All optional —
+   *  pre-WS-6 sites fall back to the template's stock copy and layout. */
+  layout_mood?: string;
+  brand_voice?: string;
+  hero_cta?: string;
+  about_title?: string;
+  trust_signals?: string[];
+  usps?: string[];
 };
 
 export type ShopSettings = {

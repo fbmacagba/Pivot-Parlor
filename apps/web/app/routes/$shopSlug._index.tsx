@@ -103,6 +103,12 @@ export default function ShopLanding() {
     description: (s.seo_description ?? s.about) || undefined,
     rating: reviewAvg,
     review_count: reviews.length,
+    layout_mood: s.layout_mood ?? undefined,
+    brand_voice: s.brand_voice ?? undefined,
+    hero_cta: s.hero_cta ?? undefined,
+    about_title: s.about_title ?? undefined,
+    trust_signals: Array.isArray(s.trust_signals) ? s.trust_signals : undefined,
+    usps: Array.isArray(s.usps) ? s.usps : undefined,
   };
 
   return (
