@@ -182,6 +182,27 @@ shops.get("/:shopId/site", async (c) => {
 
   const websiteStatus = (site as { website_status?: string | null }).website_status ?? "draft";
 
+  // Design intent persisted by the assembler (WS-6) — arrays parsed here so
+  // the web loader receives plain data.
+  const siteExtra = site as {
+    seo_title?: string | null;
+    seo_description?: string | null;
+    trust_signals_json?: string | null;
+    usps_json?: string | null;
+    layout_mood?: string | null;
+    brand_voice?: string | null;
+    hero_cta?: string | null;
+    about_title?: string | null;
+  };
+  const designIntent = {
+    trust_signals: safeJsonParse<string[]>(siteExtra.trust_signals_json) ?? [],
+    usps: safeJsonParse<string[]>(siteExtra.usps_json) ?? [],
+    layout_mood: siteExtra.layout_mood ?? null,
+    brand_voice: siteExtra.brand_voice ?? null,
+    hero_cta: siteExtra.hero_cta ?? null,
+    about_title: siteExtra.about_title ?? null,
+  };
+
   const cached = await c.env.KV.get(`site:${shop.slug}`);
   if (cached) {
     try {
@@ -191,6 +212,8 @@ shops.get("/:shopId/site", async (c) => {
       // Always refresh image URLs from D1 — KV snapshot can be stale after save-image / pipeline
       data.hero_image_url = site.hero_image_url;
       data.logo_url = site.logo_url;
+      // Same for the design intent — pre-WS-6 cache snapshots don't carry it.
+      Object.assign(data, designIntent);
       return c.json({ success: true, data });
     } catch {
       /* fall through to rebuild from D1 */
@@ -210,9 +233,10 @@ shops.get("/:shopId/site", async (c) => {
     hero_image_url: site.hero_image_url,
     logo_url: site.logo_url,
     catalog_images: safeJsonParse<unknown[]>(site.catalog_images_json) ?? [],
-    seo_title: (site as { seo_title?: string | null }).seo_title ?? null,
-    seo_description: (site as { seo_description?: string | null }).seo_description ?? null,
+    seo_title: siteExtra.seo_title ?? null,
+    seo_description: siteExtra.seo_description ?? null,
     website_status: websiteStatus,
+    ...designIntent,
   };
 
   await c.env.KV.put(`site:${shop.slug}`, JSON.stringify(data), { expirationTtl: 60 * 60 * 24 });
