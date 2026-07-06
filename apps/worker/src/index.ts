@@ -17,6 +17,7 @@ import staffRouter from "./routes/staff.js";
 import servicesRouter from "./routes/services.js";
 import scheduleRouter from "./routes/schedule.js";
 import slotsRouter from "./routes/slots.js";
+import connectProxyRouter from "./routes/connect-proxy.js";
 import waitlistRouter from "./routes/waitlist.js";
 import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
@@ -140,6 +141,7 @@ app.route("/api/invites", invitesRouter);
 // Stripe webhooks: handled only via stripeWebhookApp in fetch() below (bypasses global middleware).
 
 // Shop sub-resources  (auth + requireShop applied inside each router)
+app.route("/api/shops/:shopId/connect", connectProxyRouter);
 app.route("/api/shops/:shopId/staff", staffRouter);
 app.route("/api/shops/:shopId/services", servicesRouter);
 app.route("/api/shops/:shopId/schedule", scheduleRouter);

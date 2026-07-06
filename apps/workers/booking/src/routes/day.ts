@@ -3,6 +3,8 @@ import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { generateSlotTimes, todayUtcYmd } from "../lib/time.js";
 import { d1Rows } from "../lib/d1-helpers.js";
+import { capturePaymentIntent } from "../lib/stripe.js";
+import { reportError } from "../services/report-error.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -100,6 +102,41 @@ r.post("/:shopId/close", async (c) => {
     )
     .bind(shopId, date)
     .run();
+
+  // WS-2: capture the deposit hold of every no-show (deposit forfeiture).
+  // Manual-capture holds expire after ~7 days if never captured, which used
+  // to mean no-shows cost the shop nothing. A hold the customer never
+  // confirmed cannot be captured — reported and skipped, never fatal to close.
+  const holdRows = await db
+    .prepare(
+      `SELECT b.id AS booking_id, s.stripe_payment_intent_id AS pi_id
+       FROM bookings b
+       INNER JOIN bw_booking_state s ON s.booking_id = b.id
+       INNER JOIN bw_transactions t ON t.booking_id = b.id AND t.type = 'deposit' AND t.status = 'pending'
+       WHERE b.shop_id = ? AND b.booking_date = ? AND b.status = 'no_show'
+         AND s.stripe_payment_intent_id IS NOT NULL AND s.deposit_amount > 0`
+    )
+    .bind(shopId, date)
+    .all();
+  for (const hold of d1Rows<{ booking_id: string; pi_id: string }>(holdRows)) {
+    try {
+      await capturePaymentIntent(c.env.STRIPE_SECRET_KEY, hold.pi_id, {
+        idempotencyKey: `noshow:${hold.booking_id}`,
+      });
+      await db
+        .prepare(
+          "UPDATE bw_transactions SET type = 'no_show_capture', status = 'captured' WHERE booking_id = ? AND type = 'deposit' AND stripe_id = ?"
+        )
+        .bind(hold.booking_id, hold.pi_id)
+        .run();
+    } catch (err) {
+      reportError("day.close_noshow_capture", err, {
+        shopId,
+        bookingId: hold.booking_id,
+        paymentIntentId: hold.pi_id,
+      });
+    }
+  }
 
   await db
     .prepare(

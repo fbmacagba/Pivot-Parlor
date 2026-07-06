@@ -8,6 +8,8 @@ import dayRoutes from "./routes/day.js";
 import bookingsRoutes from "./routes/bookings.js";
 import platformAlertsRoutes from "./routes/platform-alerts.js";
 import publicRoutes from "./routes/public.js";
+import connectRoutes from "./routes/connect.js";
+import stripeWebhookRoutes from "./routes/stripe-webhook.js";
 
 const root = new Hono<{ Bindings: Env }>();
 
@@ -33,6 +35,7 @@ shops.use("/:shopId/*", requireShopAccess());
 shops.route("/", setupRoutes);
 shops.route("/", dayRoutes);
 shops.route("/", bookingsRoutes);
+shops.route("/", connectRoutes);
 
 booking.route("/shops", shops);
 
@@ -48,6 +51,9 @@ root.route("/booking", booking);
 // /api/bookings and /api/shops/:shopId/slots here over its BOOKING service
 // binding (WS-1). Rate limiting is applied inside the routes.
 root.route("/public", publicRoutes);
+
+// Stripe webhook — authenticated by signature, not JWT (WS-2).
+root.route("/webhooks", stripeWebhookRoutes);
 
 root.get("/health", (c) => c.json({ ok: true, worker: "pivot-parlor-booking" }));
 

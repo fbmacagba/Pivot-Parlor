@@ -29,7 +29,11 @@ PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 # Secrets:
 #   STRIPE_SECRET_KEY
 #   JWT_SECRET
-#   RESEND_API_KEY   ← booking confirmation emails (WS-1)
+#   RESEND_API_KEY          ← booking confirmation emails (WS-1)
+#   STRIPE_WEBHOOK_SECRET   ← signing secret of this worker's webhook endpoint
+#                             (Stripe dashboard → webhooks → .../webhooks/stripe;
+#                             events: account.updated, payment_intent.succeeded,
+#                             charge.refunded, charge.dispute.created) (WS-2)
 
 # ─── Staging ──────────────────────────────────────────────────────────────────
 # Deploy: npx wrangler deploy --env staging (CI deploys this BEFORE the main
