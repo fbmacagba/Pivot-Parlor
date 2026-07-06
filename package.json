@@ -28,6 +28,7 @@
   "packageManager": "npm@11.10.1",
   "workspaces": [
     "apps/*",
+    "apps/workers/booking",
     "packages/*"
   ]
 }

@@ -7,6 +7,7 @@ import setupRoutes from "./routes/setup.js";
 import dayRoutes from "./routes/day.js";
 import bookingsRoutes from "./routes/bookings.js";
 import platformAlertsRoutes from "./routes/platform-alerts.js";
+import publicRoutes from "./routes/public.js";
 
 const root = new Hono<{ Bindings: Env }>();
 
@@ -42,6 +43,11 @@ platform.route("/", platformAlertsRoutes);
 booking.route("/platform", platform);
 
 root.route("/booking", booking);
+
+// Public (unauthenticated) customer booking surface — the main worker proxies
+// /api/bookings and /api/shops/:shopId/slots here over its BOOKING service
+// binding (WS-1). Rate limiting is applied inside the routes.
+root.route("/public", publicRoutes);
 
 root.get("/health", (c) => c.json({ ok: true, worker: "pivot-parlor-booking" }));
 

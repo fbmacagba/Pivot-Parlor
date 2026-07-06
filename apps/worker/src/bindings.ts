@@ -1,9 +1,12 @@
-import type { D1Database, KVNamespace, R2Bucket, Queue } from "@cloudflare/workers-types";
+import type { D1Database, KVNamespace, R2Bucket, Queue, Fetcher } from "@cloudflare/workers-types";
 
 export type Bindings = {
   DB: D1Database;
   KV: KVNamespace;
   ASSETS: R2Bucket;
+  /** Service binding to pivot-parlor-booking — the canonical booking system (WS-1).
+   *  Public /api/bookings and /api/shops/:shopId/slots proxy through it. */
+  BOOKING: Fetcher;
   /** Booking reminder queue (legacy) */
   QUEUE?: Queue;
   site_research_queue?: Queue;

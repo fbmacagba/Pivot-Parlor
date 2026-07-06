@@ -2,6 +2,9 @@
  * Timezone conversion for schedule math. Schedule times ("HH:MM") are
  * shop-local wall-clock times; bookings/slots are stored as UTC instants.
  * Workers ship full ICU, so Intl handles DST tables.
+ *
+ * Moved from apps/worker/src/lib/timezone.ts in WS-1 — the booking worker is
+ * the canonical owner of slot computation.
  */
 
 /** Offset of `tz` from UTC (ms) at the given instant. Positive = ahead of UTC. */

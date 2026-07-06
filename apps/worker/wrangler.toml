@@ -48,6 +48,12 @@ max_retries = 10
 binding = "site_research_queue"
 queue = "site-research-queue"
 
+# Canonical booking system (WS-1): public booking + slots proxy through this.
+# Deploy pivot-parlor-booking BEFORE this worker so the binding resolves.
+[[services]]
+binding = "BOOKING"
+service = "pivot-parlor-booking"
+
 # Cron triggers:
 # 08:00 UTC — send 24h-ahead reminders
 # 20:00 UTC — EOD developer alert (booking count)
@@ -112,6 +118,10 @@ max_retries = 10
 [[env.staging.queues.producers]]
 binding = "site_research_queue"
 queue = "site-research-queue-staging"
+
+[[env.staging.services]]
+binding = "BOOKING"
+service = "pivot-parlor-booking-staging"
 
 [env.staging.triggers]
 crons = ["0 8 * * *", "0 20 * * *"]

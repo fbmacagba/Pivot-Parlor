@@ -73,3 +73,18 @@ export function safeJsonParse<T = unknown>(raw: string | null | undefined): T | 
     return null;
   }
 }
+
+/** Cloudflare Queues maximum delaySeconds (12 hours). */
+export const MAX_QUEUE_DELAY_S = 43_200;
+
+/**
+ * Seconds to delay a reminder message so it (re)arrives at or after sendAt.
+ * Queues cap delays at 12h, so longer waits are made in hops: the producer
+ * delays the first 12h and the consumer re-delays (msg.retry) the remainder.
+ * Returns 0 when sendAt is due or past.
+ */
+export function reminderDelaySeconds(sendAt: Date, now: Date): number {
+  const remainingS = Math.ceil((sendAt.getTime() - now.getTime()) / 1000);
+  if (remainingS <= 0) return 0;
+  return Math.min(remainingS, MAX_QUEUE_DELAY_S);
+}
