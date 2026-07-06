@@ -1,6 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
 import { getBookingsDueForReminder, markReminderSent } from "../db/queries.js";
 import { sendBookingReminder } from "./email.js";
+import { reportError } from "./report-error.js";
 
 export interface ReminderPayload {
   bookingId: string;
@@ -77,7 +78,9 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
         booking_id:     booking.id,
       });
     } catch (err) {
-      console.warn("[Reminder] Email send failed (non-fatal):", err);
+      // Non-fatal, but the reminder is still marked sent below and will not
+      // retry — a failure here means the customer gets no reminder.
+      reportError("reminder.email_send", err, { bookingId: booking.id });
     }
   } else {
     console.log(
@@ -113,7 +116,8 @@ export async function sendPendingReminders(db: D1Database, resendApiKey?: string
             booking_id:     b.id,
           });
         } catch (err) {
-          console.warn(`[Cron Reminder] Email failed for ${b.id}:`, err);
+          // Non-fatal, but marked sent below — no retry for this booking.
+          reportError("reminder.cron_email_send", err, { bookingId: b.id });
         }
       } else {
         console.log(`[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`);

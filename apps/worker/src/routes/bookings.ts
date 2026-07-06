@@ -9,6 +9,7 @@ import { sendBookingConfirmation, sendReviewRequest } from "../services/email.js
 import { reminderDelaySeconds } from "../services/reminder.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { reportError } from "../services/report-error.js";
 import { getAvailableSlots } from "../services/slots.js";
 import { addMinutes } from "@repo/utils";
 
@@ -62,21 +63,23 @@ bookings.put("/:bookingId/status", async (c) => {
         .prepare("SELECT review_request_email FROM shop_settings WHERE shop_id = ? LIMIT 1")
         .bind(shopId)
         .first<{ review_request_email: number | null }>();
-      if (reviewPref?.review_request_email === 0) throw new Error("review_request disabled");
-      const shop = await getShopById(c.env.DB, shopId);
-      const service = await getServiceById(c.env.DB, booking.service_id);
-      if (shop && service) {
-        await sendReviewRequest(c.env.RESEND_API_KEY, {
-          customer_name:  booking.customer_name,
-          customer_email: booking.customer_email,
-          service_name:   service.name,
-          shop_name:      shop.name,
-          shop_slug:      shop.slug,
-          booking_id:     bookingId,
-        });
+      if (reviewPref?.review_request_email !== 0) {
+        const shop = await getShopById(c.env.DB, shopId);
+        const service = await getServiceById(c.env.DB, booking.service_id);
+        if (shop && service) {
+          await sendReviewRequest(c.env.RESEND_API_KEY, {
+            customer_name:  booking.customer_name,
+            customer_email: booking.customer_email,
+            service_name:   service.name,
+            shop_name:      shop.name,
+            shop_slug:      shop.slug,
+            booking_id:     bookingId,
+          });
+        }
       }
     } catch (err) {
-      console.warn("[Review] Request email failed (non-fatal):", err);
+      // Non-fatal: the status update stands even if the review email fails.
+      reportError("booking.review_request_email", err, { shopId, bookingId });
     }
   }
 
@@ -236,7 +239,8 @@ publicBookings.post(
       });
     }
   } catch (err) {
-    console.warn("[Email] Confirmation send failed (non-fatal):", err);
+    // Non-fatal: the booking is already created; the customer just gets no email.
+    reportError("booking.confirmation_email", err, { shopId: shop.id, bookingId: id });
   }
 
   // Enqueue reminder job — fire-and-forget, never block booking creation
@@ -258,7 +262,8 @@ publicBookings.post(
       );
     }
   } catch (err) {
-    console.warn("[Queue] Could not enqueue reminder (non-fatal):", err);
+    // Non-fatal, but the customer will get no reminder for this booking.
+    reportError("booking.reminder_enqueue", err, { shopId: shop.id, bookingId: id });
   }
 
   return c.json({

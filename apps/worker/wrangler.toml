@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Logs — structured logs + errors queryable in the dashboard
+# (Workers & Pages → pivot-parlor-api → Logs). WS-5 observability.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 ENVIRONMENT = "production"
 ASSET_BASE_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
@@ -109,3 +115,7 @@ queue = "site-research-queue-staging"
 
 [env.staging.triggers]
 crons = ["0 8 * * *", "0 20 * * *"]
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1

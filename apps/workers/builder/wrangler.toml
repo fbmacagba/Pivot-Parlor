@@ -2,6 +2,10 @@ name = "pivot-parlor-assembler"
 main = "src/index.ts"
 compatibility_date = "2025-06-01"
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[queues.consumers]]
 queue = "site-assemble-queue"
 max_batch_size = 1
