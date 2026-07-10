@@ -1,4 +1,5 @@
 -- WS-4: money REAL (pounds) -> INTEGER (pence). bw_transactions.amount -> amount_pence.
+-- One column per guarded file — see 025 for why.
 --
 -- replay-guard: skip-if-column-absent bw_transactions.amount
 

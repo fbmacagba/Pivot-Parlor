@@ -1,18 +1,18 @@
 /**
  * WS-4: prove the pounds->pence conversion migrations do what they claim,
- * using the REAL migration file (027) against a real old-shape table with
+ * using the REAL migration file (029) against a real old-shape table with
  * real float-pounds data — not a copy of its SQL.
  *
  * The suite's apply-schema setup already replayed the chain, so
  * bw_transactions is at its final (pence) shape here. This test reverts it to
  * the pre-WS-4 shape, seeds pounds values (including binary-float dirt),
- * re-runs 027, and asserts exact integer pence. It then asserts the
+ * re-runs 029, and asserts exact integer pence. It then asserts the
  * replay-guard reports "skip" once the old column is gone — the mechanism
  * that keeps the chain replayable on databases built from the snapshot.
  */
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import migration027 from "../src/db/migrations/027_pence_bw_transactions.sql?raw";
+import migration029 from "../src/db/migrations/029_pence_bw_transactions.sql?raw";
 import { seedShop } from "./helpers";
 
 // Mirrors scripts/migrate.mjs and apply-schema.ts.
@@ -35,9 +35,9 @@ async function guardSaysSkip(sql: string): Promise<boolean> {
   return !(info.results ?? []).some((row) => row.name === m[2]);
 }
 
-describe("WS-4 pence conversion (migration 027 against an old-shape bw_transactions)", () => {
+describe("WS-4 pence conversion (migration 029 against an old-shape bw_transactions)", () => {
   it("declares a replay-guard on the column it drops", () => {
-    const m = migration027.match(GUARD_RE);
+    const m = migration029.match(GUARD_RE);
     expect(m?.[1]).toBe("bw_transactions");
     expect(m?.[2]).toBe("amount");
   });
@@ -48,7 +48,7 @@ describe("WS-4 pence conversion (migration 027 against an old-shape bw_transacti
     // Revert bw_transactions to its pre-WS-4 shape (pounds REAL).
     await env.DB.prepare("ALTER TABLE bw_transactions DROP COLUMN amount_pence").run();
     await env.DB.prepare("ALTER TABLE bw_transactions ADD COLUMN amount REAL NOT NULL DEFAULT 0").run();
-    expect(await guardSaysSkip(migration027)).toBe(false);
+    expect(await guardSaysSkip(migration029)).toBe(false);
 
     // Pounds values as production stored them, including 0.1 + 0.2 float dirt.
     const seed: Array<[string, number]> = [
@@ -67,7 +67,7 @@ describe("WS-4 pence conversion (migration 027 against an old-shape bw_transacti
     }
 
     // Run the real migration file exactly as the appliers would.
-    for (const stmt of statements(migration027)) {
+    for (const stmt of statements(migration029)) {
       await env.DB.prepare(stmt).run();
     }
 
@@ -83,12 +83,12 @@ describe("WS-4 pence conversion (migration 027 against an old-shape bw_transacti
     ]);
 
     // The old pounds column is gone and the guard now reports skip — a
-    // replayed chain will record 027 without executing it.
+    // replayed chain will record 029 without executing it.
     const info = await env.DB.prepare("PRAGMA table_info(bw_transactions)").all<{ name: string }>();
     const cols = (info.results ?? []).map((r) => r.name);
     expect(cols).not.toContain("amount");
     expect(cols).toContain("amount_pence");
-    expect(await guardSaysSkip(migration027)).toBe(true);
+    expect(await guardSaysSkip(migration029)).toBe(true);
 
     // Integer SUM is exact — the WS-4 acceptance criterion.
     const sum = await env.DB
