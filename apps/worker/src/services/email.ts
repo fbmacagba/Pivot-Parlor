@@ -16,7 +16,7 @@ export interface BookingEmailData {
   booking_date: string;   // "YYYY-MM-DD"
   start_time: string;     // ISO string
   duration_min: number;
-  amount: number;         // pounds
+  amount_pence: number;   // integer pence (WS-4)
   booking_id: string;
 }
 

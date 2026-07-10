@@ -88,7 +88,15 @@ node scripts/migrate.mjs --remote --db pivot-parlor-db-staging   # staging
 node scripts/migrate.mjs --remote --baseline
 ```
 
-**Adding a migration:** create `apps/worker/src/db/migrations/0NN_name.sql` (next number; currently up to `019`), also reflect the change in `schema.sql` (it is the rolling snapshot used as migration `000`), and run the worker test suite — it replays the full chain and fails if the migration is not replayable.
+**Adding a migration:** create `apps/worker/src/db/migrations/0NN_name.sql` (next number; currently up to `033`), also reflect the change in `schema.sql` (it is the rolling snapshot used as migration `000`), and run the worker test suite — it replays the full chain and fails if the migration is not replayable.
+
+**Data migrations that reference columns they later drop** (like the WS-4 pence conversion) must start with a replay-guard directive so the chain stays replayable on databases built from the snapshot:
+
+```sql
+-- replay-guard: skip-if-column-absent <table>.<column>
+```
+
+When the named column is absent the whole file is recorded as applied without executing. Supported by `scripts/migrate.mjs` and both test `apply-schema.ts` files; guard on the column the file drops LAST.
 
 ## High-Level Architecture
 
@@ -115,12 +123,13 @@ The Remix frontend acts as a BFF (Backend-for-Frontend). It proxies authenticate
 - **Worker responses** always use `{ success: boolean, data?: T, error?: string }`.
 - **Remix loaders/actions** should return `json({ success, data?, error? })` to match.
 - **Shop-scoped queries** in the Worker must include `WHERE shop_id = ?`.
+- **Money is INTEGER pence** (WS-4). DB money columns and API JSON money fields are named `*_pence`. Pounds exist only at two boundaries: form input (`parsePoundsToPence`) and display/AI presentation (`formatPence` / `price_gbp` in the site pipeline), all from `@repo/utils`. `calculateCommissionPence` is the single commission rounding path — never inline `* 0.1`. Never add `REAL` money columns.
 - **SQL** must use prepared statements; never interpolate user input.
 
 ### Database
 
 - Cloudflare D1 (SQLite): `pivot-parlor-db` (production), `pivot-parlor-db-staging` (staging).
-- Schema snapshot in `apps/worker/src/db/schema.sql`; sequential migrations in `apps/worker/src/db/migrations/` (currently up to `019`), tracked in `schema_migrations` and applied via `scripts/migrate.mjs` (see Database migrations above).
+- Schema snapshot in `apps/worker/src/db/schema.sql`; sequential migrations in `apps/worker/src/db/migrations/` (currently up to `033`), tracked in `schema_migrations` and applied via `scripts/migrate.mjs` (see Database migrations above).
 - The main worker's migration chain is the **canonical schema owner** — including tables used by `apps/workers/*` (`bw_*`, `chat_sessions`, `ai_usage_log`, `shop_settings`). The background workers' `ensure-schema` files are defensive idempotent duplicates only; new DDL goes in a migration.
 - Query helpers in `apps/worker/src/db/queries.ts`. Add new helpers there, do not inline SQL.
 - UUIDs are generated with `crypto.randomUUID()`.

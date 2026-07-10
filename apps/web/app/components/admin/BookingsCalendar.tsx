@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import type { Booking, BookingStatus } from "~/routes/admin.bookings";
+import { formatPence } from "@repo/utils";
 
 const STATUS_COLORS: Record<BookingStatus, string> = {
   confirmed: "bg-emerald-400",
@@ -218,7 +219,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
                     <p className="text-xs text-white/30 truncate">{booking.staff_name}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <span className="text-xs font-semibold text-gold">£{booking.amount.toFixed(2)}</span>
+                    <span className="text-xs font-semibold text-gold">{formatPence(booking.amount_pence)}</span>
                     <svg className="w-3 h-3 text-white/20 ml-auto mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>

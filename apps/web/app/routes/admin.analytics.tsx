@@ -3,6 +3,7 @@ import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -10,16 +11,16 @@ interface AnalyticsData {
   period: { from: string; to: string };
   totals: {
     total_bookings: number;
-    total_revenue: number;
-    total_commission: number;
+    total_revenue_pence: number;
+    total_commission_pence: number;
     unique_customers: number;
   };
-  monthly: { month: string; booking_count: number; gross: number }[];
+  monthly: { month: string; booking_count: number; gross_pence: number }[];
   peak_hours: { hour: number; booking_count: number }[];
   peak_days: { dow: number; booking_count: number }[];
   status_breakdown: { status: string; count: number }[];
-  top_services: { service_name: string; booking_count: number; gross: number }[];
-  top_staff: { display_name: string; booking_count: number; gross: number }[];
+  top_services: { service_name: string; booking_count: number; gross_pence: number }[];
+  top_staff: { display_name: string; booking_count: number; gross_pence: number }[];
 }
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -130,7 +131,7 @@ export default function AdminAnalytics() {
   }
 
   const { totals, monthly, peak_hours, peak_days, status_breakdown, top_services, top_staff } = data;
-  const net = totals.total_revenue - totals.total_commission;
+  const net_pence = totals.total_revenue_pence - totals.total_commission_pence;
 
   // Fill all 12 months for trend chart (include zeros)
   const now = new Date();
@@ -138,7 +139,7 @@ export default function AdminAnalytics() {
     const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     const found = monthly.find(m => m.month === key);
-    return { month: key, booking_count: found?.booking_count ?? 0, gross: found?.gross ?? 0 };
+    return { month: key, booking_count: found?.booking_count ?? 0, gross_pence: found?.gross_pence ?? 0 };
   });
 
   // Fill all 24 hours
@@ -169,8 +170,8 @@ export default function AdminAnalytics() {
       {/* All-time totals */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total bookings" value={totals.total_bookings.toLocaleString()} sub="all time" />
-        <StatCard label="Total revenue" value={`£${totals.total_revenue.toFixed(2)}`} sub="completed bookings" />
-        <StatCard label="Net earnings" value={`£${net.toFixed(2)}`} sub={`after £${totals.total_commission.toFixed(2)} commission`} />
+        <StatCard label="Total revenue" value={formatPence(totals.total_revenue_pence)} sub="completed bookings" />
+        <StatCard label="Net earnings" value={formatPence(net_pence)} sub={`after ${formatPence(totals.total_commission_pence)} commission`} />
         <StatCard label="Unique customers" value={totals.unique_customers.toLocaleString()} sub="all time" />
       </div>
 
@@ -194,9 +195,9 @@ export default function AdminAnalytics() {
         <BarChart
           data={allMonths}
           labelKey="month"
-          valueKey="gross"
+          valueKey="gross_pence"
           formatLabel={v => formatMonth(String(v)).slice(0, 3)}
-          formatValue={v => `£${v.toFixed(0)}`}
+          formatValue={v => `£${Math.round(v / 100)}`}
           color="bg-emerald-500"
         />
       </div>
@@ -274,7 +275,7 @@ export default function AdminAnalytics() {
                     <p className="text-sm text-white truncate">{s.service_name}</p>
                     <p className="text-xs text-white/40">{s.booking_count} bookings</p>
                   </div>
-                  <span className="text-sm font-semibold text-gold shrink-0">£{s.gross.toFixed(0)}</span>
+                  <span className="text-sm font-semibold text-gold shrink-0">£{Math.round(s.gross_pence / 100)}</span>
                 </div>
               ))}
             </div>
@@ -298,7 +299,7 @@ export default function AdminAnalytics() {
                     <p className="text-sm text-white truncate">{s.display_name}</p>
                     <p className="text-xs text-white/40">{s.booking_count} bookings</p>
                   </div>
-                  <span className="text-sm font-semibold text-gold shrink-0">£{s.gross.toFixed(0)}</span>
+                  <span className="text-sm font-semibold text-gold shrink-0">£{Math.round(s.gross_pence / 100)}</span>
                 </div>
               ))}
             </div>

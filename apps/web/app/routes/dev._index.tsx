@@ -4,12 +4,13 @@ import { Link, useLoaderData } from "@remix-run/react";
 import { BarChart3, MessageSquare, ShoppingBag, TrendingUp } from "lucide-react";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
 
 interface DevStats {
   total_shops: number;
   bookings_this_month: number;
-  platform_commission: number;
+  platform_commission_pence: number;
   pending_enquiries: number;
 }
 
@@ -32,7 +33,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   let stats: DevStats = {
     total_shops: 0,
     bookings_this_month: 0,
-    platform_commission: 0,
+    platform_commission_pence: 0,
     pending_enquiries: 0,
   };
 
@@ -73,7 +74,7 @@ export default function DevOverview() {
         />
         <StatCard
           label="Platform commission"
-          value={`£${stats.platform_commission.toFixed(2)}`}
+          value={formatPence(stats.platform_commission_pence)}
           icon={TrendingUp}
         />
         <StatCard

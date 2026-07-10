@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SessionPayload } from "~/lib/auth";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/components/ui/Dialog";
@@ -16,7 +17,7 @@ interface Service {
   id: string;
   name: string;
   duration_min: number;
-  price: number;
+  price_pence: number;
   is_active: boolean;
 }
 
@@ -205,7 +206,7 @@ function EditStaffModal({
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm text-white">{svc.name}</span>
-                  <span className="text-xs text-white/40 ml-2">{svc.duration_min}min · £{svc.price.toFixed(2)}</span>
+                  <span className="text-xs text-white/40 ml-2">{svc.duration_min}min · {formatPence(svc.price_pence)}</span>
                 </div>
               </label>
             ))}

@@ -11,7 +11,7 @@ let serviceA: string;
 async function seedService(shopId: string, name: string): Promise<string> {
   const id = crypto.randomUUID();
   await env.DB.prepare(
-    "INSERT INTO services (id, shop_id, name, duration_min, price) VALUES (?, ?, ?, 30, 25)"
+    "INSERT INTO services (id, shop_id, name, duration_min, price_pence) VALUES (?, ?, ?, 30, 2500)"
   )
     .bind(id, shopId, name)
     .run();
@@ -41,8 +41,8 @@ function directBooking(staffId: string, startTime: string, status = "pending") {
     booking_date: startTime.slice(0, 10),
     start_time: startTime,
     end_time: startTime,
-    amount: 25,
-    commission: 2.5,
+    amount_pence: 2500,
+    commission_pence: 250,
     ...(status ? {} : {}),
   };
 }

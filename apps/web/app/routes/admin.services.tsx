@@ -5,6 +5,7 @@ import { Plus, Pencil, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import type { SessionPayload } from "~/lib/auth";
 import { getSessionToken, requireRole } from "~/lib/auth";
+import { formatPence, parsePoundsToPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
@@ -24,7 +25,7 @@ interface Service {
   name: string;
   description: string;
   durationMinutes: number;
-  price: number;
+  price_pence: number;
   category: string;
   isActive: boolean;
 }
@@ -107,8 +108,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const durationStr = String(form.get("duration_min") ?? "");
 
     if (!name) return json<ActionData>({ error: "Service name is required." }, { status: 400 });
-    if (!priceStr || isNaN(parseFloat(priceStr)))
-      return json<ActionData>({ error: "Valid price required." }, { status: 400 });
+    const pricePence = parsePoundsToPence(priceStr);
+    if (pricePence === null)
+      return json<ActionData>({ error: "Valid price required (e.g. 25 or 25.50)." }, { status: 400 });
     if (!durationStr || isNaN(parseInt(durationStr)))
       return json<ActionData>({ error: "Valid duration required." }, { status: 400 });
 
@@ -116,7 +118,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       await api.post(`/api/shops/${shopId}/services`, {
         name,
         category,
-        price: parseFloat(parseFloat(priceStr).toFixed(2)),
+        price_pence: pricePence,
         duration_min: parseInt(durationStr),
       });
     } catch (e) {
@@ -136,12 +138,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const durationStr = String(form.get("duration_min") ?? "");
 
     if (!serviceId || !name) return json<ActionData>({ error: "Invalid data." }, { status: 400 });
+    const pricePence = parsePoundsToPence(priceStr);
+    if (pricePence === null)
+      return json<ActionData>({ error: "Valid price required (e.g. 25 or 25.50)." }, { status: 400 });
 
     try {
       await api.put(`/api/shops/${shopId}/services/${serviceId}`, {
         name,
         category,
-        price: parseFloat(parseFloat(priceStr).toFixed(2)),
+        price_pence: pricePence,
         duration_min: parseInt(durationStr),
       });
     } catch (e) {
@@ -182,10 +187,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatPrice(price: number) {
-  return `£${price.toFixed(2)}`;
-}
 
 function formatDuration(mins: number) {
   if (mins < 60) return `${mins}m`;
@@ -378,7 +379,7 @@ function ServiceRow({
       {/* Price + duration */}
       <div className="shrink-0 text-right">
         <p className="text-sm font-semibold text-gold">
-          {formatPrice(service.price)}
+          {formatPence(service.price_pence)}
         </p>
         <p className="text-xs text-white/40">
           {formatDuration(service.durationMinutes)}
@@ -447,7 +448,7 @@ function ServiceFields({ service }: { service?: Service }) {
           label="Price (£) *"
           name="price"
           type="number"
-          defaultValue={service ? service.price.toFixed(2) : ""}
+          defaultValue={service ? (service.price_pence / 100).toFixed(2) : ""}
           placeholder="0.00"
           min="0"
           step="0.01"

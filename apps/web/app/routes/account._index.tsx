@@ -1,6 +1,7 @@
 import { Link, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { Calendar, Clock, ArrowRight, RefreshCw } from "lucide-react";
+import { formatPence } from "@repo/utils";
 
 type Me = { id: string; name: string | null; email: string; phone?: string | null; role: string };
 
@@ -10,7 +11,7 @@ interface Booking {
   start_time: string;
   end_time: string;
   status: string;
-  amount: number;
+  amount_pence: number;
   customer_name: string;
   service_name: string;
   duration_min?: number;
@@ -98,7 +99,7 @@ function UpcomingBookingCard({
           </p>
         </div>
         <div className="text-right shrink-0">
-          <p className="text-sm font-bold text-gold">£{booking.amount.toFixed(2)}</p>
+          <p className="text-sm font-bold text-gold">{formatPence(booking.amount_pence)}</p>
           <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[booking.status] ?? "bg-white/5 text-white/40"}`}>
             {booking.status.replace("_", " ")}
           </span>

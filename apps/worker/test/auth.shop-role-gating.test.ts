@@ -34,7 +34,7 @@ describe("SEC-2: shop role-gating", () => {
     const token = await tokenFor(await seedUser("staff", shop), "staff", shop);
     const res = await dispatch("POST", `/api/shops/${shop}/services`, {
       headers: authHeaders(token),
-      body: { name: "Cut", duration_min: 30, price: 20 },
+      body: { name: "Cut", duration_min: 30, price_pence: 2000 },
     });
     expect(res.status).toBe(403);
   });
@@ -59,7 +59,7 @@ describe("SEC-2: shop role-gating", () => {
     expect(patch.status).toBe(200);
     const svc = await dispatch("POST", `/api/shops/${shop}/services`, {
       headers: authHeaders(token),
-      body: { name: "Cut", duration_min: 30, price: 20 },
+      body: { name: "Cut", duration_min: 30, price_pence: 2000 },
     });
     expect(svc.status).toBe(201);
   });

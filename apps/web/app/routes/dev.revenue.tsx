@@ -3,14 +3,15 @@ import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
 import { TrendingUp, BarChart2, ShoppingBag, PoundSterling } from "lucide-react";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
-interface ShopRow { shop_id: string; shop_name: string; booking_count: number; gross: number; commission: number }
-interface Totals   { total_bookings: number; total_gross: number; total_commission: number }
+interface ShopRow { shop_id: string; shop_name: string; booking_count: number; gross_pence: number; commission_pence: number }
+interface Totals   { total_bookings: number; total_gross_pence: number; total_commission_pence: number }
 interface RevenueData { year: number; month: number; totals: Totals; shops: ShopRow[] }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -36,7 +37,7 @@ export default function DevRevenue() {
   const { data, year, month } = useLoaderData<typeof loader>();
   const now = new Date();
 
-  const t = data?.totals ?? { total_bookings: 0, total_gross: 0, total_commission: 0 };
+  const t = data?.totals ?? { total_bookings: 0, total_gross_pence: 0, total_commission_pence: 0 };
 
   const monthOptions: { year: number; month: number; label: string }[] = [];
   for (let i = 0; i < 12; i++) {
@@ -68,8 +69,8 @@ export default function DevRevenue() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total gross bookings" value={`£${t.total_gross.toFixed(2)}`}      icon={TrendingUp} />
-        <StatCard label="Platform commission"  value={`£${t.total_commission.toFixed(2)}`} icon={PoundSterling} />
+        <StatCard label="Total gross bookings" value={formatPence(t.total_gross_pence)}      icon={TrendingUp} />
+        <StatCard label="Platform commission"  value={formatPence(t.total_commission_pence)} icon={PoundSterling} />
         <StatCard label="Total bookings"       value={t.total_bookings}                    icon={BarChart2} />
         <StatCard label="Active shops"         value={data?.shops.filter(s => s.booking_count > 0).length ?? 0} icon={ShoppingBag} />
       </div>
@@ -96,9 +97,9 @@ export default function DevRevenue() {
                 <tr key={r.shop_id} className="hover:bg-white/[0.02]">
                   <td className="px-4 py-3 font-medium text-white">{r.shop_name}</td>
                   <td className="px-4 py-3 text-white/60">{r.booking_count}</td>
-                  <td className="px-4 py-3 text-white font-semibold">£{r.gross.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-gold font-semibold">£{r.commission.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-white/70">£{(r.gross - r.commission).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-white font-semibold">{formatPence(r.gross_pence)}</td>
+                  <td className="px-4 py-3 text-gold font-semibold">{formatPence(r.commission_pence)}</td>
+                  <td className="px-4 py-3 text-white/70">{formatPence(r.gross_pence - r.commission_pence)}</td>
                 </tr>
               ))
             )}

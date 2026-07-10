@@ -35,7 +35,8 @@ const shops = new Hono<{ Bindings: Bindings }>();
 type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number };
 
 function mapDbServiceToResearchQueue(row: DBService): SiteResearchQueueService {
-  return { name: row.name, price_gbp: row.price, duration_min: row.duration_min };
+  // price_gbp is a presentation value for the AI site pipeline, not money math.
+  return { name: row.name, price_gbp: row.price_pence / 100, duration_min: row.duration_min };
 }
 
 function servicesFromShopSitesJson(servicesJson: string | null | undefined): SiteResearchQueueService[] {
@@ -128,7 +129,7 @@ const E2E_MOCK_SHOPS = [
     stripe_payment_status: "unpaid",
     stripe_checkout_url: "https://checkout.stripe.com/e2e-mock-session",
     booking_count: 0,
-    commission_total: 0,
+    commission_total_pence: 0,
   },
 ];
 

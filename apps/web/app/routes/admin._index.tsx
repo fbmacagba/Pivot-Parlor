@@ -4,6 +4,7 @@ import { json } from "@remix-run/cloudflare";
 import { Calendar, TrendingUp, Users, Clock, ArrowRight, CheckCircle } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
 import { SetupGate } from "~/components/admin/SetupGate";
 import type { SetupStatus } from "~/components/admin/SetupGate";
@@ -11,7 +12,7 @@ import type { SetupStatus } from "~/components/admin/SetupGate";
 interface AdminStats {
   date: string;
   todays_bookings: number;
-  todays_revenue: number;
+  todays_revenue_pence: number;
   active_staff: number;
   waitlist_count: number;
 }
@@ -24,7 +25,7 @@ interface TodayBooking {
   customer_name: string;
   service_name: string;
   duration_min: number;
-  amount: number;
+  amount_pence: number;
 }
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
@@ -56,7 +57,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   let stats: AdminStats = {
     date: new Date().toISOString().slice(0, 10),
     todays_bookings: 0,
-    todays_revenue: 0,
+    todays_revenue_pence: 0,
     active_staff: 0,
     waitlist_count: 0,
   };
@@ -116,7 +117,7 @@ export default function AdminOverview() {
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Today's bookings"  value={stats.todays_bookings}                        icon={Calendar} />
-        <StatCard label="Today's revenue"   value={`£${(stats.todays_revenue ?? 0).toFixed(2)}`} icon={TrendingUp} />
+        <StatCard label="Today's revenue"   value={formatPence(stats.todays_revenue_pence ?? 0)} icon={TrendingUp} />
         <StatCard label="Staff on shift"    value={stats.active_staff}                           icon={Users} />
         <StatCard label="Waitlist"          value={stats.waitlist_count}                         icon={Clock} />
       </div>
@@ -157,7 +158,7 @@ export default function AdminOverview() {
                         <p className="text-xs text-white/50 truncate">{b.service_name}</p>
                       </div>
                       {/* Amount */}
-                      <p className="shrink-0 text-sm font-semibold text-gold">£{b.amount.toFixed(2)}</p>
+                      <p className="shrink-0 text-sm font-semibold text-gold">{formatPence(b.amount_pence)}</p>
                       {/* Status badge */}
                       <div className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${s.bg} ${s.text}`}>
                         <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
@@ -188,7 +189,7 @@ export default function AdminOverview() {
                         <p className="text-sm font-medium text-white/70 truncate">{b.customer_name}</p>
                         <p className="text-xs text-white/35 truncate">{b.service_name}</p>
                       </div>
-                      <p className="shrink-0 text-sm text-white/50">£{b.amount.toFixed(2)}</p>
+                      <p className="shrink-0 text-sm text-white/50">{formatPence(b.amount_pence)}</p>
                       <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
                         <CheckCircle className="h-3 w-3" /> done
                       </div>

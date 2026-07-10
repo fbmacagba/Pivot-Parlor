@@ -14,7 +14,7 @@ beforeAll(async () => {
   staffB = await seedStaff(shopB);
   serviceB = crypto.randomUUID();
   await env.DB.prepare(
-    "INSERT INTO services (id, shop_id, name, duration_min, price) VALUES (?, ?, 'Cut B', 30, 25)"
+    "INSERT INTO services (id, shop_id, name, duration_min, price_pence) VALUES (?, ?, 'Cut B', 30, 2500)"
   )
     .bind(serviceB, shopB)
     .run();

@@ -89,7 +89,7 @@ describe("POST /webhooks/stripe", () => {
     const bookingId = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-        booking_date, start_time, end_time, status, amount, commission)
+        booking_date, start_time, end_time, status, amount_pence, commission_pence)
        VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2099-01-01', '10:00', '10:30', 'completed', 25, 2.5)`
     ).bind(bookingId, shop, staff, service).run();
     await env.DB.prepare(
@@ -97,11 +97,11 @@ describe("POST /webhooks/stripe", () => {
        VALUES (?, ?, 'pi_bal_1', datetime('now'))`
     ).bind(bookingId, shop).run();
     await env.DB.prepare(
-      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id)
+      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
        VALUES (?, ?, ?, 'balance', 15, 'pending', 'pi_bal_1')`
     ).bind(crypto.randomUUID(), bookingId, shop).run();
     await env.DB.prepare(
-      `INSERT INTO bw_commission_ledger (id, shop_id, booking_id, services_amount, commission_amount, commission_bearer, status)
+      `INSERT INTO bw_commission_ledger (id, shop_id, booking_id, services_amount_pence, commission_amount_pence, commission_bearer, status)
        VALUES (?, ?, ?, 25, 2.5, 'shop', 'pending')`
     ).bind(crypto.randomUUID(), shop, bookingId).run();
 
@@ -137,15 +137,15 @@ describe("POST /webhooks/stripe", () => {
     const bookingId = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-        booking_date, start_time, end_time, status, amount, commission)
+        booking_date, start_time, end_time, status, amount_pence, commission_pence)
        VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2099-01-02', '10:00', '10:30', 'completed', 25, 2.5)`
     ).bind(bookingId, shop, staff, service).run();
     await env.DB.prepare(
-      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id)
+      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
        VALUES (?, ?, ?, 'balance', 15, 'captured', 'pi_ref_1')`
     ).bind(crypto.randomUUID(), bookingId, shop).run();
     await env.DB.prepare(
-      `INSERT INTO bw_commission_ledger (id, shop_id, booking_id, services_amount, commission_amount, commission_bearer, status)
+      `INSERT INTO bw_commission_ledger (id, shop_id, booking_id, services_amount_pence, commission_amount_pence, commission_bearer, status)
        VALUES (?, ?, ?, 25, 2.5, 'shop', 'transferred')`
     ).bind(crypto.randomUUID(), shop, bookingId).run();
 

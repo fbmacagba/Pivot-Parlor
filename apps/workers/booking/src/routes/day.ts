@@ -114,7 +114,7 @@ r.post("/:shopId/close", async (c) => {
        INNER JOIN bw_booking_state s ON s.booking_id = b.id
        INNER JOIN bw_transactions t ON t.booking_id = b.id AND t.type = 'deposit' AND t.status = 'pending'
        WHERE b.shop_id = ? AND b.booking_date = ? AND b.status = 'no_show'
-         AND s.stripe_payment_intent_id IS NOT NULL AND s.deposit_amount > 0`
+         AND s.stripe_payment_intent_id IS NOT NULL AND s.deposit_amount_pence > 0`
     )
     .bind(shopId, date)
     .all();
@@ -184,7 +184,7 @@ r.post("/:shopId/close", async (c) => {
 
   const revSvc = await db
     .prepare(
-      `SELECT COALESCE(SUM(bi.total_price), 0) AS s FROM bw_booking_items bi
+      `SELECT COALESCE(SUM(bi.total_price_pence), 0) AS s FROM bw_booking_items bi
        INNER JOIN bookings b ON b.id = bi.booking_id
        WHERE bi.shop_id = ? AND bi.item_type = 'service' AND b.booking_date = ?`
     )
@@ -193,7 +193,7 @@ r.post("/:shopId/close", async (c) => {
 
   const revProd = await db
     .prepare(
-      `SELECT COALESCE(SUM(bi.total_price), 0) AS s FROM bw_booking_items bi
+      `SELECT COALESCE(SUM(bi.total_price_pence), 0) AS s FROM bw_booking_items bi
        INNER JOIN bookings b ON b.id = bi.booking_id
        WHERE bi.shop_id = ? AND bi.item_type = 'product' AND b.booking_date = ?`
     )
@@ -202,28 +202,28 @@ r.post("/:shopId/close", async (c) => {
 
   const revTips = await db
     .prepare(
-      `SELECT COALESCE(SUM(bi.total_price), 0) AS s FROM bw_booking_items bi
+      `SELECT COALESCE(SUM(bi.total_price_pence), 0) AS s FROM bw_booking_items bi
        INNER JOIN bookings b ON b.id = bi.booking_id
        WHERE bi.shop_id = ? AND bi.item_type = 'tip' AND b.booking_date = ?`
     )
     .bind(shopId, date)
     .first<{ s: number }>();
 
-  const servicesRevenue = Number(revSvc?.s ?? 0);
-  const productsRevenue = Number(revProd?.s ?? 0);
-  const tipsCollected = Number(revTips?.s ?? 0);
-  const totalRevenue = servicesRevenue + productsRevenue + tipsCollected;
+  const servicesRevenuePence = Number(revSvc?.s ?? 0);
+  const productsRevenuePence = Number(revProd?.s ?? 0);
+  const tipsCollectedPence = Number(revTips?.s ?? 0);
+  const totalRevenuePence = servicesRevenuePence + productsRevenuePence + tipsCollectedPence;
 
   const commissionTotal = await db
     .prepare(
-      "SELECT COALESCE(SUM(commission_amount), 0) AS s FROM bw_commission_ledger WHERE business_day_id = ?"
+      "SELECT COALESCE(SUM(commission_amount_pence), 0) AS s FROM bw_commission_ledger WHERE business_day_id = ?"
     )
     .bind(businessDayId)
     .first<{ s: number }>();
 
   const staffRows = await db
     .prepare(
-      `SELECT b.staff_id, st.display_name AS staff_name, COUNT(*) AS cnt, COALESCE(SUM(b.amount), 0) AS revenue
+      `SELECT b.staff_id, st.display_name AS staff_name, COUNT(*) AS cnt, COALESCE(SUM(b.amount_pence), 0) AS revenue_pence
        FROM bookings b
        INNER JOIN staff st ON st.id = b.staff_id
        WHERE b.shop_id = ? AND b.booking_date = ? AND b.status = 'completed'
@@ -231,7 +231,7 @@ r.post("/:shopId/close", async (c) => {
     )
     .bind(shopId, date)
     .all();
-  const staffBreakdown = d1Rows<{ staff_id: string; staff_name: string; cnt: number; revenue: number }>(staffRows);
+  const staffBreakdown = d1Rows<{ staff_id: string; staff_name: string; cnt: number; revenue_pence: number }>(staffRows);
 
   const topSvc = await db
     .prepare(
@@ -253,7 +253,7 @@ r.post("/:shopId/close", async (c) => {
     .bind(shopId, date)
     .first<{ summary_json: string }>();
 
-  let prevSummary: { totalRevenue?: number; noShowCount?: number } = {};
+  let prevSummary: { totalRevenuePence?: number; totalRevenue?: number; noShowCount?: number } = {};
   try {
     if (prev?.summary_json) prevSummary = JSON.parse(prev.summary_json) as typeof prevSummary;
   } catch {
@@ -261,8 +261,12 @@ r.post("/:shopId/close", async (c) => {
   }
 
   const signals: Array<{ type: string; metric: string; message: string; recommendation: string }> = [];
-  const prevRev = Number(prevSummary.totalRevenue ?? 0);
-  if (prevRev > 0 && totalRevenue > prevRev * 1.1) {
+  // Summaries written before WS-4 stored pounds under totalRevenue.
+  const prevRev =
+    prevSummary.totalRevenuePence != null
+      ? Number(prevSummary.totalRevenuePence)
+      : Math.round(Number(prevSummary.totalRevenue ?? 0) * 100);
+  if (prevRev > 0 && totalRevenuePence > prevRev * 1.1) {
     signals.push({
       type: "improved",
       metric: "revenue",
@@ -289,7 +293,7 @@ r.post("/:shopId/close", async (c) => {
       recommendation: "Review reminders and deposit policy.",
     });
   }
-  if (prevRev > 0 && totalRevenue < prevRev * 0.8) {
+  if (prevRev > 0 && totalRevenuePence < prevRev * 0.8) {
     signals.push({
       type: "action",
       metric: "revenue",
@@ -315,11 +319,11 @@ r.post("/:shopId/close", async (c) => {
     walkInCount: Number(walkInCount?.n ?? 0),
     noShowCount: Number(noShowCount?.n ?? 0),
     cancellationCount: Number(cancellationCount?.n ?? 0),
-    servicesRevenue,
-    productsRevenue,
-    tipsCollected,
-    totalRevenue,
-    commissionTotal: Number(commissionTotal?.s ?? 0),
+    servicesRevenuePence,
+    productsRevenuePence,
+    tipsCollectedPence,
+    totalRevenuePence,
+    commissionTotalPence: Number(commissionTotal?.s ?? 0),
     staffBreakdown,
     topService: topSvc ?? null,
   };

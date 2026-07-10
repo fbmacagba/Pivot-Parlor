@@ -90,8 +90,8 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
         service_id TEXT,
         name TEXT,
         quantity INTEGER NOT NULL DEFAULT 1,
-        unit_price REAL NOT NULL DEFAULT 0,
-        total_price REAL NOT NULL DEFAULT 0,
+        unit_price_pence INTEGER NOT NULL DEFAULT 0,
+        total_price_pence INTEGER NOT NULL DEFAULT 0,
         is_commissionable INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`
@@ -105,7 +105,7 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
         booking_id TEXT REFERENCES bookings(id) ON DELETE SET NULL,
         shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
         type TEXT NOT NULL,
-        amount REAL NOT NULL,
+        amount_pence INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL,
         stripe_id TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -120,9 +120,9 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
         shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
         business_day_id TEXT REFERENCES bw_business_days(id) ON DELETE SET NULL,
         booking_id TEXT REFERENCES bookings(id) ON DELETE SET NULL,
-        services_amount REAL NOT NULL DEFAULT 0,
+        services_amount_pence INTEGER NOT NULL DEFAULT 0,
         commission_rate REAL NOT NULL DEFAULT 0.10,
-        commission_amount REAL NOT NULL DEFAULT 0,
+        commission_amount_pence INTEGER NOT NULL DEFAULT 0,
         commission_bearer TEXT NOT NULL,
         stripe_transfer_id TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
@@ -153,7 +153,7 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
         booking_id TEXT PRIMARY KEY REFERENCES bookings(id) ON DELETE CASCADE,
         shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
         booking_type TEXT NOT NULL DEFAULT 'online',
-        deposit_amount REAL NOT NULL DEFAULT 0,
+        deposit_amount_pence INTEGER NOT NULL DEFAULT 0,
         stripe_payment_intent_id TEXT,
         promo_code TEXT,
         promo_discount_percent REAL,
@@ -161,7 +161,7 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
         checked_in_at TEXT,
         slot_time TEXT,
         workflow_flag TEXT,
-        total_amount REAL,
+        total_amount_pence INTEGER,
         stripe_balance_pi TEXT,
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`
