@@ -31,13 +31,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   } catch {
     // silent
   }
-  return json({ shops, models });
+  return json({ shops, models, apiUrl: env.API_URL });
 }
 
 type ThemeResult = { theme: BrandConfig; model: string } | null;
 
 export default function DevAIDeploy() {
-  const { shops, models } = useLoaderData<typeof loader>();
+  const { shops, models, apiUrl } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
   const recommendedId = models.find((m) => m.recommended)?.id ?? models[0]?.id ?? "";
@@ -57,9 +57,42 @@ export default function DevAIDeploy() {
   const selectedModel = models.find((m) => m.id === modelId);
   const effortAvailable = selectedModel?.supportsEffort ?? false;
 
-  const token = typeof document !== "undefined"
-    ? document.cookie.split(";").find((c) => c.trim().startsWith("pp_session="))?.split("=")[1]
-    : null;
+  /**
+   * Theme generation can run for a while on high-effort models. On production
+   * *.pivotparlor.com, pp_session is scoped to Domain=.pivotparlor.com so the
+   * browser calls the Worker directly with credentials (no Pages wall-clock
+   * limit); elsewhere (local dev, pages.dev previews) the relative path hits
+   * the api.ai.* Remix proxy routes. pp_session is HttpOnly, so cookie
+   * credentials are the ONLY way to authenticate from the browser.
+   */
+  function workerUrl(path: string): string {
+    const base = (apiUrl ?? "").trim().replace(/\/$/, "");
+    const onPivotParlorHost =
+      typeof window !== "undefined" &&
+      /^(?:[a-z0-9-]+\.)*pivotparlor\.com$/i.test(window.location.hostname);
+    return onPivotParlorHost && base ? `${base}${path}` : path;
+  }
+
+  async function postJson(path: string, body: Record<string, unknown>): Promise<unknown> {
+    const res = await fetch(workerUrl(path), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const raw = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(`Unexpected non-JSON response (HTTP ${res.status})`);
+    }
+    if (!res.ok) {
+      const err = (data as { error?: string })?.error;
+      throw new Error(err?.trim() || `Request failed (HTTP ${res.status})`);
+    }
+    return data;
+  }
 
   function modelOptionLabel(m: AIModel): string {
     const price = `$${m.costPer1MInput}/M in · $${m.costPer1MOutput}/M out`;
@@ -74,21 +107,14 @@ export default function DevAIDeploy() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api-proxy/api/ai/generate-theme", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          shop_id: shopId,
-          model_id: modelId,
-          style_keywords: keywords,
-          ...(effortAvailable && effort ? { effort } : {}),
-        }),
-      });
-      const data = (await res.json()) as { data?: BrandConfig; error?: string };
-      if (!res.ok || !data.data) throw new Error(data.error ?? "Generation failed");
+      const data = (await postJson("/api/ai/generate-theme", {
+        shop_id: shopId,
+        model_id: modelId,
+        style_keywords: keywords,
+        regenerate: true,
+        ...(effortAvailable && effort ? { effort } : {}),
+      })) as { data?: BrandConfig; error?: string };
+      if (!data.data) throw new Error(data.error ?? "Generation failed");
       setResult({ theme: data.data, model: selectedModel?.name ?? modelId });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
@@ -102,21 +128,20 @@ export default function DevAIDeploy() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api-proxy/api/ai/compare", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          shop_id: shopId,
-          model_a_id: modelId,
-          model_b_id: modelBId,
-          style_keywords: keywords,
-          ...(effortAvailable && effort ? { effort } : {}),
-        }),
-      });
-      const data = (await res.json()) as { data?: { modelA: { result: BrandConfig }; modelB: { result: BrandConfig } }; error?: string };
-      if (!res.ok || !data.data) throw new Error(data.error ?? "Comparison failed");
-      setResult({ theme: data.data.modelA.result, model: selectedModel?.name ?? modelId });
-      setResultB({ theme: data.data.modelB.result, model: models.find((m) => m.id === modelBId)?.name ?? modelBId });
+      type CompareSide = { id: string; theme: BrandConfig | null; error: string | null };
+      const data = (await postJson("/api/ai/compare", {
+        shop_id: shopId,
+        model_a_id: modelId,
+        model_b_id: modelBId,
+        style_keywords: keywords,
+        ...(effortAvailable && effort ? { effort } : {}),
+      })) as { data?: { model_a: CompareSide; model_b: CompareSide }; error?: string };
+      if (!data.data) throw new Error(data.error ?? "Comparison failed");
+      const { model_a, model_b } = data.data;
+      if (!model_a.theme) throw new Error(model_a.error ?? "Model A generation failed");
+      if (!model_b.theme) throw new Error(model_b.error ?? "Model B generation failed");
+      setResult({ theme: model_a.theme, model: selectedModel?.name ?? modelId });
+      setResultB({ theme: model_b.theme, model: models.find((m) => m.id === modelBId)?.name ?? modelBId });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
