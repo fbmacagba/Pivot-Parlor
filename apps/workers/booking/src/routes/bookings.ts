@@ -4,12 +4,9 @@ import { shopExists } from "../middleware/shop-access.js";
 import { addMinutesToHm, todayUtcYmd } from "../lib/time.js";
 import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent } from "../lib/stripe.js";
 import { reportError } from "../services/report-error.js";
+import { calculateCommissionPence } from "@repo/utils";
 
 const r = new Hono<{ Bindings: Env }>();
-
-function gbpToPence(gbp: number): number {
-  return Math.round(gbp * 100);
-}
 
 r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   const shopId = c.req.param("shopId");
@@ -21,13 +18,18 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
 
   let body: {
     extraServices?: { serviceId: string; quantity: number }[];
-    products?: { name: string; price: number; quantity: number }[];
+    products?: { name: string; price_pence: number; quantity: number }[];
     tipPercent?: number;
   };
   try {
     body = (await c.req.json()) as typeof body;
   } catch {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
+  for (const p of body.products ?? []) {
+    if (!Number.isInteger(p.price_pence) || p.price_pence < 0) {
+      return c.json({ success: false, error: "product price_pence must be a non-negative integer (pence)" }, 400);
+    }
   }
 
   const booking = await db
@@ -72,84 +74,83 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   const productCommission = Number(settings?.product_commission_enabled ?? 0) === 1;
 
   const shopRow = await db
-    .prepare("SELECT stripe_connect_account_id FROM shops WHERE id = ?")
+    .prepare("SELECT stripe_connect_account_id, commission_rate FROM shops WHERE id = ?")
     .bind(shopId)
-    .first<{ stripe_connect_account_id: string | null }>();
+    .first<{ stripe_connect_account_id: string | null; commission_rate: number }>();
   const connectId = shopRow?.stripe_connect_account_id?.trim();
   if (!connectId) {
     return c.json({ success: false, error: "Stripe Connect not configured" }, 400);
   }
+  const commissionRate = Number(shopRow?.commission_rate ?? 0.1);
 
   const svcSum = await db
     .prepare(
-      "SELECT COALESCE(SUM(total_price), 0) AS s FROM bw_booking_items WHERE booking_id = ? AND item_type = 'service'"
+      "SELECT COALESCE(SUM(total_price_pence), 0) AS s FROM bw_booking_items WHERE booking_id = ? AND item_type = 'service'"
     )
     .bind(bookingId)
     .first<{ s: number }>();
-  let servicesTotal = Number(svcSum?.s ?? 0);
+  let servicesTotalPence = Number(svcSum?.s ?? 0);
 
   const extras = body.extraServices ?? [];
   for (const ex of extras) {
     const svc = await db
-      .prepare("SELECT price, name FROM services WHERE id = ? AND shop_id = ?")
+      .prepare("SELECT price_pence, name FROM services WHERE id = ? AND shop_id = ?")
       .bind(ex.serviceId, shopId)
-      .first<{ price: number; name: string }>();
+      .first<{ price_pence: number; name: string }>();
     if (svc) {
       const q = Math.max(1, ex.quantity ?? 1);
-      const line = Number(svc.price) * q;
-      servicesTotal += line;
+      const linePence = svc.price_pence * q;
+      servicesTotalPence += linePence;
       const itemId = crypto.randomUUID();
       await db
         .prepare(
-          `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price, total_price, is_commissionable)
+          `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
            VALUES (?, ?, ?, 'service', ?, ?, ?, ?, ?, 1)`
         )
-        .bind(itemId, bookingId, shopId, ex.serviceId, svc.name, q, svc.price, line)
+        .bind(itemId, bookingId, shopId, ex.serviceId, svc.name, q, svc.price_pence, linePence)
         .run();
     }
   }
 
-  let productsTotal = 0;
+  let productsTotalPence = 0;
   for (const p of body.products ?? []) {
     const q = Math.max(1, p.quantity ?? 1);
-    const line = Number(p.price) * q;
-    productsTotal += line;
+    const linePence = p.price_pence * q;
+    productsTotalPence += linePence;
     const itemId = crypto.randomUUID();
     await db
       .prepare(
-        `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price, total_price, is_commissionable)
+        `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
          VALUES (?, ?, ?, 'product', NULL, ?, ?, ?, ?, ?)`
       )
-      .bind(itemId, bookingId, shopId, p.name, q, p.price, line, productCommission ? 1 : 0)
+      .bind(itemId, bookingId, shopId, p.name, q, p.price_pence, linePence, productCommission ? 1 : 0)
       .run();
   }
 
   const tipPct = [0, 5, 10, 15, 20].includes(Number(body.tipPercent)) ? Number(body.tipPercent) : 0;
-  const subForTip = servicesTotal + productsTotal;
-  const tipAmount = subForTip * (tipPct / 100);
-  if (tipPct > 0 && tipAmount > 0) {
+  const subForTipPence = servicesTotalPence + productsTotalPence;
+  const tipPence = Math.round((subForTipPence * tipPct) / 100);
+  if (tipPct > 0 && tipPence > 0) {
     const itemId = crypto.randomUUID();
     await db
       .prepare(
-        `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price, total_price, is_commissionable)
+        `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
          VALUES (?, ?, ?, 'tip', NULL, 'Tip', 1, ?, ?, 0)`
       )
-      .bind(itemId, bookingId, shopId, tipAmount, tipAmount)
+      .bind(itemId, bookingId, shopId, tipPence, tipPence)
       .run();
   }
 
-  let commissionBase = servicesTotal;
-  if (productCommission) commissionBase += productsTotal;
-  const commissionAmount = commissionBase * 0.1;
-  const grandTotal = servicesTotal + productsTotal + tipAmount;
-  const customerTotal =
-    commissionBearer === "customer" ? grandTotal + commissionAmount : grandTotal;
+  let commissionBasePence = servicesTotalPence;
+  if (productCommission) commissionBasePence += productsTotalPence;
+  // Single rounding path (WS-4): the shop's configured rate, not a literal.
+  const commissionPence = calculateCommissionPence(commissionBasePence, commissionRate).commission_pence;
+  const grandTotalPence = servicesTotalPence + productsTotalPence + tipPence;
+  const customerTotalPence =
+    commissionBearer === "customer" ? grandTotalPence + commissionPence : grandTotalPence;
 
   const piId = typeof st.stripe_payment_intent_id === "string" ? st.stripe_payment_intent_id.trim() || null : null;
-  const depositGbp = piId ? Number(st.deposit_amount ?? 0) : 0;
-  const customerTotalPence = gbpToPence(customerTotal);
-  const depositPence = gbpToPence(depositGbp);
-  const commissionPence = gbpToPence(commissionAmount);
+  const depositPence = piId ? Number(st.deposit_amount_pence ?? 0) : 0;
 
   const captureFromHoldPence = piId ? Math.min(depositPence, customerTotalPence) : 0;
   const remainderPence = Math.max(0, customerTotalPence - captureFromHoldPence);
@@ -189,23 +190,22 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       const txBal = crypto.randomUUID();
       await db
         .prepare(
-          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id) VALUES (?, ?, ?, 'balance', ?, 'pending', ?)`
+          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id) VALUES (?, ?, ?, 'balance', ?, 'pending', ?)`
         )
-        .bind(txBal, bookingId, shopId, remainderPence / 100, bal.id)
+        .bind(txBal, bookingId, shopId, remainderPence, bal.id)
         .run();
       if (!stripeChargeId) {
         stripeChargeId = String(bal.latest_charge ?? bal.id ?? "");
       }
     }
 
-    const captureGbp = captureFromHoldPence / 100;
-    if (captureGbp > 0) {
+    if (captureFromHoldPence > 0) {
       const tx1 = crypto.randomUUID();
       await db
         .prepare(
-          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id) VALUES (?, ?, ?, 'deposit_capture', ?, 'captured', ?)`
+          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id) VALUES (?, ?, ?, 'deposit_capture', ?, 'captured', ?)`
         )
-        .bind(tx1, bookingId, shopId, captureGbp, piId ?? "")
+        .bind(tx1, bookingId, shopId, captureFromHoldPence, piId ?? "")
         .run();
     }
 
@@ -220,35 +220,36 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       .first<{ id: string }>();
     await db
       .prepare(
-        `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, services_amount, commission_rate, commission_amount, commission_bearer, status)
-         VALUES (?, ?, ?, ?, ?, 0.10, ?, ?, ?)`
+        `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, services_amount_pence, commission_rate, commission_amount_pence, commission_bearer, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         ledgerId,
         shopId,
         bd?.id ?? null,
         bookingId,
-        servicesTotal,
-        commissionAmount,
+        servicesTotalPence,
+        commissionRate,
+        commissionPence,
         commissionBearer,
         fullySettled ? "transferred" : "pending"
       )
       .run();
 
     // Status was already claimed above; persist the final money figures.
-    // bookings keeps only canonical columns; total_amount + completed_at live
+    // bookings keeps only canonical columns; total_amount_pence + completed_at live
     // in bw_booking_state (completed_at only once fully settled).
     await db
-      .prepare(`UPDATE bookings SET amount = ?, commission = ? WHERE id = ? AND shop_id = ?`)
-      .bind(customerTotal, commissionAmount, bookingId, shopId)
+      .prepare(`UPDATE bookings SET amount_pence = ?, commission_pence = ? WHERE id = ? AND shop_id = ?`)
+      .bind(customerTotalPence, commissionPence, bookingId, shopId)
       .run();
 
     await db
       .prepare(
-        `UPDATE bw_booking_state SET total_amount = ?, completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE booking_id = ?`
+        `UPDATE bw_booking_state SET total_amount_pence = ?, completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE booking_id = ?`
       )
       .bind(
-        customerTotal,
+        customerTotalPence,
         fullySettled ? new Date().toISOString() : null,
         new Date().toISOString(),
         bookingId
@@ -258,12 +259,12 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     return c.json({
       success: true,
       receipt: {
-        services: servicesTotal,
-        products: productsTotal,
-        tip: tipAmount,
-        subtotal: grandTotal,
-        commission: commissionBearer === "customer" ? commissionAmount : 0,
-        total: customerTotal,
+        services_pence: servicesTotalPence,
+        products_pence: productsTotalPence,
+        tip_pence: tipPence,
+        subtotal_pence: grandTotalPence,
+        commission_pence: commissionBearer === "customer" ? commissionPence : 0,
+        total_pence: customerTotalPence,
       },
       stripeChargeId,
       balanceClientSecret,
@@ -314,9 +315,9 @@ r.post("/:shopId/bookings", async (c) => {
   }
 
   const service = await db
-    .prepare("SELECT price, duration_min FROM services WHERE id = ? AND shop_id = ? AND is_active = 1")
+    .prepare("SELECT price_pence, duration_min FROM services WHERE id = ? AND shop_id = ? AND is_active = 1")
     .bind(body.serviceId, shopId)
-    .first<{ price: number; duration_min: number }>();
+    .first<{ price_pence: number; duration_min: number }>();
   if (!service) {
     return c.json({ success: false, error: "Service not found" }, 404);
   }
@@ -332,29 +333,31 @@ r.post("/:shopId/bookings", async (c) => {
       promo_discount_percent: number | null;
     }>();
 
-  let priceGbp = Number(service.price);
+  let pricePence = Number(service.price_pence);
   let promoDiscount = 0;
   let promoUsed: string | undefined;
   if (body.promoCode?.trim() && settings?.promo_discount_code?.trim()) {
     if (body.promoCode.trim().toLowerCase() === settings.promo_discount_code.trim().toLowerCase()) {
       promoDiscount = Number(settings.promo_discount_percent ?? 0);
-      priceGbp = priceGbp * (1 - Math.min(100, Math.max(0, promoDiscount)) / 100);
+      pricePence = Math.round(pricePence * (1 - Math.min(100, Math.max(0, promoDiscount)) / 100));
       promoUsed = body.promoCode.trim();
     }
   }
 
-  const depositGbp = Math.max(5, priceGbp * 0.5);
-  const depositPence = gbpToPence(depositGbp);
-  const applicationFeePence = gbpToPence(priceGbp * 0.1);
+  // Deposit: half the price, min £5.
+  const depositPence = Math.max(500, Math.round(pricePence * 0.5));
 
   const shopRow = await db
-    .prepare("SELECT stripe_connect_account_id FROM shops WHERE id = ?")
+    .prepare("SELECT stripe_connect_account_id, commission_rate FROM shops WHERE id = ?")
     .bind(shopId)
-    .first<{ stripe_connect_account_id: string | null }>();
+    .first<{ stripe_connect_account_id: string | null; commission_rate: number }>();
   const connectId = shopRow?.stripe_connect_account_id?.trim();
   if (!connectId) {
     return c.json({ success: false, error: "Stripe Connect not configured for shop" }, 400);
   }
+  // Single rounding path (WS-4): the shop's configured rate, not a literal.
+  const commissionPence = calculateCommissionPence(pricePence, Number(shopRow?.commission_rate ?? 0.1)).commission_pence;
+  const applicationFeePence = commissionPence;
 
   // Atomic slot claim BEFORE the PaymentIntent (WS-2, ABUSE-1): of two
   // concurrent requests for the same slot exactly one sees changes === 1;
@@ -410,7 +413,6 @@ r.post("/:shopId/bookings", async (c) => {
   }
 
   const endTime = addMinutesToHm(body.slotTime, service.duration_min);
-  const commission = priceGbp * 0.1;
 
   const qrCodeData = JSON.stringify({
     bookingId,
@@ -427,7 +429,7 @@ r.post("/:shopId/bookings", async (c) => {
       .prepare(
         `INSERT INTO bookings (
            id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
-           booking_date, start_time, end_time, status, notes, amount, commission
+           booking_date, start_time, end_time, status, notes, amount_pence, commission_pence
          )
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?)`
       )
@@ -442,8 +444,8 @@ r.post("/:shopId/bookings", async (c) => {
         body.slotDate,
         body.slotTime,
         endTime,
-        priceGbp,
-        commission
+        pricePence,
+        commissionPence
       )
       .run();
   } catch (err) {
@@ -466,10 +468,10 @@ r.post("/:shopId/bookings", async (c) => {
   const itemId = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price, total_price, is_commissionable)
-       SELECT ?, ?, ?, 'service', s.id, s.name, 1, s.price, ?, 1 FROM services s WHERE s.id = ?`
+      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
+       SELECT ?, ?, ?, 'service', s.id, s.name, 1, s.price_pence, ?, 1 FROM services s WHERE s.id = ?`
     )
-    .bind(itemId, bookingId, shopId, priceGbp, body.serviceId)
+    .bind(itemId, bookingId, shopId, pricePence, body.serviceId)
     .run();
 
   // The slot was already claimed atomically above; attach the booking to it.
@@ -483,13 +485,13 @@ r.post("/:shopId/bookings", async (c) => {
 
   await db
     .prepare(
-      `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount, stripe_payment_intent_id, promo_code, promo_discount_percent, qr_code_data, slot_time, updated_at)
+      `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount_pence, stripe_payment_intent_id, promo_code, promo_discount_percent, qr_code_data, slot_time, updated_at)
        VALUES (?, ?, 'online', ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       bookingId,
       shopId,
-      depositGbp,
+      depositPence,
       paymentIntentId,
       promoUsed ?? null,
       promoUsed ? promoDiscount : null,
@@ -502,16 +504,16 @@ r.post("/:shopId/bookings", async (c) => {
   const txId = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id) VALUES (?, ?, ?, 'deposit', ?, 'pending', ?)`
+      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id) VALUES (?, ?, ?, 'deposit', ?, 'pending', ?)`
     )
-    .bind(txId, bookingId, shopId, depositGbp, paymentIntentId)
+    .bind(txId, bookingId, shopId, depositPence, paymentIntentId)
     .run();
 
   return c.json({
     success: true,
     bookingId,
     clientSecret,
-    depositAmount: depositGbp,
+    depositAmountPence: depositPence,
     qrCodeData,
   });
 });
@@ -550,9 +552,9 @@ r.post("/:shopId/walk-ins", async (c) => {
   }
 
   const service = await db
-    .prepare("SELECT price, duration_min, name FROM services WHERE id = ? AND shop_id = ?")
+    .prepare("SELECT price_pence, duration_min, name FROM services WHERE id = ? AND shop_id = ?")
     .bind(body.serviceId, shopId)
-    .first<{ price: number; duration_min: number; name: string }>();
+    .first<{ price_pence: number; duration_min: number; name: string }>();
   if (!service) {
     return c.json({ success: false, error: "Service not found" }, 404);
   }
@@ -570,8 +572,13 @@ r.post("/:shopId/walk-ins", async (c) => {
   }
 
   const endTime = addMinutesToHm(slot.slot_time, service.duration_min);
-  const priceGbp = Number(service.price);
-  const commission = priceGbp * 0.1;
+  const pricePence = Number(service.price_pence);
+  const rateRow = await db
+    .prepare("SELECT commission_rate FROM shops WHERE id = ?")
+    .bind(shopId)
+    .first<{ commission_rate: number }>();
+  // Single rounding path (WS-4): the shop's configured rate, not a literal.
+  const commissionPence = calculateCommissionPence(pricePence, Number(rateRow?.commission_rate ?? 0.1)).commission_pence;
   const email = `walkin+${bookingId.slice(0, 8)}@pivotparlor.invalid`;
 
   const qrCodeData = JSON.stringify({
@@ -589,7 +596,7 @@ r.post("/:shopId/walk-ins", async (c) => {
       .prepare(
         `INSERT INTO bookings (
            id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
-           booking_date, start_time, end_time, status, notes, amount, commission
+           booking_date, start_time, end_time, status, notes, amount_pence, commission_pence
          )
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?)`
       )
@@ -604,8 +611,8 @@ r.post("/:shopId/walk-ins", async (c) => {
         date,
         slot.slot_time,
         endTime,
-        priceGbp,
-        commission
+        pricePence,
+        commissionPence
       )
       .run();
   } catch (err) {
@@ -624,15 +631,15 @@ r.post("/:shopId/walk-ins", async (c) => {
   const itemId = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price, total_price, is_commissionable)
+      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
        VALUES (?, ?, ?, 'service', ?, ?, 1, ?, ?, 1)`
     )
-    .bind(itemId, bookingId, shopId, body.serviceId, service.name, priceGbp, priceGbp)
+    .bind(itemId, bookingId, shopId, body.serviceId, service.name, pricePence, pricePence)
     .run();
 
   await db
     .prepare(
-      `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount, qr_code_data, slot_time, updated_at)
+      `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount_pence, qr_code_data, slot_time, updated_at)
        VALUES (?, ?, 'walk_in', 0, ?, ?, ?)`
     )
     .bind(bookingId, shopId, qrCodeData, slot.slot_time, new Date().toISOString())

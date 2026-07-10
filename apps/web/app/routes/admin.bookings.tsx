@@ -4,6 +4,7 @@ import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 import { BookingsCalendar } from "~/components/admin/BookingsCalendar";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
@@ -20,8 +21,8 @@ export interface Booking {
   staff_name: string;
   status: BookingStatus;
   duration_min: number;
-  amount: number;
-  commission: number;
+  amount_pence: number;
+  commission_pence: number;
   notes: string | null;
   created_at: string;
 }
@@ -55,11 +56,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const today = new Date().toISOString().slice(0, 10);
   const todayCount = bookings.filter((b) => b.booking_date === today).length;
   const pendingCount = bookings.filter((b) => b.status === "pending").length;
-  const completedRevenue = bookings
+  const completedRevenuePence = bookings
     .filter((b) => b.status === "completed")
-    .reduce((sum, b) => sum + b.amount, 0);
+    .reduce((sum, b) => sum + b.amount_pence, 0);
 
-  return json({ bookings, shopId, stats: { total: bookings.length, todayCount, pendingCount, completedRevenue } });
+  return json({ bookings, shopId, stats: { total: bookings.length, todayCount, pendingCount, completedRevenuePence } });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -188,9 +189,9 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
           <div>
             <p className="text-xs font-semibold text-white/30 uppercase tracking-wide mb-3">Payment</p>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <div className="flex justify-between"><span className="text-sm text-white/40">Total</span><span className="text-sm font-semibold text-gold">£{booking.amount.toFixed(2)}</span></div>
-              <div className="flex justify-between"><span className="text-sm text-white/40">Commission</span><span className="text-sm text-white/60">£{booking.commission.toFixed(2)}</span></div>
-              <div className="border-t border-white/10 pt-2 flex justify-between"><span className="text-sm text-white/40">Net to shop</span><span className="text-sm font-semibold text-white">£{(booking.amount - booking.commission).toFixed(2)}</span></div>
+              <div className="flex justify-between"><span className="text-sm text-white/40">Total</span><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
+              <div className="flex justify-between"><span className="text-sm text-white/40">Commission</span><span className="text-sm text-white/60">{formatPence(booking.commission_pence)}</span></div>
+              <div className="border-t border-white/10 pt-2 flex justify-between"><span className="text-sm text-white/40">Net to shop</span><span className="text-sm font-semibold text-white">{formatPence(booking.amount_pence - booking.commission_pence)}</span></div>
             </div>
           </div>
           {booking.notes && (
@@ -243,7 +244,7 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
                 </div>
                 <span className="text-xs text-white/30 shrink-0 hidden sm:block">{booking.duration_min}min</span>
                 <div className="shrink-0"><StatusBadge status={booking.status} /></div>
-                <div className="w-16 text-right shrink-0"><span className="text-sm font-semibold text-gold">£{booking.amount.toFixed(2)}</span></div>
+                <div className="w-16 text-right shrink-0"><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
                 <svg className="w-4 h-4 text-white/20 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
               </button>
             ))}
@@ -298,7 +299,7 @@ export default function AdminBookings() {
         <SummaryCard label="Total bookings" value={stats.total} icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>} />
         <SummaryCard label="Today" value={stats.todayCount} icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
         <SummaryCard label="Pending" value={stats.pendingCount} icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>} />
-        <SummaryCard label="Completed revenue" value={`£${stats.completedRevenue.toFixed(2)}`} icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
+        <SummaryCard label="Completed revenue" value={formatPence(stats.completedRevenuePence)} icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>} />
       </div>
 
       {view === "list" && (

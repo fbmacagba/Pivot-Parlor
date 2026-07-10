@@ -16,7 +16,7 @@ type ApiPublicService = {
   name: string;
   description?: string;
   durationMinutes: number;
-  price: number;
+  price_pence: number;
   category?: string;
 };
 
@@ -36,9 +36,11 @@ export function normalizeCommercialServices(
     const price_gbp =
       typeof raw.price_gbp === "number"
         ? raw.price_gbp
-        : typeof raw.price === "number"
-          ? raw.price
-          : 0;
+        : typeof raw.price_pence === "number"
+          ? raw.price_pence / 100
+          : typeof raw.price === "number"
+            ? raw.price
+            : 0;
     const category =
       (typeof raw.category === "string" && raw.category.trim())
         ? raw.category.trim()
@@ -69,7 +71,7 @@ function mapApiServicesToCommercial(
     id: row.id,
     name: row.name,
     duration_minutes: row.durationMinutes,
-    price_gbp: row.price,
+    price_gbp: row.price_pence / 100,
     description: row.description?.trim() || undefined,
     category: row.category?.trim() || "Service",
     image_url: catalog[index % catalog.length] || "",

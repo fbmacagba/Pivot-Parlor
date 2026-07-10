@@ -6,6 +6,7 @@ import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import type { Service } from "@repo/types";
+import { formatPence } from "@repo/utils";
 
 interface Staff { id: string; display_name: string; bio?: string }
 interface Slot { staff_id: string; start_time: string; end_time: string; is_available: boolean }
@@ -131,7 +132,7 @@ export default function BookingWizard() {
                   >
                     <div className="flex items-center justify-between">
                       <p className="font-medium text-white">{s.name}</p>
-                      <p className="text-gold font-semibold">£{s.price}</p>
+                      <p className="text-gold font-semibold">{formatPence(s.price_pence)}</p>
                     </div>
                     <p className="mt-0.5 text-sm text-white/50">{s.durationMinutes} min</p>
                   </button>
@@ -265,7 +266,7 @@ export default function BookingWizard() {
               <h2 className="font-heading text-2xl font-bold text-white">Review & confirm</h2>
               <div className="space-y-3 rounded-xl border border-white/10 bg-dark p-4 text-sm">
                 <Row label="Service" value={selection.service?.name ?? "—"} />
-                <Row label="Price" value={`£${selection.service?.price ?? 0}`} />
+                <Row label="Price" value={formatPence(selection.service?.price_pence ?? 0)} />
                 <Row label="Date" value={selection.date} />
                 <Row label="Time" value={selection.slot ? formatSlotTime(selection.slot, shopTimezone) : "—"} />
                 <Row label="Name" value={selection.name} />

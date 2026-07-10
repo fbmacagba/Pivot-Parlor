@@ -14,7 +14,7 @@ import { requireShopRole } from "../middleware/rbac.js";
 
 const services = new Hono<{ Bindings: Bindings }>();
 
-/** Public API shape for booking UI (@repo/types Service). */
+/** Public API shape for booking UI (@repo/types Service). Money is pence (WS-4). */
 function toPublicService(row: DBService) {
   return {
     id: row.id,
@@ -22,7 +22,7 @@ function toPublicService(row: DBService) {
     name: row.name,
     description: "",
     durationMinutes: row.duration_min,
-    price: row.price,
+    price_pence: row.price_pence,
     category: row.category ?? "",
     isActive: row.is_active === 1,
   };
@@ -81,12 +81,15 @@ services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const body = await c.req.json<{
     name?: string;
     duration_min?: number;
-    price?: number;
+    price_pence?: number;
     category?: string;
   }>();
 
-  if (!body.name || body.duration_min == null || body.price == null) {
-    return c.json({ success: false, error: "name, duration_min and price are required" }, 400);
+  if (!body.name || body.duration_min == null || body.price_pence == null) {
+    return c.json({ success: false, error: "name, duration_min and price_pence are required" }, 400);
+  }
+  if (!Number.isInteger(body.price_pence) || body.price_pence < 0) {
+    return c.json({ success: false, error: "price_pence must be a non-negative integer (pence)" }, 400);
   }
 
   const id = crypto.randomUUID();
@@ -95,7 +98,7 @@ services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
     shop_id: shopId,
     name: body.name,
     duration_min: body.duration_min,
-    price: body.price,
+    price_pence: body.price_pence,
     category: body.category ?? null,
   });
 
@@ -113,9 +116,13 @@ services.put("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) 
   const body = await c.req.json<{
     name?: string;
     duration_min?: number;
-    price?: number;
+    price_pence?: number;
     category?: string | null;
   }>();
+
+  if (body.price_pence !== undefined && (!Number.isInteger(body.price_pence) || body.price_pence < 0)) {
+    return c.json({ success: false, error: "price_pence must be a non-negative integer (pence)" }, 400);
+  }
 
   await updateService(c.env.DB, serviceId, body);
   const updated = await getServiceById(c.env.DB, serviceId);

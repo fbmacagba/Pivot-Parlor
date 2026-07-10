@@ -4,12 +4,13 @@ import { json } from "@remix-run/cloudflare";
 import { TrendingUp, PoundSterling, BarChart2, Users } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
 
-interface Summary { booking_count: number; gross: number; commission: number }
-interface ByStaff  { staff_id: string; display_name: string; booking_count: number; gross: number; commission: number }
-interface ByService{ service_id: string; service_name: string; booking_count: number; gross: number }
-interface Daily    { booking_date: string; booking_count: number; gross: number; commission: number }
+interface Summary { booking_count: number; gross_pence: number; commission_pence: number }
+interface ByStaff  { staff_id: string; display_name: string; booking_count: number; gross_pence: number; commission_pence: number }
+interface ByService{ service_id: string; service_name: string; booking_count: number; gross_pence: number }
+interface Daily    { booking_date: string; booking_count: number; gross_pence: number; commission_pence: number }
 
 interface RevenueData {
   year: number; month: number;
@@ -51,8 +52,8 @@ export default function AdminRevenue() {
   const { data, year, month } = useLoaderData<typeof loader>();
   const now = new Date();
 
-  const s = data?.summary ?? { booking_count: 0, gross: 0, commission: 0 };
-  const net = s.gross - s.commission;
+  const s = data?.summary ?? { booking_count: 0, gross_pence: 0, commission_pence: 0 };
+  const net_pence = s.gross_pence - s.commission_pence;
 
   // Build month selector options — current month back 12 months
   const monthOptions: { year: number; month: number; label: string }[] = [];
@@ -63,7 +64,7 @@ export default function AdminRevenue() {
 
   // Chart: max gross for bar scale
   const daily = data?.daily ?? [];
-  const maxGross = Math.max(...daily.map(d => d.gross), 1);
+  const maxGross = Math.max(...daily.map(d => d.gross_pence), 1);
 
   return (
     <div className="space-y-8">
@@ -94,9 +95,9 @@ export default function AdminRevenue() {
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Gross bookings"    value={`£${s.gross.toFixed(2)}`}      icon={TrendingUp} />
-        <StatCard label="Net earnings"      value={`£${net.toFixed(2)}`}           icon={PoundSterling} />
-        <StatCard label="Platform commission" value={`£${s.commission.toFixed(2)}`} icon={BarChart2} />
+        <StatCard label="Gross bookings"    value={formatPence(s.gross_pence)}      icon={TrendingUp} />
+        <StatCard label="Net earnings"      value={formatPence(net_pence)}           icon={PoundSterling} />
+        <StatCard label="Platform commission" value={formatPence(s.commission_pence)} icon={BarChart2} />
         <StatCard label="Completed bookings"  value={s.booking_count}              icon={Users} />
       </div>
 
@@ -106,19 +107,19 @@ export default function AdminRevenue() {
           <h2 className="font-heading text-base font-semibold text-white mb-4">Daily revenue — {MONTHS[month - 1]}</h2>
           <div className="flex items-end gap-1 h-32">
             {daily.map(d => {
-              const pct = (d.gross / maxGross) * 100;
+              const pct = (d.gross_pence / maxGross) * 100;
               const day = d.booking_date.slice(8);
               return (
                 <div key={d.booking_date} className="group relative flex flex-1 flex-col items-center gap-1">
                   <div
                     className="w-full rounded-t bg-gold/60 hover:bg-gold transition-colors"
                     style={{ height: `${Math.max(pct, 2)}%` }}
-                    title={`£${d.gross.toFixed(2)}`}
+                    title={formatPence(d.gross_pence)}
                   />
                   {/* Tooltip */}
                   <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col items-center">
                     <div className="rounded bg-dark-100 border border-white/15 px-2 py-1 text-xs text-white whitespace-nowrap shadow-lg">
-                      {day} {MONTHS[month - 1]}<br />£{d.gross.toFixed(2)} · {d.booking_count} bookings
+                      {day} {MONTHS[month - 1]}<br />{formatPence(d.gross_pence)} · {d.booking_count} bookings
                     </div>
                   </div>
                   {parseInt(day) % 5 === 0 && (
@@ -150,9 +151,9 @@ export default function AdminRevenue() {
                 <tr key={r.staff_id} className="hover:bg-white/[0.02]">
                   <td className="px-4 py-3 font-medium text-white">{r.display_name}</td>
                   <td className="px-4 py-3 text-white/60">{r.booking_count}</td>
-                  <td className="px-4 py-3 text-gold font-semibold">£{r.gross.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-white/50">£{r.commission.toFixed(2)}</td>
-                  <td className="px-4 py-3 text-white">£{(r.gross - r.commission).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-gold font-semibold">{formatPence(r.gross_pence)}</td>
+                  <td className="px-4 py-3 text-white/50">{formatPence(r.commission_pence)}</td>
+                  <td className="px-4 py-3 text-white">{formatPence(r.gross_pence - r.commission_pence)}</td>
                 </tr>
               ))}
             </tbody>
@@ -179,7 +180,7 @@ export default function AdminRevenue() {
                 <tr key={r.service_id} className="hover:bg-white/[0.02]">
                   <td className="px-4 py-3 font-medium text-white">{r.service_name}</td>
                   <td className="px-4 py-3 text-white/60">{r.booking_count}</td>
-                  <td className="px-4 py-3 text-gold font-semibold">£{r.gross.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-gold font-semibold">{formatPence(r.gross_pence)}</td>
                 </tr>
               ))}
             </tbody>

@@ -37,7 +37,7 @@ devRouter.get("/stats", async (c) => {
     c.env.DB
       .prepare(
         `SELECT COUNT(*) AS bookings_count,
-                COALESCE(SUM(commission), 0) AS commission_total
+                COALESCE(SUM(commission_pence), 0) AS commission_total_pence
          FROM bookings
          WHERE booking_date >= ? AND booking_date <= ?
            AND status = 'completed'`
@@ -46,7 +46,7 @@ devRouter.get("/stats", async (c) => {
         `${year}-${String(month).padStart(2, "0")}-01`,
         `${year}-${String(month).padStart(2, "0")}-31`
       )
-      .first<{ bookings_count: number; commission_total: number }>(),
+      .first<{ bookings_count: number; commission_total_pence: number }>(),
     c.env.DB
       .prepare("SELECT COUNT(*) AS total FROM contacts WHERE onboarded_at IS NULL")
       .first<{ total: number }>(),
@@ -57,7 +57,7 @@ devRouter.get("/stats", async (c) => {
     data: {
       total_shops: shopRow?.total ?? 0,
       bookings_this_month: bookingRow?.bookings_count ?? 0,
-      platform_commission: bookingRow?.commission_total ?? 0,
+      platform_commission_pence: bookingRow?.commission_total_pence ?? 0,
       pending_enquiries: enquiryRow?.total ?? 0,
     },
   });
@@ -81,11 +81,11 @@ devRouter.get("/revenue", async (c) => {
   const totals = rows.reduce(
     (acc, r) => {
       acc.total_bookings += r.booking_count;
-      acc.total_gross += r.gross;
-      acc.total_commission += r.commission;
+      acc.total_gross_pence += r.gross_pence;
+      acc.total_commission_pence += r.commission_pence;
       return acc;
     },
-    { total_bookings: 0, total_gross: 0, total_commission: 0 }
+    { total_bookings: 0, total_gross_pence: 0, total_commission_pence: 0 }
   );
 
   return c.json({
@@ -127,12 +127,12 @@ shopStatsRouter.get("/", async (c) => {
     c.env.DB
       .prepare(
         `SELECT COUNT(*) AS bookings_count,
-                COALESCE(SUM(CASE WHEN status = 'completed' THEN amount ELSE 0 END), 0) AS revenue
+                COALESCE(SUM(CASE WHEN status = 'completed' THEN amount_pence ELSE 0 END), 0) AS revenue_pence
          FROM bookings
          WHERE shop_id = ? AND booking_date = ?`
       )
       .bind(shopId, today)
-      .first<{ bookings_count: number; revenue: number }>(),
+      .first<{ bookings_count: number; revenue_pence: number }>(),
 
     // "Active staff" = staff with at least one booking today OR a schedule entry for today's DOW
     c.env.DB
@@ -158,7 +158,7 @@ shopStatsRouter.get("/", async (c) => {
     data: {
       date: today,
       todays_bookings: todayRow?.bookings_count ?? 0,
-      todays_revenue: todayRow?.revenue ?? 0,
+      todays_revenue_pence: todayRow?.revenue_pence ?? 0,
       active_staff: activeStaffRow?.active ?? 0,
       waitlist_count: waitlistRow?.total ?? 0,
     },
@@ -203,23 +203,23 @@ shopRevenueRouter.get("/", async (c) => {
       .prepare(
         `SELECT st.id AS staff_id, st.display_name,
                 COUNT(b.id) AS booking_count,
-                COALESCE(SUM(b.amount), 0) AS gross,
-                COALESCE(SUM(b.commission), 0) AS commission
+                COALESCE(SUM(b.amount_pence), 0) AS gross_pence,
+                COALESCE(SUM(b.commission_pence), 0) AS commission_pence
          FROM staff st
          LEFT JOIN bookings b ON b.staff_id = st.id
            AND b.shop_id = ? AND b.booking_date >= ? AND b.booking_date <= ?
            AND b.status = 'completed'
          WHERE st.shop_id = ? AND st.is_active = 1
          GROUP BY st.id
-         ORDER BY gross DESC`
+         ORDER BY gross_pence DESC`
       )
       .bind(shopId, from, to, shopId)
       .all<{
         staff_id: string;
         display_name: string;
         booking_count: number;
-        gross: number;
-        commission: number;
+        gross_pence: number;
+        commission_pence: number;
       }>(),
 
     // Per-service breakdown
@@ -227,21 +227,21 @@ shopRevenueRouter.get("/", async (c) => {
       .prepare(
         `SELECT sv.id AS service_id, sv.name AS service_name,
                 COUNT(b.id) AS booking_count,
-                COALESCE(SUM(b.amount), 0) AS gross
+                COALESCE(SUM(b.amount_pence), 0) AS gross_pence
          FROM services sv
          LEFT JOIN bookings b ON b.service_id = sv.id
            AND b.shop_id = ? AND b.booking_date >= ? AND b.booking_date <= ?
            AND b.status = 'completed'
          WHERE sv.shop_id = ? AND sv.is_active = 1
          GROUP BY sv.id
-         ORDER BY gross DESC`
+         ORDER BY gross_pence DESC`
       )
       .bind(shopId, from, to, shopId)
       .all<{
         service_id: string;
         service_name: string;
         booking_count: number;
-        gross: number;
+        gross_pence: number;
       }>(),
 
     // Daily totals for chart (all days in month)
@@ -249,8 +249,8 @@ shopRevenueRouter.get("/", async (c) => {
       .prepare(
         `SELECT booking_date,
                 COUNT(*) AS booking_count,
-                COALESCE(SUM(amount), 0) AS gross,
-                COALESCE(SUM(commission), 0) AS commission
+                COALESCE(SUM(amount_pence), 0) AS gross_pence,
+                COALESCE(SUM(commission_pence), 0) AS commission_pence
          FROM bookings
          WHERE shop_id = ? AND booking_date >= ? AND booking_date <= ?
            AND status = 'completed'
@@ -261,8 +261,8 @@ shopRevenueRouter.get("/", async (c) => {
       .all<{
         booking_date: string;
         booking_count: number;
-        gross: number;
-        commission: number;
+        gross_pence: number;
+        commission_pence: number;
       }>(),
   ]);
 
@@ -326,7 +326,7 @@ staffMeRouter.get("/today", async (c) => {
       `SELECT b.id, b.booking_date, b.start_time, b.end_time, b.status, b.notes,
               b.customer_name,
               sv.name AS service_name, sv.duration_min,
-              sv.price AS amount
+              sv.price_pence AS amount_pence
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        WHERE b.staff_id = ? AND b.booking_date = ?
@@ -344,7 +344,7 @@ staffMeRouter.get("/today", async (c) => {
       customer_name: string;
       service_name: string;
       duration_min: number;
-      amount: number;
+      amount_pence: number;
     }>();
 
   return c.json({ success: true, data: results });
@@ -420,7 +420,7 @@ staffMeRouter.get("/bookings/:bookingId", async (c) => {
     .prepare(
       `SELECT b.id, b.booking_date, b.start_time, b.end_time, b.status, b.notes,
               b.customer_name, b.customer_email, b.customer_phone,
-              sv.name AS service_name, sv.duration_min, sv.price AS amount
+              sv.name AS service_name, sv.duration_min, sv.price_pence AS amount_pence
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        WHERE b.id = ? AND b.staff_id = ?
@@ -439,7 +439,7 @@ staffMeRouter.get("/bookings/:bookingId", async (c) => {
       customer_phone: string | null;
       service_name: string;
       duration_min: number;
-      amount: number;
+      amount_pence: number;
     }>();
 
   if (!booking) {
@@ -622,7 +622,7 @@ meRouter.get("/bookings", async (c) => {
     c.env.DB
       .prepare(
         `SELECT b.id, b.booking_date, b.start_time, b.end_time, b.status, b.notes,
-                b.amount, b.customer_name,
+                b.amount_pence, b.customer_name,
                 sv.name AS service_name, sv.duration_min,
                 st.display_name AS staff_name,
                 sh.name AS shop_name, sh.slug AS shop_slug
@@ -643,7 +643,7 @@ meRouter.get("/bookings", async (c) => {
         end_time: string;
         status: string;
         notes: string | null;
-        amount: number;
+        amount_pence: number;
         customer_name: string;
         service_name: string;
         duration_min: number;
@@ -655,7 +655,7 @@ meRouter.get("/bookings", async (c) => {
     c.env.DB
       .prepare(
         `SELECT b.id, b.booking_date, b.start_time, b.end_time, b.status,
-                b.amount, b.customer_name,
+                b.amount_pence, b.customer_name,
                 sv.name AS service_name,
                 st.display_name AS staff_name,
                 sh.name AS shop_name, sh.slug AS shop_slug
@@ -674,7 +674,7 @@ meRouter.get("/bookings", async (c) => {
         start_time: string;
         end_time: string;
         status: string;
-        amount: number;
+        amount_pence: number;
         customer_name: string;
         service_name: string;
         staff_name: string;
@@ -894,13 +894,13 @@ shopAnalyticsRouter.get("/", async (c) => {
     c.env.DB.prepare(
       `SELECT strftime('%Y-%m', booking_date) AS month,
               COUNT(*) AS booking_count,
-              COALESCE(SUM(amount), 0) AS gross
+              COALESCE(SUM(amount_pence), 0) AS gross_pence
        FROM bookings
        WHERE shop_id = ? AND booking_date >= ? AND booking_date <= ?
          AND status = 'completed'
        GROUP BY month
        ORDER BY month ASC`
-    ).bind(shopId, fromDate, toDate).all<{ month: string; booking_count: number; gross: number }>(),
+    ).bind(shopId, fromDate, toDate).all<{ month: string; booking_count: number; gross_pence: number }>(),
 
     // Peak hours (0-23) — all time
     c.env.DB.prepare(
@@ -934,39 +934,39 @@ shopAnalyticsRouter.get("/", async (c) => {
     c.env.DB.prepare(
       `SELECT sv.name AS service_name,
               COUNT(b.id) AS booking_count,
-              COALESCE(SUM(b.amount), 0) AS gross
+              COALESCE(SUM(b.amount_pence), 0) AS gross_pence
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        WHERE b.shop_id = ? AND b.booking_date >= ? AND b.status = 'completed'
        GROUP BY b.service_id
        ORDER BY booking_count DESC
        LIMIT 5`
-    ).bind(shopId, fromDate).all<{ service_name: string; booking_count: number; gross: number }>(),
+    ).bind(shopId, fromDate).all<{ service_name: string; booking_count: number; gross_pence: number }>(),
 
     // Top staff by booking count (last 12 months)
     c.env.DB.prepare(
       `SELECT st.display_name,
               COUNT(b.id) AS booking_count,
-              COALESCE(SUM(b.amount), 0) AS gross
+              COALESCE(SUM(b.amount_pence), 0) AS gross_pence
        FROM bookings b
        JOIN staff st ON st.id = b.staff_id
        WHERE b.shop_id = ? AND b.booking_date >= ? AND b.status = 'completed'
        GROUP BY b.staff_id
        ORDER BY booking_count DESC
        LIMIT 5`
-    ).bind(shopId, fromDate).all<{ display_name: string; booking_count: number; gross: number }>(),
+    ).bind(shopId, fromDate).all<{ display_name: string; booking_count: number; gross_pence: number }>(),
 
     // All-time totals
     c.env.DB.prepare(
       `SELECT COUNT(*) AS total_bookings,
-              COALESCE(SUM(CASE WHEN status='completed' THEN amount ELSE 0 END), 0) AS total_revenue,
-              COALESCE(SUM(CASE WHEN status='completed' THEN commission ELSE 0 END), 0) AS total_commission,
+              COALESCE(SUM(CASE WHEN status='completed' THEN amount_pence ELSE 0 END), 0) AS total_revenue_pence,
+              COALESCE(SUM(CASE WHEN status='completed' THEN commission_pence ELSE 0 END), 0) AS total_commission_pence,
               COUNT(DISTINCT customer_email) AS unique_customers
        FROM bookings WHERE shop_id = ?`
     ).bind(shopId).first<{
       total_bookings: number;
-      total_revenue: number;
-      total_commission: number;
+      total_revenue_pence: number;
+      total_commission_pence: number;
       unique_customers: number;
     }>(),
   ]);

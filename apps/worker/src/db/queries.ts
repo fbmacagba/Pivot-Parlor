@@ -46,7 +46,7 @@ export interface DBService {
   shop_id: string;
   name: string;
   duration_min: number;
-  price: number;
+  price_pence: number;
   category: string | null;
   is_active: number;
 }
@@ -84,8 +84,8 @@ export interface DBBooking {
   end_time: string;
   status: string;
   notes: string | null;
-  amount: number;
-  commission: number;
+  amount_pence: number;
+  commission_pence: number;
   reminder_sent: number;
   created_at: string;
 }
@@ -156,7 +156,7 @@ export async function getAllShops(db: D1Database) {
     .prepare(
       `SELECT s.*,
               COUNT(DISTINCT b.id)                                     AS booking_count,
-              COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.commission ELSE 0 END), 0) AS commission_total,
+              COALESCE(SUM(CASE WHEN b.status = 'completed' THEN b.commission_pence ELSE 0 END), 0) AS commission_total_pence,
               (SELECT 1 FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS has_site,
               (SELECT ss.website_status FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS website_status,
               (SELECT ss.hero_image_url FROM shop_sites ss WHERE ss.shop_id = s.id AND ss.status = 'active' LIMIT 1) AS hero_image_url,
@@ -169,7 +169,7 @@ export async function getAllShops(db: D1Database) {
     .all<
       DBShop & {
         booking_count: number;
-        commission_total: number;
+        commission_total_pence: number;
         has_site: number | null;
         website_status: string | null;
         hero_image_url: string | null;
@@ -334,8 +334,8 @@ export async function ensureE2eBookableShop(db: D1Database): Promise<void> {
 
   await db
     .prepare(
-      `INSERT OR IGNORE INTO services (id, shop_id, name, duration_min, price, is_active)
-       VALUES (?, ?, 'E2E Haircut', 30, 25, 1)`
+      `INSERT OR IGNORE INTO services (id, shop_id, name, duration_min, price_pence, is_active)
+       VALUES (?, ?, 'E2E Haircut', 30, 2500, 1)`
     )
     .bind(E2E_BOOKABLE_SERVICE_ID, E2E_BOOKABLE_SHOP_ID)
     .run();
@@ -663,26 +663,26 @@ export function getServiceById(db: D1Database, id: string) {
 
 export function createService(
   db: D1Database,
-  svc: { id: string; shop_id: string; name: string; duration_min: number; price: number; category?: string | null }
+  svc: { id: string; shop_id: string; name: string; duration_min: number; price_pence: number; category?: string | null }
 ) {
   return db
     .prepare(
-      "INSERT INTO services (id, shop_id, name, duration_min, price, category) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO services (id, shop_id, name, duration_min, price_pence, category) VALUES (?, ?, ?, ?, ?, ?)"
     )
-    .bind(svc.id, svc.shop_id, svc.name, svc.duration_min, svc.price, svc.category ?? null)
+    .bind(svc.id, svc.shop_id, svc.name, svc.duration_min, svc.price_pence, svc.category ?? null)
     .run();
 }
 
 export function updateService(
   db: D1Database,
   id: string,
-  fields: { name?: string; duration_min?: number; price?: number; category?: string | null; is_active?: number }
+  fields: { name?: string; duration_min?: number; price_pence?: number; category?: string | null; is_active?: number }
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
   if (fields.duration_min !== undefined) { sets.push("duration_min = ?"); vals.push(fields.duration_min); }
-  if (fields.price !== undefined) { sets.push("price = ?"); vals.push(fields.price); }
+  if (fields.price_pence !== undefined) { sets.push("price_pence = ?"); vals.push(fields.price_pence); }
   if (fields.category !== undefined) { sets.push("category = ?"); vals.push(fields.category); }
   if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
   if (sets.length === 0) return Promise.resolve();
@@ -930,15 +930,15 @@ export async function getRevenueByShop(
   const row = await db
     .prepare(
       `SELECT COUNT(*) AS booking_count,
-              COALESCE(SUM(amount), 0) AS gross,
-              COALESCE(SUM(commission), 0) AS commission
+              COALESCE(SUM(amount_pence), 0) AS gross_pence,
+              COALESCE(SUM(commission_pence), 0) AS commission_pence
        FROM bookings
        WHERE shop_id = ? AND booking_date >= ? AND booking_date <= ?
          AND status = 'completed'`
     )
     .bind(shopId, from, to)
-    .first<{ booking_count: number; gross: number; commission: number }>();
-  return row ?? { booking_count: 0, gross: 0, commission: 0 };
+    .first<{ booking_count: number; gross_pence: number; commission_pence: number }>();
+  return row ?? { booking_count: 0, gross_pence: 0, commission_pence: 0 };
 }
 
 export async function getPlatformRevenueByMonth(db: D1Database, year: number, month: number) {
@@ -948,8 +948,8 @@ export async function getPlatformRevenueByMonth(db: D1Database, year: number, mo
     .prepare(
       `SELECT s.id AS shop_id, s.name AS shop_name,
               COUNT(b.id) AS booking_count,
-              COALESCE(SUM(b.amount), 0) AS gross,
-              COALESCE(SUM(b.commission), 0) AS commission
+              COALESCE(SUM(b.amount_pence), 0) AS gross_pence,
+              COALESCE(SUM(b.commission_pence), 0) AS commission_pence
        FROM shops s
        LEFT JOIN bookings b ON b.shop_id = s.id
          AND b.booking_date >= ? AND b.booking_date <= ?
@@ -962,8 +962,8 @@ export async function getPlatformRevenueByMonth(db: D1Database, year: number, mo
       shop_id: string;
       shop_name: string;
       booking_count: number;
-      gross: number;
-      commission: number;
+      gross_pence: number;
+      commission_pence: number;
     }>();
   return results;
 }
@@ -974,7 +974,7 @@ export async function getBookingsDueForReminder(db: D1Database) {
   const { results } = await db
     .prepare(
       `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
-              b.start_time, b.booking_date, b.notes, b.amount,
+              b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
               sh.name AS shop_name, sh.slug AS shop_slug
@@ -994,7 +994,7 @@ export async function getBookingsDueForReminder(db: D1Database) {
       start_time: string;
       booking_date: string;
       notes: string | null;
-      amount: number;
+      amount_pence: number;
       service_name: string;
       duration_min: number;
       staff_name: string;

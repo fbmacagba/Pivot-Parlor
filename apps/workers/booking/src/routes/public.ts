@@ -2,10 +2,11 @@
  * Public (unauthenticated) booking surface — WS-1.
  *
  * The canonical customer booking path. The main worker proxies its public
- * URLs here over a service binding, so the request/response contracts must
- * stay byte-compatible with the routes this replaces:
+ * URLs here over a service binding:
  *   GET  /public/shops/:shopId/slots   ← /api/shops/:shopId/slots
  *   POST /public/bookings              ← /api/bookings
+ * WS-4 renamed the money response fields to amount_pence/commission_pence
+ * (integer pence); the web booking UI was updated in the same change.
  */
 import { Hono } from "hono";
 import type { Env } from "../types.js";
@@ -17,7 +18,7 @@ import { getAvailableSlots } from "../services/slots.js";
 import { sendBookingConfirmation } from "../services/email.js";
 import { reportError } from "../services/report-error.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
-import { addMinutes, reminderDelaySeconds } from "@repo/utils";
+import { addMinutes, calculateCommissionPence, reminderDelaySeconds } from "@repo/utils";
 
 function toDateString(iso: string): string {
   return iso.slice(0, 10); // "YYYY-MM-DD"
@@ -157,7 +158,7 @@ publicRoutes.post(
     return c.json({ success: false, error: "This time slot is no longer available" }, 409);
   }
 
-  const commission = Math.round(service.price * shop.commission_rate * 100) / 100;
+  const { commission_pence } = calculateCommissionPence(service.price_pence, shop.commission_rate);
   const id = crypto.randomUUID();
 
   try {
@@ -173,8 +174,8 @@ publicRoutes.post(
       start_time: startISO,
       end_time: endISO,
       notes: body.notes ?? null,
-      amount: service.price,
-      commission,
+      amount_pence: service.price_pence,
+      commission_pence,
     });
   } catch (err) {
     // idx_bookings_active_slot (migration 018): a concurrent request won the
@@ -202,7 +203,7 @@ publicRoutes.post(
         booking_date: bookingDate,
         start_time: startISO,
         duration_min: service.duration_min,
-        amount: service.price,
+        amount_pence: service.price_pence,
         booking_id: id,
       });
     }
@@ -247,8 +248,8 @@ publicRoutes.post(
       start_time: startISO,
       end_time: endISO,
       status: "pending",
-      amount: service.price,
-      commission,
+      amount_pence: service.price_pence,
+      commission_pence,
     },
   }, 201);
 });

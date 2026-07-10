@@ -138,8 +138,8 @@ describe("public booking (/public/bookings)", () => {
       booking_date: FUTURE_DATE,
       start_time: slot.start_time,
       end_time: slot.end_time,
-      amount: 25,
-      commission: 2.5,
+      amount_pence: 2500,
+      commission_pence: 250,
     });
 
     const res = await dispatch("POST", "/public/bookings", {
@@ -179,7 +179,7 @@ describe("public booking (/public/bookings)", () => {
       .first<Record<string, unknown>>();
     expect(row).toBeTruthy();
     expect(row!.status).toBe("pending");
-    expect(row!.amount).toBe(25);
+    expect(row!.amount_pence).toBe(2500);
     expect(Object.keys(row!)).not.toContain("deposit_amount");
     expect(Object.keys(row!)).not.toContain("stripe_payment_intent_id");
   });

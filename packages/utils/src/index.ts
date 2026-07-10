@@ -7,13 +7,66 @@ export function slugify(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Format a price (cents) to a locale currency string */
-export function formatPrice(cents: number, currency = "USD", locale = "en-US"): string {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-  }).format(cents / 100);
+// ─── Money (WS-4) ─────────────────────────────────────────────────────────────
+// All money is stored and computed as INTEGER pence. Pounds exist only at two
+// boundaries: form input (parsePoundsToPence) and display/presentation
+// (formatPence / penceToPoundsNumber). Never do arithmetic on pounds values.
+
+export interface CommissionBreakdownPence {
+  amount_pence: number;
+  commission_pence: number;
+  shop_revenue_pence: number;
+  commission_rate: number;
+}
+
+/**
+ * The single commission rounding path (WS-4). `commissionRate` is a decimal
+ * rate (0.10 = 10%). Commission rounds to the nearest penny; shop revenue is
+ * the exact integer remainder, so commission + shop_revenue === amount.
+ */
+export function calculateCommissionPence(
+  amountPence: number,
+  commissionRate: number
+): CommissionBreakdownPence {
+  if (!Number.isInteger(amountPence)) {
+    throw new Error(`amountPence must be an integer, got ${amountPence}`);
+  }
+  const commission_pence = Math.round(amountPence * commissionRate);
+  return {
+    amount_pence: amountPence,
+    commission_pence,
+    shop_revenue_pence: amountPence - commission_pence,
+    commission_rate: commissionRate,
+  };
+}
+
+/** Display boundary: 2550 -> "£25.50". Always two decimals. */
+export function formatPence(pence: number): string {
+  const sign = pence < 0 ? "-" : "";
+  const abs = Math.abs(Math.round(pence));
+  return `${sign}£${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+}
+
+/** Presentation boundary (AI copy, price_gbp fields): 2550 -> 25.5. Not for arithmetic. */
+export function penceToPoundsNumber(pence: number): number {
+  return Math.round(pence) / 100;
+}
+
+/** One-off conversion boundary: 25.5 -> 2550. Not for arithmetic chains. */
+export function poundsToPence(pounds: number): number {
+  return Math.round(pounds * 100);
+}
+
+/**
+ * Form-input boundary: "25", "25.5", "£25.50", " 25.50 " -> pence integer.
+ * Returns null for anything that is not a plain non-negative pounds amount
+ * with at most two decimal places.
+ */
+export function parsePoundsToPence(input: string): number | null {
+  const cleaned = input.trim().replace(/^£/, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  const [whole, frac = ""] = cleaned.split(".");
+  return Number(whole) * 100 + Number((frac + "00").slice(0, 2));
 }
 
 /** Format a date-time string to a readable locale string */
@@ -31,11 +84,6 @@ export function formatDuration(minutes: number): string {
   if (h === 0) return `${m}min`;
   if (m === 0) return `${h}hr`;
   return `${h}hr ${m}min`;
-}
-
-/** Calculate platform commission */
-export function calcCommission(amount: number, ratePercent: number): number {
-  return Math.round(amount * (ratePercent / 100));
 }
 
 /** Add minutes to a Date and return a new Date */

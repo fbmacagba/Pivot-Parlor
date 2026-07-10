@@ -13,7 +13,7 @@ let serviceId: string;
 async function insertBooking(start: string, end: string, status = "confirmed") {
   await env.DB.prepare(
     `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-       booking_date, start_time, end_time, status, amount, commission)
+       booking_date, start_time, end_time, status, amount_pence, commission_pence)
      VALUES (?, ?, ?, ?, 'C', 'c@test.local', ?, ?, ?, ?, 10, 1)`
   )
     .bind(crypto.randomUUID(), shopId, staffId, serviceId, MONDAY, start, end, status)
@@ -26,7 +26,7 @@ beforeAll(async () => {
   await seedScheduleDay(shopId, staffId);
   serviceId = crypto.randomUUID();
   await env.DB.prepare(
-    "INSERT INTO services (id, shop_id, name, duration_min, price) VALUES (?, ?, 'Cut', 30, 25)"
+    "INSERT INTO services (id, shop_id, name, duration_min, price_pence) VALUES (?, ?, 'Cut', 30, 2500)"
   )
     .bind(serviceId, shopId)
     .run();
@@ -136,7 +136,7 @@ describe("getAvailableSlots for a non-UTC shop (booking_date straddles UTC midni
       .run();
     nyService = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO services (id, shop_id, name, duration_min, price) VALUES (?, ?, 'Cut', 30, 25)"
+      "INSERT INTO services (id, shop_id, name, duration_min, price_pence) VALUES (?, ?, 'Cut', 30, 2500)"
     )
       .bind(nyService, nyShop)
       .run();
@@ -154,7 +154,7 @@ describe("getAvailableSlots for a non-UTC shop (booking_date straddles UTC midni
     // date '2027-07-06', NOT the local schedule date '2027-07-05'.
     await env.DB.prepare(
       `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-         booking_date, start_time, end_time, status, amount, commission)
+         booking_date, start_time, end_time, status, amount_pence, commission_pence)
        VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2027-07-06',
                '2027-07-06T00:30:00.000Z', '2027-07-06T01:00:00.000Z', 'confirmed', 25, 2.5)`
     )

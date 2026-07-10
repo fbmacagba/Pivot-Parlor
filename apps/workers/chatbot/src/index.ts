@@ -325,15 +325,15 @@ chat.post("/:shopSlug/session", async (c) => {
         }>(),
       c.env.DB
         .prepare(
-          "SELECT name, price, category FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
+          "SELECT name, price_pence, category FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
         )
         .bind(shop.id)
-        .all<{ name: string; price: number; category: string | null }>(),
+        .all<{ name: string; price_pence: number; category: string | null }>(),
     ]);
 
     // Separate treatments from products
-    const allServices: { name: string; price: number; category: string | null }[] =
-      (servicesRes.results ?? []) as { name: string; price: number; category: string | null }[];
+    const allServices: { name: string; price_pence: number; category: string | null }[] =
+      (servicesRes.results ?? []) as { name: string; price_pence: number; category: string | null }[];
     const treatmentServices = allServices.filter(s => !looksLikeProduct(s.name, s.category));
     const hasProducts = allServices.some(s => looksLikeProduct(s.name, s.category));
 

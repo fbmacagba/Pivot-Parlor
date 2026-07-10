@@ -19,7 +19,7 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
   const booking = await db
     .prepare(
       `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
-              b.start_time, b.booking_date, b.notes, b.amount,
+              b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
               sh.name AS shop_name, sh.slug AS shop_slug
@@ -39,7 +39,7 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
       start_time: string;
       booking_date: string;
       notes: string | null;
-      amount: number;
+      amount_pence: number;
       service_name: string;
       duration_min: number;
       staff_name: string;
@@ -62,7 +62,7 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
         booking_date:   booking.booking_date,
         start_time:     booking.start_time,
         duration_min:   booking.duration_min,
-        amount:         booking.amount,
+        amount_pence:   booking.amount_pence,
         booking_id:     booking.id,
       });
     } catch (err) {
@@ -100,7 +100,7 @@ export async function sendPendingReminders(db: D1Database, resendApiKey?: string
             booking_date:   b.booking_date,
             start_time:     b.start_time,
             duration_min:   b.duration_min,
-            amount:         b.amount,
+            amount_pence:   b.amount_pence,
             booking_id:     b.id,
           });
         } catch (err) {

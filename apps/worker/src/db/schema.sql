@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS services (
   shop_id      TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
   name         TEXT NOT NULL,
   duration_min INTEGER NOT NULL DEFAULT 30,
-  price        REAL NOT NULL,
+  price_pence  INTEGER NOT NULL DEFAULT 0,
   category     TEXT,
   is_active    INTEGER NOT NULL DEFAULT 1
 );
@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS bookings (
   status          TEXT NOT NULL DEFAULT 'pending'
                   CHECK(status IN ('pending','confirmed','in_progress','completed','cancelled','no_show')),
   notes           TEXT,
-  amount          REAL NOT NULL,
-  commission      REAL NOT NULL,
+  amount_pence     INTEGER NOT NULL DEFAULT 0,
+  commission_pence INTEGER NOT NULL DEFAULT 0,
   reminder_sent   INTEGER NOT NULL DEFAULT 0,
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

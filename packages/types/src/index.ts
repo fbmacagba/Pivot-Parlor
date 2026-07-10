@@ -66,7 +66,8 @@ export interface Service {
   name: string;
   description: string;
   durationMinutes: number;
-  price: number;
+  /** Integer pence (WS-4). Format for display with formatPence from @repo/utils. */
+  price_pence: number;
   category: string;
   isActive: boolean;
 }
@@ -113,7 +114,8 @@ export interface Booking {
   status: BookingStatus;
   startTime: string;
   endTime: string;
-  price: number;
+  /** Integer pence (WS-4). */
+  price_pence: number;
   notes?: string;
   createdAt: string;
   updatedAt: string;

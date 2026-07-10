@@ -10,8 +10,8 @@ export interface Shop {
   owner_name: string;
   owner_email: string;
   bookings_count?: number;
-  revenue?: number;
-  commission?: number;
+  revenue_pence?: number;
+  commission_pence?: number;
   ai_model?: string;
   is_active: number;
   status: string;

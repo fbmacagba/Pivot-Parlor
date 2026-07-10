@@ -3,6 +3,8 @@
 // owns the booking lifecycle, so it sends the confirmation. Reminder, review
 // and EOD emails stay with the main worker (its queue consumer and crons).
 
+import { formatPence } from "@repo/utils";
+
 const RESEND_API = "https://api.resend.com/emails";
 const FROM = "Pivot Parlor <bookings@pivotparlor.com>";
 
@@ -18,7 +20,7 @@ export interface BookingEmailData {
   booking_date: string;   // "YYYY-MM-DD"
   start_time: string;     // ISO string
   duration_min: number;
-  amount: number;         // pounds
+  amount_pence: number;   // integer pence (WS-4)
   booking_id: string;
 }
 
@@ -116,7 +118,7 @@ function confirmationHtml(d: BookingEmailData): string {
       <div class="detail-row"><span class="detail-label">Service</span><span class="detail-value">${d.service_name}</span></div>
       <div class="detail-row"><span class="detail-label">With</span><span class="detail-value">${d.staff_name}</span></div>
       <div class="detail-row"><span class="detail-label">Location</span><span class="detail-value">${d.shop_name}</span></div>
-      <div class="detail-row"><span class="detail-label">Total</span><span class="detail-value amount">£${d.amount.toFixed(2)}</span></div>
+      <div class="detail-row"><span class="detail-label">Total</span><span class="detail-value amount">${formatPence(d.amount_pence)}</span></div>
       <p style="font-size:13px;color:#6b7280;margin-top:20px;">
         Need to cancel or reschedule? Reply to this email or contact the shop directly.
       </p>

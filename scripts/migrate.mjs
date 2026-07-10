@@ -40,6 +40,15 @@ const dbName = dbFlag !== -1 ? args[dbFlag + 1] : "pivot-parlor-db";
 
 const BENIGN = /duplicate column name|already exists/i;
 
+// A migration file may declare (WS-4 pence conversion pattern):
+//   -- replay-guard: skip-if-column-absent <table>.<column>
+// If the named column does not exist, the file's work is already reflected in
+// the schema (fresh replay from the snapshot, or the file already ran) and it
+// is recorded as applied WITHOUT executing. This lets a data migration
+// reference columns it later drops while the chain stays replayable.
+// A missing table also skips (nothing to convert).
+const GUARD_RE = /^--\s*replay-guard:\s*skip-if-column-absent\s+([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\s*$/m;
+
 // Invoke wrangler's JS entry directly with node — avoids npx/.cmd shell
 // quoting differences on Windows that split SQL into separate args.
 const wranglerBin = path.join(repoRoot, "node_modules", "wrangler", "bin", "wrangler.js");
@@ -145,8 +154,21 @@ if (appliedSet.size === 0) {
 console.log(`Pending: ${pending.map((m) => m.name).join(", ")}`);
 if (dryRun) process.exit(0);
 
+function guardSaysSkip(sql) {
+  const m = sql.match(GUARD_RE);
+  if (!m) return false;
+  const [, table, column] = m;
+  const cols = wranglerJson(`PRAGMA table_info(${table})`);
+  return !cols.some((c) => c.name === column);
+}
+
 for (const m of pending) {
-  applyFile(m.name, m.sql());
+  const sql = m.sql();
+  if (guardSaysSkip(sql)) {
+    console.log(`  ↷ ${m.name} skipped by replay-guard (schema already at target shape)`);
+  } else {
+    applyFile(m.name, sql);
+  }
   wranglerJson(`INSERT INTO schema_migrations (name) VALUES ('${m.name}')`);
 }
 console.log(`Done — applied ${pending.length} migration(s).`);

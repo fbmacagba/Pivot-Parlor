@@ -14,7 +14,7 @@ interface TodayBooking {
   customer_name: string;
   service_name: string;
   duration_min: number;
-  amount: number;
+  amount_pence: number;
   notes?: string | null;
 }
 

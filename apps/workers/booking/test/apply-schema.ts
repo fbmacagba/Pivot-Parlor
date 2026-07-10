@@ -29,6 +29,18 @@ function statements(sql: string): string[] {
 
 const BENIGN = /duplicate column name|already exists/i;
 
+// "-- replay-guard: skip-if-column-absent <table>.<column>" — same semantics
+// as scripts/migrate.mjs: when the named column is gone the file's work is
+// already reflected in the snapshot, so the whole file is skipped.
+const GUARD_RE = /^--\s*replay-guard:\s*skip-if-column-absent\s+([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\s*$/m;
+
+async function guardSaysSkip(sql: string): Promise<boolean> {
+  const m = sql.match(GUARD_RE);
+  if (!m) return false;
+  const info = await env.DB.prepare(`PRAGMA table_info(${m[1]})`).all<{ name: string }>();
+  return !(info.results ?? []).some((row) => row.name === m[2]);
+}
+
 beforeAll(async () => {
   for (const stmt of statements(schemaSql)) {
     await env.DB.prepare(stmt).run();
@@ -36,6 +48,7 @@ beforeAll(async () => {
 
   const files = Object.keys(migrationModules).sort();
   for (const file of files) {
+    if (await guardSaysSkip(migrationModules[file]!)) continue;
     for (const stmt of statements(migrationModules[file]!)) {
       try {
         await env.DB.prepare(stmt).run();

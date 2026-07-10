@@ -51,7 +51,7 @@ export async function seedScheduleDay(shopId: string, staffId: string, dayOfWeek
 export async function seedService(shopId: string, durationMin = 30): Promise<string> {
   const id = uid("svc");
   await env.DB.prepare(
-    "INSERT INTO services (id, shop_id, name, duration_min, price, is_active) VALUES (?, ?, 'Cut', ?, 25, 1)"
+    "INSERT INTO services (id, shop_id, name, duration_min, price_pence, is_active) VALUES (?, ?, 'Cut', ?, 2500, 1)"
   )
     .bind(id, shopId, durationMin)
     .run();

@@ -18,7 +18,7 @@ export interface ServiceRow {
   shop_id: string;
   name: string;
   duration_min: number;
-  price: number;
+  price_pence: number;
   is_active: number;
 }
 
@@ -69,8 +69,8 @@ export function createBooking(db: D1Database, b: {
   start_time: string;
   end_time: string;
   notes?: string | null;
-  amount: number;
-  commission: number;
+  amount_pence: number;
+  commission_pence: number;
 }) {
   return db
     .prepare(
@@ -78,14 +78,14 @@ export function createBooking(db: D1Database, b: {
          (id, shop_id, staff_id, service_id,
           customer_name, customer_email, customer_phone,
           booking_date, start_time, end_time,
-          notes, amount, commission)
+          notes, amount_pence, commission_pence)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       b.id, b.shop_id, b.staff_id, b.service_id,
       b.customer_name, b.customer_email, b.customer_phone ?? null,
       b.booking_date, b.start_time, b.end_time,
-      b.notes ?? null, b.amount, b.commission
+      b.notes ?? null, b.amount_pence, b.commission_pence
     )
     .run();
 }

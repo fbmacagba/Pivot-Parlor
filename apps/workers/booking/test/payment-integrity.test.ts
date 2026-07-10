@@ -120,16 +120,16 @@ describe("checkout (POST /booking/shops/:shopId/bookings/:bookingId/checkout)", 
     const bookingId = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-        booking_date, start_time, end_time, status, amount, commission)
-       VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2099-01-01', '10:00', '10:30', 'confirmed', 25, 2.5)`
+        booking_date, start_time, end_time, status, amount_pence, commission_pence)
+       VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2099-01-01', '10:00', '10:30', 'confirmed', 2500, 250)`
     ).bind(bookingId, shop, staff, service).run();
     await env.DB.prepare(
-      `INSERT INTO bw_booking_state (booking_id, shop_id, deposit_amount, stripe_payment_intent_id, checked_in_at, updated_at)
-       VALUES (?, ?, 10, ?, datetime('now'), datetime('now'))`
+      `INSERT INTO bw_booking_state (booking_id, shop_id, deposit_amount_pence, stripe_payment_intent_id, checked_in_at, updated_at)
+       VALUES (?, ?, 1000, ?, datetime('now'), datetime('now'))`
     ).bind(bookingId, shop, piId).run();
     await env.DB.prepare(
-      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price, total_price, is_commissionable)
-       VALUES (?, ?, ?, 'service', ?, 'Cut', 1, 25, 25, 1)`
+      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
+       VALUES (?, ?, ?, 'service', ?, 'Cut', 1, 2500, 2500, 1)`
     ).bind(crypto.randomUUID(), bookingId, shop, service).run();
     return bookingId;
   }
@@ -217,16 +217,16 @@ describe("no-show deposit capture at day close", () => {
     const bookingId = crypto.randomUUID();
     await env.DB.prepare(
       `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-        booking_date, start_time, end_time, status, amount, commission)
-       VALUES (?, ?, ?, ?, 'Ghost', 'g@t.local', ?, '10:00', '10:30', 'confirmed', 25, 2.5)`
+        booking_date, start_time, end_time, status, amount_pence, commission_pence)
+       VALUES (?, ?, ?, ?, 'Ghost', 'g@t.local', ?, '10:00', '10:30', 'confirmed', 2500, 250)`
     ).bind(bookingId, shop, staff, service, today).run();
     await env.DB.prepare(
-      `INSERT INTO bw_booking_state (booking_id, shop_id, deposit_amount, stripe_payment_intent_id, updated_at)
-       VALUES (?, ?, 12.5, 'pi_ns_1', datetime('now'))`
+      `INSERT INTO bw_booking_state (booking_id, shop_id, deposit_amount_pence, stripe_payment_intent_id, updated_at)
+       VALUES (?, ?, 1250, 'pi_ns_1', datetime('now'))`
     ).bind(bookingId, shop).run();
     await env.DB.prepare(
-      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id)
-       VALUES (?, ?, ?, 'deposit', 12.5, 'pending', 'pi_ns_1')`
+      `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
+       VALUES (?, ?, ?, 'deposit', 1250, 'pending', 'pi_ns_1')`
     ).bind(crypto.randomUUID(), bookingId, shop).run();
 
     const res = await dispatch("POST", `/booking/shops/${shop}/close`, {

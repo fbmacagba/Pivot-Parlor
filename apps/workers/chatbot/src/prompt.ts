@@ -89,11 +89,11 @@ export async function loadShopContext(
 
   const servicesRes = await db
     .prepare(
-      "SELECT name, price, duration_min, category FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
+      "SELECT name, price_pence, duration_min, category FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY name ASC"
     )
     .bind(shopId)
     .all();
-  const serviceRows = d1Rows<{ name: string; price: number; duration_min: number; category: string | null }>(servicesRes);
+  const serviceRows = d1Rows<{ name: string; price_pence: number; duration_min: number; category: string | null }>(servicesRes);
 
   // Separate services from products
   const productRows = serviceRows.filter(
@@ -104,11 +104,11 @@ export async function loadShopContext(
   );
 
   const servicesLines = treatmentRows.map(
-    (s) => `- ${s.name}: £${Number(s.price).toFixed(2)}, ${s.duration_min} min`
+    (s) => `- ${s.name}: £${(Number(s.price_pence) / 100).toFixed(2)}, ${s.duration_min} min`
   );
 
   const productLines = productRows.map(
-    (s) => `- ${s.name}: £${Number(s.price).toFixed(2)} [product for sale]`
+    (s) => `- ${s.name}: £${(Number(s.price_pence) / 100).toFixed(2)} [product for sale]`
   );
 
   const allServicesLines = [...servicesLines, ...productLines];
@@ -237,12 +237,12 @@ export function welcomeMessage(
   promoActive: boolean,
   promoDiscountPercent: number,
   promoDiscountCode: string,
-  services: { name: string; price: number }[] = [],
+  services: { name: string; price_pence: number }[] = [],
   hasProducts = false
 ): string {
   const topServices = services.slice(0, 3);
   const serviceSnippet = topServices.length > 0
-    ? topServices.map(s => `${s.name} (£${Number(s.price).toFixed(0)})`).join(", ")
+    ? topServices.map(s => `${s.name} (£${Math.round(Number(s.price_pence) / 100)})`).join(", ")
     : "";
 
   const moreLine = services.length > 3

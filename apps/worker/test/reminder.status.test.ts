@@ -16,7 +16,7 @@ async function seedBooking(status: string): Promise<string> {
   const hh = String(slotCounter++).padStart(2, "0");
   await env.DB.prepare(
     `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
-       booking_date, start_time, end_time, status, amount, commission, reminder_sent)
+       booking_date, start_time, end_time, status, amount_pence, commission_pence, reminder_sent)
      VALUES (?, ?, ?, ?, 'Cust', 'cust@test.local', '2027-05-10',
              ?, ?, ?, 25, 2.5, 0)`
   )
@@ -37,7 +37,7 @@ beforeAll(async () => {
   staffId = await seedStaff(shopId);
   serviceId = crypto.randomUUID();
   await env.DB.prepare(
-    "INSERT INTO services (id, shop_id, name, duration_min, price) VALUES (?, ?, 'Cut', 30, 25)"
+    "INSERT INTO services (id, shop_id, name, duration_min, price_pence) VALUES (?, ?, 'Cut', 30, 2500)"
   )
     .bind(serviceId, shopId)
     .run();
