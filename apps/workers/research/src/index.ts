@@ -13,6 +13,9 @@ export interface Env {
   ENVIRONMENT: string;
 }
 
+/** Reasoning-effort level for models that support it (OpenRouter `reasoning`). */
+export type TextEffort = "low" | "medium" | "high";
+
 export interface ResearchQueueMessage {
   jobId: string;
   shopId: string;
@@ -23,6 +26,7 @@ export interface ResearchQueueMessage {
   services: { name: string; price_gbp: number; duration_min: number }[];
   hasLogoFile: boolean;
   text_model: string;
+  text_effort?: TextEffort;
   image_model: string;
   skip_images?: boolean;
   /** Owner-chosen palette override (6-digit hex). Honoured only as a complete pair. */
@@ -82,6 +86,7 @@ export interface GenResearchKvPayload {
   hasLogoFile: boolean;
   template: string;
   text_model: string;
+  text_effort?: TextEffort;
   image_model: string;
   /** Owner-chosen palette override forwarded to the text worker (6-digit hex pair). */
   owner_color_primary?: string;
@@ -215,7 +220,13 @@ function maxTokensForOpenRouterModel(model: string): number {
   return 4096;
 }
 
-async function openRouterJson(apiKey: string, model: string, system: string, user: string): Promise<string> {
+async function openRouterJson(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: string,
+  effort?: TextEffort
+): Promise<string> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -227,6 +238,7 @@ async function openRouterJson(apiKey: string, model: string, system: string, use
     body: JSON.stringify({
       model,
       max_tokens: maxTokensForOpenRouterModel(model),
+      ...(effort ? { reasoning: { effort } } : {}),
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
@@ -235,6 +247,12 @@ async function openRouterJson(apiKey: string, model: string, system: string, use
     }),
   });
   if (!res.ok) {
+    // Some providers reject the reasoning parameter outright — retry once
+    // without effort rather than burning the whole attempt budget on it.
+    if (effort && res.status === 400) {
+      console.warn(`[pivot-parlor-research] ${model} rejected reasoning effort, retrying without`);
+      return openRouterJson(apiKey, model, system, user, undefined);
+    }
     throw new Error(`OpenRouter error ${res.status}: ${await res.text()}`);
   }
   const data = (await res.json()) as {
@@ -362,6 +380,10 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
   if (services.length < 2) return null;
   const text_model =
     typeof o.text_model === "string" && o.text_model.trim() ? o.text_model.trim() : DEFAULT_TEXT_MODEL;
+  const text_effort =
+    o.text_effort === "low" || o.text_effort === "medium" || o.text_effort === "high"
+      ? o.text_effort
+      : undefined;
   const image_model =
     typeof o.image_model === "string" && o.image_model.trim() ? o.image_model.trim() : DEFAULT_IMAGE_MODEL;
   const skip_images = o.skip_images === true;
@@ -379,6 +401,7 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     services,
     hasLogoFile: o.hasLogoFile,
     text_model,
+    ...(text_effort ? { text_effort } : {}),
     image_model,
     skip_images,
     ...(hasColorOverride ? { color_primary: op, color_accent: oa } : {}),
@@ -426,7 +449,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       let rawText: string;
       try {
-        rawText = await openRouterJson(apiKey, input.text_model, SYSTEM_PROMPT, userPrompt);
+        rawText = await openRouterJson(apiKey, input.text_model, SYSTEM_PROMPT, userPrompt, input.text_effort);
       } catch (e) {
         lastError = `model call failed: ${errorMessage(e)}`;
         console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} ${lastError}`);
@@ -488,6 +511,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       hasLogoFile: input.hasLogoFile,
       template: templateFromLayoutMood(spec.layout_mood),
       text_model: input.text_model,
+      ...(input.text_effort ? { text_effort: input.text_effort } : {}),
       image_model: input.image_model,
       ...(input.color_primary && input.color_accent
         ? { owner_color_primary: input.color_primary, owner_color_accent: input.color_accent }
@@ -555,6 +579,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       shopId,
       shopSlug: input.shopSlug,
       text_model: input.text_model,
+      ...(input.text_effort ? { text_effort: input.text_effort } : {}),
     });
     console.log(`[${jobId}] [pivot-parlor-research] enqueued site-text-queue`);
   } catch (err) {

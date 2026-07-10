@@ -28,6 +28,7 @@ import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
+import { parseTextEffort } from "../services/model-registry.js";
 
 const shops = new Hono<{ Bindings: Bindings }>();
 
@@ -630,14 +631,19 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
 
-  const body = await c.req
-    .json<{ design_notes?: string; text_model?: string; image_model?: string }>()
-    .catch((): { design_notes?: string; text_model?: string; image_model?: string } => ({}));
+  type GenSettingsBody = {
+    design_notes?: string;
+    text_model?: string;
+    text_effort?: string;
+    image_model?: string;
+  };
+  const body = await c.req.json<GenSettingsBody>().catch((): GenSettingsBody => ({}));
   await c.env.KV.put(
     genSettingsKvKey(shop.id),
     JSON.stringify({
       design_notes: typeof body.design_notes === "string" ? body.design_notes : "",
       text_model: typeof body.text_model === "string" ? body.text_model : "",
+      text_effort: parseTextEffort(body.text_effort) ?? "",
       image_model: typeof body.image_model === "string" ? body.image_model : "",
     }),
     { expirationTtl: 60 * 60 * 24 }
@@ -965,6 +971,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     design_notes?: string;
     logo_file?: File;
     text_model?: string;
+    text_effort?: string;
     image_model?: string;
     skip_images?: boolean;
   } = {};
@@ -984,7 +991,12 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
   }
 
   const settingsRaw = await c.env.KV.get(genSettingsKvKey(shop.id));
-  let settingsKv: { design_notes?: string; text_model?: string; image_model?: string } = {};
+  let settingsKv: {
+    design_notes?: string;
+    text_model?: string;
+    text_effort?: string;
+    image_model?: string;
+  } = {};
   if (settingsRaw) {
     try {
       settingsKv = JSON.parse(settingsRaw) as typeof settingsKv;
@@ -1039,6 +1051,10 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       typeof body.text_model === "string" && body.text_model.trim()
         ? body.text_model.trim()
         : settingsKv.text_model?.trim() || "google/gemini-3.1-flash-lite-preview";
+    // Reasoning effort for the text/research model. Request wins over saved
+    // settings; anything but low/medium/high is dropped (pipeline default).
+    const text_effort =
+      parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
     const image_model =
       typeof body.image_model === "string" && body.image_model.trim()
         ? body.image_model.trim()
@@ -1062,6 +1078,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       hasLogoFile,
       services: researchServices,
       text_model,
+      ...(text_effort ? { text_effort } : {}),
       image_model,
       skip_images,
       ...(hasColorOverride

@@ -23,6 +23,7 @@ import {
   DEFAULT_IMAGE_MODEL,
   TEXT_MODEL_OPTIONS,
   IMAGE_MODEL_OPTIONS,
+  EFFORT_OPTIONS,
   REGEN_STEP_LABELS,
   E2E_STRIPE_LIST_SHOPS,
 } from "~/components/dev-shops/constants";
@@ -151,6 +152,7 @@ export default function DevShops() {
   const [regenShopId, setRegenShopId] = useState<string | null>(null);
   const [regenDesignNotes, setRegenDesignNotes] = useState("");
   const [regenTextModel, setRegenTextModel] = useState(DEFAULT_TEXT_MODEL);
+  const [regenTextEffort, setRegenTextEffort] = useState("");
   const [regenImageModel, setRegenImageModel] = useState(DEFAULT_IMAGE_MODEL);
 
   const [shopToDelete, setShopToDelete] = useState<Shop | null>(null);
@@ -213,6 +215,7 @@ export default function DevShops() {
     if (!regenShopId) return;
     setRegenDesignNotes("");
     setRegenTextModel(DEFAULT_TEXT_MODEL);
+    setRegenTextEffort("");
     setRegenImageModel(DEFAULT_IMAGE_MODEL);
     regenPrefsFetcher.load(`/api/shops/${regenShopId}/generation-prefs`);
   }, [regenShopId]); // eslint-disable-line react-hooks/exhaustive-deps -- regenPrefsFetcher.load is stable; only shop id matters
@@ -1342,7 +1345,10 @@ export default function DevShops() {
               <label className="mb-1.5 block text-sm font-medium text-white/80">Text &amp; Research Model</label>
               <select
                 value={regenTextModel}
-                onChange={(e) => setRegenTextModel(e.target.value)}
+                onChange={(e) => {
+                  setRegenTextModel(e.target.value);
+                  setRegenTextEffort("");
+                }}
                 disabled={settingsFetcher.state !== "idle"}
                 className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
               >
@@ -1353,6 +1359,23 @@ export default function DevShops() {
                 ))}
               </select>
             </div>
+            {TEXT_MODEL_OPTIONS.find((o) => o.value === regenTextModel)?.supportsEffort !== false && (
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-white/80">Reasoning effort</label>
+                <select
+                  value={regenTextEffort}
+                  onChange={(e) => setRegenTextEffort(e.target.value)}
+                  disabled={settingsFetcher.state !== "idle"}
+                  className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+                >
+                  {EFFORT_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value} className="bg-dark">
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block text-sm font-medium text-white/80">Image Model</label>
               <select
@@ -1389,6 +1412,7 @@ export default function DevShops() {
                     {
                       design_notes: regenDesignNotes,
                       text_model: regenTextModel,
+                      text_effort: regenTextEffort,
                       image_model: regenImageModel,
                     },
                     {
