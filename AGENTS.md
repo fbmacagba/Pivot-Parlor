@@ -25,6 +25,6 @@ During active multi-file development, keep the graph current with:
 python -m graphite watch . --impact
 ```
 
-Graphite is installed centrally at `F:\Projects\_tools\graphite`, runs locally by default, and should not use LLM or network calls unless explicitly configured. The bare `graphite` command works in PowerShell/cmd (via the `C:/Users/fbmac/.local/bin/graphite.cmd` shim) but not in Git Bash; `python -m graphite` works in every shell, so prefer that form.
+Graphite lives in its own git repo at `F:\Projects\graphite` and is pip-installed editable from there; it runs locally by default and should not use LLM or network calls unless explicitly configured. The bare `graphite` command works in PowerShell/cmd (via the `C:/Users/fbmac/.local/bin/graphite.cmd` shim) but not in Git Bash; `python -m graphite` works in every shell, so prefer that form.
 
 For TypeScript, Graphite uses the local TypeScript compiler resolver automatically when available. If a project has a broken TypeScript setup, fall back with `python -m graphite --typescript-resolver disabled build .`.
