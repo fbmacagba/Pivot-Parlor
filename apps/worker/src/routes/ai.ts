@@ -4,12 +4,32 @@ import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
-import { generateShopTheme } from "../services/ai-generator.js";
+import {
+  generateShopTheme,
+  persistShopTheme,
+  validateBrandConfig,
+  type ThemePalette,
+} from "../services/ai-generator.js";
 import {
   DEFAULT_THEME_MODEL,
   getLiveModels,
   parseTextEffort,
 } from "../services/model-registry.js";
+
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+
+/** Owner palette from a request body — honoured only as a complete, valid pair. */
+function parsePalette(body: { color_primary?: unknown; color_accent?: unknown }): ThemePalette | undefined {
+  const primary =
+    typeof body.color_primary === "string" && HEX6.test(body.color_primary.trim())
+      ? body.color_primary.trim()
+      : undefined;
+  const accent =
+    typeof body.color_accent === "string" && HEX6.test(body.color_accent.trim())
+      ? body.color_accent.trim()
+      : undefined;
+  return primary && accent ? { primary, accent } : undefined;
+}
 
 const ai = new Hono<{ Bindings: Bindings }>();
 
@@ -34,7 +54,10 @@ ai.get("/models", async (c) => {
 });
 
 // ─── POST /api/ai/generate-theme — generate brand theme for a shop ────────────
-// Body: { shop_id, model_id, style_keywords?, effort?, regenerate? }
+// Body: { shop_id, model_id, style_keywords?, effort?, regenerate?,
+//         color_primary?, color_accent?, preview? }
+// preview: true returns the theme without persisting it — the caller applies
+// the one it wants via /api/ai/apply-theme.
 
 ai.post("/generate-theme", async (c) => {
   const body = await c.req.json<{
@@ -43,6 +66,9 @@ ai.post("/generate-theme", async (c) => {
     style_keywords?: string;
     effort?: string;
     regenerate?: boolean;
+    color_primary?: string;
+    color_accent?: string;
+    preview?: boolean;
   }>();
 
   if (!body.shop_id) {
@@ -84,10 +110,34 @@ ai.post("/generate-theme", async (c) => {
     effort,
     c.env.DB,
     c.env.KV,
-    c.env.OPENROUTER_API_KEY
+    c.env.OPENROUTER_API_KEY,
+    { palette: parsePalette(body), persist: body.preview !== true }
   );
 
   return c.json({ success: true, data: theme, cached: false, model_used: modelId });
+});
+
+// ─── POST /api/ai/apply-theme — persist a previously previewed theme ──────────
+// Body: { shop_id, theme, model_id? }
+
+ai.post("/apply-theme", async (c) => {
+  const body = await c.req.json<{ shop_id?: string; model_id?: string; theme?: unknown }>();
+  if (!body.shop_id) {
+    return c.json({ success: false, error: "shop_id is required" }, 400);
+  }
+  const theme = validateBrandConfig(body.theme);
+  if (!theme) {
+    return c.json({ success: false, error: "theme is missing or invalid" }, 400);
+  }
+
+  const shop = await c.env.DB.prepare("SELECT id FROM shops WHERE id = ?")
+    .bind(body.shop_id)
+    .first<{ id: string }>();
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+
+  const modelId = typeof body.model_id === "string" && body.model_id.trim() ? body.model_id.trim() : "manual";
+  await persistShopTheme(c.env.DB, c.env.KV, shop.id, modelId, theme);
+  return c.json({ success: true, data: theme });
 });
 
 // ─── POST /api/ai/compare — generate with two models side by side ─────────────
@@ -100,6 +150,8 @@ ai.post("/compare", async (c) => {
     model_b_id?: string;
     style_keywords?: string;
     effort?: string;
+    color_primary?: string;
+    color_accent?: string;
   }>();
 
   if (!body.shop_id || !body.model_a_id || !body.model_b_id) {
@@ -121,6 +173,9 @@ ai.post("/compare", async (c) => {
 
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
+  // Comparisons are ALWAYS previews: persisting both sides made the slower
+  // model silently win. The caller applies its pick via /api/ai/apply-theme.
+  const options = { palette: parsePalette(body), persist: false as const };
   const [resultA, resultB] = await Promise.allSettled([
     generateShopTheme(
       shop.id,
@@ -131,7 +186,8 @@ ai.post("/compare", async (c) => {
       effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY
+      c.env.OPENROUTER_API_KEY,
+      options
     ),
     generateShopTheme(
       shop.id,
@@ -142,7 +198,8 @@ ai.post("/compare", async (c) => {
       effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY
+      c.env.OPENROUTER_API_KEY,
+      options
     ),
   ]);
 

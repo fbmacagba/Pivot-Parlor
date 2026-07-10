@@ -21,14 +21,32 @@ export interface BrandConfig {
 
 const THEME_KV_TTL = 60 * 60 * 24 * 30; // 30 days
 
+export interface ThemePalette {
+  primary: string;
+  accent: string;
+}
+
+export interface ThemeGenerationOptions {
+  /** Owner-chosen palette — wins over the model's colour pick. */
+  palette?: ThemePalette;
+  /** Write the result to D1/KV (default true). Previews pass false. */
+  persist?: boolean;
+}
+
 // ─── Prompt builder ───────────────────────────────────────────────────────────
 
-function buildPrompt(shopName: string, shopType: string, styleKeywords?: string): string {
+function buildPrompt(
+  shopName: string,
+  shopType: string,
+  styleKeywords?: string,
+  palette?: ThemePalette
+): string {
   const shopTypeLabel = shopType.replace(/_/g, " ");
   return `You are an expert brand strategist and direct response copywriter specialising in beauty and grooming businesses.
 
 Generate a high-converting brand config for a ${shopTypeLabel} called "${shopName}".
 ${styleKeywords ? `Style preferences: ${styleKeywords}` : ""}
+${palette ? `The owner has locked the colour palette: primaryColor MUST be ${palette.primary} and accentColor MUST be ${palette.accent}. Choose fonts and write copy that harmonise with those colours.` : ""}
 
 Your output must maximise bookings and conversion using these proven frameworks:
 - AIDA (Attention, Interest, Desire, Action) for copy structure
@@ -131,6 +149,66 @@ async function callOpenRouter(
 
 // ─── Main generator ───────────────────────────────────────────────────────────
 
+/** Write a theme to the shop row and the KV cache — the single "apply" path. */
+export async function persistShopTheme(
+  db: D1Database,
+  kv: KVNamespace,
+  shopId: string,
+  modelId: string,
+  config: BrandConfig
+): Promise<void> {
+  await db
+    .prepare("UPDATE shops SET ai_theme = ?, ai_model = ? WHERE id = ?")
+    .bind(JSON.stringify(config), modelId, shopId)
+    .run();
+  await kv.put(`shop:theme:${shopId}`, JSON.stringify(config), {
+    expirationTtl: THEME_KV_TTL,
+  });
+}
+
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
+
+/** Validate an externally supplied theme (the apply endpoint) — returns null on junk. */
+export function validateBrandConfig(raw: unknown): BrandConfig | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const strings = [
+    "fontHeading",
+    "fontBody",
+    "tagline",
+    "heroHeadline",
+    "heroSubheadline",
+    "shortDescription",
+    "ctaText",
+    "servicesIntro",
+    "trustStatement",
+    "urgencyText",
+  ] as const;
+  for (const key of strings) {
+    if (typeof o[key] !== "string" || !(o[key] as string).trim()) return null;
+  }
+  if (typeof o.primaryColor !== "string" || !HEX6.test(o.primaryColor.trim())) return null;
+  if (typeof o.accentColor !== "string" || !HEX6.test(o.accentColor.trim())) return null;
+  if (!Array.isArray(o.aestheticKeywords) || !o.aestheticKeywords.every((k) => typeof k === "string")) {
+    return null;
+  }
+  return {
+    primaryColor: o.primaryColor.trim(),
+    accentColor: o.accentColor.trim(),
+    fontHeading: o.fontHeading as string,
+    fontBody: o.fontBody as string,
+    tagline: o.tagline as string,
+    heroHeadline: o.heroHeadline as string,
+    heroSubheadline: o.heroSubheadline as string,
+    shortDescription: o.shortDescription as string,
+    ctaText: o.ctaText as string,
+    aestheticKeywords: o.aestheticKeywords as string[],
+    servicesIntro: o.servicesIntro as string,
+    trustStatement: o.trustStatement as string,
+    urgencyText: o.urgencyText as string,
+  };
+}
+
 export async function generateShopTheme(
   shopId: string,
   shopName: string,
@@ -140,12 +218,13 @@ export async function generateShopTheme(
   effort: TextEffort | undefined,
   db: D1Database,
   kv: KVNamespace,
-  openrouterKey: string
+  openrouterKey: string,
+  options: ThemeGenerationOptions = {}
 ): Promise<BrandConfig> {
   const model = getModel(modelId);
   if (!model) throw new Error(`Unknown model: ${modelId}`);
 
-  const prompt = buildPrompt(shopName, shopType, styleKeywords);
+  const prompt = buildPrompt(shopName, shopType, styleKeywords, options.palette);
 
   let config: BrandConfig;
 
@@ -159,16 +238,15 @@ export async function generateShopTheme(
     config = defaultTheme(shopName, shopType);
   }
 
-  // Persist to D1
-  await db
-    .prepare("UPDATE shops SET ai_theme = ?, ai_model = ? WHERE id = ?")
-    .bind(JSON.stringify(config), modelId, shopId)
-    .run();
+  // An owner-chosen palette must win over the model's colour pick.
+  if (options.palette) {
+    config.primaryColor = options.palette.primary;
+    config.accentColor = options.palette.accent;
+  }
 
-  // Cache in KV — 30-day TTL
-  await kv.put(`shop:theme:${shopId}`, JSON.stringify(config), {
-    expirationTtl: THEME_KV_TTL,
-  });
+  if (options.persist !== false) {
+    await persistShopTheme(db, kv, shopId, modelId, config);
+  }
 
   return config;
 }

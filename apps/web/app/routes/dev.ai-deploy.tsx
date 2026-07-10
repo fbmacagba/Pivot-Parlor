@@ -8,6 +8,7 @@ import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { Badge } from "~/components/ui/Badge";
+import { COLOR_PALETTES } from "~/lib/color-palettes";
 import type { AIModel, BrandConfig } from "@repo/types";
 
 interface Shop {
@@ -34,7 +35,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   return json({ shops, models, apiUrl: env.API_URL });
 }
 
-type ThemeResult = { theme: BrandConfig; model: string } | null;
+type ThemeResult = { theme: BrandConfig; model: string; modelId: string } | null;
 
 export default function DevAIDeploy() {
   const { shops, models, apiUrl } = useLoaderData<typeof loader>();
@@ -45,13 +46,18 @@ export default function DevAIDeploy() {
   const [shopId, setShopId] = useState(params.get("shopId") ?? "");
   const [modelChoice, setModelChoice] = useState("");
   const [effort, setEffort] = useState("");
+  const [paletteId, setPaletteId] = useState<string | null>(null);
   const [modelBId, setModelBId] = useState("");
   const [keywords, setKeywords] = useState("");
   const [compareMode, setCompareMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ThemeResult>(null);
   const [resultB, setResultB] = useState<ThemeResult>(null);
+  const [applying, setApplying] = useState<"A" | "B" | null>(null);
+  const [applied, setApplied] = useState<"A" | "B" | null>(null);
   const [error, setError] = useState("");
+
+  const selectedPalette = paletteId ? COLOR_PALETTES.find((p) => p.id === paletteId) ?? null : null;
 
   const modelId = modelChoice || recommendedId;
   const selectedModel = models.find((m) => m.id === modelId);
@@ -102,20 +108,30 @@ export default function DevAIDeploy() {
     return `${m.providerLabel} | ${m.name} — ${price}${flags ? ` (${flags})` : ""}`;
   }
 
+  function paletteBody(): Record<string, string> {
+    return selectedPalette
+      ? { color_primary: selectedPalette.primary, color_accent: selectedPalette.accent }
+      : {};
+  }
+
   async function handleGenerate() {
     if (!shopId || !modelId) return;
     setLoading(true);
     setError("");
+    setApplied(null);
     try {
       const data = (await postJson("/api/ai/generate-theme", {
         shop_id: shopId,
         model_id: modelId,
         style_keywords: keywords,
         regenerate: true,
+        preview: true,
+        ...paletteBody(),
         ...(effortAvailable && effort ? { effort } : {}),
       })) as { data?: BrandConfig; error?: string };
       if (!data.data) throw new Error(data.error ?? "Generation failed");
-      setResult({ theme: data.data, model: selectedModel?.name ?? modelId });
+      setResult({ theme: data.data, model: selectedModel?.name ?? modelId, modelId });
+      setResultB(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -127,6 +143,7 @@ export default function DevAIDeploy() {
     if (!shopId || !modelId || !modelBId) return;
     setLoading(true);
     setError("");
+    setApplied(null);
     try {
       type CompareSide = { id: string; theme: BrandConfig | null; error: string | null };
       const data = (await postJson("/api/ai/compare", {
@@ -134,18 +151,42 @@ export default function DevAIDeploy() {
         model_a_id: modelId,
         model_b_id: modelBId,
         style_keywords: keywords,
+        ...paletteBody(),
         ...(effortAvailable && effort ? { effort } : {}),
       })) as { data?: { model_a: CompareSide; model_b: CompareSide }; error?: string };
       if (!data.data) throw new Error(data.error ?? "Comparison failed");
       const { model_a, model_b } = data.data;
       if (!model_a.theme) throw new Error(model_a.error ?? "Model A generation failed");
       if (!model_b.theme) throw new Error(model_b.error ?? "Model B generation failed");
-      setResult({ theme: model_a.theme, model: selectedModel?.name ?? modelId });
-      setResultB({ theme: model_b.theme, model: models.find((m) => m.id === modelBId)?.name ?? modelBId });
+      setResult({ theme: model_a.theme, model: selectedModel?.name ?? modelId, modelId });
+      setResultB({
+        theme: model_b.theme,
+        model: models.find((m) => m.id === modelBId)?.name ?? modelBId,
+        modelId: modelBId,
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleApply(side: "A" | "B") {
+    const chosen = side === "A" ? result : resultB;
+    if (!chosen || !shopId || applying) return;
+    setApplying(side);
+    setError("");
+    try {
+      await postJson("/api/ai/apply-theme", {
+        shop_id: shopId,
+        model_id: chosen.modelId,
+        theme: chosen.theme,
+      });
+      setApplied(side);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setApplying(null);
     }
   }
 
@@ -221,6 +262,57 @@ export default function DevAIDeploy() {
             </div>
           )}
 
+          {/* Colour palette — Let AI choose (default) or lock a curated pair */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="block text-sm font-medium text-white/80">Colour palette</label>
+              <span className="text-xs text-white/40">
+                {selectedPalette ? selectedPalette.name : "Auto (AI picks)"}
+              </span>
+            </div>
+            <div className="space-y-1.5" role="radiogroup" aria-label="Colour palette">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={selectedPalette === null}
+                onClick={() => setPaletteId(null)}
+                className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                  selectedPalette === null
+                    ? "border-gold bg-gold/10 text-white"
+                    : "border-white/10 bg-dark-100 text-white/70 hover:border-white/20"
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-gold" />
+                <span className="flex-1">Let AI choose the palette</span>
+              </button>
+              <div className="grid grid-cols-2 gap-1.5">
+                {COLOR_PALETTES.map((p) => {
+                  const isSel = p.id === paletteId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSel}
+                      onClick={() => setPaletteId(isSel ? null : p.id)}
+                      className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors ${
+                        isSel
+                          ? "border-gold bg-gold/10 text-white"
+                          : "border-white/10 bg-dark-100 text-white/70 hover:border-white/20"
+                      }`}
+                    >
+                      <span className="flex shrink-0 overflow-hidden rounded-full border border-white/20">
+                        <span className="h-4 w-4" style={{ background: p.primary }} />
+                        <span className="h-4 w-4" style={{ background: p.accent }} />
+                      </span>
+                      <span className="truncate">{p.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
           <Input
             label="Style keywords (optional)"
             value={keywords}
@@ -271,14 +363,26 @@ export default function DevAIDeploy() {
         {/* Right: Preview */}
         <div className={`flex-1 ${compareMode && result && resultB ? "grid grid-cols-2 gap-4" : ""}`}>
           {result ? (
-            <BrandPreview theme={result.theme} modelLabel={result.model} />
+            <BrandPreview
+              theme={result.theme}
+              modelLabel={result.model}
+              applyState={applied === "A" ? "applied" : applying === "A" ? "applying" : "idle"}
+              applyDisabled={applying !== null}
+              onApply={() => handleApply("A")}
+            />
           ) : (
             <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-white/20 text-sm text-white/30">
-              Generate a theme to see a preview here
+              Generate a theme to see a preview here — nothing changes on the shop site until you apply one
             </div>
           )}
           {compareMode && resultB && (
-            <BrandPreview theme={resultB.theme} modelLabel={resultB.model} />
+            <BrandPreview
+              theme={resultB.theme}
+              modelLabel={resultB.model}
+              applyState={applied === "B" ? "applied" : applying === "B" ? "applying" : "idle"}
+              applyDisabled={applying !== null}
+              onApply={() => handleApply("B")}
+            />
           )}
         </div>
       </div>
@@ -286,7 +390,19 @@ export default function DevAIDeploy() {
   );
 }
 
-function BrandPreview({ theme, modelLabel }: { theme: BrandConfig; modelLabel: string }) {
+function BrandPreview({
+  theme,
+  modelLabel,
+  applyState,
+  applyDisabled,
+  onApply,
+}: {
+  theme: BrandConfig;
+  modelLabel: string;
+  applyState: "idle" | "applying" | "applied";
+  applyDisabled: boolean;
+  onApply: () => void;
+}) {
   return (
     <div className="rounded-xl border border-white/10 bg-dark-100 p-5 space-y-4">
       <div className="flex items-center justify-between">
@@ -318,6 +434,18 @@ function BrandPreview({ theme, modelLabel }: { theme: BrandConfig; modelLabel: s
           <Badge key={kw} variant="outline">{kw}</Badge>
         ))}
       </div>
+      <Button
+        onClick={onApply}
+        disabled={applyDisabled || applyState === "applied"}
+        className="w-full"
+        variant={applyState === "applied" ? "outline" : "default"}
+      >
+        {applyState === "applied"
+          ? "✓ Applied to shop site"
+          : applyState === "applying"
+            ? "Applying…"
+            : "Use this theme"}
+      </Button>
     </div>
   );
 }
