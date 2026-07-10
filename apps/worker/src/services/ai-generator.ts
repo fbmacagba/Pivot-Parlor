@@ -1,5 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
-import { getModel } from "./model-registry.js";
+import { getModel, type TextEffort } from "./model-registry.js";
 
 // ─── Brand config (full schema, with conversion-optimised copy fields) ────────
 
@@ -76,12 +76,22 @@ function defaultTheme(shopName: string, shopType: string): BrandConfig {
   };
 }
 
-// ─── OpenRouter API caller (Anthropic models via OpenAI-compatible API) ───────
+// ─── OpenRouter API caller (all providers via the OpenAI-compatible API) ──────
 
-async function callAnthropic(
+/** Reasoning tokens count against the completion budget on most providers, so
+ *  give thinking models room to reason AND still emit the full JSON. */
+function maxTokensForEffort(effort: TextEffort | undefined): number {
+  if (effort === "high") return 8192;
+  if (effort === "medium") return 4096;
+  if (effort === "low") return 2048;
+  return 1024;
+}
+
+async function callOpenRouter(
   modelId: string,
   prompt: string,
-  apiKey: string
+  apiKey: string,
+  effort?: TextEffort
 ): Promise<BrandConfig> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -93,7 +103,8 @@ async function callAnthropic(
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 1024,
+      max_tokens: maxTokensForEffort(effort),
+      ...(effort ? { reasoning: { effort } } : {}),
       messages: [
         {
           role: "system",
@@ -118,48 +129,6 @@ async function callAnthropic(
   return JSON.parse(clean) as BrandConfig;
 }
 
-// ─── Google Gemini API caller ─────────────────────────────────────────────────
-
-async function callGemini(
-  modelId: string,
-  prompt: string,
-  apiKey: string
-): Promise<BrandConfig> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [
-          {
-            text: "You are a brand designer and direct response copywriter. Return ONLY valid JSON, no markdown, no explanation, no code fences.",
-          },
-        ],
-      },
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.8,
-        maxOutputTokens: 1024,
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${err}`);
-  }
-
-  const data = (await response.json()) as {
-    candidates: Array<{ content: { parts: Array<{ text: string }> } }>;
-  };
-  const rawText = (data.candidates[0]?.content?.parts[0]?.text ?? "{}").trim();
-  const clean = rawText.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean) as BrandConfig;
-}
-
 // ─── Main generator ───────────────────────────────────────────────────────────
 
 export async function generateShopTheme(
@@ -168,10 +137,10 @@ export async function generateShopTheme(
   shopType: string,
   modelId: string,
   styleKeywords: string | undefined,
+  effort: TextEffort | undefined,
   db: D1Database,
   kv: KVNamespace,
-  openrouterKey: string,
-  googleKey: string
+  openrouterKey: string
 ): Promise<BrandConfig> {
   const model = getModel(modelId);
   if (!model) throw new Error(`Unknown model: ${modelId}`);
@@ -181,11 +150,10 @@ export async function generateShopTheme(
   let config: BrandConfig;
 
   try {
-    if (model.provider === "anthropic") {
-      config = await callAnthropic(modelId, prompt, openrouterKey);
-    } else {
-      config = await callGemini(modelId, prompt, googleKey);
-    }
+    // Only forward effort to models that accept it — OpenRouter rejects the
+    // reasoning parameter on some non-reasoning providers.
+    const effectiveEffort = model.supportsEffort ? effort : undefined;
+    config = await callOpenRouter(modelId, prompt, openrouterKey, effectiveEffort);
   } catch (err) {
     console.error(`[AI Generator] ${model.provider} call failed, using fallback:`, err);
     config = defaultTheme(shopName, shopType);

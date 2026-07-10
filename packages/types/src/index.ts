@@ -169,19 +169,27 @@ export interface BrandConfig {
   urgencyText: string;
 }
 
-export type ModelProvider = "anthropic" | "google";
-export type ModelTier = "standard" | "pro" | "premium";
+/** Reasoning-effort level passed to OpenRouter for models that support it. */
+export type TextEffort = "low" | "medium" | "high";
 
 export interface AIModel {
+  /** OpenRouter model slug, e.g. "anthropic/claude-sonnet-5". */
   id: string;
   name: string;
-  provider: ModelProvider;
-  tier: ModelTier;
+  /** OpenRouter vendor prefix, e.g. "anthropic". */
+  provider: string;
+  /** Display name for the provider, e.g. "Anthropic". */
+  providerLabel: string;
   description: string;
+  /** USD per 1M input tokens. */
   costPer1MInput: number;
+  /** USD per 1M output tokens. */
   costPer1MOutput: number;
-  isPreview: boolean;
+  /** Model accepts a reasoning-effort parameter via OpenRouter. */
+  supportsEffort: boolean;
   recommended: boolean;
+  /** True when pricing was refreshed from the live OpenRouter catalogue. */
+  livePricing: boolean;
 }
 
 // ─── AI Deploy (legacy) ───────────────────────────────────────────────────────

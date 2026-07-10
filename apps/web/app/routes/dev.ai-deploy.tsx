@@ -40,8 +40,11 @@ export default function DevAIDeploy() {
   const { shops, models } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
+  const recommendedId = models.find((m) => m.recommended)?.id ?? models[0]?.id ?? "";
+
   const [shopId, setShopId] = useState(params.get("shopId") ?? "");
-  const [modelId, setModelId] = useState("claude-sonnet-4-6");
+  const [modelChoice, setModelChoice] = useState("");
+  const [effort, setEffort] = useState("");
   const [modelBId, setModelBId] = useState("");
   const [keywords, setKeywords] = useState("");
   const [compareMode, setCompareMode] = useState(false);
@@ -50,11 +53,21 @@ export default function DevAIDeploy() {
   const [resultB, setResultB] = useState<ThemeResult>(null);
   const [error, setError] = useState("");
 
+  const modelId = modelChoice || recommendedId;
+  const selectedModel = models.find((m) => m.id === modelId);
+  const effortAvailable = selectedModel?.supportsEffort ?? false;
+
   const token = typeof document !== "undefined"
     ? document.cookie.split(";").find((c) => c.trim().startsWith("pp_session="))?.split("=")[1]
     : null;
 
-  const tiers = ["standard", "pro", "premium"] as const;
+  function modelOptionLabel(m: AIModel): string {
+    const price = `$${m.costPer1MInput}/M in · $${m.costPer1MOutput}/M out`;
+    const flags = [m.recommended ? "★ recommended" : "", m.supportsEffort ? "effort" : ""]
+      .filter(Boolean)
+      .join(", ");
+    return `${m.providerLabel} | ${m.name} — ${price}${flags ? ` (${flags})` : ""}`;
+  }
 
   async function handleGenerate() {
     if (!shopId || !modelId) return;
@@ -67,11 +80,16 @@ export default function DevAIDeploy() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ shop_id: shopId, model_id: modelId, style_keywords: keywords }),
+        body: JSON.stringify({
+          shop_id: shopId,
+          model_id: modelId,
+          style_keywords: keywords,
+          ...(effortAvailable && effort ? { effort } : {}),
+        }),
       });
       const data = (await res.json()) as { data?: BrandConfig; error?: string };
       if (!res.ok || !data.data) throw new Error(data.error ?? "Generation failed");
-      setResult({ theme: data.data, model: modelId });
+      setResult({ theme: data.data, model: selectedModel?.name ?? modelId });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -87,12 +105,18 @@ export default function DevAIDeploy() {
       const res = await fetch("/api-proxy/api/ai/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ shop_id: shopId, model_a_id: modelId, model_b_id: modelBId, style_keywords: keywords }),
+        body: JSON.stringify({
+          shop_id: shopId,
+          model_a_id: modelId,
+          model_b_id: modelBId,
+          style_keywords: keywords,
+          ...(effortAvailable && effort ? { effort } : {}),
+        }),
       });
       const data = (await res.json()) as { data?: { modelA: { result: BrandConfig }; modelB: { result: BrandConfig } }; error?: string };
       if (!res.ok || !data.data) throw new Error(data.error ?? "Comparison failed");
-      setResult({ theme: data.data.modelA.result, model: modelId });
-      setResultB({ theme: data.data.modelB.result, model: modelBId });
+      setResult({ theme: data.data.modelA.result, model: selectedModel?.name ?? modelId });
+      setResultB({ theme: data.data.modelB.result, model: models.find((m) => m.id === modelBId)?.name ?? modelBId });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -121,46 +145,56 @@ export default function DevAIDeploy() {
             </select>
           </div>
 
-          {/* Model selector */}
-          {tiers.map((tier) => {
-            const group = models.filter((m) => m.tier === tier);
-            if (!group.length) return null;
-            return (
-              <div key={tier}>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/40">
-                  {tier}
-                </p>
-                <div className="space-y-2">
-                  {group.map((m) => (
-                    <button
-                      key={m.id}
-                      onClick={() => setModelId(m.id)}
-                      className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                        modelId === m.id
-                          ? "border-gold bg-gold/10"
-                          : "border-white/10 bg-dark-100 hover:border-white/20"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-white">{m.name}</span>
-                        <div className="flex items-center gap-1">
-                          <Badge variant={m.provider === "anthropic" ? "anthropic" : "google"}>
-                            {m.provider === "anthropic" ? "A" : "G"}
-                          </Badge>
-                          {m.recommended && <Badge variant="gold">Rec</Badge>}
-                          {m.isPreview && <Badge variant="warning">Preview</Badge>}
-                        </div>
-                      </div>
-                      <p className="mt-0.5 text-xs text-white/50">{m.description}</p>
-                      <p className="mt-0.5 text-xs text-white/30">
-                        ${m.costPer1MInput}/1M input · ${m.costPer1MOutput}/1M output
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {/* Model selector — top 10 providers via OpenRouter, live pricing */}
+          <div>
+            <label className="block text-sm font-medium text-white/80 mb-1.5">
+              LLM Model <span className="text-white/40">(top 10 providers via OpenRouter)</span>
+            </label>
+            <select
+              value={modelId}
+              onChange={(e) => {
+                setModelChoice(e.target.value);
+                setEffort("");
+              }}
+              className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id} className="bg-dark">
+                  {modelOptionLabel(m)}
+                </option>
+              ))}
+            </select>
+            {selectedModel && (
+              <p className="mt-1.5 text-xs text-white/50">{selectedModel.description}</p>
+            )}
+            <p className="mt-1 text-xs text-white/30">
+              {models.some((m) => m.livePricing)
+                ? "Live pricing from the OpenRouter catalogue (refreshed hourly)."
+                : "OpenRouter catalogue unreachable — showing last-known pricing."}
+            </p>
+          </div>
+
+          {/* Reasoning effort — only for models that support it */}
+          {effortAvailable && (
+            <div>
+              <label className="block text-sm font-medium text-white/80 mb-1.5">
+                Reasoning effort
+              </label>
+              <select
+                value={effort}
+                onChange={(e) => setEffort(e.target.value)}
+                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+              >
+                <option value="" className="bg-dark">Default (model decides)</option>
+                <option value="low" className="bg-dark">Low — fastest, cheapest</option>
+                <option value="medium" className="bg-dark">Medium — balanced</option>
+                <option value="high" className="bg-dark">High — deepest thinking, most tokens</option>
+              </select>
+              <p className="mt-1 text-xs text-white/30">
+                Higher effort spends more output tokens on reasoning before writing.
+              </p>
+            </div>
+          )}
 
           <Input
             label="Style keywords (optional)"
@@ -193,7 +227,7 @@ export default function DevAIDeploy() {
               >
                 <option value="" className="bg-dark">Select model B…</option>
                 {models.map((m) => (
-                  <option key={m.id} value={m.id} className="bg-dark">{m.name}</option>
+                  <option key={m.id} value={m.id} className="bg-dark">{modelOptionLabel(m)}</option>
                 ))}
               </select>
               <Button onClick={handleCompare} disabled={loading || !shopId || !modelBId} className="mt-2 w-full">

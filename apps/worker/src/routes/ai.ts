@@ -5,7 +5,11 @@ import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { generateShopTheme } from "../services/ai-generator.js";
-import { MODEL_REGISTRY } from "../services/model-registry.js";
+import {
+  DEFAULT_THEME_MODEL,
+  getLiveModels,
+  parseTextEffort,
+} from "../services/model-registry.js";
 
 const ai = new Hono<{ Bindings: Bindings }>();
 
@@ -23,27 +27,32 @@ ai.use(
   })
 );
 
-// ─── GET /api/ai/models — return full model registry ─────────────────────────
+// ─── GET /api/ai/models — curated top-10 catalogue with live OpenRouter pricing ───
 
-ai.get("/models", (c) => {
-  return c.json({ success: true, data: MODEL_REGISTRY });
+ai.get("/models", async (c) => {
+  return c.json({ success: true, data: await getLiveModels(c.env.KV) });
 });
 
 // ─── POST /api/ai/generate-theme — generate brand theme for a shop ────────────
-// Body: { shop_id, model_id, style_keywords?, regenerate? }
+// Body: { shop_id, model_id, style_keywords?, effort?, regenerate? }
 
 ai.post("/generate-theme", async (c) => {
   const body = await c.req.json<{
     shop_id?: string;
     model_id?: string;
     style_keywords?: string;
+    effort?: string;
     regenerate?: boolean;
   }>();
 
   if (!body.shop_id) {
     return c.json({ success: false, error: "shop_id is required" }, 400);
   }
-  const modelId = body.model_id ?? "claude-sonnet-4-6";
+  if (body.effort !== undefined && body.effort !== "" && !parseTextEffort(body.effort)) {
+    return c.json({ success: false, error: "effort must be low, medium or high" }, 400);
+  }
+  const effort = parseTextEffort(body.effort);
+  const modelId = body.model_id ?? DEFAULT_THEME_MODEL;
 
   const shop = await c.env.DB.prepare(
     "SELECT id, name, type, ai_theme FROM shops WHERE id = ?"
@@ -72,11 +81,11 @@ ai.post("/generate-theme", async (c) => {
     shop.type,
     modelId,
     body.style_keywords,
+    effort,
     c.env.DB,
     c.env.KV,
-      c.env.OPENROUTER_API_KEY,
-      c.env.GOOGLE_AI_API_KEY
-    );
+    c.env.OPENROUTER_API_KEY
+  );
 
   return c.json({ success: true, data: theme, cached: false, model_used: modelId });
 });
@@ -90,6 +99,7 @@ ai.post("/compare", async (c) => {
     model_a_id?: string;
     model_b_id?: string;
     style_keywords?: string;
+    effort?: string;
   }>();
 
   if (!body.shop_id || !body.model_a_id || !body.model_b_id) {
@@ -98,6 +108,10 @@ ai.post("/compare", async (c) => {
       400
     );
   }
+  if (body.effort !== undefined && body.effort !== "" && !parseTextEffort(body.effort)) {
+    return c.json({ success: false, error: "effort must be low, medium or high" }, 400);
+  }
+  const effort = parseTextEffort(body.effort);
 
   const shop = await c.env.DB.prepare(
     "SELECT id, name, type FROM shops WHERE id = ?"
@@ -114,10 +128,10 @@ ai.post("/compare", async (c) => {
       shop.type,
       body.model_a_id,
       body.style_keywords,
+      effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY,
-      c.env.GOOGLE_AI_API_KEY
+      c.env.OPENROUTER_API_KEY
     ),
     generateShopTheme(
       shop.id,
@@ -125,10 +139,10 @@ ai.post("/compare", async (c) => {
       shop.type,
       body.model_b_id,
       body.style_keywords,
+      effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY,
-      c.env.GOOGLE_AI_API_KEY
+      c.env.OPENROUTER_API_KEY
     ),
   ]);
 

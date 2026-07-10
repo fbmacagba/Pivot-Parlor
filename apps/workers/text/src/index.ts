@@ -11,11 +11,15 @@ export interface Env {
   ENVIRONMENT: string;
 }
 
+/** Reasoning-effort level for models that support it (OpenRouter `reasoning`). */
+export type TextEffort = "low" | "medium" | "high";
+
 export interface StageMessage {
   jobId: string;
   shopId: string;
   shopSlug: string;
   text_model?: string;
+  text_effort?: TextEffort;
 }
 
 interface GenResearchKvPayload {
@@ -29,6 +33,7 @@ interface GenResearchKvPayload {
   hasLogoFile: boolean;
   template: string;
   text_model?: string;
+  text_effort?: TextEffort;
   image_model?: string;
   /** Owner-chosen palette override (6-digit hex pair) — wins over the AI palette. */
   owner_color_primary?: string;
@@ -78,10 +83,20 @@ function parseStageMessage(body: unknown): StageMessage | null {
   if (typeof o.jobId !== "string" || typeof o.shopId !== "string" || typeof o.shopSlug !== "string") return null;
   const text_model =
     typeof o.text_model === "string" && o.text_model.trim() ? o.text_model.trim() : undefined;
-  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, text_model };
+  const text_effort =
+    o.text_effort === "low" || o.text_effort === "medium" || o.text_effort === "high"
+      ? o.text_effort
+      : undefined;
+  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, text_model, text_effort };
 }
 
-async function openRouterJson(apiKey: string, model: string, system: string, user: string): Promise<string> {
+async function openRouterJson(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: string,
+  effort?: TextEffort
+): Promise<string> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -93,6 +108,7 @@ async function openRouterJson(apiKey: string, model: string, system: string, use
     body: JSON.stringify({
       model,
       max_tokens: maxTokensForOpenRouterModel(model),
+      ...(effort ? { reasoning: { effort } } : {}),
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
@@ -101,6 +117,12 @@ async function openRouterJson(apiKey: string, model: string, system: string, use
     }),
   });
   if (!res.ok) {
+    // Some providers reject the reasoning parameter outright — retry once
+    // without effort instead of failing the copy pass over an optional knob.
+    if (effort && res.status === 400) {
+      console.warn(`[pivot-parlor-text] ${model} rejected reasoning effort, retrying without`);
+      return openRouterJson(apiKey, model, system, user, undefined);
+    }
     throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
   }
   const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
@@ -248,11 +270,14 @@ Return JSON:
 If source services are missing or empty, invent exactly 3 plausible services for this shop type.`;
 
   const textModel = msg.text_model?.trim() || research.text_model?.trim() || DEFAULT_TEXT_MODEL;
-  console.log(`[${jobId}] [pivot-parlor-text] calling OpenRouter model=${textModel}`);
+  const textEffort = msg.text_effort ?? research.text_effort;
+  console.log(
+    `[${jobId}] [pivot-parlor-text] calling OpenRouter model=${textModel}${textEffort ? ` effort=${textEffort}` : ""}`
+  );
 
   let payload: TextKvPayload;
   try {
-    const raw = await openRouterJson(apiKey, textModel, system, user);
+    const raw = await openRouterJson(apiKey, textModel, system, user, textEffort);
     const parsed: unknown = JSON.parse(raw);
     if (validateTextOut(parsed)) {
       parsed.services = padServices(research.shopType, parsed.services);
