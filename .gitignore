@@ -51,10 +51,15 @@ yarn-error.log*
 # Database backups / D1 exports (may contain production data — never commit)
 *-backup-*.sql
 apps/worker/pivot-parlor-db*.sql
+backups/
 
 # Misc
 .DS_Store
 *.pem
 
-# graphify knowledge-graph output (large generated artifact)
-graphify-out/
+# graphite knowledge-graph output (large generated artifact)
+# NB: **/ prefix is required — a pattern with an internal slash (".cache/graphite/")
+# is anchored to the repo root and misses the per-workspace copies.
+graph-out/
+**/.cache/graphite/
+.graphite-daemon/

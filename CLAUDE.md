@@ -61,6 +61,19 @@ npx playwright test
 npx playwright test tests/e2e/booking.spec.ts
 ```
 
+### Code graph (graphite)
+
+A machine-wide graphite daemon keeps a fresh dependency graph of this repo in `graph-out/` (gitignored; rebuilt automatically within seconds of file changes). **Before any non-trivial or multi-file change, consult the graph instead of broad greps** — e.g. "who reads this column/function" is one `impact` call:
+
+```bash
+python -m graphite check .           # confirm the graph is fresh
+python -m graphite context <file>    # what <file> depends on / what depends on it
+python -m graphite impact <file>     # blast radius of changing <file>
+python -m graphite query "stats"     # graph overview
+```
+
+Treat the output as a dependency map, not proof of correctness — still read the relevant sources and tests before editing. If `check` reports stale, rebuild with `python -m graphite -v build .`. Full workflow notes live in `AGENTS.md` (kept for non-Claude agents that read that file).
+
 ### Deployment
 
 ```bash
