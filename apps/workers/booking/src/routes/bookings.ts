@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { addMinutesToHm, todayUtcYmd } from "../lib/time.js";
-import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent } from "../lib/stripe.js";
+import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent } from "../lib/stripe.js";
+import { reportError } from "../services/report-error.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -49,6 +50,18 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     .first<Record<string, unknown>>();
   if (!st?.checked_in_at) {
     return c.json({ success: false, error: "Not checked in" }, 400);
+  }
+
+  // Atomic checkout claim (WS-2): flip confirmed → completed BEFORE any line
+  // items or Stripe calls. A concurrent double-submit loses this UPDATE
+  // (changes === 0) and cannot double-charge or duplicate items. On a Stripe
+  // failure below the status is reverted so the checkout can be retried.
+  const claim = await db
+    .prepare("UPDATE bookings SET status = 'completed' WHERE id = ? AND shop_id = ? AND status = 'confirmed'")
+    .bind(bookingId, shopId)
+    .run();
+  if ((claim.meta?.changes ?? 0) !== 1) {
+    return c.json({ success: false, error: "Checkout already in progress or completed" }, 409);
   }
 
   const settings = await db
@@ -147,10 +160,12 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
 
   try {
     if (piId && captureFromHoldPence > 0) {
-      const cap =
-        captureFromHoldPence < depositPence
-          ? await capturePaymentIntent(c.env.STRIPE_SECRET_KEY, piId, { amountPence: captureFromHoldPence })
-          : await capturePaymentIntent(c.env.STRIPE_SECRET_KEY, piId);
+      // Deposit capture is synchronous — a repeated Idempotency-Key returns
+      // the original capture instead of a second charge.
+      const cap = await capturePaymentIntent(c.env.STRIPE_SECRET_KEY, piId, {
+        ...(captureFromHoldPence < depositPence ? { amountPence: captureFromHoldPence } : {}),
+        idempotencyKey: `capture:${bookingId}`,
+      });
       stripeChargeId = String((cap.latest_charge as string) ?? "");
     }
 
@@ -162,14 +177,24 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         destinationAccount: connectId,
         applicationFeePence: balanceApplicationFeePence,
         metadata: { shopId, bookingId, type: "balance" },
+        idempotencyKey: `balance:${bookingId}`,
       });
       balanceClientSecret = bal.client_secret || null;
       await db
         .prepare("UPDATE bw_booking_state SET stripe_balance_pi = ?, updated_at = ? WHERE booking_id = ?")
         .bind(bal.id, new Date().toISOString(), bookingId)
         .run();
+      // The balance PI is unconfirmed here (the customer pays via
+      // client_secret); record it pending — payment_intent.succeeded flips it.
+      const txBal = crypto.randomUUID();
+      await db
+        .prepare(
+          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount, status, stripe_id) VALUES (?, ?, ?, 'balance', ?, 'pending', ?)`
+        )
+        .bind(txBal, bookingId, shopId, remainderPence / 100, bal.id)
+        .run();
       if (!stripeChargeId) {
-        stripeChargeId = String((bal as { latest_charge?: string }).latest_charge ?? bal.id ?? "");
+        stripeChargeId = String(bal.latest_charge ?? bal.id ?? "");
       }
     }
 
@@ -184,6 +209,10 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         .run();
     }
 
+    // Ledger honesty (WS-2): commission is 'transferred' only when all money
+    // has actually settled. With an outstanding balance PI it stays 'pending'
+    // until payment_intent.succeeded reconciles it (stripe-webhook.ts).
+    const fullySettled = remainderPence === 0;
     const ledgerId = crypto.randomUUID();
     const bd = await db
       .prepare("SELECT id FROM bw_business_days WHERE shop_id = ? AND date = ? LIMIT 1")
@@ -192,7 +221,7 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     await db
       .prepare(
         `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, services_amount, commission_rate, commission_amount, commission_bearer, status)
-         VALUES (?, ?, ?, ?, ?, 0.10, ?, ?, 'transferred')`
+         VALUES (?, ?, ?, ?, ?, 0.10, ?, ?, ?)`
       )
       .bind(
         ledgerId,
@@ -201,23 +230,29 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         bookingId,
         servicesTotal,
         commissionAmount,
-        commissionBearer
+        commissionBearer,
+        fullySettled ? "transferred" : "pending"
       )
       .run();
 
-    // bookings keeps only canonical columns; total_amount lives in
-    // bw_booking_state (updated below) and completion time is captured by
-    // status = 'completed' plus bw_booking_state.updated_at.
+    // Status was already claimed above; persist the final money figures.
+    // bookings keeps only canonical columns; total_amount + completed_at live
+    // in bw_booking_state (completed_at only once fully settled).
     await db
-      .prepare(
-        `UPDATE bookings SET status = 'completed', amount = ?, commission = ? WHERE id = ? AND shop_id = ?`
-      )
+      .prepare(`UPDATE bookings SET amount = ?, commission = ? WHERE id = ? AND shop_id = ?`)
       .bind(customerTotal, commissionAmount, bookingId, shopId)
       .run();
 
     await db
-      .prepare("UPDATE bw_booking_state SET total_amount = ?, updated_at = ? WHERE booking_id = ?")
-      .bind(customerTotal, new Date().toISOString(), bookingId)
+      .prepare(
+        `UPDATE bw_booking_state SET total_amount = ?, completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE booking_id = ?`
+      )
+      .bind(
+        customerTotal,
+        fullySettled ? new Date().toISOString() : null,
+        new Date().toISOString(),
+        bookingId
+      )
       .run();
 
     return c.json({
@@ -234,7 +269,13 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       balanceClientSecret,
     });
   } catch (e) {
-    console.error("[booking] checkout stripe error", e);
+    // Revert the checkout claim so the shop can retry once Stripe recovers;
+    // the idempotency keys above make the retry safe.
+    reportError("checkout.stripe", e, { shopId, bookingId });
+    await db
+      .prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND shop_id = ? AND status = 'completed'")
+      .bind(bookingId, shopId)
+      .run();
     return c.json({ success: false, error: e instanceof Error ? e.message : "Checkout failed" }, 500);
   }
 });
@@ -315,9 +356,35 @@ r.post("/:shopId/bookings", async (c) => {
     return c.json({ success: false, error: "Stripe Connect not configured for shop" }, 400);
   }
 
+  // Atomic slot claim BEFORE the PaymentIntent (WS-2, ABUSE-1): of two
+  // concurrent requests for the same slot exactly one sees changes === 1;
+  // the loser never reaches Stripe. Released on every failure path below.
+  const claim = await db
+    .prepare(
+      `UPDATE bw_availability SET is_booked = 1
+       WHERE shop_id = ? AND staff_id = ? AND slot_date = ? AND slot_time = ? AND is_booked = 0`
+    )
+    .bind(shopId, body.staffId, body.slotDate, body.slotTime)
+    .run();
+  if ((claim.meta?.changes ?? 0) !== 1) {
+    return c.json({ success: false, error: "Slot not available" }, 400);
+  }
+  const releaseClaim = () =>
+    db
+      .prepare(
+        `UPDATE bw_availability SET is_booked = 0, booking_id = NULL
+         WHERE shop_id = ? AND staff_id = ? AND slot_date = ? AND slot_time = ? AND booking_id IS NULL`
+      )
+      .bind(shopId, body.staffId, body.slotDate, body.slotTime)
+      .run();
+
+  const bookingId = crypto.randomUUID();
+
   let clientSecret = "";
   let paymentIntentId = "";
   try {
+    // Deterministic Idempotency-Key: a double-submit for the same slot gets
+    // the same PaymentIntent back instead of a second authorisation.
     const pi = await createPaymentIntentManualCapture({
       secret: c.env.STRIPE_SECRET_KEY,
       amountPence: depositPence,
@@ -326,20 +393,22 @@ r.post("/:shopId/bookings", async (c) => {
       applicationFeePence,
       metadata: {
         shopId,
+        bookingId,
         staffId: body.staffId,
         serviceId: body.serviceId,
         slotDate: body.slotDate,
         slotTime: body.slotTime,
       },
+      idempotencyKey: `deposit:${shopId}:${body.staffId}:${body.slotDate}:${body.slotTime}`,
     });
     clientSecret = pi.client_secret;
     paymentIntentId = pi.id;
   } catch (e) {
-    console.error("[booking] PI create failed", e);
+    reportError("booking.deposit_pi_create", e, { shopId, staffId: body.staffId, slotDate: body.slotDate, slotTime: body.slotTime });
+    await releaseClaim();
     return c.json({ success: false, error: e instanceof Error ? e.message : "Stripe error" }, 502);
   }
 
-  const bookingId = crypto.randomUUID();
   const endTime = addMinutesToHm(body.slotTime, service.duration_min);
   const commission = priceGbp * 0.1;
 
@@ -378,9 +447,17 @@ r.post("/:shopId/bookings", async (c) => {
       )
       .run();
   } catch (err) {
-    // idx_bookings_active_slot (migration 018): a concurrent request won the
-    // slot between the availability check and this INSERT.
+    // idx_bookings_active_slot (migration 018): a booking from another path
+    // (e.g. the public dynamic-slots flow) won this staff/time first. Unwind:
+    // release the availability claim and void the uncaptured hold.
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      await releaseClaim();
+      try {
+        await cancelPaymentIntent(c.env.STRIPE_SECRET_KEY, paymentIntentId, `cancel:${paymentIntentId}`);
+      } catch (cancelErr) {
+        // The hold auto-expires in ~7 days; report so it is not invisible.
+        reportError("booking.deposit_pi_cancel", cancelErr, { shopId, paymentIntentId });
+      }
       return c.json({ success: false, error: "This time slot is no longer available" }, 409);
     }
     throw err;
@@ -395,9 +472,13 @@ r.post("/:shopId/bookings", async (c) => {
     .bind(itemId, bookingId, shopId, priceGbp, body.serviceId)
     .run();
 
+  // The slot was already claimed atomically above; attach the booking to it.
   await db
-    .prepare("UPDATE bw_availability SET is_booked = 1, booking_id = ? WHERE id = ?")
-    .bind(bookingId, av.id)
+    .prepare(
+      `UPDATE bw_availability SET booking_id = ?
+       WHERE shop_id = ? AND staff_id = ? AND slot_date = ? AND slot_time = ? AND is_booked = 1 AND booking_id IS NULL`
+    )
+    .bind(bookingId, shopId, body.staffId, body.slotDate, body.slotTime)
     .run();
 
   await db
@@ -477,6 +558,17 @@ r.post("/:shopId/walk-ins", async (c) => {
   }
 
   const bookingId = crypto.randomUUID();
+
+  // Atomic claim of the selected slot (WS-2): a concurrent walk-in that
+  // selected the same earliest slot loses this UPDATE and gets a 409 to retry.
+  const claim = await db
+    .prepare("UPDATE bw_availability SET is_booked = 1, booking_id = ? WHERE id = ? AND is_booked = 0")
+    .bind(bookingId, slot.id)
+    .run();
+  if ((claim.meta?.changes ?? 0) !== 1) {
+    return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+  }
+
   const endTime = addMinutesToHm(slot.slot_time, service.duration_min);
   const priceGbp = Number(service.price);
   const commission = priceGbp * 0.1;
@@ -518,8 +610,12 @@ r.post("/:shopId/walk-ins", async (c) => {
       .run();
   } catch (err) {
     // idx_bookings_active_slot (migration 018): another walk-in or online
-    // booking won this staff/time slot first.
+    // booking won this staff/time slot first. Release the claim taken above.
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
+      await db
+        .prepare("UPDATE bw_availability SET is_booked = 0, booking_id = NULL WHERE id = ? AND booking_id = ?")
+        .bind(slot.id, bookingId)
+        .run();
       return c.json({ success: false, error: "This time slot is no longer available" }, 409);
     }
     throw err;
@@ -532,11 +628,6 @@ r.post("/:shopId/walk-ins", async (c) => {
        VALUES (?, ?, ?, 'service', ?, ?, 1, ?, ?, 1)`
     )
     .bind(itemId, bookingId, shopId, body.serviceId, service.name, priceGbp, priceGbp)
-    .run();
-
-  await db
-    .prepare("UPDATE bw_availability SET is_booked = 1, booking_id = ? WHERE id = ?")
-    .bind(bookingId, slot.id)
     .run();
 
   await db

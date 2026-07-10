@@ -9,15 +9,7 @@ function formEncode(data: Record<string, string | number | undefined | null>): s
   return parts.join("&");
 }
 
-async function stripePost(secret: string, path: string, body: Record<string, string | number | undefined | null>) {
-  const res = await fetch(`${STRIPE_API}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: formEncode(body),
-  });
+async function parseStripeResponse(res: Response, context: string): Promise<Record<string, unknown>> {
   const text = await res.text();
   let json: unknown;
   try {
@@ -27,10 +19,42 @@ async function stripePost(secret: string, path: string, body: Record<string, str
   }
   if (!res.ok) {
     const err = (json as { error?: { message?: string } })?.error?.message ?? text.slice(0, 500);
-    throw new Error(`Stripe ${res.status}: ${err}`);
+    throw new Error(`Stripe ${context} ${res.status}: ${err}`);
   }
   return json as Record<string, unknown>;
 }
+
+/**
+ * POST to Stripe. `idempotencyKey` makes retries and double-submits safe:
+ * Stripe returns the original response for a repeated key instead of creating
+ * a second object. Every money-moving call MUST pass one (WS-2).
+ */
+async function stripePost(
+  secret: string,
+  path: string,
+  body: Record<string, string | number | undefined | null>,
+  idempotencyKey?: string
+) {
+  const res = await fetch(`${STRIPE_API}${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: formEncode(body),
+  });
+  return parseStripeResponse(res, path);
+}
+
+async function stripeGet(secret: string, path: string) {
+  const res = await fetch(`${STRIPE_API}${path}`, {
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  return parseStripeResponse(res, path);
+}
+
+// ─── PaymentIntents ───────────────────────────────────────────────────────────
 
 export async function createPaymentIntentManualCapture(params: {
   secret: string;
@@ -39,6 +63,7 @@ export async function createPaymentIntentManualCapture(params: {
   destinationAccount: string;
   applicationFeePence: number;
   metadata: Record<string, string>;
+  idempotencyKey: string;
 }): Promise<{ id: string; client_secret: string }> {
   const metaFlat: Record<string, string | number | undefined> = {
     "payment_method_types[]": "card",
@@ -51,39 +76,8 @@ export async function createPaymentIntentManualCapture(params: {
   for (const [k, v] of Object.entries(params.metadata)) {
     metaFlat[`metadata[${k}]`] = v;
   }
-  const data = await stripePost(params.secret, "/payment_intents", metaFlat);
+  const data = await stripePost(params.secret, "/payment_intents", metaFlat, params.idempotencyKey);
   return { id: String(data.id), client_secret: String(data.client_secret ?? "") };
-}
-
-export async function capturePaymentIntent(
-  secret: string,
-  paymentIntentId: string,
-  options?: { amountPence?: number }
-): Promise<Record<string, unknown>> {
-  const body =
-    options?.amountPence != null
-      ? new URLSearchParams({ amount_to_capture: String(options.amountPence) }).toString()
-      : undefined;
-  const res = await fetch(`${STRIPE_API}/payment_intents/${encodeURIComponent(paymentIntentId)}/capture`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
-    },
-    body,
-  });
-  const text = await res.text();
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = { raw: text };
-  }
-  if (!res.ok) {
-    const err = (json as { error?: { message?: string } })?.error?.message ?? text.slice(0, 500);
-    throw new Error(`Stripe capture ${res.status}: ${err}`);
-  }
-  return json as Record<string, unknown>;
 }
 
 export async function createPaymentIntentAutoCapture(params: {
@@ -93,7 +87,8 @@ export async function createPaymentIntentAutoCapture(params: {
   destinationAccount: string;
   applicationFeePence: number;
   metadata: Record<string, string>;
-}): Promise<{ id: string; client_secret: string }> {
+  idempotencyKey: string;
+}): Promise<{ id: string; client_secret: string; latest_charge?: string }> {
   const metaFlat: Record<string, string | number | undefined> = {
     "payment_method_types[]": "card",
     amount: params.amountPence,
@@ -105,6 +100,148 @@ export async function createPaymentIntentAutoCapture(params: {
   for (const [k, v] of Object.entries(params.metadata)) {
     metaFlat[`metadata[${k}]`] = v;
   }
-  const data = await stripePost(params.secret, "/payment_intents", metaFlat);
-  return { id: String(data.id), client_secret: String(data.client_secret ?? "") };
+  const data = await stripePost(params.secret, "/payment_intents", metaFlat, params.idempotencyKey);
+  return {
+    id: String(data.id),
+    client_secret: String(data.client_secret ?? ""),
+    latest_charge: data.latest_charge ? String(data.latest_charge) : undefined,
+  };
+}
+
+export async function capturePaymentIntent(
+  secret: string,
+  paymentIntentId: string,
+  options?: { amountPence?: number; idempotencyKey?: string }
+): Promise<Record<string, unknown>> {
+  const body: Record<string, string | number | undefined | null> = {};
+  if (options?.amountPence != null) body.amount_to_capture = options.amountPence;
+  return stripePost(
+    secret,
+    `/payment_intents/${encodeURIComponent(paymentIntentId)}/capture`,
+    body,
+    options?.idempotencyKey
+  );
+}
+
+export async function cancelPaymentIntent(
+  secret: string,
+  paymentIntentId: string,
+  idempotencyKey?: string
+): Promise<Record<string, unknown>> {
+  return stripePost(
+    secret,
+    `/payment_intents/${encodeURIComponent(paymentIntentId)}/cancel`,
+    {},
+    idempotencyKey
+  );
+}
+
+// ─── Connect (Express) ────────────────────────────────────────────────────────
+
+export async function createConnectAccount(params: {
+  secret: string;
+  email: string;
+  shopId: string;
+  idempotencyKey: string;
+}): Promise<{ id: string }> {
+  const data = await stripePost(
+    params.secret,
+    "/accounts",
+    {
+      type: "express",
+      country: "GB",
+      email: params.email,
+      "capabilities[card_payments][requested]": "true",
+      "capabilities[transfers][requested]": "true",
+      "metadata[shopId]": params.shopId,
+    },
+    params.idempotencyKey
+  );
+  return { id: String(data.id) };
+}
+
+export async function createAccountLink(params: {
+  secret: string;
+  account: string;
+  refreshUrl: string;
+  returnUrl: string;
+}): Promise<{ url: string }> {
+  const data = await stripePost(params.secret, "/account_links", {
+    account: params.account,
+    refresh_url: params.refreshUrl,
+    return_url: params.returnUrl,
+    type: "account_onboarding",
+  });
+  return { url: String(data.url) };
+}
+
+export async function getAccount(secret: string, accountId: string): Promise<{
+  id: string;
+  charges_enabled: boolean;
+  details_submitted: boolean;
+  payouts_enabled: boolean;
+}> {
+  const data = await stripeGet(secret, `/accounts/${encodeURIComponent(accountId)}`);
+  return {
+    id: String(data.id),
+    charges_enabled: Boolean(data.charges_enabled),
+    details_submitted: Boolean(data.details_submitted),
+    payouts_enabled: Boolean(data.payouts_enabled),
+  };
+}
+
+// ─── Webhook signature verification ───────────────────────────────────────────
+
+const encoder = new TextEncoder();
+
+function hexEqualConstantTime(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+async function hmacSha256Hex(secret: string, payload: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+  return Array.from(new Uint8Array(sig), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Verify a Stripe-Signature header (t=...,v1=...) against the raw request
+ * body. Constant-time comparison; rejects events older than `toleranceS` to
+ * blunt replay. Returns true only for a valid, fresh signature.
+ */
+export async function verifyStripeSignature(
+  payload: string,
+  signatureHeader: string | undefined,
+  webhookSecret: string,
+  toleranceS = 300,
+  nowMs = Date.now()
+): Promise<boolean> {
+  if (!signatureHeader) return false;
+  const parts = new Map<string, string[]>();
+  for (const kv of signatureHeader.split(",")) {
+    const [k, v] = kv.split("=", 2);
+    if (!k || v === undefined) continue;
+    const key = k.trim();
+    if (!parts.has(key)) parts.set(key, []);
+    parts.get(key)!.push(v);
+  }
+  const t = parts.get("t")?.[0];
+  const v1s = parts.get("v1") ?? [];
+  if (!t || v1s.length === 0) return false;
+
+  const tsSec = Number(t);
+  if (!Number.isFinite(tsSec)) return false;
+  if (Math.abs(nowMs / 1000 - tsSec) > toleranceS) return false;
+
+  const expected = await hmacSha256Hex(webhookSecret, `${t}.${payload}`);
+  return v1s.some((v1) => hexEqualConstantTime(expected, v1.trim()));
 }

@@ -11,6 +11,8 @@ export type Env = {
   QUEUE?: Queue;
   /** Resend key for booking confirmation emails (wrangler secret). */
   RESEND_API_KEY?: string;
+  /** Signing secret of this worker's Stripe webhook endpoint (wrangler secret). */
+  STRIPE_WEBHOOK_SECRET?: string;
 };
 
 export interface JWTUser {

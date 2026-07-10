@@ -7,6 +7,7 @@ import {
   Users2,
   CalendarDays,
   Clock,
+  CreditCard,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -41,6 +42,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/queue", label: "Queue", icon: Users2 },
   { href: "/admin/revenue", label: "Revenue", icon: BarChart3 },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/admin/payments", label: "Payments", icon: CreditCard },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
