@@ -6,6 +6,7 @@ import {
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { hashPassword } from "../lib/password.js";
 
 const staff = new Hono<{ Bindings: Bindings }>();
 
@@ -68,19 +69,10 @@ staff.post("/", requireShopRole("admin"), async (c) => {
   const userId = crypto.randomUUID();
   const tempPassword = body.password ?? crypto.randomUUID().slice(0, 12);
 
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(tempPassword), "PBKDF2", false, ["deriveBits"]);
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-  const hash = btoa(String.fromCharCode(...new Uint8Array(bits)));
-  const saltB64 = btoa(String.fromCharCode(...salt));
-  const password_hash = `${saltB64}:${hash}`;
+  const password_hash = await hashPassword(tempPassword);
 
-  await createUser(c.env.DB, { id: userId, email: body.email, password_hash, role: "staff", shop_id: shopId });
+  // email_verified: the account is provisioned by the shop admin (operator-vouched).
+  await createUser(c.env.DB, { id: userId, email: body.email, password_hash, role: "staff", shop_id: shopId, email_verified: 1 });
 
   const staffId = crypto.randomUUID();
   await createStaffMember(c.env.DB, {

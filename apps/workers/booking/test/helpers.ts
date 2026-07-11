@@ -1,8 +1,26 @@
 /** Shared test fixtures — seed rows the way the main worker's suite does. */
 import { env } from "cloudflare:test";
+import { sign } from "hono/jwt";
 
 let n = 0;
 const uid = (prefix: string) => `${prefix}-${String(++n).padStart(4, "0")}-${crypto.randomUUID()}`;
+
+/**
+ * Signed JWT PLUS the session:<token> KV record authMiddleware now requires
+ * (WS-7 revocation check) — a bare signature is treated as revoked.
+ */
+export async function tokenFor(role: string, shopId: string): Promise<string> {
+  const token = await sign(
+    { sub: `user-${role}`, role, shop_id: shopId, exp: Math.floor(Date.now() / 1000) + 3600 },
+    "test-secret"
+  );
+  await env.KV.put(
+    `session:${token}`,
+    JSON.stringify({ user_id: `user-${role}`, role, shop_id: shopId }),
+    { expirationTtl: 3600 }
+  );
+  return token;
+}
 
 export async function seedShop(name: string): Promise<string> {
   const id = uid("shop");

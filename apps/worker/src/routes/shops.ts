@@ -26,11 +26,15 @@ import {
 import { safeJsonParse } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
 import { parseTextEffort } from "../services/model-registry.js";
 
 const shops = new Hono<{ Bindings: Bindings }>();
+
+/** Upload cap for shop images (logo/hero) — matches the staff-avatar limit. */
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Matches `ResearchQueueMessage.services` in apps/workers/research. */
 type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number };
@@ -327,8 +331,15 @@ shops.get("/:shopId/stripe-status", authMiddleware, async (c) => {
 });
 
 // ─── POST /api/shops/:shopId/reviews — public review submission ──────────────
+//
+// booking_id is REQUIRED (WS-7): reviews without one accepted unlimited
+// fake/defamatory entries. The review-request email links customers here with
+// their booking id (?review=<id>), which is the intended entry point.
 
-shops.post("/:shopId/reviews", async (c) => {
+shops.post(
+  "/:shopId/reviews",
+  rateLimit({ name: "reviews", limit: 5, windowS: 3600, key: clientIp }),
+  async (c) => {
   try {
     const shopIdParam = c.req.param("shopId");
     const shop =
@@ -348,24 +359,36 @@ shops.post("/:shopId/reviews", async (c) => {
     const bookingId = typeof body.booking_id === "string" ? body.booking_id.trim() : null;
 
     if (!name) return c.json({ success: false, error: "Name is required" }, 400);
+    if (name.length > 120) return c.json({ success: false, error: "Name is too long" }, 400);
     if (!text) return c.json({ success: false, error: "Review text is required" }, 400);
-    if (rating < 1 || rating > 5) return c.json({ success: false, error: "Rating must be 1–5" }, 400);
-
-    // Verify booking belongs to this shop (if provided)
-    if (bookingId) {
-      const booking = await c.env.DB
-        .prepare("SELECT id FROM bookings WHERE id = ? AND shop_id = ? LIMIT 1")
-        .bind(bookingId, shop.id)
-        .first<{ id: string }>();
-      if (!booking) return c.json({ success: false, error: "Invalid booking" }, 400);
-
-      // Check for duplicate review
-      const existing = await c.env.DB
-        .prepare("SELECT id FROM reviews WHERE booking_id = ? LIMIT 1")
-        .bind(bookingId)
-        .first<{ id: string }>();
-      if (existing) return c.json({ success: false, error: "Review already submitted for this booking" }, 409);
+    if (text.length > 2000) return c.json({ success: false, error: "Review text is too long (max 2000 characters)" }, 400);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      return c.json({ success: false, error: "Rating must be 1–5" }, 400);
     }
+    if (!bookingId || bookingId.length > 100) {
+      return c.json({ success: false, error: "A booking is required to leave a review" }, 400);
+    }
+
+    // The booking must belong to this shop, still stand, and have started —
+    // you review a visit, not a reservation.
+    const booking = await c.env.DB
+      .prepare("SELECT id, status, booking_date FROM bookings WHERE id = ? AND shop_id = ? LIMIT 1")
+      .bind(bookingId, shop.id)
+      .first<{ id: string; status: string; booking_date: string }>();
+    if (!booking || booking.status === "cancelled" || booking.status === "no_show") {
+      return c.json({ success: false, error: "Invalid booking" }, 400);
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if (booking.booking_date > today) {
+      return c.json({ success: false, error: "You can leave a review after your visit" }, 400);
+    }
+
+    // One review per booking
+    const existing = await c.env.DB
+      .prepare("SELECT id FROM reviews WHERE booking_id = ? LIMIT 1")
+      .bind(bookingId)
+      .first<{ id: string }>();
+    if (existing) return c.json({ success: false, error: "Review already submitted for this booking" }, 409);
 
     const id = crypto.randomUUID();
     await c.env.DB
@@ -800,6 +823,9 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
   if (!(file instanceof File) || file.size === 0) {
     return c.json({ success: false, error: "file required" }, 400);
   }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return c.json({ success: false, error: "File too large (max 5MB)" }, 400);
+  }
 
   const filename = `${type}.png`;
   const key = `shops/${shop.slug}/${filename}`;
@@ -988,6 +1014,11 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
   } else {
     const json = await c.req.json<typeof body>().catch((): typeof body => ({}));
     body = json;
+  }
+
+  // Cap before any buffering — same limit as the other image uploads.
+  if (body.logo_file && body.logo_file.size > MAX_UPLOAD_BYTES) {
+    return c.json({ success: false, error: "Logo file too large (max 5MB)" }, 400);
   }
 
   const settingsRaw = await c.env.KV.get(genSettingsKvKey(shop.id));

@@ -1,8 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { sign } from "hono/jwt";
 import { dispatch } from "./request";
-import { seedShop, seedStaff, seedService } from "./helpers";
+import { seedShop, seedStaff, seedService, tokenFor } from "./helpers";
 
 /**
  * WS-2 payment integrity: atomic slot claim before the PaymentIntent,
@@ -13,13 +12,6 @@ import { seedShop, seedStaff, seedService } from "./helpers";
  * (pi_idem_<key>), so persisted rows prove which key was sent; a PI id
  * containing "fail" makes capture 500.
  */
-
-async function tokenFor(role: string, shopId: string): Promise<string> {
-  return sign(
-    { sub: `user-${role}`, role, shop_id: shopId, exp: Math.floor(Date.now() / 1000) + 3600 },
-    "test-secret"
-  );
-}
 
 async function seedConnectedShop() {
   const shop = await seedShop("Pay Shop");

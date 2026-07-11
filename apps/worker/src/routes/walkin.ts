@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { getShopById, getShopBySlug } from "../db/queries.js";
 
 const walkin = new Hono<{ Bindings: Bindings }>();
@@ -32,7 +33,12 @@ async function reorderQueue(db: D1Database, shopId: string): Promise<void> {
 
 // ─── PUBLIC: POST /api/walkin/:shopSlug/join ──────────────────────────────────
 
-walkin.post("/:shopSlug/join", async (c) => {
+// 20/hour per IP: a whole party joining from shared shop Wi-Fi fits, a
+// queue-flooding script does not.
+walkin.post(
+  "/:shopSlug/join",
+  rateLimit({ name: "walkin-join", limit: 20, windowS: 3600, key: clientIp }),
+  async (c) => {
   const slug = c.req.param("shopSlug");
   const shop = (await getShopBySlug(c.env.DB, slug)) ?? (await getShopById(c.env.DB, slug));
   if (!shop || !shop.is_active) return c.json({ success: false, error: "Shop not found" }, 404);
@@ -41,7 +47,14 @@ walkin.post("/:shopSlug/join", async (c) => {
     .json<{ name?: string; phone?: string; service?: string; notes?: string }>()
     .catch((): { name?: string; phone?: string; service?: string; notes?: string } => ({}));
   const name = typeof body.name === "string" ? body.name.trim() : "";
+  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  const service = typeof body.service === "string" ? body.service.trim() : "";
+  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
   if (!name) return c.json({ success: false, error: "Name is required" }, 400);
+  if (name.length > 120) return c.json({ success: false, error: "Name is too long" }, 400);
+  if (phone.length > 40) return c.json({ success: false, error: "Phone number is too long" }, 400);
+  if (service.length > 120) return c.json({ success: false, error: "Service is too long" }, 400);
+  if (notes.length > 500) return c.json({ success: false, error: "Notes are too long" }, 400);
 
   const position = await getNextPosition(c.env.DB, shop.id);
   const id = crypto.randomUUID();
@@ -49,7 +62,7 @@ walkin.post("/:shopSlug/join", async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO walkin_queue (id, shop_id, name, phone, service, status, position, notes)
      VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)`
-  ).bind(id, shop.id, name, body.phone ?? null, body.service ?? null, position, body.notes ?? null).run();
+  ).bind(id, shop.id, name, phone || null, service || null, position, notes || null).run();
 
   // Cache bust queue KV
   await c.env.KV.delete(`walkin:queue:${shop.id}`);

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { dispatch } from "./request";
-import { seedShop, seedUser, bareTokenFor } from "./helpers";
+import { seedShop, seedUser, bareTokenFor, tokenFor } from "./helpers";
 
 /**
  * SEC-1 regression. POST /auth/register must not let an unauthenticated caller
@@ -59,7 +59,7 @@ describe("SEC-1: /auth/register privilege boundary", () => {
   it("still lets an authenticated developer create an admin bound to a shop", async () => {
     const shop = await seedShop("Legit Shop");
     const devId = await seedUser("developer", null);
-    const devToken = await bareTokenFor(devId, "developer", null);
+    const devToken = await tokenFor(devId, "developer", null);
     const email = `owner-${crypto.randomUUID()}@legit.test`;
 
     const res = await dispatch("POST", "/auth/register", {
@@ -73,5 +73,23 @@ describe("SEC-1: /auth/register privilege boundary", () => {
       .first<{ role: string; shop_id: string | null }>();
     expect(row?.role).toBe("admin");
     expect(row?.shop_id).toBe(shop);
+  });
+
+  it("WS-7: a REVOKED developer token (no KV session) cannot create privileged accounts", async () => {
+    const shop = await seedShop("Revoked Dev Shop");
+    const devId = await seedUser("developer", null);
+    // Validly signed but never recorded in KV — i.e. logged out / revoked.
+    const revokedToken = await bareTokenFor(devId, "developer", null);
+    const email = `owner-${crypto.randomUUID()}@revoked.test`;
+
+    const res = await dispatch("POST", "/auth/register", {
+      headers: { Authorization: `Bearer ${revokedToken}` },
+      body: { name: "Owner", email, password: "pw-123456", role: "admin", shop_id: shop },
+    });
+
+    // Treated as unauthenticated → the public-registration boundary applies.
+    expect(res.status).toBe(403);
+    const row = await env.DB.prepare("SELECT id FROM platform_users WHERE email = ?").bind(email).first();
+    expect(row).toBeNull();
   });
 });

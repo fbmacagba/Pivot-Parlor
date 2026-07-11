@@ -9,6 +9,8 @@ export interface DBUser {
   password_hash: string;
   role: string;
   shop_id: string | null;
+  /** 1 once address ownership is proven (OAuth, invite accept, or verify-email link). */
+  email_verified: number;
   created_at: string;
 }
 
@@ -205,7 +207,7 @@ export function getUserByEmail(db: D1Database, email: string) {
 
 export function getUserById(db: D1Database, id: string) {
   return db
-    .prepare("SELECT id, name, email, phone, role, shop_id, created_at FROM platform_users WHERE id = ? LIMIT 1")
+    .prepare("SELECT id, name, email, phone, role, shop_id, email_verified, created_at FROM platform_users WHERE id = ? LIMIT 1")
     .bind(id)
     .first<Omit<DBUser, "password_hash"> & { phone?: string | null }>();
 }
@@ -217,12 +219,14 @@ export function createUser(db: D1Database, user: {
   password_hash: string;
   role: string;
   shop_id?: string | null;
+  /** Only pass 1 when address ownership is proven (invite accept, operator-provisioned). */
+  email_verified?: number;
 }) {
   return db
     .prepare(
-      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
-    .bind(user.id, user.name ?? null, user.email, user.password_hash, user.role, user.shop_id ?? null)
+    .bind(user.id, user.name ?? null, user.email, user.password_hash, user.role, user.shop_id ?? null, user.email_verified ?? 0)
     .run();
 }
 

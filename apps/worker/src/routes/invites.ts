@@ -12,30 +12,11 @@ import {
   E2E_PLAYWRIGHT_INVITE_TOKEN,
 } from "../db/queries.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
+import { hashPassword } from "../lib/password.js";
 
 const invites = new Hono<{ Bindings: Bindings }>();
 
 const SESSION_TTL_S = 60 * 60 * 24 * 7; // 7 days
-
-async function hashPassword(password: string): Promise<string> {
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
-    keyMaterial,
-    256
-  );
-  const hash = btoa(String.fromCharCode(...new Uint8Array(bits)));
-  const saltB64 = btoa(String.fromCharCode(...salt));
-  return `${saltB64}:${hash}`;
-}
 
 // ─── GET /api/invites/:token — validate and return invite details (public) ────
 
@@ -111,6 +92,8 @@ invites.post("/:token/accept", async (c) => {
     password_hash,
     role: invite.role,
     shop_id: invite.shop_id,
+    // Accepting a token that was emailed to this address proves ownership (SEC-3).
+    email_verified: 1,
   });
 
   await markInviteUsed(c.env.DB, token);
