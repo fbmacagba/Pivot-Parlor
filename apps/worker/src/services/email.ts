@@ -57,7 +57,11 @@ async function sendEmail(
 
 // ─── Email templates ──────────────────────────────────────────────────────────
 
-function baseLayout(content: string, shopName: string): string {
+function baseLayout(
+  content: string,
+  shopName: string,
+  footerNote = "You received this because you made a booking."
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -92,7 +96,7 @@ function baseLayout(content: string, shopName: string): string {
     ${content}
     <div class="footer">
       ${shopName} · Powered by Pivot Parlor<br/>
-      You received this because you made a booking.
+      ${footerNote}
     </div>
   </div>
 </div>
@@ -179,6 +183,45 @@ export async function sendEodAlert(
     data.developer_email,
     `Pivot Parlor — ${data.booking_count} booking${data.booking_count !== 1 ? "s" : ""} today (${data.date})`,
     eodAlertHtml(data)
+  );
+}
+
+// ─── Email verification (SEC-3) ───────────────────────────────────────────────
+
+export interface VerificationEmailData {
+  to: string;
+  name: string | null;
+  verifyUrl: string;
+}
+
+function verificationHtml(d: VerificationEmailData): string {
+  const greeting = d.name?.trim() ? `Hi ${d.name.trim()},` : "Hi,";
+  return baseLayout(`
+    <div class="header">
+      <h1>Confirm your email address</h1>
+      <p>${greeting} please confirm this address to finish setting up your account.</p>
+    </div>
+    <div class="body">
+      <p style="font-size:14px;color:#9ca3af;">
+        Confirming your email lets you view and manage your bookings from your account.
+      </p>
+      <a href="${d.verifyUrl}" class="btn">Confirm email →</a>
+      <p style="font-size:12px;color:#4b5563;margin-top:20px;">
+        This link expires in 24 hours. If you didn't create a Pivot Parlor account, you can ignore this email.
+      </p>
+    </div>
+  `, "Pivot Parlor", "You received this because an account was created with this address.");
+}
+
+export async function sendVerificationEmail(
+  apiKey: string,
+  data: VerificationEmailData
+): Promise<void> {
+  await sendEmail(
+    apiKey,
+    data.to,
+    "Confirm your email address — Pivot Parlor",
+    verificationHtml(data)
   );
 }
 

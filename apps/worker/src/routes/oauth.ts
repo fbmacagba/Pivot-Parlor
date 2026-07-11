@@ -90,10 +90,20 @@ async function upsertOAuthUser(
 
   if (!byEmail) {
     // Create a new customer account — no password needed for OAuth users.
+    // email_verified = 1: every callback rejects provider-unverified emails
+    // before reaching here (SEC-3).
     await env.DB.prepare(
-      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id) VALUES (?, ?, ?, '', 'customer', NULL)"
+      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id, email_verified) VALUES (?, ?, ?, '', 'customer', NULL, 1)"
     )
       .bind(userId, name, email)
+      .run();
+  } else {
+    // Logging in via OAuth with this email IS proof of ownership — flip the
+    // flag for accounts that pre-date verification or self-registered (SEC-3).
+    await env.DB.prepare(
+      "UPDATE platform_users SET email_verified = 1 WHERE id = ? AND email_verified = 0"
+    )
+      .bind(userId)
       .run();
   }
 

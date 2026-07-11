@@ -1,9 +1,8 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { sign } from "hono/jwt";
 import { calculateCommissionPence } from "@repo/utils";
 import { dispatch } from "./request";
-import { seedShop, seedStaff, seedService, seedProduct } from "./helpers";
+import { seedShop, seedStaff, seedService, seedProduct, tokenFor } from "./helpers";
 
 /**
  * WS-3 Phase 1: counter POS + checkout on the unified sales spine.
@@ -13,13 +12,6 @@ import { seedShop, seedStaff, seedService, seedProduct } from "./helpers";
 
 const SECRET = "whsec_test";
 const encoder = new TextEncoder();
-
-async function tokenFor(role: string, shopId: string): Promise<string> {
-  return sign(
-    { sub: `user-${role}`, role, shop_id: shopId, exp: Math.floor(Date.now() / 1000) + 3600 },
-    "test-secret"
-  );
-}
 
 async function sigHeader(payload: string) {
   const t = Math.floor(Date.now() / 1000);

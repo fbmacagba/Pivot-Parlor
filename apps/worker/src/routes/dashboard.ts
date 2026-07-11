@@ -608,12 +608,26 @@ meRouter.get("/bookings", async (c) => {
 
   // Get user email from DB (customer may have booked without an account, matched by email)
   const userRow = await c.env.DB
-    .prepare("SELECT email FROM platform_users WHERE id = ? LIMIT 1")
+    .prepare("SELECT email, email_verified FROM platform_users WHERE id = ? LIMIT 1")
     .bind(user.sub)
-    .first<{ email: string }>();
+    .first<{ email: string; email_verified: number }>();
 
   if (!userRow) {
     return c.json({ success: true, data: { upcoming: [], past: [] } });
+  }
+
+  // SEC-3: bookings are matched purely on customer_email, so an unproven
+  // address must not unlock them — registering with someone else's email
+  // would disclose their booking history.
+  if (userRow.email_verified !== 1) {
+    return c.json(
+      {
+        success: false,
+        error: "Please verify your email address to view your bookings.",
+        code: "email_unverified",
+      },
+      403
+    );
   }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -707,11 +721,24 @@ meRouter.post("/bookings/:bookingId/cancel", async (c) => {
   const bookingId = c.req.param("bookingId")!;
 
   const userRow = await c.env.DB
-    .prepare("SELECT email FROM platform_users WHERE id = ? LIMIT 1")
+    .prepare("SELECT email, email_verified FROM platform_users WHERE id = ? LIMIT 1")
     .bind(user.sub)
-    .first<{ email: string }>();
+    .first<{ email: string; email_verified: number }>();
   if (!userRow) {
     return c.json({ success: false, error: "Account not found" }, 404);
+  }
+
+  // SEC-3: same email-claim rule as GET /bookings — an unverified address
+  // must not be able to cancel someone else's appointments.
+  if (userRow.email_verified !== 1) {
+    return c.json(
+      {
+        success: false,
+        error: "Please verify your email address to manage your bookings.",
+        code: "email_unverified",
+      },
+      403
+    );
   }
 
   const booking = await getBookingById(c.env.DB, bookingId);

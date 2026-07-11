@@ -1,6 +1,6 @@
 import { Link, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
-import { Calendar, Clock, ArrowRight, RefreshCw } from "lucide-react";
+import { Calendar, Clock, ArrowRight, RefreshCw, MailWarning } from "lucide-react";
 import { formatPence } from "@repo/utils";
 
 type Me = { id: string; name: string | null; email: string; phone?: string | null; role: string };
@@ -137,6 +137,64 @@ function UpcomingBookingCard({
   );
 }
 
+/** Shown when the worker gates bookings behind email verification (SEC-3). */
+function VerifyEmailBanner({ email }: { email: string }) {
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  async function resend() {
+    if (state === "sending") return;
+    setState("sending");
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/me/resend-verification", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = (await res.json().catch(() => null)) as { success?: boolean; error?: string } | null;
+      if (res.ok && data?.success) {
+        setState("sent");
+      } else {
+        setErrorMsg(data?.error ?? "Could not send the email. Please try again later.");
+        setState("error");
+      }
+    } catch {
+      setErrorMsg("Network error. Please try again.");
+      setState("error");
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5">
+      <div className="flex items-start gap-3">
+        <MailWarning className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-amber-300">Verify your email to see your bookings</p>
+          <p className="mt-1 text-xs text-white/50">
+            We need to confirm you own <span className="text-white/80">{email}</span> before showing
+            bookings made with that address. Check your inbox for the verification link.
+          </p>
+          {state === "sent" ? (
+            <p className="mt-3 text-xs text-emerald-400">
+              Verification email sent. Check your inbox (and spam folder).
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={resend}
+              disabled={state === "sending"}
+              className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
+            >
+              {state === "sending" ? "Sending…" : "Resend verification email"}
+            </button>
+          )}
+          {errorMsg && <p className="mt-2 text-xs text-red-400">{errorMsg}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProfileCard({ me }: { me: Me }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(me.name ?? "");
@@ -236,20 +294,24 @@ export default function AccountIndex() {
   const { me } = useOutletContext<{ me: Me }>();
   const displayName = me.name?.trim() || "there";
 
-  const [data, setData]       = useState<BookingData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState(false);
+  const [data, setData]           = useState<BookingData | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(false);
+  const [unverified, setUnverified] = useState(false);
 
   function reloadBookings() {
     setLoading(true);
     setError(false);
     fetch("/api/me/bookings", { credentials: "include" })
       .then(async (r) => {
-        const j = (await r.json().catch(() => null)) as { success?: boolean; data?: BookingData } | null;
+        const j = (await r.json().catch(() => null)) as
+          { success?: boolean; data?: BookingData; code?: string } | null;
+        if (j?.code === "email_unverified") { setUnverified(true); return null; }
         if (!r.ok || !j?.success || !j.data) throw new Error("bad response");
+        setUnverified(false);
         return j.data;
       })
-      .then((d) => setData(d))
+      .then((d) => { if (d) setData(d); })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
   }
@@ -260,11 +322,16 @@ export default function AccountIndex() {
     setError(false);
     fetch("/api/me/bookings", { credentials: "include" })
       .then(async (r) => {
-        const j = (await r.json().catch(() => null)) as { success?: boolean; data?: BookingData } | null;
+        const j = (await r.json().catch(() => null)) as
+          { success?: boolean; data?: BookingData; code?: string } | null;
+        if (j?.code === "email_unverified") {
+          if (!cancelled) setUnverified(true);
+          return null;
+        }
         if (!r.ok || !j?.success || !j.data) throw new Error("bad response");
         return j.data;
       })
-      .then((d) => { if (!cancelled) setData(d); })
+      .then((d) => { if (!cancelled && d) setData(d); })
       .catch(() => { if (!cancelled) setError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -286,6 +353,9 @@ export default function AccountIndex() {
       {/* Profile card */}
       <ProfileCard me={me} />
 
+      {/* Email verification gate (SEC-3) */}
+      {unverified && <VerifyEmailBanner email={me.email} />}
+
       {/* Upcoming bookings */}
       <section className="space-y-3">
         <div className="flex items-center justify-between">
@@ -295,7 +365,11 @@ export default function AccountIndex() {
           {loading && <span className="text-xs text-white/30 animate-pulse">Loading…</span>}
         </div>
 
-        {error ? (
+        {unverified ? (
+          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/35">
+            Verify your email above to see your bookings.
+          </div>
+        ) : error ? (
           <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 text-sm text-red-300">
             Could not load bookings. Try refreshing the page.
           </div>

@@ -1,7 +1,7 @@
 /**
  * seed-dev.ts — Seeds a developer account into Pivot Parlor's D1 database.
  *
- * Uses the IDENTICAL PBKDF2 algorithm from src/routes/auth.ts so that the
+ * Uses the IDENTICAL PBKDF2 algorithm from src/lib/password.ts so that the
  * login route's verifyPassword() will accept the seeded credentials.
  *
  * Usage (local D1 only):
@@ -21,7 +21,9 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ─── PBKDF2 hash — mirrors hashPassword() in src/routes/auth.ts exactly ──────
+// ─── PBKDF2 hash — mirrors hashPassword() in src/lib/password.ts exactly ─────
+
+const PBKDF2_ITERATIONS = 600_000;
 
 async function hashPassword(password: string): Promise<string> {
   const enc = new TextEncoder();
@@ -34,13 +36,13 @@ async function hashPassword(password: string): Promise<string> {
   );
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100_000, hash: "SHA-256" },
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
     keyMaterial,
     256
   );
   const hash    = btoa(String.fromCharCode(...new Uint8Array(bits)));
   const saltB64 = btoa(String.fromCharCode(...salt));
-  return `${saltB64}:${hash}`;
+  return `v2:${PBKDF2_ITERATIONS}:${saltB64}:${hash}`;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -67,14 +69,15 @@ async function main() {
 
   const sql =
     `-- Pivot Parlor developer seed (${new Date().toISOString()})\n` +
-    `INSERT OR IGNORE INTO platform_users (id, name, email, password_hash, role, shop_id)\n` +
+    `INSERT OR IGNORE INTO platform_users (id, name, email, password_hash, role, shop_id, email_verified)\n` +
     `VALUES (\n` +
     `  '${esc(id)}',\n` +
     `  '${esc(DEV_NAME)}',\n` +
     `  '${esc(DEV_EMAIL)}',\n` +
     `  '${esc(passwordHash)}',\n` +
     `  'developer',\n` +
-    `  NULL\n` +
+    `  NULL,\n` +
+    `  1\n` +
     `);\n`;
 
   console.log("\n  Pivot Parlor — developer account seed");
@@ -82,7 +85,7 @@ async function main() {
   console.log(`  Email : ${DEV_EMAIL}`);
   console.log(`  Name  : ${DEV_NAME}`);
   console.log(`  Role  : developer`);
-  console.log(`  Hash  : ${passwordHash.slice(0, 24)}…  (PBKDF2/SHA-256, 100 k iterations)\n`);
+  console.log(`  Hash  : ${passwordHash.slice(0, 24)}…  (PBKDF2/SHA-256, ${PBKDF2_ITERATIONS.toLocaleString()} iterations)\n`);
 
   // Resolve the worker root so wrangler can find wrangler.toml
   const workerRoot = dirname(dirname(fileURLToPath(import.meta.url)));
