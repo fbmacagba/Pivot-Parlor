@@ -24,6 +24,8 @@ import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
 import { productsRouter, suppliersRouter } from "./routes/products.js";
 import { inventoryRouter } from "./routes/inventory.js";
+import { purchaseOrdersRouter } from "./routes/purchase-orders.js";
+import { stockTakesRouter } from "./routes/stock-takes.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
 import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
 import { reminderDelaySeconds } from "@repo/utils";
@@ -155,6 +157,10 @@ app.route("/api/shops/:shopId/bookings", bookingsRouter);
 app.route("/api/shops/:shopId/products", productsRouter);
 app.route("/api/shops/:shopId/suppliers", suppliersRouter);
 app.route("/api/shops/:shopId/inventory", inventoryRouter);
+
+// Purchasing + stock-take sessions (WS-3 Phase 2)
+app.route("/api/shops/:shopId/purchase-orders", purchaseOrdersRouter);
+app.route("/api/shops/:shopId/stock-takes", stockTakesRouter);
 
 // ─── Dashboard endpoints ──────────────────────────────────────────────────────
 

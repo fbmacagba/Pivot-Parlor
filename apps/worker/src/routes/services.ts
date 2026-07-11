@@ -8,6 +8,9 @@ import {
   updateService,
   getShopBySlug,
   getShopById,
+  getProductById,
+  getServiceProducts,
+  setServiceProducts,
 } from "../db/queries.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
@@ -127,6 +130,53 @@ services.put("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) 
   await updateService(c.env.DB, serviceId, body);
   const updated = await getServiceById(c.env.DB, serviceId);
   return c.json({ success: true, data: updated });
+});
+
+// ─── Back-bar BOM (WS-3 Phase 2) ──────────────────────────────────────────────
+// Products consumed each time this service is sold — the booking worker reads
+// service_products at sale time and emits 'consumption' stock movements.
+
+services.get("/:serviceId/products", authMiddleware, requireShopRole("admin", "staff"), async (c) => {
+  const shopId = c.req.param("shopId")!;
+  const serviceId = c.req.param("serviceId")!;
+  const svc = await getServiceById(c.env.DB, serviceId);
+  if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);
+  return c.json({ success: true, data: await getServiceProducts(c.env.DB, shopId, serviceId) });
+});
+
+services.put("/:serviceId/products", authMiddleware, requireShopRole("admin"), async (c) => {
+  const shopId = c.req.param("shopId")!;
+  const serviceId = c.req.param("serviceId")!;
+  const svc = await getServiceById(c.env.DB, serviceId);
+  if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);
+
+  const body = await c.req.json<{ products?: Array<{ product_id?: string; quantity?: number }> }>();
+  if (!Array.isArray(body.products)) {
+    return c.json({ success: false, error: "products is required (empty array clears the list)" }, 400);
+  }
+  if (body.products.length > 50) {
+    return c.json({ success: false, error: "Too many products (max 50)" }, 400);
+  }
+
+  const entries: Array<{ product_id: string; quantity: number }> = [];
+  const seen = new Set<string>();
+  for (const p of body.products) {
+    if (!p.product_id) return c.json({ success: false, error: "product_id is required on every entry" }, 400);
+    if (seen.has(p.product_id)) return c.json({ success: false, error: "Duplicate product in list" }, 400);
+    seen.add(p.product_id);
+    const qty = p.quantity ?? 1;
+    if (!Number.isInteger(qty) || qty < 1 || qty > 1000) {
+      return c.json({ success: false, error: "quantity must be an integer between 1 and 1000" }, 400);
+    }
+    const product = await getProductById(c.env.DB, p.product_id);
+    if (!product || product.shop_id !== shopId) {
+      return c.json({ success: false, error: "Product not found" }, 404);
+    }
+    entries.push({ product_id: product.id, quantity: qty });
+  }
+
+  await setServiceProducts(c.env.DB, shopId, serviceId, entries);
+  return c.json({ success: true, data: await getServiceProducts(c.env.DB, shopId, serviceId) });
 });
 
 // ─── DELETE /api/shops/:shopId/services/:serviceId (soft-delete) ──────────────

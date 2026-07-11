@@ -7,6 +7,7 @@ import {
   setReorderLevels,
   getLowStockByShop,
   getStockMovementsByShop,
+  getInventoryReport,
   type StockMovementType,
 } from "../db/queries.js";
 import { authMiddleware } from "../middleware/auth.js";
@@ -35,6 +36,24 @@ const inventoryRouter = new Hono<{ Bindings: Bindings }>();
 inventoryRouter.get("/low-stock", authMiddleware, requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
   return c.json({ success: true, data: await getLowStockByShop(c.env.DB, shopId) });
+});
+
+// ─── GET /api/shops/:shopId/inventory/report?from=&to= ────────────────────────
+// Retail COGS/margin + per-product sell-through + per-staff retail +
+// consumption cost (WS-3 Phase 2). Defaults to the last 30 days.
+
+inventoryRouter.get("/report", authMiddleware, requireShopRole("admin", "staff"), async (c) => {
+  const shopId = c.req.param("shopId")!;
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const to = c.req.query("to") ?? new Date().toISOString().slice(0, 10);
+  const from =
+    c.req.query("from") ??
+    new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  if (!dateRe.test(from) || !dateRe.test(to) || from > to) {
+    return c.json({ success: false, error: "from/to must be YYYY-MM-DD with from <= to" }, 400);
+  }
+  const report = await getInventoryReport(c.env.DB, shopId, from, to);
+  return c.json({ success: true, data: { from, to, ...report } });
 });
 
 // ─── GET /api/shops/:shopId/inventory/movements ───────────────────────────────

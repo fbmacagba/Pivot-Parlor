@@ -1355,22 +1355,26 @@ export function updateProductVariant(
 // directly. The paired ON CONFLICT targets match the two partial unique
 // indexes from migration 034 (variant vs no-variant rows).
 
-export async function applyStockMovement(
-  db: D1Database,
-  m: {
-    id: string;
-    shop_id: string;
-    product_id: string;
-    variant_id?: string | null;
-    type: StockMovementType;
-    quantity_delta: number;
-    unit_cost_pence?: number | null;
-    reference_type?: string | null;
-    reference_id?: string | null;
-    staff_id?: string | null;
-    note?: string | null;
-  }
-) {
+export interface StockMovementInput {
+  id: string;
+  shop_id: string;
+  product_id: string;
+  variant_id?: string | null;
+  type: StockMovementType;
+  quantity_delta: number;
+  unit_cost_pence?: number | null;
+  reference_type?: string | null;
+  reference_id?: string | null;
+  staff_id?: string | null;
+  note?: string | null;
+}
+
+/**
+ * The movement + level-upsert statement pair, for callers that need several
+ * movements inside ONE db.batch (PO receiving, stock-take close). Single
+ * movements should keep using applyStockMovement.
+ */
+export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
   const variantId = m.variant_id ?? null;
   const movement = db
     .prepare(
@@ -1401,7 +1405,11 @@ export async function applyStockMovement(
              DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`
           )
           .bind(crypto.randomUUID(), m.shop_id, m.product_id, variantId, m.quantity_delta);
-  await db.batch([movement, level]);
+  return [movement, level];
+}
+
+export async function applyStockMovement(db: D1Database, m: StockMovementInput) {
+  await db.batch(stockMovementStatements(db, m));
 }
 
 /** Reorder thresholds are configuration, not stock: set them without a movement row. */
@@ -1501,4 +1509,271 @@ export async function getStockMovementsByShop(
     .bind(...vals)
     .all<DBStockMovement & { product_name: string; variant_name: string | null }>();
   return results;
+}
+
+// ─── Inventory: purchasing + stock-takes + BOM (WS-3 Phase 2, migration 038) ──
+
+export interface DBPurchaseOrder {
+  id: string;
+  shop_id: string;
+  supplier_id: string | null;
+  status: "draft" | "ordered" | "partial" | "received" | "cancelled";
+  notes: string | null;
+  ordered_at: string | null;
+  received_at: string | null;
+  created_at: string;
+}
+
+export interface DBPurchaseOrderItem {
+  id: string;
+  po_id: string;
+  shop_id: string;
+  product_id: string;
+  variant_id: string | null;
+  quantity: number;
+  received_qty: number;
+  unit_cost_pence: number;
+  created_at: string;
+}
+
+export interface DBStockTake {
+  id: string;
+  shop_id: string;
+  status: "open" | "completed" | "cancelled";
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface DBStockTakeItem {
+  id: string;
+  stock_take_id: string;
+  shop_id: string;
+  product_id: string;
+  variant_id: string | null;
+  expected_qty: number;
+  counted_qty: number;
+  created_at: string;
+}
+
+/** Headers with supplier name and item-derived totals (never stored — cannot drift). */
+export async function getPurchaseOrdersByShop(db: D1Database, shopId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT po.*, s.name AS supplier_name,
+              COALESCE(SUM(i.quantity * i.unit_cost_pence), 0) AS total_pence,
+              COALESCE(SUM(i.quantity), 0) AS total_qty,
+              COALESCE(SUM(i.received_qty), 0) AS total_received_qty
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON s.id = po.supplier_id
+       LEFT JOIN purchase_order_items i ON i.po_id = po.id
+       WHERE po.shop_id = ?
+       GROUP BY po.id
+       ORDER BY po.created_at DESC
+       LIMIT 100`
+    )
+    .bind(shopId)
+    .all<DBPurchaseOrder & { supplier_name: string | null; total_pence: number; total_qty: number; total_received_qty: number }>();
+  return results;
+}
+
+export function getPurchaseOrderById(db: D1Database, shopId: string, poId: string) {
+  return db
+    .prepare("SELECT * FROM purchase_orders WHERE id = ? AND shop_id = ? LIMIT 1")
+    .bind(poId, shopId)
+    .first<DBPurchaseOrder>();
+}
+
+export async function getPurchaseOrderItems(db: D1Database, poId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT i.*, p.name AS product_name, p.sku AS product_sku, v.name AS variant_name
+       FROM purchase_order_items i
+       JOIN products p ON p.id = i.product_id
+       LEFT JOIN product_variants v ON v.id = i.variant_id
+       WHERE i.po_id = ?
+       ORDER BY p.name`
+    )
+    .bind(poId)
+    .all<DBPurchaseOrderItem & { product_name: string; product_sku: string | null; variant_name: string | null }>();
+  return results;
+}
+
+/** BOM rows for one service, joined with the product facts the UI needs. */
+export async function getServiceProducts(db: D1Database, shopId: string, serviceId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT sp.service_id, sp.product_id, sp.quantity, p.name AS product_name,
+              p.cost_price_pence, p.track_stock, p.is_professional
+       FROM service_products sp
+       JOIN products p ON p.id = sp.product_id
+       WHERE sp.shop_id = ? AND sp.service_id = ?
+       ORDER BY p.name`
+    )
+    .bind(shopId, serviceId)
+    .all<{ service_id: string; product_id: string; quantity: number; product_name: string; cost_price_pence: number; track_stock: number; is_professional: number }>();
+  return results;
+}
+
+/** Replace a service's BOM wholesale — delete + insert in one batch. */
+export async function setServiceProducts(
+  db: D1Database,
+  shopId: string,
+  serviceId: string,
+  entries: Array<{ product_id: string; quantity: number }>
+) {
+  const stmts = [
+    db.prepare("DELETE FROM service_products WHERE shop_id = ? AND service_id = ?").bind(shopId, serviceId),
+    ...entries.map((e) =>
+      db
+        .prepare(
+          "INSERT INTO service_products (service_id, product_id, shop_id, quantity) VALUES (?, ?, ?, ?)"
+        )
+        .bind(serviceId, e.product_id, shopId, e.quantity)
+    ),
+  ];
+  await db.batch(stmts);
+}
+
+export function getStockTakeById(db: D1Database, shopId: string, stockTakeId: string) {
+  return db
+    .prepare("SELECT * FROM stock_takes WHERE id = ? AND shop_id = ? LIMIT 1")
+    .bind(stockTakeId, shopId)
+    .first<DBStockTake>();
+}
+
+export async function getStockTakesByShop(db: D1Database, shopId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT st.*, COUNT(i.id) AS item_count,
+              COALESCE(SUM(i.counted_qty - i.expected_qty), 0) AS variance_qty
+       FROM stock_takes st
+       LEFT JOIN stock_take_items i ON i.stock_take_id = st.id
+       WHERE st.shop_id = ?
+       GROUP BY st.id
+       ORDER BY st.created_at DESC
+       LIMIT 50`
+    )
+    .bind(shopId)
+    .all<DBStockTake & { item_count: number; variance_qty: number }>();
+  return results;
+}
+
+export async function getStockTakeItems(db: D1Database, stockTakeId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT i.*, p.name AS product_name, p.sku AS product_sku, v.name AS variant_name
+       FROM stock_take_items i
+       JOIN products p ON p.id = i.product_id
+       LEFT JOIN product_variants v ON v.id = i.variant_id
+       WHERE i.stock_take_id = ?
+       ORDER BY p.name`
+    )
+    .bind(stockTakeId)
+    .all<DBStockTakeItem & { product_name: string; product_sku: string | null; variant_name: string | null }>();
+  return results;
+}
+
+/** Current on-hand quantity for one product/variant (0 when no level row exists). */
+export async function getCurrentQuantity(
+  db: D1Database,
+  shopId: string,
+  productId: string,
+  variantId: string | null
+): Promise<number> {
+  const row =
+    variantId === null
+      ? await db
+          .prepare(
+            "SELECT quantity FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1"
+          )
+          .bind(shopId, productId)
+          .first<{ quantity: number }>()
+      : await db
+          .prepare(
+            "SELECT quantity FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1"
+          )
+          .bind(shopId, productId, variantId)
+          .first<{ quantity: number }>();
+  return row?.quantity ?? 0;
+}
+
+/**
+ * Retail/COGS report over the sale_items snapshots (WS-3 Phase 2). Voided
+ * sales are excluded; refund adjustments arrive with the returns work.
+ * Dates are inclusive YYYY-MM-DD, matched on substr(created_at, 1, 10).
+ */
+export async function getInventoryReport(db: D1Database, shopId: string, from: string, to: string) {
+  const [summary, byProduct, byStaff, consumption] = await Promise.all([
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(si.line_total_pence), 0) AS retail_revenue_pence,
+                COALESCE(SUM(si.cost_price_pence * si.quantity), 0) AS cogs_pence,
+                COALESCE(SUM(si.quantity), 0) AS units_sold
+         FROM sale_items si JOIN sales s ON s.id = si.sale_id
+         WHERE si.shop_id = ? AND si.item_type = 'product'
+           AND s.status != 'voided'
+           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?`
+      )
+      .bind(shopId, from, to)
+      .first<{ retail_revenue_pence: number; cogs_pence: number; units_sold: number }>(),
+    db
+      .prepare(
+        `SELECT si.product_id, si.name,
+                SUM(si.quantity) AS units_sold,
+                SUM(si.line_total_pence) AS revenue_pence,
+                SUM(si.cost_price_pence * si.quantity) AS cogs_pence
+         FROM sale_items si JOIN sales s ON s.id = si.sale_id
+         WHERE si.shop_id = ? AND si.item_type = 'product'
+           AND s.status != 'voided'
+           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?
+         GROUP BY si.product_id, si.name
+         ORDER BY revenue_pence DESC
+         LIMIT 50`
+      )
+      .bind(shopId, from, to)
+      .all<{ product_id: string | null; name: string; units_sold: number; revenue_pence: number; cogs_pence: number }>(),
+    db
+      .prepare(
+        `SELECT si.staff_id, st.display_name AS staff_name,
+                SUM(si.quantity) AS units_sold,
+                SUM(si.line_total_pence) AS revenue_pence
+         FROM sale_items si
+         JOIN sales s ON s.id = si.sale_id
+         LEFT JOIN staff st ON st.id = si.staff_id
+         WHERE si.shop_id = ? AND si.item_type = 'product'
+           AND s.status != 'voided'
+           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?
+         GROUP BY si.staff_id
+         ORDER BY revenue_pence DESC`
+      )
+      .bind(shopId, from, to)
+      .all<{ staff_id: string | null; staff_name: string | null; units_sold: number; revenue_pence: number }>(),
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(-m.quantity_delta), 0) AS units_consumed,
+                COALESCE(SUM(-m.quantity_delta * COALESCE(m.unit_cost_pence, 0)), 0) AS cost_pence
+         FROM stock_movements m
+         WHERE m.shop_id = ? AND m.type = 'consumption'
+           AND substr(m.created_at, 1, 10) BETWEEN ? AND ?`
+      )
+      .bind(shopId, from, to)
+      .first<{ units_consumed: number; cost_pence: number }>(),
+  ]);
+
+  return {
+    retail: {
+      revenue_pence: summary?.retail_revenue_pence ?? 0,
+      cogs_pence: summary?.cogs_pence ?? 0,
+      margin_pence: (summary?.retail_revenue_pence ?? 0) - (summary?.cogs_pence ?? 0),
+      units_sold: summary?.units_sold ?? 0,
+    },
+    by_product: byProduct.results ?? [],
+    by_staff: (byStaff.results ?? []).filter((r) => r.staff_id !== null),
+    consumption: {
+      units_consumed: consumption?.units_consumed ?? 0,
+      cost_pence: consumption?.cost_pence ?? 0,
+    },
+  };
 }
