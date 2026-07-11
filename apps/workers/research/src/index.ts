@@ -440,19 +440,36 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     const userPrompt = buildUserPrompt(input);
     console.log(`[${jobId}] [pivot-parlor-research] text model=${input.text_model}`);
 
-    // Model output is non-deterministic; a single off-spec or empty completion
-    // must not sink the whole job. Retry a few times, logging the raw response
-    // so a persistent failure is diagnosable from the tail.
-    const MAX_ATTEMPTS = 3;
+    // Model output is non-deterministic and providers rate-limit ("retry
+    // shortly"), so: retry the chosen model with a growing pause between
+    // attempts, then rescue the job with the default model — a temporarily
+    // rate-limited upstream (e.g. a 429 on one vendor) must not sink the run.
+    const attempts: { model: string; effort?: TextEffort }[] = [
+      { model: input.text_model, effort: input.text_effort },
+      { model: input.text_model, effort: input.text_effort },
+      { model: input.text_model, effort: input.text_effort },
+      ...(input.text_model !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
+    ];
     let spec: ResearchSpec | null = null;
     let lastError = "unknown";
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    for (let i = 0; i < attempts.length; i++) {
+      const { model, effort } = attempts[i]!;
+      const attempt = i + 1;
+      if (i > 0) {
+        // 3s, 6s, 9s… — enough for transient upstream rate limits to clear.
+        await new Promise((resolve) => setTimeout(resolve, 3000 * i));
+      }
+      if (model !== input.text_model) {
+        console.warn(
+          `[${jobId}] [pivot-parlor-research] ${input.text_model} exhausted, falling back to default model ${model}`
+        );
+      }
       let rawText: string;
       try {
-        rawText = await openRouterJson(apiKey, input.text_model, SYSTEM_PROMPT, userPrompt, input.text_effort);
+        rawText = await openRouterJson(apiKey, model, SYSTEM_PROMPT, userPrompt, effort);
       } catch (e) {
         lastError = `model call failed: ${errorMessage(e)}`;
-        console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} ${lastError}`);
+        console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${attempts.length} ${lastError}`);
         continue;
       }
       let parsed: unknown;
@@ -461,24 +478,24 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       } catch {
         lastError = "model returned non-JSON";
         console.warn(
-          `[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} non-JSON len=${rawText.length} head=${JSON.stringify(rawText.slice(0, 200))}`
+          `[${jobId}] [pivot-parlor-research] attempt ${attempt}/${attempts.length} non-JSON len=${rawText.length} head=${JSON.stringify(rawText.slice(0, 200))}`
         );
         continue;
       }
       if (!validateResearchSpec(parsed)) {
         lastError = "model JSON failed schema validation";
         console.warn(
-          `[${jobId}] [pivot-parlor-research] attempt ${attempt}/${MAX_ATTEMPTS} schema-invalid head=${JSON.stringify(parsed).slice(0, 300)}`
+          `[${jobId}] [pivot-parlor-research] attempt ${attempt}/${attempts.length} schema-invalid head=${JSON.stringify(parsed).slice(0, 300)}`
         );
         continue;
       }
       spec = parsed;
-      console.log(`[${jobId}] [pivot-parlor-research] valid spec on attempt ${attempt}`);
+      console.log(`[${jobId}] [pivot-parlor-research] valid spec on attempt ${attempt} (model=${model})`);
       break;
     }
 
     if (!spec) {
-      const err = `Research worker could not produce a valid spec after ${MAX_ATTEMPTS} attempts (${lastError})`;
+      const err = `Research worker could not produce a valid spec after ${attempts.length} attempts (${lastError})`;
       console.error(`[${jobId}] [pivot-parlor-research] ${err}`);
       await updateGenerationJob(env.DB, jobId, { status: "failed", error: err });
       await putJobKv(env.KV, jobId, { status: "failed", error: err, shopSlug: input.shopSlug });

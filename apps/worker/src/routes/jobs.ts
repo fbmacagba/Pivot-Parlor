@@ -30,6 +30,14 @@ jobs.get("/:jobId/status", authMiddleware, async (c) => {
   let error: string | undefined = job.error ?? undefined;
   let shopSlug = shop?.slug;
 
+  // KV is a cheap read-cache for progress, but its reads are eventually
+  // consistent: an edge location can serve a stale "queued"/"running" value
+  // for a while after a pipeline worker wrote a terminal state. D1 is the
+  // source of truth, so once IT says failed/complete, stale KV must never
+  // drag the response backwards (this kept the progress UI spinning for
+  // minutes on a job that failed in seconds).
+  const d1Terminal = job.status === "failed" || job.status === "complete";
+
   const kvRaw = await c.env.KV.get(`job:${jobId}`);
   if (kvRaw) {
     try {
@@ -39,8 +47,11 @@ jobs.get("/:jobId/status", authMiddleware, async (c) => {
         shopSlug?: string;
         error?: string | null;
       };
-      if (parsed.status) status = parsed.status;
-      if (parsed.stage) stage = parsed.stage;
+      const kvTerminal = parsed.status === "failed" || parsed.status === "complete";
+      if (!d1Terminal || kvTerminal) {
+        if (parsed.status) status = parsed.status;
+        if (parsed.stage) stage = parsed.stage;
+      }
       if (parsed.shopSlug) shopSlug = parsed.shopSlug;
       if (parsed.error !== undefined && parsed.error !== null) error = String(parsed.error);
     } catch {
