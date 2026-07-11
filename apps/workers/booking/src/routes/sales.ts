@@ -23,6 +23,7 @@ import { createCheckoutSession } from "../lib/stripe.js";
 import {
   SaleInputError,
   resolveSaleLines,
+  resolveConsumption,
   sumByType,
   computeCommission,
   buildSaleBatch,
@@ -146,6 +147,7 @@ r.post("/:shopId/sales", async (c) => {
 
   const saleId = crypto.randomUUID();
   const isRecordOnly = tender !== "stripe";
+  const consumption = await resolveConsumption(db, shopId, lines);
 
   await db.batch(
     buildSaleBatch(db, {
@@ -156,6 +158,7 @@ r.post("/:shopId/sales", async (c) => {
       customerName: body.customer_name?.toString().trim() || null,
       customerEmail: body.customer_email?.toString().trim() || null,
       lines,
+      consumption,
       subtotalPence,
       discountPence,
       tipPence,

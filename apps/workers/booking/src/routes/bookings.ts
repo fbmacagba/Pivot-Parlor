@@ -6,6 +6,7 @@ import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, captu
 import {
   SaleInputError,
   resolveSaleLines,
+  resolveConsumption,
   sumByType,
   computeCommission,
   buildSaleBatch,
@@ -152,6 +153,17 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
 
   const { servicesPence: servicesTotalPence, retailPence: productsTotalPence } = sumByType(lines);
 
+  // Back-bar BOM for the base service + any service extras (WS-3 Phase 2).
+  // Read-only, but it runs after the atomic status claim — any failure must
+  // revert the claim like every other early exit.
+  let consumption;
+  try {
+    consumption = await resolveConsumption(db, shopId, lines);
+  } catch (e) {
+    await revertClaim();
+    throw e;
+  }
+
   const tipPct = [0, 5, 10, 15, 20].includes(Number(body.tipPercent)) ? Number(body.tipPercent) : 0;
   const subForTipPence = servicesTotalPence + productsTotalPence;
   const tipPence = Math.round((subForTipPence * tipPct) / 100);
@@ -235,6 +247,7 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       customerName: typeof booking.customer_name === "string" ? booking.customer_name : null,
       customerEmail: typeof booking.customer_email === "string" ? booking.customer_email : null,
       lines,
+      consumption,
       subtotalPence: servicesTotalPence + productsTotalPence,
       discountPence: 0,
       tipPence,

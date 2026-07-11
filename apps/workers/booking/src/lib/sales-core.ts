@@ -145,6 +145,56 @@ export async function resolveSaleLines(
   return resolved;
 }
 
+export interface ConsumptionEntry {
+  product_id: string;
+  /** Negative: units leaving stock. */
+  quantity_delta: number;
+  unit_cost_pence: number | null;
+}
+
+/**
+ * Back-bar consumption (WS-3 Phase 2): service_products is the per-service
+ * bill of materials — selling a service consumes its products. Only active,
+ * stock-tracked products move. Runs on BOTH sale paths (POS counter sales and
+ * appointment checkout); pending Stripe sales consume at creation just like
+ * 'sale' movements, and voiding reverses both (voidSale reverses every
+ * movement referencing the sale).
+ */
+export async function resolveConsumption(
+  db: D1Database,
+  shopId: string,
+  lines: ResolvedLine[]
+): Promise<ConsumptionEntry[]> {
+  const perService = new Map<string, number>();
+  for (const l of lines) {
+    if (l.item_type === "service" && l.service_id) {
+      perService.set(l.service_id, (perService.get(l.service_id) ?? 0) + l.quantity);
+    }
+  }
+  if (perService.size === 0) return [];
+
+  const entries: ConsumptionEntry[] = [];
+  for (const [serviceId, svcQty] of perService) {
+    const { results } = await db
+      .prepare(
+        `SELECT sp.product_id, sp.quantity, p.cost_price_pence
+         FROM service_products sp
+         JOIN products p ON p.id = sp.product_id
+         WHERE sp.service_id = ? AND sp.shop_id = ? AND p.is_active = 1 AND p.track_stock = 1`
+      )
+      .bind(serviceId, shopId)
+      .all<{ product_id: string; quantity: number; cost_price_pence: number }>();
+    for (const row of results ?? []) {
+      entries.push({
+        product_id: row.product_id,
+        quantity_delta: -(row.quantity * svcQty),
+        unit_cost_pence: row.cost_price_pence,
+      });
+    }
+  }
+  return entries;
+}
+
 export function sumByType(lines: ResolvedLine[]): { servicesPence: number; retailPence: number } {
   let servicesPence = 0;
   let retailPence = 0;
@@ -195,6 +245,8 @@ export interface SaleBatchArgs {
   tenderType: "cash" | "card_external" | "stripe";
   /** 'completed' for record-only tenders and settled checkouts, 'pending' while Stripe money is outstanding. */
   status: "pending" | "completed";
+  /** Back-bar BOM movements from resolveConsumption (WS-3 Phase 2). */
+  consumption?: ConsumptionEntry[];
   note?: string | null;
   ledger: {
     servicesAmountPence: number;
@@ -289,6 +341,25 @@ export function buildSaleBatch(db: D1Database, args: SaleBatchArgs): D1PreparedS
         staffId: line.staff_id,
       }));
     }
+  }
+
+  // Back-bar consumption rides in the same batch and carries the same
+  // reference as the 'sale' movements, so voidSale reverses it too.
+  for (const entry of args.consumption ?? []) {
+    stmts.push(
+      ...stockMovementStatements(db, {
+        shopId: args.shopId,
+        productId: entry.product_id,
+        variantId: null,
+        type: "consumption",
+        quantityDelta: entry.quantity_delta,
+        unitCostPence: entry.unit_cost_pence,
+        referenceType: "sale",
+        referenceId: args.saleId,
+        staffId: args.staffId ?? null,
+        note: "Back-bar consumption",
+      })
+    );
   }
 
   for (const tx of args.transactions) {
