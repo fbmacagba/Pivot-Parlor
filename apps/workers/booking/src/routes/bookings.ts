@@ -3,6 +3,14 @@ import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { addMinutesToHm, todayUtcYmd } from "../lib/time.js";
 import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent } from "../lib/stripe.js";
+import {
+  SaleInputError,
+  resolveSaleLines,
+  sumByType,
+  computeCommission,
+  buildSaleBatch,
+  type ResolvedLine,
+} from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
 import { calculateCommissionPence } from "@repo/utils";
 
@@ -16,20 +24,17 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
+  // Products are catalogue references now (WS-3): the server prices them and
+  // decrements stock — free-text {name, price} lines are no longer accepted.
   let body: {
     extraServices?: { serviceId: string; quantity: number }[];
-    products?: { name: string; price_pence: number; quantity: number }[];
+    products?: { productId: string; variantId?: string | null; quantity: number }[];
     tipPercent?: number;
   };
   try {
     body = (await c.req.json()) as typeof body;
   } catch {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
-  }
-  for (const p of body.products ?? []) {
-    if (!Number.isInteger(p.price_pence) || p.price_pence < 0) {
-      return c.json({ success: false, error: "product price_pence must be a non-negative integer (pence)" }, 400);
-    }
   }
 
   const booking = await db
@@ -66,85 +71,101 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     return c.json({ success: false, error: "Checkout already in progress or completed" }, 409);
   }
 
+  // Any early exit after the claim must put the booking back to 'confirmed'
+  // or it is stuck completed-but-unpaid.
+  const revertClaim = () =>
+    db
+      .prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND shop_id = ? AND status = 'completed'")
+      .bind(bookingId, shopId)
+      .run();
+
   const settings = await db
-    .prepare("SELECT commission_bearer, product_commission_enabled FROM shop_settings WHERE shop_id = ? LIMIT 1")
+    .prepare("SELECT commission_bearer FROM shop_settings WHERE shop_id = ? LIMIT 1")
     .bind(shopId)
-    .first<{ commission_bearer: string; product_commission_enabled: number }>();
+    .first<{ commission_bearer: string }>();
   const commissionBearer = settings?.commission_bearer ?? "shop";
-  const productCommission = Number(settings?.product_commission_enabled ?? 0) === 1;
 
   const shopRow = await db
-    .prepare("SELECT stripe_connect_account_id, commission_rate FROM shops WHERE id = ?")
+    .prepare("SELECT stripe_connect_account_id, commission_rate, retail_commission_rate FROM shops WHERE id = ?")
     .bind(shopId)
-    .first<{ stripe_connect_account_id: string | null; commission_rate: number }>();
+    .first<{ stripe_connect_account_id: string | null; commission_rate: number; retail_commission_rate: number }>();
   const connectId = shopRow?.stripe_connect_account_id?.trim();
   if (!connectId) {
+    await revertClaim();
     return c.json({ success: false, error: "Stripe Connect not configured" }, 400);
   }
   const commissionRate = Number(shopRow?.commission_rate ?? 0.1);
+  const retailCommissionRate = Number(shopRow?.retail_commission_rate ?? commissionRate);
 
-  const svcSum = await db
-    .prepare(
-      "SELECT COALESCE(SUM(total_price_pence), 0) AS s FROM bw_booking_items WHERE booking_id = ? AND item_type = 'service'"
-    )
-    .bind(bookingId)
-    .first<{ s: number }>();
-  let servicesTotalPence = Number(svcSum?.s ?? 0);
+  // The base service line is the price agreed at booking time (post-promo),
+  // which lives on bookings.amount_pence — pre-checkout line-item rows are
+  // gone with bw_booking_items (migration 036).
+  const baseSvc = await db
+    .prepare("SELECT name FROM services WHERE id = ? LIMIT 1")
+    .bind(booking.service_id)
+    .first<{ name: string }>();
+  const basePricePence = Number(booking.amount_pence ?? 0);
+  const bookingStaffId = typeof booking.staff_id === "string" ? booking.staff_id : null;
 
-  const extras = body.extraServices ?? [];
-  for (const ex of extras) {
-    const svc = await db
-      .prepare("SELECT price_pence, name FROM services WHERE id = ? AND shop_id = ?")
-      .bind(ex.serviceId, shopId)
-      .first<{ price_pence: number; name: string }>();
-    if (svc) {
-      const q = Math.max(1, ex.quantity ?? 1);
-      const linePence = svc.price_pence * q;
-      servicesTotalPence += linePence;
-      const itemId = crypto.randomUUID();
-      await db
-        .prepare(
-          `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
-           VALUES (?, ?, ?, 'service', ?, ?, ?, ?, ?, 1)`
-        )
-        .bind(itemId, bookingId, shopId, ex.serviceId, svc.name, q, svc.price_pence, linePence)
-        .run();
+  const lines: ResolvedLine[] = [
+    {
+      item_type: "service",
+      service_id: String(booking.service_id),
+      product_id: null,
+      variant_id: null,
+      name: baseSvc?.name ?? "Service",
+      quantity: 1,
+      unit_price_pence: basePricePence,
+      cost_price_pence: 0,
+      line_total_pence: basePricePence,
+      staff_id: bookingStaffId,
+      decrements_stock: false,
+    },
+  ];
+
+  const extraInputs = [
+    ...(body.extraServices ?? []).map((e) => ({
+      type: "service" as const,
+      serviceId: e.serviceId,
+      quantity: e.quantity ?? 1,
+      staffId: bookingStaffId,
+    })),
+    ...(body.products ?? []).map((p) => ({
+      type: "product" as const,
+      productId: p.productId,
+      variantId: p.variantId ?? null,
+      quantity: p.quantity ?? 1,
+      staffId: bookingStaffId,
+    })),
+  ];
+  if (extraInputs.length > 0) {
+    try {
+      lines.push(...(await resolveSaleLines(db, shopId, extraInputs)));
+    } catch (e) {
+      await revertClaim();
+      if (e instanceof SaleInputError) {
+        return c.json({ success: false, error: e.message }, 400);
+      }
+      throw e;
     }
   }
 
-  let productsTotalPence = 0;
-  for (const p of body.products ?? []) {
-    const q = Math.max(1, p.quantity ?? 1);
-    const linePence = p.price_pence * q;
-    productsTotalPence += linePence;
-    const itemId = crypto.randomUUID();
-    await db
-      .prepare(
-        `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
-         VALUES (?, ?, ?, 'product', NULL, ?, ?, ?, ?, ?)`
-      )
-      .bind(itemId, bookingId, shopId, p.name, q, p.price_pence, linePence, productCommission ? 1 : 0)
-      .run();
-  }
+  const { servicesPence: servicesTotalPence, retailPence: productsTotalPence } = sumByType(lines);
 
   const tipPct = [0, 5, 10, 15, 20].includes(Number(body.tipPercent)) ? Number(body.tipPercent) : 0;
   const subForTipPence = servicesTotalPence + productsTotalPence;
   const tipPence = Math.round((subForTipPence * tipPct) / 100);
-  if (tipPct > 0 && tipPence > 0) {
-    const itemId = crypto.randomUUID();
-    await db
-      .prepare(
-        `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
-         VALUES (?, ?, ?, 'tip', NULL, 'Tip', 1, ?, ?, 0)`
-      )
-      .bind(itemId, bookingId, shopId, tipPence, tipPence)
-      .run();
-  }
 
-  let commissionBasePence = servicesTotalPence;
-  if (productCommission) commissionBasePence += productsTotalPence;
-  // Single rounding path (WS-4): the shop's configured rate, not a literal.
-  const commissionPence = calculateCommissionPence(commissionBasePence, commissionRate).commission_pence;
+  // Two commission rates (WS-3): the service rate on the service portion,
+  // the shop's retail rate on the product portion. Rounding stays on the
+  // WS-4 single path inside computeCommission.
+  const { discountedServicesPence, discountedRetailPence, commissionPence } = computeCommission({
+    servicesPence: servicesTotalPence,
+    retailPence: productsTotalPence,
+    discountPence: 0,
+    commissionRate,
+    retailCommissionRate,
+  });
   const grandTotalPence = servicesTotalPence + productsTotalPence + tipPence;
   const customerTotalPence =
     commissionBearer === "customer" ? grandTotalPence + commissionPence : grandTotalPence;
@@ -159,6 +180,10 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   let stripeChargeId = "";
   let balanceClientSecret: string | null = null;
 
+  // Generated before the Stripe calls so the balance PI can carry it in
+  // metadata — payment_intent.succeeded settles the sale by saleId.
+  const saleId = crypto.randomUUID();
+
   try {
     if (piId && captureFromHoldPence > 0) {
       // Deposit capture is synchronous — a repeated Idempotency-Key returns
@@ -170,6 +195,7 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       stripeChargeId = String((cap.latest_charge as string) ?? "");
     }
 
+    let balancePiId: string | null = null;
     if (remainderPence > 0) {
       const bal = await createPaymentIntentAutoCapture({
         secret: c.env.STRIPE_SECRET_KEY,
@@ -177,87 +203,82 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         currency: "gbp",
         destinationAccount: connectId,
         applicationFeePence: balanceApplicationFeePence,
-        metadata: { shopId, bookingId, type: "balance" },
+        metadata: { shopId, bookingId, saleId, type: "balance" },
         idempotencyKey: `balance:${bookingId}`,
       });
       balanceClientSecret = bal.client_secret || null;
-      await db
-        .prepare("UPDATE bw_booking_state SET stripe_balance_pi = ?, updated_at = ? WHERE booking_id = ?")
-        .bind(bal.id, new Date().toISOString(), bookingId)
-        .run();
-      // The balance PI is unconfirmed here (the customer pays via
-      // client_secret); record it pending — payment_intent.succeeded flips it.
-      const txBal = crypto.randomUUID();
-      await db
-        .prepare(
-          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id) VALUES (?, ?, ?, 'balance', ?, 'pending', ?)`
-        )
-        .bind(txBal, bookingId, shopId, remainderPence, bal.id)
-        .run();
+      balancePiId = bal.id;
       if (!stripeChargeId) {
         stripeChargeId = String(bal.latest_charge ?? bal.id ?? "");
       }
-    }
-
-    if (captureFromHoldPence > 0) {
-      const tx1 = crypto.randomUUID();
-      await db
-        .prepare(
-          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id) VALUES (?, ?, ?, 'deposit_capture', ?, 'captured', ?)`
-        )
-        .bind(tx1, bookingId, shopId, captureFromHoldPence, piId ?? "")
-        .run();
     }
 
     // Ledger honesty (WS-2): commission is 'transferred' only when all money
     // has actually settled. With an outstanding balance PI it stays 'pending'
     // until payment_intent.succeeded reconciles it (stripe-webhook.ts).
     const fullySettled = remainderPence === 0;
-    const ledgerId = crypto.randomUUID();
     const bd = await db
       .prepare("SELECT id FROM bw_business_days WHERE shop_id = ? AND date = ? LIMIT 1")
       .bind(shopId, todayUtcYmd())
       .first<{ id: string }>();
-    await db
-      .prepare(
-        `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, services_amount_pence, commission_rate, commission_amount_pence, commission_bearer, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        ledgerId,
-        shopId,
-        bd?.id ?? null,
-        bookingId,
-        servicesTotalPence,
+
+    // The whole checkout persists atomically on the sales spine (WS-3):
+    // sale header + line items + stock movements for catalogue products +
+    // tender transactions + commission ledger + booking money columns.
+    const nowIso = new Date().toISOString();
+    const stmts = buildSaleBatch(db, {
+      saleId,
+      shopId,
+      bookingId,
+      businessDayId: bd?.id ?? null,
+      staffId: bookingStaffId,
+      customerName: typeof booking.customer_name === "string" ? booking.customer_name : null,
+      customerEmail: typeof booking.customer_email === "string" ? booking.customer_email : null,
+      lines,
+      subtotalPence: servicesTotalPence + productsTotalPence,
+      discountPence: 0,
+      tipPence,
+      totalPence: customerTotalPence,
+      tenderType: "stripe",
+      status: fullySettled ? "completed" : "pending",
+      ledger: {
+        servicesAmountPence: discountedServicesPence,
+        retailAmountPence: discountedRetailPence,
         commissionRate,
+        retailCommissionRate,
         commissionPence,
         commissionBearer,
-        fullySettled ? "transferred" : "pending"
-      )
-      .run();
+        status: fullySettled ? "transferred" : "pending",
+      },
+      transactions: [
+        ...(captureFromHoldPence > 0
+          ? [{ type: "deposit_capture", amountPence: captureFromHoldPence, status: "captured", stripeId: piId ?? "", bookingId }]
+          : []),
+        ...(remainderPence > 0 && balancePiId
+          ? [{ type: "balance", amountPence: remainderPence, status: "pending", stripeId: balancePiId, bookingId }]
+          : []),
+      ],
+    });
 
-    // Status was already claimed above; persist the final money figures.
-    // bookings keeps only canonical columns; total_amount_pence + completed_at live
-    // in bw_booking_state (completed_at only once fully settled).
-    await db
-      .prepare(`UPDATE bookings SET amount_pence = ?, commission_pence = ? WHERE id = ? AND shop_id = ?`)
-      .bind(customerTotalPence, commissionPence, bookingId, shopId)
-      .run();
+    // bookings keeps only canonical columns; total_amount_pence + completed_at
+    // live in bw_booking_state (completed_at only once fully settled).
+    stmts.push(
+      db
+        .prepare(`UPDATE bookings SET amount_pence = ?, commission_pence = ? WHERE id = ? AND shop_id = ?`)
+        .bind(customerTotalPence, commissionPence, bookingId, shopId),
+      db
+        .prepare(
+          `UPDATE bw_booking_state SET total_amount_pence = ?, stripe_balance_pi = COALESCE(?, stripe_balance_pi),
+             completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE booking_id = ?`
+        )
+        .bind(customerTotalPence, balancePiId, fullySettled ? nowIso : null, nowIso, bookingId)
+    );
 
-    await db
-      .prepare(
-        `UPDATE bw_booking_state SET total_amount_pence = ?, completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE booking_id = ?`
-      )
-      .bind(
-        customerTotalPence,
-        fullySettled ? new Date().toISOString() : null,
-        new Date().toISOString(),
-        bookingId
-      )
-      .run();
+    await db.batch(stmts);
 
     return c.json({
       success: true,
+      saleId,
       receipt: {
         services_pence: servicesTotalPence,
         products_pence: productsTotalPence,
@@ -273,10 +294,7 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     // Revert the checkout claim so the shop can retry once Stripe recovers;
     // the idempotency keys above make the retry safe.
     reportError("checkout.stripe", e, { shopId, bookingId });
-    await db
-      .prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND shop_id = ? AND status = 'completed'")
-      .bind(bookingId, shopId)
-      .run();
+    await revertClaim();
     return c.json({ success: false, error: e instanceof Error ? e.message : "Checkout failed" }, 500);
   }
 });
@@ -465,14 +483,8 @@ r.post("/:shopId/bookings", async (c) => {
     throw err;
   }
 
-  const itemId = crypto.randomUUID();
-  await db
-    .prepare(
-      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
-       SELECT ?, ?, ?, 'service', s.id, s.name, 1, s.price_pence, ?, 1 FROM services s WHERE s.id = ?`
-    )
-    .bind(itemId, bookingId, shopId, pricePence, body.serviceId)
-    .run();
+  // No pre-checkout line items any more (WS-3): the checkout derives the base
+  // service from bookings.amount_pence and creates the sale itself.
 
   // The slot was already claimed atomically above; attach the booking to it.
   await db
@@ -628,14 +640,8 @@ r.post("/:shopId/walk-ins", async (c) => {
     throw err;
   }
 
-  const itemId = crypto.randomUUID();
-  await db
-    .prepare(
-      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
-       VALUES (?, ?, ?, 'service', ?, ?, 1, ?, ?, 1)`
-    )
-    .bind(itemId, bookingId, shopId, body.serviceId, service.name, pricePence, pricePence)
-    .run();
+  // No pre-checkout line items any more (WS-3): the checkout derives the base
+  // service from bookings.amount_pence and creates the sale itself.
 
   await db
     .prepare(

@@ -1154,6 +1154,8 @@ shops.get("/:shopId", async (c) => {
     type: shop.type,
     phone: shop.phone,
     commission_rate: shop.commission_rate,
+    retail_commission_rate: shop.retail_commission_rate,
+    currency: shop.currency,
     is_active: shop.is_active,
     created_at: shop.created_at,
     ...(aiTheme ? { ai_theme: aiTheme } : {}),
@@ -1323,18 +1325,36 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
 
 shops.patch("/:shopId", authMiddleware, requireShopRole("admin"), async (c) => {
   const { shopId } = c.req.param();
+  const user = getUser(c);
 
   const body = await c.req.json<{
     name?: string;
     phone?: string;
     is_active?: number;
+    commission_rate?: number;
+    retail_commission_rate?: number;
   }>();
+
+  // Commission rates are platform economics: only a developer may change
+  // them — a shop admin must not be able to zero their own commission.
+  for (const key of ["commission_rate", "retail_commission_rate"] as const) {
+    const rate = body[key];
+    if (rate === undefined) continue;
+    if (user.role !== "developer") {
+      return c.json({ success: false, error: `Only developers can change ${key}` }, 403);
+    }
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0 || rate > 1) {
+      return c.json({ success: false, error: `${key} must be a number between 0 and 1` }, 400);
+    }
+  }
 
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (body.name !== undefined) { sets.push("name = ?"); vals.push(body.name); }
   if (body.phone !== undefined) { sets.push("phone = ?"); vals.push(body.phone); }
   if (body.is_active !== undefined) { sets.push("is_active = ?"); vals.push(body.is_active); }
+  if (body.commission_rate !== undefined) { sets.push("commission_rate = ?"); vals.push(body.commission_rate); }
+  if (body.retail_commission_rate !== undefined) { sets.push("retail_commission_rate = ?"); vals.push(body.retail_commission_rate); }
 
   if (sets.length > 0) {
     vals.push(shopId);

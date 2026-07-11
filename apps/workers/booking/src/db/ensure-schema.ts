@@ -80,23 +80,10 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
     )
     .run();
 
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS bw_booking_items (
-        id TEXT PRIMARY KEY,
-        booking_id TEXT NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-        shop_id TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
-        item_type TEXT NOT NULL,
-        service_id TEXT,
-        name TEXT,
-        quantity INTEGER NOT NULL DEFAULT 1,
-        unit_price_pence INTEGER NOT NULL DEFAULT 0,
-        total_price_pence INTEGER NOT NULL DEFAULT 0,
-        is_commissionable INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`
-    )
-    .run();
+  // bw_booking_items was retired by migration 036 (WS-3: the sales spine
+  // replaces it) — deliberately NOT re-created here or the drop would undo
+  // itself on the next cold start. The sales/sale_items DDL lives only in
+  // the canonical migration chain (035).
 
   await db
     .prepare(

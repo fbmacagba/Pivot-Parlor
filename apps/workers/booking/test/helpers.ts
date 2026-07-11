@@ -62,3 +62,25 @@ export async function slugFor(shopId: string): Promise<string> {
   const row = await env.DB.prepare("SELECT slug FROM shops WHERE id = ?").bind(shopId).first<{ slug: string }>();
   return row!.slug;
 }
+
+/** Catalogue product with optional opening stock (WS-3). */
+export async function seedProduct(
+  shopId: string,
+  opts: { retailPence?: number; costPence?: number; stock?: number; trackStock?: boolean } = {}
+): Promise<string> {
+  const id = uid("prod");
+  await env.DB.prepare(
+    `INSERT INTO products (id, shop_id, name, sku, cost_price_pence, retail_price_pence, track_stock, is_active)
+     VALUES (?, ?, 'Pomade', ?, ?, ?, ?, 1)`
+  )
+    .bind(id, shopId, uid("sku"), opts.costPence ?? 300, opts.retailPence ?? 1000, opts.trackStock === false ? 0 : 1)
+    .run();
+  if (opts.stock && opts.stock > 0) {
+    await env.DB.prepare(
+      `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity) VALUES (?, ?, ?, NULL, ?)`
+    )
+      .bind(crypto.randomUUID(), shopId, id, opts.stock)
+      .run();
+  }
+  return id;
+}

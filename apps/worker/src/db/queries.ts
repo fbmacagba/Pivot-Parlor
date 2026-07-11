@@ -22,6 +22,8 @@ export interface DBShop {
   owner_email: string;
   phone: string;
   commission_rate: number;
+  retail_commission_rate: number;
+  currency: string;
   ai_theme: string | null;
   is_active: number;
   status: string;
