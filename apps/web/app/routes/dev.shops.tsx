@@ -1241,7 +1241,7 @@ export default function DevShops() {
                                   Generating site for {expandedGenJob?.shopName ?? shop.name}
                                 </h4>
                                 <p className="mt-1 text-sm text-white/55">
-                                  This takes 1–2 minutes. Keep this row open.
+                                  This takes 1–3 minutes. Keep this row open.
                                 </p>
                                 <ol className="mt-3 list-none space-y-2 p-0" aria-label="Generation progress">
                                   {REGEN_STEP_LABELS.map((label, i) => (

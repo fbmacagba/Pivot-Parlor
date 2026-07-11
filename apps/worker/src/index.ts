@@ -21,6 +21,8 @@ import connectProxyRouter from "./routes/connect-proxy.js";
 import waitlistRouter from "./routes/waitlist.js";
 import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
+import { productsRouter, suppliersRouter } from "./routes/products.js";
+import { inventoryRouter } from "./routes/inventory.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
 import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
 import { reminderDelaySeconds } from "@repo/utils";
@@ -146,6 +148,11 @@ app.route("/api/shops/:shopId/staff", staffRouter);
 app.route("/api/shops/:shopId/services", servicesRouter);
 app.route("/api/shops/:shopId/schedule", scheduleRouter);
 app.route("/api/shops/:shopId/bookings", bookingsRouter);
+
+// Inventory catalogue + stock (WS-3 Phase 0; shop-internal, auth inside routers)
+app.route("/api/shops/:shopId/products", productsRouter);
+app.route("/api/shops/:shopId/suppliers", suppliersRouter);
+app.route("/api/shops/:shopId/inventory", inventoryRouter);
 
 // ─── Dashboard endpoints ──────────────────────────────────────────────────────
 

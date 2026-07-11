@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS shops (
   status          TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','suspended')),
   plan            TEXT NOT NULL DEFAULT 'standard',
   timezone        TEXT NOT NULL DEFAULT 'Europe/London',
+  currency        TEXT NOT NULL DEFAULT 'GBP',
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -146,3 +147,102 @@ CREATE TABLE IF NOT EXISTS invites (
 
 CREATE INDEX IF NOT EXISTS idx_invites_token   ON invites(token);
 CREATE INDEX IF NOT EXISTS idx_invites_shop_id ON invites(shop_id);
+
+-- ─── Inventory: catalogue + stock (WS-3 Phase 0, migration 034) ───────────────
+-- Money is INTEGER pence; tax_rate_bps is basis points. stock_levels holds the
+-- current quantity; every change is recorded as a stock_movements row.
+CREATE TABLE IF NOT EXISTS product_categories (
+  id         TEXT PRIMARY KEY,
+  shop_id    TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_active  INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id         TEXT PRIMARY KEY,
+  shop_id    TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  email      TEXT,
+  phone      TEXT,
+  notes      TEXT,
+  is_active  INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS products (
+  id                 TEXT PRIMARY KEY,
+  shop_id            TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  category_id        TEXT REFERENCES product_categories(id) ON DELETE SET NULL,
+  supplier_id        TEXT REFERENCES suppliers(id) ON DELETE SET NULL,
+  name               TEXT NOT NULL,
+  description        TEXT,
+  brand              TEXT,
+  sku                TEXT,
+  barcode            TEXT,
+  cost_price_pence   INTEGER NOT NULL DEFAULT 0,
+  retail_price_pence INTEGER NOT NULL DEFAULT 0,
+  tax_rate_bps       INTEGER NOT NULL DEFAULT 0,
+  is_professional    INTEGER NOT NULL DEFAULT 0,
+  track_stock        INTEGER NOT NULL DEFAULT 1,
+  image_url          TEXT,
+  is_active          INTEGER NOT NULL DEFAULT 1,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS product_variants (
+  id                 TEXT PRIMARY KEY,
+  product_id         TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  shop_id            TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  name               TEXT NOT NULL,
+  sku                TEXT,
+  barcode            TEXT,
+  cost_price_pence   INTEGER NOT NULL DEFAULT 0,
+  retail_price_pence INTEGER NOT NULL DEFAULT 0,
+  attributes_json    TEXT,
+  is_active          INTEGER NOT NULL DEFAULT 1,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stock_levels (
+  id            TEXT PRIMARY KEY,
+  shop_id       TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  product_id    TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_id    TEXT REFERENCES product_variants(id) ON DELETE CASCADE,
+  quantity      INTEGER NOT NULL DEFAULT 0,
+  reorder_point INTEGER NOT NULL DEFAULT 0,
+  reorder_qty   INTEGER NOT NULL DEFAULT 0,
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id              TEXT PRIMARY KEY,
+  shop_id         TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  product_id      TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_id      TEXT REFERENCES product_variants(id) ON DELETE CASCADE,
+  type            TEXT NOT NULL CHECK(type IN ('receive','sale','adjustment','waste','transfer','return','consumption')),
+  quantity_delta  INTEGER NOT NULL CHECK(quantity_delta <> 0),
+  unit_cost_pence INTEGER,
+  reference_type  TEXT,
+  reference_id    TEXT,
+  staff_id        TEXT REFERENCES staff(id),
+  note            TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_products_shop_sku
+  ON products(shop_id, sku) WHERE sku IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_variants_shop_sku
+  ON product_variants(shop_id, sku) WHERE sku IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_levels_product
+  ON stock_levels(shop_id, product_id) WHERE variant_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_levels_variant
+  ON stock_levels(shop_id, product_id, variant_id) WHERE variant_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_product_categories_shop ON product_categories(shop_id);
+CREATE INDEX IF NOT EXISTS idx_suppliers_shop          ON suppliers(shop_id);
+CREATE INDEX IF NOT EXISTS idx_products_shop           ON products(shop_id);
+CREATE INDEX IF NOT EXISTS idx_products_barcode        ON products(shop_id, barcode);
+CREATE INDEX IF NOT EXISTS idx_variants_product        ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(shop_id, product_id, created_at);
