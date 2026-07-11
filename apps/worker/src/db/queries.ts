@@ -103,6 +103,95 @@ export interface DBWaitlist {
   created_at: string;
 }
 
+export interface DBProductCategory {
+  id: string;
+  shop_id: string;
+  name: string;
+  sort_order: number;
+  is_active: number;
+  created_at: string;
+}
+
+export interface DBSupplier {
+  id: string;
+  shop_id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  is_active: number;
+  created_at: string;
+}
+
+export interface DBProduct {
+  id: string;
+  shop_id: string;
+  category_id: string | null;
+  supplier_id: string | null;
+  name: string;
+  description: string | null;
+  brand: string | null;
+  sku: string | null;
+  barcode: string | null;
+  cost_price_pence: number;
+  retail_price_pence: number;
+  tax_rate_bps: number;
+  is_professional: number;
+  track_stock: number;
+  image_url: string | null;
+  is_active: number;
+  created_at: string;
+}
+
+export interface DBProductVariant {
+  id: string;
+  product_id: string;
+  shop_id: string;
+  name: string;
+  sku: string | null;
+  barcode: string | null;
+  cost_price_pence: number;
+  retail_price_pence: number;
+  attributes_json: string | null;
+  is_active: number;
+  created_at: string;
+}
+
+export interface DBStockLevel {
+  id: string;
+  shop_id: string;
+  product_id: string;
+  variant_id: string | null;
+  quantity: number;
+  reorder_point: number;
+  reorder_qty: number;
+  updated_at: string;
+}
+
+export type StockMovementType =
+  | "receive"
+  | "sale"
+  | "adjustment"
+  | "waste"
+  | "transfer"
+  | "return"
+  | "consumption";
+
+export interface DBStockMovement {
+  id: string;
+  shop_id: string;
+  product_id: string;
+  variant_id: string | null;
+  type: StockMovementType;
+  quantity_delta: number;
+  unit_cost_pence: number | null;
+  reference_type: string | null;
+  reference_id: string | null;
+  staff_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
 // ─── Platform Users ───────────────────────────────────────────────────────────
 
 export function getUserByEmail(db: D1Database, email: string) {
@@ -1001,5 +1090,409 @@ export async function getBookingsDueForReminder(db: D1Database) {
       shop_name: string;
       shop_slug: string;
     }>();
+  return results;
+}
+
+// ─── Inventory: catalogue (WS-3 Phase 0) ──────────────────────────────────────
+
+export async function getProductCategoriesByShop(db: D1Database, shopId: string) {
+  const { results } = await db
+    .prepare(
+      "SELECT * FROM product_categories WHERE shop_id = ? AND is_active = 1 ORDER BY sort_order, name"
+    )
+    .bind(shopId)
+    .all<DBProductCategory>();
+  return results;
+}
+
+export function getProductCategoryById(db: D1Database, id: string) {
+  return db
+    .prepare("SELECT * FROM product_categories WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<DBProductCategory>();
+}
+
+export function createProductCategory(
+  db: D1Database,
+  cat: { id: string; shop_id: string; name: string; sort_order?: number }
+) {
+  return db
+    .prepare("INSERT INTO product_categories (id, shop_id, name, sort_order) VALUES (?, ?, ?, ?)")
+    .bind(cat.id, cat.shop_id, cat.name, cat.sort_order ?? 0)
+    .run();
+}
+
+export function updateProductCategory(
+  db: D1Database,
+  id: string,
+  fields: { name?: string; sort_order?: number; is_active?: number }
+) {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
+  if (fields.sort_order !== undefined) { sets.push("sort_order = ?"); vals.push(fields.sort_order); }
+  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (sets.length === 0) return Promise.resolve();
+  vals.push(id);
+  return db.prepare(`UPDATE product_categories SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+}
+
+export async function getSuppliersByShop(db: D1Database, shopId: string) {
+  const { results } = await db
+    .prepare("SELECT * FROM suppliers WHERE shop_id = ? AND is_active = 1 ORDER BY name")
+    .bind(shopId)
+    .all<DBSupplier>();
+  return results;
+}
+
+export function getSupplierById(db: D1Database, id: string) {
+  return db.prepare("SELECT * FROM suppliers WHERE id = ? LIMIT 1").bind(id).first<DBSupplier>();
+}
+
+export function createSupplier(
+  db: D1Database,
+  sup: { id: string; shop_id: string; name: string; email?: string | null; phone?: string | null; notes?: string | null }
+) {
+  return db
+    .prepare("INSERT INTO suppliers (id, shop_id, name, email, phone, notes) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(sup.id, sup.shop_id, sup.name, sup.email ?? null, sup.phone ?? null, sup.notes ?? null)
+    .run();
+}
+
+export function updateSupplier(
+  db: D1Database,
+  id: string,
+  fields: { name?: string; email?: string | null; phone?: string | null; notes?: string | null; is_active?: number }
+) {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
+  if (fields.email !== undefined) { sets.push("email = ?"); vals.push(fields.email); }
+  if (fields.phone !== undefined) { sets.push("phone = ?"); vals.push(fields.phone); }
+  if (fields.notes !== undefined) { sets.push("notes = ?"); vals.push(fields.notes); }
+  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (sets.length === 0) return Promise.resolve();
+  vals.push(id);
+  return db.prepare(`UPDATE suppliers SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+}
+
+/** Products with total on-hand quantity summed across their stock rows (base + variants). */
+export async function getProductsWithStockByShop(db: D1Database, shopId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT p.*, COALESCE(SUM(sl.quantity), 0) AS total_quantity
+       FROM products p
+       LEFT JOIN stock_levels sl ON sl.product_id = p.id
+       WHERE p.shop_id = ? AND p.is_active = 1
+       GROUP BY p.id
+       ORDER BY p.name`
+    )
+    .bind(shopId)
+    .all<DBProduct & { total_quantity: number }>();
+  return results;
+}
+
+export function getProductById(db: D1Database, id: string) {
+  return db.prepare("SELECT * FROM products WHERE id = ? LIMIT 1").bind(id).first<DBProduct>();
+}
+
+export function createProduct(
+  db: D1Database,
+  p: {
+    id: string;
+    shop_id: string;
+    name: string;
+    category_id?: string | null;
+    supplier_id?: string | null;
+    description?: string | null;
+    brand?: string | null;
+    sku?: string | null;
+    barcode?: string | null;
+    cost_price_pence?: number;
+    retail_price_pence?: number;
+    tax_rate_bps?: number;
+    is_professional?: number;
+    track_stock?: number;
+    image_url?: string | null;
+  }
+) {
+  return db
+    .prepare(
+      `INSERT INTO products (id, shop_id, category_id, supplier_id, name, description, brand, sku, barcode,
+         cost_price_pence, retail_price_pence, tax_rate_bps, is_professional, track_stock, image_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      p.id, p.shop_id, p.category_id ?? null, p.supplier_id ?? null, p.name,
+      p.description ?? null, p.brand ?? null, p.sku ?? null, p.barcode ?? null,
+      p.cost_price_pence ?? 0, p.retail_price_pence ?? 0, p.tax_rate_bps ?? 0,
+      p.is_professional ?? 0, p.track_stock ?? 1, p.image_url ?? null
+    )
+    .run();
+}
+
+export function updateProduct(
+  db: D1Database,
+  id: string,
+  fields: {
+    name?: string;
+    category_id?: string | null;
+    supplier_id?: string | null;
+    description?: string | null;
+    brand?: string | null;
+    sku?: string | null;
+    barcode?: string | null;
+    cost_price_pence?: number;
+    retail_price_pence?: number;
+    tax_rate_bps?: number;
+    is_professional?: number;
+    track_stock?: number;
+    image_url?: string | null;
+    is_active?: number;
+  }
+) {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
+  if (fields.category_id !== undefined) { sets.push("category_id = ?"); vals.push(fields.category_id); }
+  if (fields.supplier_id !== undefined) { sets.push("supplier_id = ?"); vals.push(fields.supplier_id); }
+  if (fields.description !== undefined) { sets.push("description = ?"); vals.push(fields.description); }
+  if (fields.brand !== undefined) { sets.push("brand = ?"); vals.push(fields.brand); }
+  if (fields.sku !== undefined) { sets.push("sku = ?"); vals.push(fields.sku); }
+  if (fields.barcode !== undefined) { sets.push("barcode = ?"); vals.push(fields.barcode); }
+  if (fields.cost_price_pence !== undefined) { sets.push("cost_price_pence = ?"); vals.push(fields.cost_price_pence); }
+  if (fields.retail_price_pence !== undefined) { sets.push("retail_price_pence = ?"); vals.push(fields.retail_price_pence); }
+  if (fields.tax_rate_bps !== undefined) { sets.push("tax_rate_bps = ?"); vals.push(fields.tax_rate_bps); }
+  if (fields.is_professional !== undefined) { sets.push("is_professional = ?"); vals.push(fields.is_professional); }
+  if (fields.track_stock !== undefined) { sets.push("track_stock = ?"); vals.push(fields.track_stock); }
+  if (fields.image_url !== undefined) { sets.push("image_url = ?"); vals.push(fields.image_url); }
+  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (sets.length === 0) return Promise.resolve();
+  vals.push(id);
+  return db.prepare(`UPDATE products SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+}
+
+export async function getVariantsByProduct(db: D1Database, productId: string) {
+  const { results } = await db
+    .prepare("SELECT * FROM product_variants WHERE product_id = ? AND is_active = 1 ORDER BY name")
+    .bind(productId)
+    .all<DBProductVariant>();
+  return results;
+}
+
+export function getProductVariantById(db: D1Database, id: string) {
+  return db
+    .prepare("SELECT * FROM product_variants WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<DBProductVariant>();
+}
+
+export function createProductVariant(
+  db: D1Database,
+  v: {
+    id: string;
+    product_id: string;
+    shop_id: string;
+    name: string;
+    sku?: string | null;
+    barcode?: string | null;
+    cost_price_pence?: number;
+    retail_price_pence?: number;
+    attributes_json?: string | null;
+  }
+) {
+  return db
+    .prepare(
+      `INSERT INTO product_variants (id, product_id, shop_id, name, sku, barcode,
+         cost_price_pence, retail_price_pence, attributes_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      v.id, v.product_id, v.shop_id, v.name, v.sku ?? null, v.barcode ?? null,
+      v.cost_price_pence ?? 0, v.retail_price_pence ?? 0, v.attributes_json ?? null
+    )
+    .run();
+}
+
+export function updateProductVariant(
+  db: D1Database,
+  id: string,
+  fields: {
+    name?: string;
+    sku?: string | null;
+    barcode?: string | null;
+    cost_price_pence?: number;
+    retail_price_pence?: number;
+    attributes_json?: string | null;
+    is_active?: number;
+  }
+) {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
+  if (fields.sku !== undefined) { sets.push("sku = ?"); vals.push(fields.sku); }
+  if (fields.barcode !== undefined) { sets.push("barcode = ?"); vals.push(fields.barcode); }
+  if (fields.cost_price_pence !== undefined) { sets.push("cost_price_pence = ?"); vals.push(fields.cost_price_pence); }
+  if (fields.retail_price_pence !== undefined) { sets.push("retail_price_pence = ?"); vals.push(fields.retail_price_pence); }
+  if (fields.attributes_json !== undefined) { sets.push("attributes_json = ?"); vals.push(fields.attributes_json); }
+  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (sets.length === 0) return Promise.resolve();
+  vals.push(id);
+  return db.prepare(`UPDATE product_variants SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+}
+
+// ─── Inventory: stock (WS-3 Phase 0) ──────────────────────────────────────────
+//
+// stock_levels is the current quantity; stock_movements is the append-only
+// audit trail. Every quantity change goes through applyStockMovement, which
+// writes both rows in one atomic D1 batch — never UPDATE stock_levels.quantity
+// directly. The paired ON CONFLICT targets match the two partial unique
+// indexes from migration 034 (variant vs no-variant rows).
+
+export async function applyStockMovement(
+  db: D1Database,
+  m: {
+    id: string;
+    shop_id: string;
+    product_id: string;
+    variant_id?: string | null;
+    type: StockMovementType;
+    quantity_delta: number;
+    unit_cost_pence?: number | null;
+    reference_type?: string | null;
+    reference_id?: string | null;
+    staff_id?: string | null;
+    note?: string | null;
+  }
+) {
+  const variantId = m.variant_id ?? null;
+  const movement = db
+    .prepare(
+      `INSERT INTO stock_movements (id, shop_id, product_id, variant_id, type, quantity_delta,
+         unit_cost_pence, reference_type, reference_id, staff_id, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      m.id, m.shop_id, m.product_id, variantId, m.type, m.quantity_delta,
+      m.unit_cost_pence ?? null, m.reference_type ?? null, m.reference_id ?? null,
+      m.staff_id ?? null, m.note ?? null
+    );
+  const level =
+    variantId === null
+      ? db
+          .prepare(
+            `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity)
+             VALUES (?, ?, ?, NULL, ?)
+             ON CONFLICT(shop_id, product_id) WHERE variant_id IS NULL
+             DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`
+          )
+          .bind(crypto.randomUUID(), m.shop_id, m.product_id, m.quantity_delta)
+      : db
+          .prepare(
+            `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(shop_id, product_id, variant_id) WHERE variant_id IS NOT NULL
+             DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`
+          )
+          .bind(crypto.randomUUID(), m.shop_id, m.product_id, variantId, m.quantity_delta);
+  await db.batch([movement, level]);
+}
+
+/** Reorder thresholds are configuration, not stock: set them without a movement row. */
+export function setReorderLevels(
+  db: D1Database,
+  args: {
+    shop_id: string;
+    product_id: string;
+    variant_id?: string | null;
+    reorder_point: number;
+    reorder_qty: number;
+  }
+) {
+  const variantId = args.variant_id ?? null;
+  if (variantId === null) {
+    return db
+      .prepare(
+        `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity, reorder_point, reorder_qty)
+         VALUES (?, ?, ?, NULL, 0, ?, ?)
+         ON CONFLICT(shop_id, product_id) WHERE variant_id IS NULL
+         DO UPDATE SET reorder_point = excluded.reorder_point, reorder_qty = excluded.reorder_qty,
+                       updated_at = datetime('now')`
+      )
+      .bind(crypto.randomUUID(), args.shop_id, args.product_id, args.reorder_point, args.reorder_qty)
+      .run();
+  }
+  return db
+    .prepare(
+      `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity, reorder_point, reorder_qty)
+       VALUES (?, ?, ?, ?, 0, ?, ?)
+       ON CONFLICT(shop_id, product_id, variant_id) WHERE variant_id IS NOT NULL
+       DO UPDATE SET reorder_point = excluded.reorder_point, reorder_qty = excluded.reorder_qty,
+                     updated_at = datetime('now')`
+    )
+    .bind(crypto.randomUUID(), args.shop_id, args.product_id, variantId, args.reorder_point, args.reorder_qty)
+    .run();
+}
+
+export async function getStockLevelsByProduct(db: D1Database, shopId: string, productId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT sl.*, v.name AS variant_name
+       FROM stock_levels sl
+       LEFT JOIN product_variants v ON v.id = sl.variant_id
+       WHERE sl.shop_id = ? AND sl.product_id = ?
+       ORDER BY v.name`
+    )
+    .bind(shopId, productId)
+    .all<DBStockLevel & { variant_name: string | null }>();
+  return results;
+}
+
+/**
+ * Low stock = tracked, active products whose stock row is out (<= 0) or at/under
+ * its reorder point (when one is configured).
+ */
+export async function getLowStockByShop(db: D1Database, shopId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT sl.*, p.name AS product_name, p.sku AS product_sku, v.name AS variant_name
+       FROM stock_levels sl
+       JOIN products p ON p.id = sl.product_id
+       LEFT JOIN product_variants v ON v.id = sl.variant_id
+       WHERE sl.shop_id = ?
+         AND p.is_active = 1 AND p.track_stock = 1
+         AND (sl.quantity <= 0 OR (sl.reorder_point > 0 AND sl.quantity <= sl.reorder_point))
+       ORDER BY sl.quantity ASC`
+    )
+    .bind(shopId)
+    .all<DBStockLevel & { product_name: string; product_sku: string | null; variant_name: string | null }>();
+  return results;
+}
+
+export async function getStockMovementsByShop(
+  db: D1Database,
+  shopId: string,
+  opts: { product_id?: string; limit?: number } = {}
+) {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const vals: unknown[] = [shopId];
+  let where = "m.shop_id = ?";
+  if (opts.product_id) {
+    where += " AND m.product_id = ?";
+    vals.push(opts.product_id);
+  }
+  vals.push(limit);
+  const { results } = await db
+    .prepare(
+      `SELECT m.*, p.name AS product_name, v.name AS variant_name
+       FROM stock_movements m
+       JOIN products p ON p.id = m.product_id
+       LEFT JOIN product_variants v ON v.id = m.variant_id
+       WHERE ${where}
+       ORDER BY m.created_at DESC
+       LIMIT ?`
+    )
+    .bind(...vals)
+    .all<DBStockMovement & { product_name: string; variant_name: string | null }>();
   return results;
 }
