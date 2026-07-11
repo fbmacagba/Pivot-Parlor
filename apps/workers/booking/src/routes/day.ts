@@ -182,29 +182,34 @@ r.post("/:shopId/close", async (c) => {
     .bind(shopId, date)
     .first<{ n: number }>();
 
+  // Revenue reads from the unified sales spine (WS-3): appointment checkouts
+  // AND counter sales, voided ones excluded. Tips live on the sale header.
   const revSvc = await db
     .prepare(
-      `SELECT COALESCE(SUM(bi.total_price_pence), 0) AS s FROM bw_booking_items bi
-       INNER JOIN bookings b ON b.id = bi.booking_id
-       WHERE bi.shop_id = ? AND bi.item_type = 'service' AND b.booking_date = ?`
+      `SELECT COALESCE(SUM(si.line_total_pence), 0) AS s
+       FROM sale_items si
+       INNER JOIN sales sa ON sa.id = si.sale_id
+       WHERE si.shop_id = ? AND si.item_type = 'service'
+         AND substr(sa.created_at, 1, 10) = ? AND sa.status != 'voided'`
     )
     .bind(shopId, date)
     .first<{ s: number }>();
 
   const revProd = await db
     .prepare(
-      `SELECT COALESCE(SUM(bi.total_price_pence), 0) AS s FROM bw_booking_items bi
-       INNER JOIN bookings b ON b.id = bi.booking_id
-       WHERE bi.shop_id = ? AND bi.item_type = 'product' AND b.booking_date = ?`
+      `SELECT COALESCE(SUM(si.line_total_pence), 0) AS s
+       FROM sale_items si
+       INNER JOIN sales sa ON sa.id = si.sale_id
+       WHERE si.shop_id = ? AND si.item_type = 'product'
+         AND substr(sa.created_at, 1, 10) = ? AND sa.status != 'voided'`
     )
     .bind(shopId, date)
     .first<{ s: number }>();
 
   const revTips = await db
     .prepare(
-      `SELECT COALESCE(SUM(bi.total_price_pence), 0) AS s FROM bw_booking_items bi
-       INNER JOIN bookings b ON b.id = bi.booking_id
-       WHERE bi.shop_id = ? AND bi.item_type = 'tip' AND b.booking_date = ?`
+      `SELECT COALESCE(SUM(tip_pence), 0) AS s FROM sales
+       WHERE shop_id = ? AND substr(created_at, 1, 10) = ? AND status != 'voided'`
     )
     .bind(shopId, date)
     .first<{ s: number }>();

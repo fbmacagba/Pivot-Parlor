@@ -36,12 +36,13 @@
     "lucide-react": "^0.447.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-qr-code": "^2.2.0",
     "tailwind-merge": "^2.5.2"
   },
   "devDependencies": {
-    "@repo/eslint-config": "*",
     "@cloudflare/workers-types": "^4.20241205.0",
     "@remix-run/dev": "^2.15.3",
+    "@repo/eslint-config": "*",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.27",

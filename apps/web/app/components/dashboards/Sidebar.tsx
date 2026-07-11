@@ -15,6 +15,7 @@ import {
   Scissors,
   Settings,
   ShoppingBag,
+  ShoppingCart,
   Users,
 } from "lucide-react";
 import { clsx } from "clsx";
@@ -39,6 +40,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/staff", label: "Staff", icon: Users },
   { href: "/admin/services", label: "Services", icon: Scissors },
   { href: "/admin/products", label: "Products", icon: Package },
+  { href: "/admin/pos", label: "Point of Sale", icon: ShoppingCart },
   { href: "/admin/schedule", label: "Schedule", icon: Calendar },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
   { href: "/admin/queue", label: "Queue", icon: Users2 },
@@ -51,6 +53,7 @@ const ADMIN_NAV: NavItem[] = [
 const STAFF_NAV: NavItem[] = [
   { href: "/staff", label: "Today", icon: LayoutDashboard },
   { href: "/staff/bookings", label: "My Bookings", icon: CalendarDays },
+  { href: "/staff/pos", label: "Point of Sale", icon: ShoppingCart },
   { href: "/staff/availability", label: "Availability", icon: Clock },
 ];
 

@@ -36,6 +36,7 @@ import {
 import { RegenStepRow } from "~/components/dev-shops/RegenStepRow";
 import { StatusBadge } from "~/components/dev-shops/StatusBadge";
 import { DeleteShopDialog, type DeleteShopResult } from "~/components/dev-shops/DeleteShopDialog";
+import { RatesDialog, type RatesActionResult } from "~/components/dev-shops/RatesDialog";
 import { OnboardShopDialog } from "~/components/dev-shops/OnboardShopDialog";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -69,6 +70,26 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const form = await request.formData();
 
   const actionType = form.get("_action");
+
+  if (actionType === "update-rates") {
+    const shopId = form.get("shopId")?.toString();
+    const commissionPct = Number(form.get("commission_percent"));
+    const retailPct = Number(form.get("retail_commission_percent"));
+    const valid = (v: number) => Number.isFinite(v) && v >= 0 && v <= 100;
+    if (!shopId || !valid(commissionPct) || !valid(retailPct)) {
+      return json({ success: false, ratesUpdated: false, error: "Rates must be between 0 and 100 percent" });
+    }
+    try {
+      await api.patch(`/api/shops/${shopId}`, {
+        commission_rate: commissionPct / 100,
+        retail_commission_rate: retailPct / 100,
+      });
+      return json({ success: true, ratesUpdated: true, error: null });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update rates";
+      return json({ success: false, ratesUpdated: false, error: msg });
+    }
+  }
 
   if (actionType === "generate-site") {
     const shopId = form.get("shopId")?.toString();
@@ -150,6 +171,8 @@ export default function DevShops() {
   const revalidator = useRevalidator();
 
   const [regenShopId, setRegenShopId] = useState<string | null>(null);
+  const [ratesShop, setRatesShop] = useState<Shop | null>(null);
+  const ratesFetcher = useFetcher<RatesActionResult>();
   const [regenDesignNotes, setRegenDesignNotes] = useState("");
   const [regenTextModel, setRegenTextModel] = useState(DEFAULT_TEXT_MODEL);
   const [regenTextEffort, setRegenTextEffort] = useState("");
@@ -676,6 +699,12 @@ export default function DevShops() {
         fetcher={deleteShopFetcher}
       />
 
+      <RatesDialog
+        shop={ratesShop}
+        onClose={() => setRatesShop(null)}
+        fetcher={ratesFetcher}
+      />
+
       <div className="mb-4">
         <Input
           type="search"
@@ -821,6 +850,15 @@ export default function DevShops() {
                                 {ws === "live" || ws === "paused" ? "Edit" : "Regenerate"}
                               </Button>
                             )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setRatesShop(shop)}
+                              title="Commission rates (services vs retail)"
+                            >
+                              Rates
+                            </Button>
                             {showDraftTools && (
                               <>
                                 <Button

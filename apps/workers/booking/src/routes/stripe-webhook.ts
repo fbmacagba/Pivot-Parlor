@@ -35,17 +35,45 @@ async function markTransactionsByStripeId(
   db: Env["DB"],
   stripeId: string,
   status: string
-): Promise<string | null> {
-  // Returns the booking_id of the affected transaction (for ledger updates).
+): Promise<{ bookingId: string | null; saleId: string | null }> {
+  // Returns the booking/sale of the affected transaction (for ledger updates).
   const tx = await db
-    .prepare("SELECT booking_id FROM bw_transactions WHERE stripe_id = ? LIMIT 1")
+    .prepare("SELECT booking_id, sale_id FROM bw_transactions WHERE stripe_id = ? LIMIT 1")
     .bind(stripeId)
-    .first<{ booking_id: string | null }>();
+    .first<{ booking_id: string | null; sale_id: string | null }>();
   await db
     .prepare("UPDATE bw_transactions SET status = ? WHERE stripe_id = ?")
     .bind(status, stripeId)
     .run();
-  return tx?.booking_id ?? null;
+  return { bookingId: tx?.booking_id ?? null, saleId: tx?.sale_id ?? null };
+}
+
+/** Settle a sale (WS-3): status, PI id, ledger, and completion stamp. */
+async function settleSale(db: Env["DB"], saleId: string, piId: string) {
+  await db
+    .prepare(
+      `UPDATE sales SET status = 'completed', stripe_payment_intent_id = ?,
+         completed_at = COALESCE(completed_at, datetime('now'))
+       WHERE id = ? AND status = 'pending'`
+    )
+    .bind(piId, saleId)
+    .run();
+  await db
+    .prepare("UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE sale_id = ? AND status = 'pending'")
+    .bind(piId, saleId)
+    .run();
+  await db
+    .prepare("UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending'")
+    .bind(saleId)
+    .run();
+}
+
+async function setSaleStatus(db: Env["DB"], saleId: string, status: string) {
+  await db.prepare("UPDATE sales SET status = ? WHERE id = ?").bind(status, saleId).run();
+  await db
+    .prepare("UPDATE bw_commission_ledger SET status = ? WHERE sale_id = ?")
+    .bind(status, saleId)
+    .run();
 }
 
 async function setLedgerStatus(db: Env["DB"], bookingId: string, from: string | null, to: string) {
@@ -114,11 +142,19 @@ r.post("/stripe", async (c) => {
       case "payment_intent.succeeded": {
         const piId = String(obj.id ?? "");
         if (!piId) break;
+        const metadata = (obj.metadata ?? {}) as Record<string, unknown>;
+        const marked = await markTransactionsByStripeId(db, piId, "captured");
+        // Sales spine (WS-3): a counter sale's Checkout Session recorded the
+        // session id, not the PI id, so the tx lookup misses — the saleId in
+        // the PI metadata is the canonical reference either way.
+        const saleId =
+          marked.saleId ?? (typeof metadata.saleId === "string" ? String(metadata.saleId) : null);
+        if (saleId) {
+          await settleSale(db, saleId, piId);
+        }
         const bookingId =
-          (await markTransactionsByStripeId(db, piId, "captured")) ??
-          (typeof (obj.metadata as Record<string, unknown> | undefined)?.bookingId === "string"
-            ? String((obj.metadata as Record<string, unknown>).bookingId)
-            : null);
+          marked.bookingId ??
+          (typeof metadata.bookingId === "string" ? String(metadata.bookingId) : null);
         if (bookingId) {
           // Money has actually settled: the commission is now real.
           await setLedgerStatus(db, bookingId, "pending", "transferred");
@@ -137,16 +173,18 @@ r.post("/stripe", async (c) => {
       case "charge.refunded": {
         const piId = String(obj.payment_intent ?? "");
         if (!piId) break;
-        const bookingId = await markTransactionsByStripeId(db, piId, "refunded");
-        if (bookingId) await setLedgerStatus(db, bookingId, null, "refunded");
+        const marked = await markTransactionsByStripeId(db, piId, "refunded");
+        if (marked.saleId) await setSaleStatus(db, marked.saleId, "refunded");
+        if (marked.bookingId) await setLedgerStatus(db, marked.bookingId, null, "refunded");
         break;
       }
 
       case "charge.dispute.created": {
         const piId = String(obj.payment_intent ?? "");
         if (!piId) break;
-        const bookingId = await markTransactionsByStripeId(db, piId, "disputed");
-        if (bookingId) await setLedgerStatus(db, bookingId, null, "disputed");
+        const marked = await markTransactionsByStripeId(db, piId, "disputed");
+        if (marked.saleId) await setSaleStatus(db, marked.saleId, "disputed");
+        if (marked.bookingId) await setLedgerStatus(db, marked.bookingId, null, "disputed");
         break;
       }
 

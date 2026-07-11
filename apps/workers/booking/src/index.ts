@@ -6,6 +6,7 @@ import { requireShopAccess, requireDeveloper } from "./middleware/shop-access.js
 import setupRoutes from "./routes/setup.js";
 import dayRoutes from "./routes/day.js";
 import bookingsRoutes from "./routes/bookings.js";
+import salesRoutes from "./routes/sales.js";
 import platformAlertsRoutes from "./routes/platform-alerts.js";
 import publicRoutes from "./routes/public.js";
 import connectRoutes from "./routes/connect.js";
@@ -35,6 +36,7 @@ shops.use("/:shopId/*", requireShopAccess());
 shops.route("/", setupRoutes);
 shops.route("/", dayRoutes);
 shops.route("/", bookingsRoutes);
+shops.route("/", salesRoutes);
 shops.route("/", connectRoutes);
 
 booking.route("/shops", shops);

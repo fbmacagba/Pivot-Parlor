@@ -108,6 +108,46 @@ export async function createPaymentIntentAutoCapture(params: {
   };
 }
 
+/**
+ * Hosted Checkout Session for a counter sale (WS-3 Phase 1). The customer
+ * pays on their own phone via the returned URL (rendered as a QR at the
+ * counter) — no card-present hardware and no Stripe.js in the dashboard.
+ * The money is a destination charge on the shop's Connect account with the
+ * platform commission as the application fee; metadata (incl. saleId)
+ * propagates to the underlying PaymentIntent so the existing
+ * payment_intent.succeeded webhook reconciles the sale.
+ */
+export async function createCheckoutSession(params: {
+  secret: string;
+  amountPence: number;
+  currency: string;
+  productName: string;
+  destinationAccount: string;
+  applicationFeePence: number;
+  metadata: Record<string, string>;
+  successUrl: string;
+  cancelUrl: string;
+  idempotencyKey: string;
+}): Promise<{ id: string; url: string }> {
+  const body: Record<string, string | number | undefined> = {
+    mode: "payment",
+    success_url: params.successUrl,
+    cancel_url: params.cancelUrl,
+    "line_items[0][quantity]": 1,
+    "line_items[0][price_data][currency]": params.currency,
+    "line_items[0][price_data][unit_amount]": params.amountPence,
+    "line_items[0][price_data][product_data][name]": params.productName,
+    "payment_intent_data[transfer_data][destination]": params.destinationAccount,
+    "payment_intent_data[application_fee_amount]": params.applicationFeePence,
+  };
+  for (const [k, v] of Object.entries(params.metadata)) {
+    body[`payment_intent_data[metadata][${k}]`] = v;
+    body[`metadata[${k}]`] = v;
+  }
+  const data = await stripePost(params.secret, "/checkout/sessions", body, params.idempotencyKey);
+  return { id: String(data.id), url: String(data.url ?? "") };
+}
+
 export async function capturePaymentIntent(
   secret: string,
   paymentIntentId: string,

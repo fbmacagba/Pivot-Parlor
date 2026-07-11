@@ -16,6 +16,8 @@ export interface Shop {
   is_active: number;
   status: string;
   plan: string;
+  commission_rate?: number;
+  retail_commission_rate?: number;
   has_site?: number | null;
   stripe_payment_status?: string;
   stripe_checkout_url?: string | null;

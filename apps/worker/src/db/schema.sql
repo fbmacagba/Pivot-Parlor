@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS shops (
   owner_email     TEXT NOT NULL UNIQUE,
   phone           TEXT NOT NULL DEFAULT '',
   commission_rate REAL NOT NULL DEFAULT 0.10,
+  retail_commission_rate REAL NOT NULL DEFAULT 0.10,
   ai_theme        TEXT,
   ai_model        TEXT NOT NULL DEFAULT 'claude-sonnet-4-6',
   ai_tier         TEXT NOT NULL DEFAULT 'pro',

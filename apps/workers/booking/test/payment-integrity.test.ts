@@ -127,10 +127,8 @@ describe("checkout (POST /booking/shops/:shopId/bookings/:bookingId/checkout)", 
       `INSERT INTO bw_booking_state (booking_id, shop_id, deposit_amount_pence, stripe_payment_intent_id, checked_in_at, updated_at)
        VALUES (?, ?, 1000, ?, datetime('now'), datetime('now'))`
     ).bind(bookingId, shop, piId).run();
-    await env.DB.prepare(
-      `INSERT INTO bw_booking_items (id, booking_id, shop_id, item_type, service_id, name, quantity, unit_price_pence, total_price_pence, is_commissionable)
-       VALUES (?, ?, ?, 'service', ?, 'Cut', 1, 2500, 2500, 1)`
-    ).bind(crypto.randomUUID(), bookingId, shop, service).run();
+    // No pre-checkout line items (WS-3): the checkout derives the base service
+    // from bookings.amount_pence (2500 above) and creates the sale itself.
     return bookingId;
   }
 
@@ -173,9 +171,17 @@ describe("checkout (POST /booking/shops/:shopId/bookings/:bookingId/checkout)", 
     // race that passes the pre-check loses the atomic claim instead (409).
     expect([400, 409]).toContain(second.status);
 
-    // No duplicate line items or ledger rows from the losing submit.
+    // Exactly one sale with one line item — no duplicates from the losing
+    // submit (WS-3: the checkout persists on the sales spine).
+    const sales = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM sales WHERE booking_id = ?")
+      .bind(bookingId)
+      .first<{ n: number }>();
+    expect(sales?.n).toBe(1);
     const items = await env.DB
-      .prepare("SELECT COUNT(*) AS n FROM bw_booking_items WHERE booking_id = ?")
+      .prepare(
+        "SELECT COUNT(*) AS n FROM sale_items si JOIN sales sa ON sa.id = si.sale_id WHERE sa.booking_id = ?"
+      )
       .bind(bookingId)
       .first<{ n: number }>();
     expect(items?.n).toBe(1);
