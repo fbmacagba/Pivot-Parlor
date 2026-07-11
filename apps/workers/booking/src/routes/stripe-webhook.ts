@@ -173,8 +173,65 @@ r.post("/stripe", async (c) => {
       case "charge.refunded": {
         const piId = String(obj.payment_intent ?? "");
         if (!piId) break;
+
+        // Which sale/booking does this charge belong to? The ORIGINAL money tx
+        // carries the PI id (settleSale) — refund txs are excluded so a partial
+        // refund doesn't resolve to itself.
+        const origin = await db
+          .prepare("SELECT booking_id, sale_id FROM bw_transactions WHERE stripe_id = ? AND type != 'refund' LIMIT 1")
+          .bind(piId)
+          .first<{ booking_id: string | null; sale_id: string | null }>();
+
+        if (origin?.sale_id) {
+          const saleId = origin.sale_id;
+          const pending = await db
+            .prepare("SELECT COUNT(*) AS n FROM sale_returns WHERE sale_id = ? AND status = 'pending'")
+            .bind(saleId)
+            .first<{ n: number }>();
+
+          if ((pending?.n ?? 0) > 0) {
+            // API-initiated return(s) (WS-3 Phase 2): the refund is confirmed —
+            // settle the return, its refund tx, and the negative ledger
+            // reversal rows. refunded_pence was recorded at initiation; the
+            // sale flips to 'refunded' only once fully refunded.
+            await db.batch([
+              db
+                .prepare(
+                  "UPDATE sale_returns SET status = 'completed', completed_at = datetime('now') WHERE sale_id = ? AND status = 'pending'"
+                )
+                .bind(saleId),
+              db
+                .prepare(
+                  "UPDATE bw_transactions SET status = 'completed' WHERE sale_id = ? AND type = 'refund' AND status = 'pending'"
+                )
+                .bind(saleId),
+              db
+                .prepare(
+                  "UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending' AND commission_amount_pence < 0"
+                )
+                .bind(saleId),
+              db
+                .prepare(
+                  "UPDATE sales SET status = 'refunded' WHERE id = ? AND status = 'completed' AND refunded_pence >= subtotal_pence - discount_pence"
+                )
+                .bind(saleId),
+            ]);
+          } else {
+            // Dashboard-initiated refund (no return row of ours). A FULL
+            // refund keeps the legacy behaviour; a partial one is left for
+            // manual reconciliation — we cannot attribute it to lines.
+            const amount = Number(obj.amount ?? 0);
+            const amountRefunded = Number(obj.amount_refunded ?? 0);
+            if (amount > 0 && amountRefunded >= amount) {
+              await markTransactionsByStripeId(db, piId, "refunded");
+              await setSaleStatus(db, saleId, "refunded");
+            }
+          }
+          break;
+        }
+
+        // Booking-only money (deposits/balances without a sale): legacy path.
         const marked = await markTransactionsByStripeId(db, piId, "refunded");
-        if (marked.saleId) await setSaleStatus(db, marked.saleId, "refunded");
         if (marked.bookingId) await setLedgerStatus(db, marked.bookingId, null, "refunded");
         break;
       }

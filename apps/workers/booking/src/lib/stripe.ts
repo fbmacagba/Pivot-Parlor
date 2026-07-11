@@ -148,6 +148,33 @@ export async function createCheckoutSession(params: {
   return { id: String(data.id), url: String(data.url ?? "") };
 }
 
+/**
+ * Refund (part of) a destination-charge PaymentIntent (WS-3 Phase 2 returns).
+ * refund_application_fee refunds the platform commission proportionally and
+ * reverse_transfer pulls the refunded amount back from the connected account,
+ * so shop and platform both give back their share. charge.refunded reconciles
+ * the D1 side.
+ */
+export async function createRefund(params: {
+  secret: string;
+  paymentIntentId: string;
+  amountPence: number;
+  metadata: Record<string, string>;
+  idempotencyKey: string;
+}): Promise<{ id: string; status: string }> {
+  const body: Record<string, string | number | undefined> = {
+    payment_intent: params.paymentIntentId,
+    amount: params.amountPence,
+    refund_application_fee: "true",
+    reverse_transfer: "true",
+  };
+  for (const [k, v] of Object.entries(params.metadata)) {
+    body[`metadata[${k}]`] = v;
+  }
+  const data = await stripePost(params.secret, "/refunds", body, params.idempotencyKey);
+  return { id: String(data.id), status: String(data.status ?? "") };
+}
+
 export async function capturePaymentIntent(
   secret: string,
   paymentIntentId: string,

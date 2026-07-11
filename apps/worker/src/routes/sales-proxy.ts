@@ -20,5 +20,6 @@ function forward(c: { env: Bindings; req: { raw: Request; url: string; param: (k
 salesProxy.all("/", (c) => forward(c, ""));
 salesProxy.all("/:saleId", (c) => forward(c, `/${encodeURIComponent(c.req.param("saleId")!)}`));
 salesProxy.all("/:saleId/void", (c) => forward(c, `/${encodeURIComponent(c.req.param("saleId")!)}/void`));
+salesProxy.all("/:saleId/refund", (c) => forward(c, `/${encodeURIComponent(c.req.param("saleId")!)}/refund`));
 
 export default salesProxy;
