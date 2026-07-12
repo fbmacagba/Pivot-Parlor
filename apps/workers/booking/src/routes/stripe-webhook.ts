@@ -36,11 +36,13 @@ interface StripeEvent {
 async function markTransactionsByStripeId(
   db: Env["DB"],
   stripeId: string,
-  status: string
+  status: string,
 ): Promise<{ bookingId: string | null; saleId: string | null }> {
   // Returns the booking/sale of the affected transaction (for ledger updates).
   const tx = await db
-    .prepare("SELECT booking_id, sale_id FROM bw_transactions WHERE stripe_id = ? LIMIT 1")
+    .prepare(
+      "SELECT booking_id, sale_id FROM bw_transactions WHERE stripe_id = ? LIMIT 1",
+    )
     .bind(stripeId)
     .first<{ booking_id: string | null; sale_id: string | null }>();
   await db
@@ -56,37 +58,53 @@ async function settleSale(db: Env["DB"], saleId: string, piId: string) {
     .prepare(
       `UPDATE sales SET status = 'completed', stripe_payment_intent_id = ?,
          completed_at = COALESCE(completed_at, datetime('now'))
-       WHERE id = ? AND status = 'pending'`
+       WHERE id = ? AND status = 'pending'`,
     )
     .bind(piId, saleId)
     .run();
   await db
-    .prepare("UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE sale_id = ? AND status = 'pending'")
+    .prepare(
+      "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE sale_id = ? AND status = 'pending'",
+    )
     .bind(piId, saleId)
     .run();
   await db
-    .prepare("UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending'")
+    .prepare(
+      "UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending'",
+    )
     .bind(saleId)
     .run();
 }
 
 async function setSaleStatus(db: Env["DB"], saleId: string, status: string) {
-  await db.prepare("UPDATE sales SET status = ? WHERE id = ?").bind(status, saleId).run();
+  await db
+    .prepare("UPDATE sales SET status = ? WHERE id = ?")
+    .bind(status, saleId)
+    .run();
   await db
     .prepare("UPDATE bw_commission_ledger SET status = ? WHERE sale_id = ?")
     .bind(status, saleId)
     .run();
 }
 
-async function setLedgerStatus(db: Env["DB"], bookingId: string, from: string | null, to: string) {
+async function setLedgerStatus(
+  db: Env["DB"],
+  bookingId: string,
+  from: string | null,
+  to: string,
+) {
   if (from) {
     await db
-      .prepare("UPDATE bw_commission_ledger SET status = ? WHERE booking_id = ? AND status = ?")
+      .prepare(
+        "UPDATE bw_commission_ledger SET status = ? WHERE booking_id = ? AND status = ?",
+      )
       .bind(to, bookingId, from)
       .run();
   } else {
     await db
-      .prepare("UPDATE bw_commission_ledger SET status = ? WHERE booking_id = ?")
+      .prepare(
+        "UPDATE bw_commission_ledger SET status = ? WHERE booking_id = ?",
+      )
       .bind(to, bookingId)
       .run();
   }
@@ -95,12 +113,20 @@ async function setLedgerStatus(db: Env["DB"], bookingId: string, from: string | 
 r.post("/stripe", async (c) => {
   const secret = c.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
-    reportError("webhook.stripe", new Error("STRIPE_WEBHOOK_SECRET not configured"), {});
+    reportError(
+      "webhook.stripe",
+      new Error("STRIPE_WEBHOOK_SECRET not configured"),
+      {},
+    );
     return c.json({ success: false, error: "Webhook not configured" }, 500);
   }
 
   const payload = await c.req.text();
-  const valid = await verifyStripeSignature(payload, c.req.header("Stripe-Signature"), secret);
+  const valid = await verifyStripeSignature(
+    payload,
+    c.req.header("Stripe-Signature"),
+    secret,
+  );
   if (!valid) {
     return c.json({ success: false, error: "Invalid signature" }, 400);
   }
@@ -116,8 +142,9 @@ r.post("/stripe", async (c) => {
   }
 
   // Dedup: Stripe retries deliveries; only the first sees changes === 1.
-  const dedup = await c.env.DB
-    .prepare("INSERT OR IGNORE INTO processed_stripe_events (id, type) VALUES (?, ?)")
+  const dedup = await c.env.DB.prepare(
+    "INSERT OR IGNORE INTO processed_stripe_events (id, type) VALUES (?, ?)",
+  )
     .bind(event.id, event.type)
     .run();
   if ((dedup.meta?.changes ?? 0) === 0) {
@@ -131,10 +158,15 @@ r.post("/stripe", async (c) => {
     switch (event.type) {
       case "account.updated": {
         const accountId = String(obj.id ?? "");
-        const onboarded = Boolean(obj.charges_enabled) && Boolean(obj.details_submitted) ? 1 : 0;
+        const onboarded =
+          Boolean(obj.charges_enabled) && Boolean(obj.details_submitted)
+            ? 1
+            : 0;
         if (accountId) {
           await db
-            .prepare("UPDATE shops SET stripe_connect_onboarded = ? WHERE stripe_connect_account_id = ?")
+            .prepare(
+              "UPDATE shops SET stripe_connect_onboarded = ? WHERE stripe_connect_account_id = ?",
+            )
             .bind(onboarded, accountId)
             .run();
         }
@@ -150,13 +182,18 @@ r.post("/stripe", async (c) => {
         // session id, not the PI id, so the tx lookup misses — the saleId in
         // the PI metadata is the canonical reference either way.
         const saleId =
-          marked.saleId ?? (typeof metadata.saleId === "string" ? String(metadata.saleId) : null);
+          marked.saleId ??
+          (typeof metadata.saleId === "string"
+            ? String(metadata.saleId)
+            : null);
         if (saleId) {
           await settleSale(db, saleId, piId);
         }
         const bookingId =
           marked.bookingId ??
-          (typeof metadata.bookingId === "string" ? String(metadata.bookingId) : null);
+          (typeof metadata.bookingId === "string"
+            ? String(metadata.bookingId)
+            : null);
 
         // Customer deposit (migration 041): the charge settled, so the
         // booking becomes real — flip pending → confirmed, point the deposit
@@ -168,39 +205,50 @@ r.post("/stripe", async (c) => {
           await db.batch([
             db
               .prepare(
-                "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
+                "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'",
               )
               .bind(piId, bookingId),
             db
               .prepare(
                 `UPDATE bw_booking_state SET deposit_paid_at = datetime('now'), stripe_payment_intent_id = ?,
                    updated_at = datetime('now')
-                 WHERE booking_id = ? AND deposit_paid_at IS NULL`
+                 WHERE booking_id = ? AND deposit_paid_at IS NULL`,
               )
               .bind(piId, bookingId),
           ]);
           const flip = await db
-            .prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'pending'")
+            .prepare(
+              "UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'pending'",
+            )
             .bind(bookingId)
             .run();
           if ((flip.meta?.changes ?? 0) === 1) {
             const details = await db
               .prepare(
                 `SELECT b.shop_id, b.customer_name, b.customer_email, b.booking_date, b.start_time, b.amount_pence,
-                        s.name AS shop_name, s.slug AS shop_slug,
+                        s.name AS shop_name, s.slug AS shop_slug, s.timezone AS shop_timezone,
                         sv.name AS service_name, sv.duration_min,
                         stf.display_name AS staff_name
                  FROM bookings b
                  JOIN shops s ON s.id = b.shop_id
                  JOIN services sv ON sv.id = b.service_id
                  LEFT JOIN staff stf ON stf.id = b.staff_id
-                 WHERE b.id = ? LIMIT 1`
+                 WHERE b.id = ? LIMIT 1`,
               )
               .bind(bookingId)
               .first<{
-                shop_id: string; customer_name: string; customer_email: string; booking_date: string;
-                start_time: string; amount_pence: number; shop_name: string; shop_slug: string;
-                service_name: string; duration_min: number; staff_name: string | null;
+                shop_id: string;
+                customer_name: string;
+                customer_email: string;
+                booking_date: string;
+                start_time: string;
+                amount_pence: number;
+                shop_name: string;
+                shop_slug: string;
+                shop_timezone: string | null;
+                service_name: string;
+                duration_min: number;
+                staff_name: string | null;
               }>();
             if (details) {
               await runBookingSideEffects(c.env, {
@@ -214,6 +262,7 @@ r.post("/stripe", async (c) => {
                 staffName: details.staff_name ?? "your specialist",
                 bookingDate: details.booking_date,
                 startISO: details.start_time,
+                timezone: details.shop_timezone ?? "Europe/London",
                 durationMin: details.duration_min,
                 amountPence: details.amount_pence,
               });
@@ -227,7 +276,7 @@ r.post("/stripe", async (c) => {
           await db
             .prepare(
               `UPDATE bw_booking_state SET completed_at = datetime('now'), updated_at = datetime('now')
-               WHERE booking_id = ? AND stripe_balance_pi = ? AND completed_at IS NULL`
+               WHERE booking_id = ? AND stripe_balance_pi = ? AND completed_at IS NULL`,
             )
             .bind(bookingId, piId)
             .run();
@@ -243,14 +292,18 @@ r.post("/stripe", async (c) => {
         // carries the PI id (settleSale) — refund txs are excluded so a partial
         // refund doesn't resolve to itself.
         const origin = await db
-          .prepare("SELECT booking_id, sale_id FROM bw_transactions WHERE stripe_id = ? AND type != 'refund' LIMIT 1")
+          .prepare(
+            "SELECT booking_id, sale_id FROM bw_transactions WHERE stripe_id = ? AND type != 'refund' LIMIT 1",
+          )
           .bind(piId)
           .first<{ booking_id: string | null; sale_id: string | null }>();
 
         if (origin?.sale_id) {
           const saleId = origin.sale_id;
           const pending = await db
-            .prepare("SELECT COUNT(*) AS n FROM sale_returns WHERE sale_id = ? AND status = 'pending'")
+            .prepare(
+              "SELECT COUNT(*) AS n FROM sale_returns WHERE sale_id = ? AND status = 'pending'",
+            )
             .bind(saleId)
             .first<{ n: number }>();
 
@@ -262,22 +315,22 @@ r.post("/stripe", async (c) => {
             await db.batch([
               db
                 .prepare(
-                  "UPDATE sale_returns SET status = 'completed', completed_at = datetime('now') WHERE sale_id = ? AND status = 'pending'"
+                  "UPDATE sale_returns SET status = 'completed', completed_at = datetime('now') WHERE sale_id = ? AND status = 'pending'",
                 )
                 .bind(saleId),
               db
                 .prepare(
-                  "UPDATE bw_transactions SET status = 'completed' WHERE sale_id = ? AND type = 'refund' AND status = 'pending'"
+                  "UPDATE bw_transactions SET status = 'completed' WHERE sale_id = ? AND type = 'refund' AND status = 'pending'",
                 )
                 .bind(saleId),
               db
                 .prepare(
-                  "UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending' AND commission_amount_pence < 0"
+                  "UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending' AND commission_amount_pence < 0",
                 )
                 .bind(saleId),
               db
                 .prepare(
-                  "UPDATE sales SET status = 'refunded' WHERE id = ? AND status = 'completed' AND refunded_pence >= subtotal_pence - discount_pence"
+                  "UPDATE sales SET status = 'refunded' WHERE id = ? AND status = 'completed' AND refunded_pence >= subtotal_pence - discount_pence",
                 )
                 .bind(saleId),
             ]);
@@ -293,7 +346,7 @@ r.post("/stripe", async (c) => {
 
             const sale = await db
               .prepare(
-                "SELECT subtotal_pence, discount_pence, refunded_pence, business_day_id FROM sales WHERE id = ? LIMIT 1"
+                "SELECT subtotal_pence, discount_pence, refunded_pence, business_day_id FROM sales WHERE id = ? LIMIT 1",
               )
               .bind(saleId)
               .first<{
@@ -304,7 +357,7 @@ r.post("/stripe", async (c) => {
               }>();
             const booked = await db
               .prepare(
-                "SELECT COALESCE(SUM(amount_pence), 0) AS total FROM bw_transactions WHERE sale_id = ? AND type = 'refund'"
+                "SELECT COALESCE(SUM(amount_pence), 0) AS total FROM bw_transactions WHERE sale_id = ? AND type = 'refund'",
               )
               .bind(saleId)
               .first<{ total: number }>();
@@ -314,7 +367,10 @@ r.post("/stripe", async (c) => {
               // Sale-value portion caps at what is still un-refunded; any
               // excess was tip/commission coming back and lives only in the
               // tx row (refunded_pence tracks sale value, matching returns).
-              const outstanding = Math.max(0, sale.subtotal_pence - sale.discount_pence - sale.refunded_pence);
+              const outstanding = Math.max(
+                0,
+                sale.subtotal_pence - sale.discount_pence - sale.refunded_pence,
+              );
               const saleDelta = Math.min(customerDelta, outstanding);
 
               // Pro-rata split + reversal at the sale's snapshot rates, same
@@ -324,7 +380,7 @@ r.post("/stripe", async (c) => {
                   `SELECT services_amount_pence, retail_amount_pence, commission_rate,
                           retail_commission_rate, commission_bearer
                    FROM bw_commission_ledger
-                   WHERE sale_id = ? AND commission_amount_pence >= 0 LIMIT 1`
+                   WHERE sale_id = ? AND commission_amount_pence >= 0 LIMIT 1`,
                 )
                 .bind(saleId)
                 .first<{
@@ -335,23 +391,31 @@ r.post("/stripe", async (c) => {
                   commission_bearer: string;
                 }>();
 
-              const refundsList = (obj.refunds as { data?: Array<{ id?: string }> } | undefined)?.data ?? [];
-              const lastRefundId = refundsList.length > 0 ? String(refundsList[refundsList.length - 1]?.id ?? "") : "";
-              const txStripeId = lastRefundId || `dashboard-refund:${piId}:${amountRefunded}`;
+              const refundsList =
+                (obj.refunds as { data?: Array<{ id?: string }> } | undefined)
+                  ?.data ?? [];
+              const lastRefundId =
+                refundsList.length > 0
+                  ? String(refundsList[refundsList.length - 1]?.id ?? "")
+                  : "";
+              const txStripeId =
+                lastRefundId || `dashboard-refund:${piId}:${amountRefunded}`;
 
               const stmts = [
                 db
                   .prepare(
                     `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
-                     SELECT ?, NULL, id, shop_id, 'refund', ?, 'completed', ? FROM sales WHERE id = ?`
+                     SELECT ?, NULL, id, shop_id, 'refund', ?, 'completed', ? FROM sales WHERE id = ?`,
                   )
                   .bind(crypto.randomUUID(), customerDelta, txStripeId, saleId),
                 db
-                  .prepare("UPDATE sales SET refunded_pence = refunded_pence + ? WHERE id = ?")
+                  .prepare(
+                    "UPDATE sales SET refunded_pence = refunded_pence + ? WHERE id = ?",
+                  )
                   .bind(saleDelta, saleId),
                 db
                   .prepare(
-                    "UPDATE sales SET status = 'refunded' WHERE id = ? AND status = 'completed' AND refunded_pence >= subtotal_pence - discount_pence"
+                    "UPDATE sales SET status = 'refunded' WHERE id = ? AND status = 'completed' AND refunded_pence >= subtotal_pence - discount_pence",
                   )
                   .bind(saleId),
               ];
@@ -360,11 +424,18 @@ r.post("/stripe", async (c) => {
                 const svc = Number(ledgerRow.services_amount_pence);
                 const ret = Number(ledgerRow.retail_amount_pence);
                 const base = svc + ret;
-                const refundServices = base > 0 ? Math.round((saleDelta * svc) / base) : 0;
+                const refundServices =
+                  base > 0 ? Math.round((saleDelta * svc) / base) : 0;
                 const refundRetail = saleDelta - refundServices;
                 const commissionReversal =
-                  calculateCommissionPence(refundServices, Number(ledgerRow.commission_rate)).commission_pence +
-                  calculateCommissionPence(refundRetail, Number(ledgerRow.retail_commission_rate)).commission_pence;
+                  calculateCommissionPence(
+                    refundServices,
+                    Number(ledgerRow.commission_rate),
+                  ).commission_pence +
+                  calculateCommissionPence(
+                    refundRetail,
+                    Number(ledgerRow.retail_commission_rate),
+                  ).commission_pence;
                 // 'pending' — an owed adjustment netted off the shop's owed
                 // commission. Unlike an API return, nothing later confirms the
                 // application fee actually came back (the dashboard checkbox
@@ -376,7 +447,7 @@ r.post("/stripe", async (c) => {
                       `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, sale_id,
                          services_amount_pence, retail_amount_pence, commission_rate, retail_commission_rate,
                          commission_amount_pence, commission_bearer, status)
-                       SELECT ?, shop_id, ?, NULL, id, ?, ?, ?, ?, ?, ?, 'pending' FROM sales WHERE id = ?`
+                       SELECT ?, shop_id, ?, NULL, id, ?, ?, ?, ?, ?, ?, 'pending' FROM sales WHERE id = ?`,
                     )
                     .bind(
                       crypto.randomUUID(),
@@ -387,8 +458,8 @@ r.post("/stripe", async (c) => {
                       Number(ledgerRow.retail_commission_rate),
                       -commissionReversal,
                       ledgerRow.commission_bearer,
-                      saleId
-                    )
+                      saleId,
+                    ),
                 );
               }
               await db.batch(stmts);
@@ -406,7 +477,8 @@ r.post("/stripe", async (c) => {
 
         // Booking-only money (deposits/balances without a sale): legacy path.
         const marked = await markTransactionsByStripeId(db, piId, "refunded");
-        if (marked.bookingId) await setLedgerStatus(db, marked.bookingId, null, "refunded");
+        if (marked.bookingId)
+          await setLedgerStatus(db, marked.bookingId, null, "refunded");
         break;
       }
 
@@ -417,23 +489,27 @@ r.post("/stripe", async (c) => {
         // event can never cancel a booking whose money actually arrived.
         const sessionId = String(obj.id ?? "");
         const metadata = (obj.metadata ?? {}) as Record<string, unknown>;
-        const bookingId = typeof metadata.bookingId === "string" ? metadata.bookingId : null;
-        if (!sessionId || !bookingId || metadata.type !== "booking_deposit") break;
+        const bookingId =
+          typeof metadata.bookingId === "string" ? metadata.bookingId : null;
+        if (!sessionId || !bookingId || metadata.type !== "booking_deposit")
+          break;
         const st = await db
           .prepare(
             `SELECT booking_id FROM bw_booking_state
-             WHERE booking_id = ? AND stripe_checkout_session_id = ? AND deposit_paid_at IS NULL LIMIT 1`
+             WHERE booking_id = ? AND stripe_checkout_session_id = ? AND deposit_paid_at IS NULL LIMIT 1`,
           )
           .bind(bookingId, sessionId)
           .first<{ booking_id: string }>();
         if (st) {
           await db.batch([
             db
-              .prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'")
+              .prepare(
+                "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
+              )
               .bind(bookingId),
             db
               .prepare(
-                "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
+                "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'",
               )
               .bind(bookingId),
           ]);
@@ -446,7 +522,8 @@ r.post("/stripe", async (c) => {
         if (!piId) break;
         const marked = await markTransactionsByStripeId(db, piId, "disputed");
         if (marked.saleId) await setSaleStatus(db, marked.saleId, "disputed");
-        if (marked.bookingId) await setLedgerStatus(db, marked.bookingId, null, "disputed");
+        if (marked.bookingId)
+          await setLedgerStatus(db, marked.bookingId, null, "disputed");
         break;
       }
 
@@ -457,8 +534,14 @@ r.post("/stripe", async (c) => {
   } catch (err) {
     // Release the dedup row before returning 500 — otherwise Stripe's retry
     // of this event would be treated as a duplicate and the side effects lost.
-    reportError("webhook.stripe_handler", err, { eventId: event.id, eventType: event.type });
-    await db.prepare("DELETE FROM processed_stripe_events WHERE id = ?").bind(event.id).run();
+    reportError("webhook.stripe_handler", err, {
+      eventId: event.id,
+      eventType: event.type,
+    });
+    await db
+      .prepare("DELETE FROM processed_stripe_events WHERE id = ?")
+      .bind(event.id)
+      .run();
     return c.json({ success: false, error: "Handler failed" }, 500);
   }
 

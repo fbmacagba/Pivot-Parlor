@@ -207,26 +207,39 @@ export function getUserByEmail(db: D1Database, email: string) {
 
 export function getUserById(db: D1Database, id: string) {
   return db
-    .prepare("SELECT id, name, email, phone, role, shop_id, email_verified, created_at FROM platform_users WHERE id = ? LIMIT 1")
+    .prepare(
+      "SELECT id, name, email, phone, role, shop_id, email_verified, created_at FROM platform_users WHERE id = ? LIMIT 1",
+    )
     .bind(id)
     .first<Omit<DBUser, "password_hash"> & { phone?: string | null }>();
 }
 
-export function createUser(db: D1Database, user: {
-  id: string;
-  name?: string | null;
-  email: string;
-  password_hash: string;
-  role: string;
-  shop_id?: string | null;
-  /** Only pass 1 when address ownership is proven (invite accept, operator-provisioned). */
-  email_verified?: number;
-}) {
+export function createUser(
+  db: D1Database,
+  user: {
+    id: string;
+    name?: string | null;
+    email: string;
+    password_hash: string;
+    role: string;
+    shop_id?: string | null;
+    /** Only pass 1 when address ownership is proven (invite accept, operator-provisioned). */
+    email_verified?: number;
+  },
+) {
   return db
     .prepare(
-      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
-    .bind(user.id, user.name ?? null, user.email, user.password_hash, user.role, user.shop_id ?? null, user.email_verified ?? 0)
+    .bind(
+      user.id,
+      user.name ?? null,
+      user.email,
+      user.password_hash,
+      user.role,
+      user.shop_id ?? null,
+      user.email_verified ?? 0,
+    )
     .run();
 }
 
@@ -259,7 +272,7 @@ export async function getAllShops(db: D1Database) {
        FROM shops s
        LEFT JOIN bookings b ON b.shop_id = s.id
        GROUP BY s.id
-       ORDER BY s.shop_number`
+       ORDER BY s.shop_number`,
     )
     .all<
       DBShop & {
@@ -297,14 +310,14 @@ export function createShop(
     plan?: string;
     stripe_checkout_session_id?: string | null;
     stripe_payment_status?: string;
-  }
+  },
 ) {
   return db
     .prepare(
       `INSERT INTO shops
          (id, shop_number, slug, name, type, owner_name, owner_email, phone,
           commission_rate, status, plan, stripe_checkout_session_id, stripe_payment_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       shop.id,
@@ -315,11 +328,11 @@ export function createShop(
       shop.owner_name ?? "",
       shop.owner_email,
       shop.phone ?? "",
-      shop.commission_rate ?? 0.10,
+      shop.commission_rate ?? 0.1,
       shop.status ?? "pending",
       shop.plan ?? "standard",
       shop.stripe_checkout_session_id ?? null,
-      shop.stripe_payment_status ?? "unpaid"
+      shop.stripe_payment_status ?? "unpaid",
     )
     .run();
 }
@@ -328,14 +341,30 @@ export function createShop(
 
 export function createInvite(
   db: D1Database,
-  invite: { id: string; email: string; shop_id: string; role: string; token: string; expires_at: string; active?: number }
+  invite: {
+    id: string;
+    email: string;
+    shop_id: string;
+    role: string;
+    token: string;
+    expires_at: string;
+    active?: number;
+  },
 ) {
   return db
     .prepare(
       `INSERT INTO invites (id, email, shop_id, role, token, expires_at, active)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(invite.id, invite.email, invite.shop_id, invite.role, invite.token, invite.expires_at, invite.active ?? 1)
+    .bind(
+      invite.id,
+      invite.email,
+      invite.shop_id,
+      invite.role,
+      invite.token,
+      invite.expires_at,
+      invite.active ?? 1,
+    )
     .run();
 }
 
@@ -363,8 +392,13 @@ async function ensureE2ePlaywrightShopExists(db: D1Database): Promise<void> {
 }
 
 /** Idempotent: reset invite + remove prior test user so accept can run again. */
-export async function ensureE2ePlaywrightInviteReady(db: D1Database): Promise<void> {
-  await db.prepare("DELETE FROM platform_users WHERE email = ?").bind(E2E_PW_EMAIL).run();
+export async function ensureE2ePlaywrightInviteReady(
+  db: D1Database,
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM platform_users WHERE email = ?")
+    .bind(E2E_PW_EMAIL)
+    .run();
 
   await ensureE2ePlaywrightShopExists(db);
 
@@ -406,23 +440,32 @@ export async function ensureE2eBookableShop(db: D1Database): Promise<void> {
   await db
     .prepare(
       `INSERT OR IGNORE INTO shops (id, shop_number, slug, name, owner_email, is_active, status)
-       VALUES (?, ?, ?, 'E2E Bookable Shop', ?, 1, 'active')`
+       VALUES (?, ?, ?, 'E2E Bookable Shop', ?, 1, 'active')`,
     )
-    .bind(E2E_BOOKABLE_SHOP_ID, shopNumber, E2E_BOOKABLE_SLUG, "e2e-bookable@pivotparlor.internal")
+    .bind(
+      E2E_BOOKABLE_SHOP_ID,
+      shopNumber,
+      E2E_BOOKABLE_SLUG,
+      "e2e-bookable@pivotparlor.internal",
+    )
     .run();
 
   await db
     .prepare(
       `INSERT OR IGNORE INTO platform_users (id, name, email, password_hash, role, shop_id)
-       VALUES (?, 'E2E Stylist', ?, 'x', 'staff', ?)`
+       VALUES (?, 'E2E Stylist', ?, 'x', 'staff', ?)`,
     )
-    .bind(E2E_BOOKABLE_USER_ID, "e2e-bookable-staff@pivotparlor.internal", E2E_BOOKABLE_SHOP_ID)
+    .bind(
+      E2E_BOOKABLE_USER_ID,
+      "e2e-bookable-staff@pivotparlor.internal",
+      E2E_BOOKABLE_SHOP_ID,
+    )
     .run();
 
   await db
     .prepare(
       `INSERT OR IGNORE INTO staff (id, shop_id, user_id, display_name, is_active)
-       VALUES (?, ?, ?, 'E2E Stylist', 1)`
+       VALUES (?, ?, ?, 'E2E Stylist', 1)`,
     )
     .bind(E2E_BOOKABLE_STAFF_ID, E2E_BOOKABLE_SHOP_ID, E2E_BOOKABLE_USER_ID)
     .run();
@@ -430,7 +473,7 @@ export async function ensureE2eBookableShop(db: D1Database): Promise<void> {
   await db
     .prepare(
       `INSERT OR IGNORE INTO services (id, shop_id, name, duration_min, price_pence, is_active)
-       VALUES (?, ?, 'E2E Haircut', 30, 2500, 1)`
+       VALUES (?, ?, 'E2E Haircut', 30, 2500, 1)`,
     )
     .bind(E2E_BOOKABLE_SERVICE_ID, E2E_BOOKABLE_SHOP_ID)
     .run();
@@ -439,9 +482,14 @@ export async function ensureE2eBookableShop(db: D1Database): Promise<void> {
     await db
       .prepare(
         `INSERT OR IGNORE INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time, is_active)
-         VALUES (?, ?, ?, ?, '09:00', '17:00', 1)`
+         VALUES (?, ?, ?, ?, '09:00', '17:00', 1)`,
       )
-      .bind(`${E2E_BOOKABLE_STAFF_ID}-sch-${d}`, E2E_BOOKABLE_SHOP_ID, E2E_BOOKABLE_STAFF_ID, d)
+      .bind(
+        `${E2E_BOOKABLE_STAFF_ID}-sch-${d}`,
+        E2E_BOOKABLE_SHOP_ID,
+        E2E_BOOKABLE_STAFF_ID,
+        d,
+      )
       .run();
   }
 }
@@ -460,14 +508,24 @@ export function markInviteUsed(db: D1Database, token: string) {
     .run();
 }
 
-export function updateShopStripeSession(db: D1Database, shopId: string, checkoutSessionId: string, checkoutUrl: string | null) {
+export function updateShopStripeSession(
+  db: D1Database,
+  shopId: string,
+  checkoutSessionId: string,
+  checkoutUrl: string | null,
+) {
   return db
-    .prepare("UPDATE shops SET stripe_checkout_session_id = ?, stripe_checkout_url = ?, stripe_payment_status = 'unpaid', status = 'awaiting_payment' WHERE id = ?")
+    .prepare(
+      "UPDATE shops SET stripe_checkout_session_id = ?, stripe_checkout_url = ?, stripe_payment_status = 'unpaid', status = 'awaiting_payment' WHERE id = ?",
+    )
     .bind(checkoutSessionId, checkoutUrl, shopId)
     .run();
 }
 
-export function getShopByCheckoutSessionId(db: D1Database, checkoutSessionId: string) {
+export function getShopByCheckoutSessionId(
+  db: D1Database,
+  checkoutSessionId: string,
+) {
   return db
     .prepare("SELECT * FROM shops WHERE stripe_checkout_session_id = ? LIMIT 1")
     .bind(checkoutSessionId)
@@ -476,7 +534,9 @@ export function getShopByCheckoutSessionId(db: D1Database, checkoutSessionId: st
 
 export function updateShopPaymentComplete(db: D1Database, shopId: string) {
   return db
-    .prepare("UPDATE shops SET stripe_payment_status = 'paid', status = 'pending' WHERE id = ?")
+    .prepare(
+      "UPDATE shops SET stripe_payment_status = 'paid', status = 'pending' WHERE id = ?",
+    )
     .bind(shopId)
     .run();
 }
@@ -520,7 +580,9 @@ export interface DBShopSite {
 
 export function getShopSiteByShopId(db: D1Database, shopId: string) {
   return db
-    .prepare("SELECT * FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1")
+    .prepare(
+      "SELECT * FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1",
+    )
     .bind(shopId)
     .first<DBShopSite>();
 }
@@ -548,7 +610,7 @@ export function createShopSite(
     owner_color_primary?: string | null;
     owner_color_accent?: string | null;
     website_status?: string;
-  }
+  },
 ) {
   return db
     .prepare(
@@ -557,7 +619,7 @@ export function createShopSite(
           color_primary, color_accent, font_heading, font_body,
           hero_image_url, logo_url, catalog_images_json, generated_at, status,
           design_notes, owner_color_primary, owner_color_accent, website_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       site.id,
@@ -579,28 +641,46 @@ export function createShopSite(
       site.design_notes ?? null,
       site.owner_color_primary ?? null,
       site.owner_color_accent ?? null,
-      site.website_status ?? "draft"
+      site.website_status ?? "draft",
     )
     .run();
 }
 
-export function updateShopSiteWebsiteStatus(db: D1Database, shopId: string, websiteStatus: string) {
+export function updateShopSiteWebsiteStatus(
+  db: D1Database,
+  shopId: string,
+  websiteStatus: string,
+) {
   return db
-    .prepare("UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'")
+    .prepare(
+      "UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'",
+    )
     .bind(websiteStatus, shopId)
     .run();
 }
 
-export function updateShopSiteHeroImageUrl(db: D1Database, shopId: string, url: string) {
+export function updateShopSiteHeroImageUrl(
+  db: D1Database,
+  shopId: string,
+  url: string,
+) {
   return db
-    .prepare("UPDATE shop_sites SET hero_image_url = ? WHERE shop_id = ? AND status = 'active'")
+    .prepare(
+      "UPDATE shop_sites SET hero_image_url = ? WHERE shop_id = ? AND status = 'active'",
+    )
     .bind(url, shopId)
     .run();
 }
 
-export function updateShopSiteLogoUrl(db: D1Database, shopId: string, url: string) {
+export function updateShopSiteLogoUrl(
+  db: D1Database,
+  shopId: string,
+  url: string,
+) {
   return db
-    .prepare("UPDATE shop_sites SET logo_url = ? WHERE shop_id = ? AND status = 'active'")
+    .prepare(
+      "UPDATE shop_sites SET logo_url = ? WHERE shop_id = ? AND status = 'active'",
+    )
     .bind(url, shopId)
     .run();
 }
@@ -629,9 +709,12 @@ export async function replaceShopSiteForShop(
     owner_color_primary?: string | null;
     owner_color_accent?: string | null;
     website_status?: string;
-  }
+  },
 ) {
-  await db.prepare("DELETE FROM shop_sites WHERE shop_id = ?").bind(site.shop_id).run();
+  await db
+    .prepare("DELETE FROM shop_sites WHERE shop_id = ?")
+    .bind(site.shop_id)
+    .run();
   await createShopSite(db, site);
 }
 
@@ -652,13 +735,13 @@ export interface DBGenerationJob {
 
 export function insertGenerationJob(
   db: D1Database,
-  job: { id: string; shop_id: string; status?: string; stage?: string }
+  job: { id: string; shop_id: string; status?: string; stage?: string },
 ) {
   const now = new Date().toISOString();
   return db
     .prepare(
       `INSERT INTO generation_jobs (id, shop_id, status, stage, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       job.id,
@@ -666,7 +749,7 @@ export function insertGenerationJob(
       job.status ?? "queued",
       job.stage ?? "research",
       now,
-      now
+      now,
     )
     .run();
 }
@@ -688,7 +771,7 @@ export function updateGenerationJob(
     build_output?: string | null;
     audit_output?: string | null;
     error?: string | null;
-  }
+  },
 ) {
   const sets: string[] = ["updated_at = ?"];
   const vals: unknown[] = [new Date().toISOString()];
@@ -742,7 +825,7 @@ export function updateShopTheme(db: D1Database, id: string, aiTheme: string) {
 export async function getServicesByShop(db: D1Database, shopId: string) {
   const { results } = await db
     .prepare(
-      "SELECT * FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY category, name"
+      "SELECT * FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY category, name",
     )
     .bind(shopId)
     .all<DBService>();
@@ -758,31 +841,69 @@ export function getServiceById(db: D1Database, id: string) {
 
 export function createService(
   db: D1Database,
-  svc: { id: string; shop_id: string; name: string; duration_min: number; price_pence: number; category?: string | null }
+  svc: {
+    id: string;
+    shop_id: string;
+    name: string;
+    duration_min: number;
+    price_pence: number;
+    category?: string | null;
+  },
 ) {
   return db
     .prepare(
-      "INSERT INTO services (id, shop_id, name, duration_min, price_pence, category) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO services (id, shop_id, name, duration_min, price_pence, category) VALUES (?, ?, ?, ?, ?, ?)",
     )
-    .bind(svc.id, svc.shop_id, svc.name, svc.duration_min, svc.price_pence, svc.category ?? null)
+    .bind(
+      svc.id,
+      svc.shop_id,
+      svc.name,
+      svc.duration_min,
+      svc.price_pence,
+      svc.category ?? null,
+    )
     .run();
 }
 
 export function updateService(
   db: D1Database,
   id: string,
-  fields: { name?: string; duration_min?: number; price_pence?: number; category?: string | null; is_active?: number }
+  fields: {
+    name?: string;
+    duration_min?: number;
+    price_pence?: number;
+    category?: string | null;
+    is_active?: number;
+  },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
-  if (fields.duration_min !== undefined) { sets.push("duration_min = ?"); vals.push(fields.duration_min); }
-  if (fields.price_pence !== undefined) { sets.push("price_pence = ?"); vals.push(fields.price_pence); }
-  if (fields.category !== undefined) { sets.push("category = ?"); vals.push(fields.category); }
-  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (fields.name !== undefined) {
+    sets.push("name = ?");
+    vals.push(fields.name);
+  }
+  if (fields.duration_min !== undefined) {
+    sets.push("duration_min = ?");
+    vals.push(fields.duration_min);
+  }
+  if (fields.price_pence !== undefined) {
+    sets.push("price_pence = ?");
+    vals.push(fields.price_pence);
+  }
+  if (fields.category !== undefined) {
+    sets.push("category = ?");
+    vals.push(fields.category);
+  }
+  if (fields.is_active !== undefined) {
+    sets.push("is_active = ?");
+    vals.push(fields.is_active);
+  }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
-  return db.prepare(`UPDATE services SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  return db
+    .prepare(`UPDATE services SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
 }
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
@@ -794,7 +915,7 @@ export async function getStaffByShop(db: D1Database, shopId: string) {
        FROM staff st
        JOIN platform_users pu ON st.user_id = pu.id
        WHERE st.shop_id = ? AND st.is_active = 1
-       ORDER BY st.display_name`
+       ORDER BY st.display_name`,
     )
     .bind(shopId)
     .all<DBStaff & { user_email: string }>();
@@ -810,36 +931,72 @@ export function getStaffById(db: D1Database, id: string) {
 
 export function createStaffMember(
   db: D1Database,
-  member: { id: string; shop_id: string; user_id: string; display_name: string; bio?: string | null }
+  member: {
+    id: string;
+    shop_id: string;
+    user_id: string;
+    display_name: string;
+    bio?: string | null;
+  },
 ) {
   return db
     .prepare(
-      "INSERT INTO staff (id, shop_id, user_id, display_name, bio) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO staff (id, shop_id, user_id, display_name, bio) VALUES (?, ?, ?, ?, ?)",
     )
-    .bind(member.id, member.shop_id, member.user_id, member.display_name, member.bio ?? null)
+    .bind(
+      member.id,
+      member.shop_id,
+      member.user_id,
+      member.display_name,
+      member.bio ?? null,
+    )
     .run();
 }
 
 export function updateStaffMember(
   db: D1Database,
   id: string,
-  fields: { display_name?: string; bio?: string | null; is_active?: number; avatar_url?: string | null }
+  fields: {
+    display_name?: string;
+    bio?: string | null;
+    is_active?: number;
+    avatar_url?: string | null;
+  },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (fields.display_name !== undefined) { sets.push("display_name = ?"); vals.push(fields.display_name); }
-  if (fields.bio !== undefined) { sets.push("bio = ?"); vals.push(fields.bio); }
-  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
-  if (fields.avatar_url !== undefined) { sets.push("avatar_url = ?"); vals.push(fields.avatar_url); }
+  if (fields.display_name !== undefined) {
+    sets.push("display_name = ?");
+    vals.push(fields.display_name);
+  }
+  if (fields.bio !== undefined) {
+    sets.push("bio = ?");
+    vals.push(fields.bio);
+  }
+  if (fields.is_active !== undefined) {
+    sets.push("is_active = ?");
+    vals.push(fields.is_active);
+  }
+  if (fields.avatar_url !== undefined) {
+    sets.push("avatar_url = ?");
+    vals.push(fields.avatar_url);
+  }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
-  return db.prepare(`UPDATE staff SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  return db
+    .prepare(`UPDATE staff SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
 }
 
-export function addStaffService(db: D1Database, staffId: string, serviceId: string) {
+export function addStaffService(
+  db: D1Database,
+  staffId: string,
+  serviceId: string,
+) {
   return db
     .prepare(
-      "INSERT OR IGNORE INTO staff_services (staff_id, service_id) VALUES (?, ?)"
+      "INSERT OR IGNORE INTO staff_services (staff_id, service_id) VALUES (?, ?)",
     )
     .bind(staffId, serviceId)
     .run();
@@ -850,7 +1007,7 @@ export async function getStaffServices(db: D1Database, staffId: string) {
     .prepare(
       `SELECT s.* FROM services s
        JOIN staff_services ss ON ss.service_id = s.id
-       WHERE ss.staff_id = ?`
+       WHERE ss.staff_id = ?`,
     )
     .bind(staffId)
     .all<DBService>();
@@ -862,7 +1019,7 @@ export async function getStaffServices(db: D1Database, staffId: string) {
 export async function getScheduleByShop(db: D1Database, shopId: string) {
   const { results } = await db
     .prepare(
-      "SELECT * FROM schedules WHERE shop_id = ? AND is_active = 1 ORDER BY staff_id, day_of_week"
+      "SELECT * FROM schedules WHERE shop_id = ? AND is_active = 1 ORDER BY staff_id, day_of_week",
     )
     .bind(shopId)
     .all<DBSchedule>();
@@ -872,7 +1029,7 @@ export async function getScheduleByShop(db: D1Database, shopId: string) {
 export async function getScheduleByStaff(db: D1Database, staffId: string) {
   const { results } = await db
     .prepare(
-      "SELECT * FROM schedules WHERE staff_id = ? AND is_active = 1 ORDER BY day_of_week"
+      "SELECT * FROM schedules WHERE staff_id = ? AND is_active = 1 ORDER BY day_of_week",
     )
     .bind(staffId)
     .all<DBSchedule>();
@@ -881,13 +1038,20 @@ export async function getScheduleByStaff(db: D1Database, staffId: string) {
 
 export function upsertSchedule(
   db: D1Database,
-  schedule: { id: string; shop_id: string; staff_id: string; day_of_week: number; start_time: string; end_time: string }
+  schedule: {
+    id: string;
+    shop_id: string;
+    staff_id: string;
+    day_of_week: number;
+    start_time: string;
+    end_time: string;
+  },
 ) {
   return db
     .prepare(
       `INSERT INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET start_time = excluded.start_time, end_time = excluded.end_time, is_active = 1`
+       ON CONFLICT(id) DO UPDATE SET start_time = excluded.start_time, end_time = excluded.end_time, is_active = 1`,
     )
     .bind(
       schedule.id,
@@ -895,14 +1059,20 @@ export function upsertSchedule(
       schedule.staff_id,
       schedule.day_of_week,
       schedule.start_time,
-      schedule.end_time
+      schedule.end_time,
     )
     .run();
 }
 
-export function deactivateScheduleDay(db: D1Database, staffId: string, dayOfWeek: number) {
+export function deactivateScheduleDay(
+  db: D1Database,
+  staffId: string,
+  dayOfWeek: number,
+) {
   return db
-    .prepare("UPDATE schedules SET is_active = 0 WHERE staff_id = ? AND day_of_week = ?")
+    .prepare(
+      "UPDATE schedules SET is_active = 0 WHERE staff_id = ? AND day_of_week = ?",
+    )
     .bind(staffId, dayOfWeek)
     .run();
 }
@@ -912,20 +1082,39 @@ export function deactivateScheduleDay(db: D1Database, staffId: string, dayOfWeek
 export async function getBookingsByShop(
   db: D1Database,
   shopId: string,
-  opts: { date?: string; staffId?: string; status?: string; limit?: number; offset?: number } = {}
+  opts: {
+    date?: string;
+    staffId?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ) {
   const conds: string[] = ["b.shop_id = ?"];
   const vals: unknown[] = [shopId];
-  if (opts.date) { conds.push("b.booking_date = ?"); vals.push(opts.date); }
-  if (opts.staffId) { conds.push("b.staff_id = ?"); vals.push(opts.staffId); }
-  if (opts.status) { conds.push("b.status = ?"); vals.push(opts.status); }
+  if (opts.date) {
+    conds.push("b.booking_date = ?");
+    vals.push(opts.date);
+  }
+  if (opts.staffId) {
+    conds.push("b.staff_id = ?");
+    vals.push(opts.staffId);
+  }
+  if (opts.status) {
+    conds.push("b.status = ?");
+    vals.push(opts.status);
+  }
 
   // Bind LIMIT/OFFSET as parameters (never interpolate). Coerce to bounded
   // integers so a non-numeric value can never reach the SQL text.
   const rawLimit = Number(opts.limit ?? 200);
-  const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(Math.trunc(rawLimit), 1000)) : 200;
+  const limit = Number.isFinite(rawLimit)
+    ? Math.max(1, Math.min(Math.trunc(rawLimit), 1000))
+    : 200;
   const rawOffset = Number(opts.offset ?? 0);
-  const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.trunc(rawOffset)) : 0;
+  const offset = Number.isFinite(rawOffset)
+    ? Math.max(0, Math.trunc(rawOffset))
+    : 0;
   vals.push(limit, offset);
 
   const sql = `
@@ -939,9 +1128,16 @@ export async function getBookingsByShop(
     LIMIT ? OFFSET ?
   `;
 
-  const { results } = await db.prepare(sql).bind(...vals).all<
-    DBBooking & { service_name: string; duration_min: number; staff_name: string }
-  >();
+  const { results } = await db
+    .prepare(sql)
+    .bind(...vals)
+    .all<
+      DBBooking & {
+        service_name: string;
+        duration_min: number;
+        staff_name: string;
+      }
+    >();
   return results;
 }
 
@@ -955,7 +1151,11 @@ export function getBookingById(db: D1Database, id: string) {
 // createBooking moved to apps/workers/booking/src/db/queries.ts (WS-1) — the
 // booking worker is the sole writer of public booking creation.
 
-export function updateBookingStatus(db: D1Database, id: string, status: string) {
+export function updateBookingStatus(
+  db: D1Database,
+  id: string,
+  status: string,
+) {
   return db
     .prepare("UPDATE bookings SET status = ? WHERE id = ?")
     .bind(status, id)
@@ -980,34 +1180,42 @@ export async function getWaitlistByShop(db: D1Database, shopId: string) {
        FROM waitlist w
        LEFT JOIN services sv ON sv.id = w.service_id
        WHERE w.shop_id = ?
-       ORDER BY w.created_at`
+       ORDER BY w.created_at`,
     )
     .bind(shopId)
     .all<DBWaitlist & { service_name: string | null }>();
   return results;
 }
 
-export function createWaitlistEntry(db: D1Database, entry: {
-  id: string;
-  shop_id: string;
-  staff_id?: string | null;
-  service_id?: string | null;
-  customer_name: string;
-  customer_email: string;
-  customer_phone?: string | null;
-  preferred_date?: string | null;
-}) {
+export function createWaitlistEntry(
+  db: D1Database,
+  entry: {
+    id: string;
+    shop_id: string;
+    staff_id?: string | null;
+    service_id?: string | null;
+    customer_name: string;
+    customer_email: string;
+    customer_phone?: string | null;
+    preferred_date?: string | null;
+  },
+) {
   return db
     .prepare(
       `INSERT INTO waitlist
          (id, shop_id, staff_id, service_id,
           customer_name, customer_email, customer_phone, preferred_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      entry.id, entry.shop_id, entry.staff_id ?? null, entry.service_id ?? null,
-      entry.customer_name, entry.customer_email, entry.customer_phone ?? null,
-      entry.preferred_date ?? null
+      entry.id,
+      entry.shop_id,
+      entry.staff_id ?? null,
+      entry.service_id ?? null,
+      entry.customer_name,
+      entry.customer_email,
+      entry.customer_phone ?? null,
+      entry.preferred_date ?? null,
     )
     .run();
 }
@@ -1018,7 +1226,7 @@ export async function getRevenueByShop(
   db: D1Database,
   shopId: string,
   year: number,
-  month: number
+  month: number,
 ) {
   const from = `${year}-${String(month).padStart(2, "0")}-01`;
   const to = `${year}-${String(month).padStart(2, "0")}-31`;
@@ -1029,14 +1237,22 @@ export async function getRevenueByShop(
               COALESCE(SUM(commission_pence), 0) AS commission_pence
        FROM bookings
        WHERE shop_id = ? AND booking_date >= ? AND booking_date <= ?
-         AND status = 'completed'`
+         AND status = 'completed'`,
     )
     .bind(shopId, from, to)
-    .first<{ booking_count: number; gross_pence: number; commission_pence: number }>();
+    .first<{
+      booking_count: number;
+      gross_pence: number;
+      commission_pence: number;
+    }>();
   return row ?? { booking_count: 0, gross_pence: 0, commission_pence: 0 };
 }
 
-export async function getPlatformRevenueByMonth(db: D1Database, year: number, month: number) {
+export async function getPlatformRevenueByMonth(
+  db: D1Database,
+  year: number,
+  month: number,
+) {
   const from = `${year}-${String(month).padStart(2, "0")}-01`;
   const to = `${year}-${String(month).padStart(2, "0")}-31`;
   const { results } = await db
@@ -1050,7 +1266,7 @@ export async function getPlatformRevenueByMonth(db: D1Database, year: number, mo
          AND b.booking_date >= ? AND b.booking_date <= ?
          AND b.status = 'completed'
        GROUP BY s.id
-       ORDER BY s.shop_number`
+       ORDER BY s.shop_number`,
     )
     .bind(from, to)
     .all<{
@@ -1077,7 +1293,7 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
-              sh.name AS shop_name, sh.slug AS shop_slug
+              sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
@@ -1085,7 +1301,7 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
        WHERE b.status IN ('pending', 'confirmed')
          AND b.reminder_sent = 0
          AND b.booking_date = date('now', '+1 day')
-       LIMIT ?`
+       LIMIT ?`,
     )
     .bind(limit)
     .all<{
@@ -1102,16 +1318,20 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
       staff_name: string;
       shop_name: string;
       shop_slug: string;
+      shop_timezone: string | null;
     }>();
   return results;
 }
 
 // ─── Inventory: catalogue (WS-3 Phase 0) ──────────────────────────────────────
 
-export async function getProductCategoriesByShop(db: D1Database, shopId: string) {
+export async function getProductCategoriesByShop(
+  db: D1Database,
+  shopId: string,
+) {
   const { results } = await db
     .prepare(
-      "SELECT * FROM product_categories WHERE shop_id = ? AND is_active = 1 ORDER BY sort_order, name"
+      "SELECT * FROM product_categories WHERE shop_id = ? AND is_active = 1 ORDER BY sort_order, name",
     )
     .bind(shopId)
     .all<DBProductCategory>();
@@ -1127,10 +1347,12 @@ export function getProductCategoryById(db: D1Database, id: string) {
 
 export function createProductCategory(
   db: D1Database,
-  cat: { id: string; shop_id: string; name: string; sort_order?: number }
+  cat: { id: string; shop_id: string; name: string; sort_order?: number },
 ) {
   return db
-    .prepare("INSERT INTO product_categories (id, shop_id, name, sort_order) VALUES (?, ?, ?, ?)")
+    .prepare(
+      "INSERT INTO product_categories (id, shop_id, name, sort_order) VALUES (?, ?, ?, ?)",
+    )
     .bind(cat.id, cat.shop_id, cat.name, cat.sort_order ?? 0)
     .run();
 }
@@ -1138,59 +1360,119 @@ export function createProductCategory(
 export function updateProductCategory(
   db: D1Database,
   id: string,
-  fields: { name?: string; sort_order?: number; is_active?: number }
+  fields: { name?: string; sort_order?: number; is_active?: number },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
-  if (fields.sort_order !== undefined) { sets.push("sort_order = ?"); vals.push(fields.sort_order); }
-  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (fields.name !== undefined) {
+    sets.push("name = ?");
+    vals.push(fields.name);
+  }
+  if (fields.sort_order !== undefined) {
+    sets.push("sort_order = ?");
+    vals.push(fields.sort_order);
+  }
+  if (fields.is_active !== undefined) {
+    sets.push("is_active = ?");
+    vals.push(fields.is_active);
+  }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
-  return db.prepare(`UPDATE product_categories SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  return db
+    .prepare(`UPDATE product_categories SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
 }
 
 export async function getSuppliersByShop(db: D1Database, shopId: string) {
   const { results } = await db
-    .prepare("SELECT * FROM suppliers WHERE shop_id = ? AND is_active = 1 ORDER BY name")
+    .prepare(
+      "SELECT * FROM suppliers WHERE shop_id = ? AND is_active = 1 ORDER BY name",
+    )
     .bind(shopId)
     .all<DBSupplier>();
   return results;
 }
 
 export function getSupplierById(db: D1Database, id: string) {
-  return db.prepare("SELECT * FROM suppliers WHERE id = ? LIMIT 1").bind(id).first<DBSupplier>();
+  return db
+    .prepare("SELECT * FROM suppliers WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<DBSupplier>();
 }
 
 export function createSupplier(
   db: D1Database,
-  sup: { id: string; shop_id: string; name: string; email?: string | null; phone?: string | null; notes?: string | null }
+  sup: {
+    id: string;
+    shop_id: string;
+    name: string;
+    email?: string | null;
+    phone?: string | null;
+    notes?: string | null;
+  },
 ) {
   return db
-    .prepare("INSERT INTO suppliers (id, shop_id, name, email, phone, notes) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(sup.id, sup.shop_id, sup.name, sup.email ?? null, sup.phone ?? null, sup.notes ?? null)
+    .prepare(
+      "INSERT INTO suppliers (id, shop_id, name, email, phone, notes) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(
+      sup.id,
+      sup.shop_id,
+      sup.name,
+      sup.email ?? null,
+      sup.phone ?? null,
+      sup.notes ?? null,
+    )
     .run();
 }
 
 export function updateSupplier(
   db: D1Database,
   id: string,
-  fields: { name?: string; email?: string | null; phone?: string | null; notes?: string | null; is_active?: number }
+  fields: {
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+    notes?: string | null;
+    is_active?: number;
+  },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
-  if (fields.email !== undefined) { sets.push("email = ?"); vals.push(fields.email); }
-  if (fields.phone !== undefined) { sets.push("phone = ?"); vals.push(fields.phone); }
-  if (fields.notes !== undefined) { sets.push("notes = ?"); vals.push(fields.notes); }
-  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (fields.name !== undefined) {
+    sets.push("name = ?");
+    vals.push(fields.name);
+  }
+  if (fields.email !== undefined) {
+    sets.push("email = ?");
+    vals.push(fields.email);
+  }
+  if (fields.phone !== undefined) {
+    sets.push("phone = ?");
+    vals.push(fields.phone);
+  }
+  if (fields.notes !== undefined) {
+    sets.push("notes = ?");
+    vals.push(fields.notes);
+  }
+  if (fields.is_active !== undefined) {
+    sets.push("is_active = ?");
+    vals.push(fields.is_active);
+  }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
-  return db.prepare(`UPDATE suppliers SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  return db
+    .prepare(`UPDATE suppliers SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
 }
 
 /** Products with total on-hand quantity summed across their stock rows (base + variants). */
-export async function getProductsWithStockByShop(db: D1Database, shopId: string) {
+export async function getProductsWithStockByShop(
+  db: D1Database,
+  shopId: string,
+) {
   const { results } = await db
     .prepare(
       `SELECT p.*, COALESCE(SUM(sl.quantity), 0) AS total_quantity
@@ -1198,7 +1480,7 @@ export async function getProductsWithStockByShop(db: D1Database, shopId: string)
        LEFT JOIN stock_levels sl ON sl.product_id = p.id
        WHERE p.shop_id = ? AND p.is_active = 1
        GROUP BY p.id
-       ORDER BY p.name`
+       ORDER BY p.name`,
     )
     .bind(shopId)
     .all<DBProduct & { total_quantity: number }>();
@@ -1206,7 +1488,10 @@ export async function getProductsWithStockByShop(db: D1Database, shopId: string)
 }
 
 export function getProductById(db: D1Database, id: string) {
-  return db.prepare("SELECT * FROM products WHERE id = ? LIMIT 1").bind(id).first<DBProduct>();
+  return db
+    .prepare("SELECT * FROM products WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<DBProduct>();
 }
 
 export function createProduct(
@@ -1227,19 +1512,30 @@ export function createProduct(
     is_professional?: number;
     track_stock?: number;
     image_url?: string | null;
-  }
+  },
 ) {
   return db
     .prepare(
       `INSERT INTO products (id, shop_id, category_id, supplier_id, name, description, brand, sku, barcode,
          cost_price_pence, retail_price_pence, tax_rate_bps, is_professional, track_stock, image_url)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      p.id, p.shop_id, p.category_id ?? null, p.supplier_id ?? null, p.name,
-      p.description ?? null, p.brand ?? null, p.sku ?? null, p.barcode ?? null,
-      p.cost_price_pence ?? 0, p.retail_price_pence ?? 0, p.tax_rate_bps ?? 0,
-      p.is_professional ?? 0, p.track_stock ?? 1, p.image_url ?? null
+      p.id,
+      p.shop_id,
+      p.category_id ?? null,
+      p.supplier_id ?? null,
+      p.name,
+      p.description ?? null,
+      p.brand ?? null,
+      p.sku ?? null,
+      p.barcode ?? null,
+      p.cost_price_pence ?? 0,
+      p.retail_price_pence ?? 0,
+      p.tax_rate_bps ?? 0,
+      p.is_professional ?? 0,
+      p.track_stock ?? 1,
+      p.image_url ?? null,
     )
     .run();
 }
@@ -1262,32 +1558,79 @@ export function updateProduct(
     track_stock?: number;
     image_url?: string | null;
     is_active?: number;
-  }
+  },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
-  if (fields.category_id !== undefined) { sets.push("category_id = ?"); vals.push(fields.category_id); }
-  if (fields.supplier_id !== undefined) { sets.push("supplier_id = ?"); vals.push(fields.supplier_id); }
-  if (fields.description !== undefined) { sets.push("description = ?"); vals.push(fields.description); }
-  if (fields.brand !== undefined) { sets.push("brand = ?"); vals.push(fields.brand); }
-  if (fields.sku !== undefined) { sets.push("sku = ?"); vals.push(fields.sku); }
-  if (fields.barcode !== undefined) { sets.push("barcode = ?"); vals.push(fields.barcode); }
-  if (fields.cost_price_pence !== undefined) { sets.push("cost_price_pence = ?"); vals.push(fields.cost_price_pence); }
-  if (fields.retail_price_pence !== undefined) { sets.push("retail_price_pence = ?"); vals.push(fields.retail_price_pence); }
-  if (fields.tax_rate_bps !== undefined) { sets.push("tax_rate_bps = ?"); vals.push(fields.tax_rate_bps); }
-  if (fields.is_professional !== undefined) { sets.push("is_professional = ?"); vals.push(fields.is_professional); }
-  if (fields.track_stock !== undefined) { sets.push("track_stock = ?"); vals.push(fields.track_stock); }
-  if (fields.image_url !== undefined) { sets.push("image_url = ?"); vals.push(fields.image_url); }
-  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (fields.name !== undefined) {
+    sets.push("name = ?");
+    vals.push(fields.name);
+  }
+  if (fields.category_id !== undefined) {
+    sets.push("category_id = ?");
+    vals.push(fields.category_id);
+  }
+  if (fields.supplier_id !== undefined) {
+    sets.push("supplier_id = ?");
+    vals.push(fields.supplier_id);
+  }
+  if (fields.description !== undefined) {
+    sets.push("description = ?");
+    vals.push(fields.description);
+  }
+  if (fields.brand !== undefined) {
+    sets.push("brand = ?");
+    vals.push(fields.brand);
+  }
+  if (fields.sku !== undefined) {
+    sets.push("sku = ?");
+    vals.push(fields.sku);
+  }
+  if (fields.barcode !== undefined) {
+    sets.push("barcode = ?");
+    vals.push(fields.barcode);
+  }
+  if (fields.cost_price_pence !== undefined) {
+    sets.push("cost_price_pence = ?");
+    vals.push(fields.cost_price_pence);
+  }
+  if (fields.retail_price_pence !== undefined) {
+    sets.push("retail_price_pence = ?");
+    vals.push(fields.retail_price_pence);
+  }
+  if (fields.tax_rate_bps !== undefined) {
+    sets.push("tax_rate_bps = ?");
+    vals.push(fields.tax_rate_bps);
+  }
+  if (fields.is_professional !== undefined) {
+    sets.push("is_professional = ?");
+    vals.push(fields.is_professional);
+  }
+  if (fields.track_stock !== undefined) {
+    sets.push("track_stock = ?");
+    vals.push(fields.track_stock);
+  }
+  if (fields.image_url !== undefined) {
+    sets.push("image_url = ?");
+    vals.push(fields.image_url);
+  }
+  if (fields.is_active !== undefined) {
+    sets.push("is_active = ?");
+    vals.push(fields.is_active);
+  }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
-  return db.prepare(`UPDATE products SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  return db
+    .prepare(`UPDATE products SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
 }
 
 export async function getVariantsByProduct(db: D1Database, productId: string) {
   const { results } = await db
-    .prepare("SELECT * FROM product_variants WHERE product_id = ? AND is_active = 1 ORDER BY name")
+    .prepare(
+      "SELECT * FROM product_variants WHERE product_id = ? AND is_active = 1 ORDER BY name",
+    )
     .bind(productId)
     .all<DBProductVariant>();
   return results;
@@ -1312,17 +1655,24 @@ export function createProductVariant(
     cost_price_pence?: number;
     retail_price_pence?: number;
     attributes_json?: string | null;
-  }
+  },
 ) {
   return db
     .prepare(
       `INSERT INTO product_variants (id, product_id, shop_id, name, sku, barcode,
          cost_price_pence, retail_price_pence, attributes_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      v.id, v.product_id, v.shop_id, v.name, v.sku ?? null, v.barcode ?? null,
-      v.cost_price_pence ?? 0, v.retail_price_pence ?? 0, v.attributes_json ?? null
+      v.id,
+      v.product_id,
+      v.shop_id,
+      v.name,
+      v.sku ?? null,
+      v.barcode ?? null,
+      v.cost_price_pence ?? 0,
+      v.retail_price_pence ?? 0,
+      v.attributes_json ?? null,
     )
     .run();
 }
@@ -1338,20 +1688,44 @@ export function updateProductVariant(
     retail_price_pence?: number;
     attributes_json?: string | null;
     is_active?: number;
-  }
+  },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
-  if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
-  if (fields.sku !== undefined) { sets.push("sku = ?"); vals.push(fields.sku); }
-  if (fields.barcode !== undefined) { sets.push("barcode = ?"); vals.push(fields.barcode); }
-  if (fields.cost_price_pence !== undefined) { sets.push("cost_price_pence = ?"); vals.push(fields.cost_price_pence); }
-  if (fields.retail_price_pence !== undefined) { sets.push("retail_price_pence = ?"); vals.push(fields.retail_price_pence); }
-  if (fields.attributes_json !== undefined) { sets.push("attributes_json = ?"); vals.push(fields.attributes_json); }
-  if (fields.is_active !== undefined) { sets.push("is_active = ?"); vals.push(fields.is_active); }
+  if (fields.name !== undefined) {
+    sets.push("name = ?");
+    vals.push(fields.name);
+  }
+  if (fields.sku !== undefined) {
+    sets.push("sku = ?");
+    vals.push(fields.sku);
+  }
+  if (fields.barcode !== undefined) {
+    sets.push("barcode = ?");
+    vals.push(fields.barcode);
+  }
+  if (fields.cost_price_pence !== undefined) {
+    sets.push("cost_price_pence = ?");
+    vals.push(fields.cost_price_pence);
+  }
+  if (fields.retail_price_pence !== undefined) {
+    sets.push("retail_price_pence = ?");
+    vals.push(fields.retail_price_pence);
+  }
+  if (fields.attributes_json !== undefined) {
+    sets.push("attributes_json = ?");
+    vals.push(fields.attributes_json);
+  }
+  if (fields.is_active !== undefined) {
+    sets.push("is_active = ?");
+    vals.push(fields.is_active);
+  }
   if (sets.length === 0) return Promise.resolve();
   vals.push(id);
-  return db.prepare(`UPDATE product_variants SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  return db
+    .prepare(`UPDATE product_variants SET ${sets.join(", ")} WHERE id = ?`)
+    .bind(...vals)
+    .run();
 }
 
 // ─── Inventory: stock (WS-3 Phase 0) ──────────────────────────────────────────
@@ -1387,12 +1761,20 @@ export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
     .prepare(
       `INSERT INTO stock_movements (id, shop_id, product_id, variant_id, type, quantity_delta,
          unit_cost_pence, reference_type, reference_id, staff_id, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
-      m.id, m.shop_id, m.product_id, variantId, m.type, m.quantity_delta,
-      m.unit_cost_pence ?? null, m.reference_type ?? null, m.reference_id ?? null,
-      m.staff_id ?? null, m.note ?? null
+      m.id,
+      m.shop_id,
+      m.product_id,
+      variantId,
+      m.type,
+      m.quantity_delta,
+      m.unit_cost_pence ?? null,
+      m.reference_type ?? null,
+      m.reference_id ?? null,
+      m.staff_id ?? null,
+      m.note ?? null,
     );
   const level =
     variantId === null
@@ -1401,7 +1783,7 @@ export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
             `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity)
              VALUES (?, ?, ?, NULL, ?)
              ON CONFLICT(shop_id, product_id) WHERE variant_id IS NULL
-             DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`
+             DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`,
           )
           .bind(crypto.randomUUID(), m.shop_id, m.product_id, m.quantity_delta)
       : db
@@ -1409,13 +1791,22 @@ export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
             `INSERT INTO stock_levels (id, shop_id, product_id, variant_id, quantity)
              VALUES (?, ?, ?, ?, ?)
              ON CONFLICT(shop_id, product_id, variant_id) WHERE variant_id IS NOT NULL
-             DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`
+             DO UPDATE SET quantity = quantity + excluded.quantity, updated_at = datetime('now')`,
           )
-          .bind(crypto.randomUUID(), m.shop_id, m.product_id, variantId, m.quantity_delta);
+          .bind(
+            crypto.randomUUID(),
+            m.shop_id,
+            m.product_id,
+            variantId,
+            m.quantity_delta,
+          );
   return [movement, level];
 }
 
-export async function applyStockMovement(db: D1Database, m: StockMovementInput) {
+export async function applyStockMovement(
+  db: D1Database,
+  m: StockMovementInput,
+) {
   await db.batch(stockMovementStatements(db, m));
 }
 
@@ -1428,7 +1819,7 @@ export function setReorderLevels(
     variant_id?: string | null;
     reorder_point: number;
     reorder_qty: number;
-  }
+  },
 ) {
   const variantId = args.variant_id ?? null;
   if (variantId === null) {
@@ -1438,9 +1829,15 @@ export function setReorderLevels(
          VALUES (?, ?, ?, NULL, 0, ?, ?)
          ON CONFLICT(shop_id, product_id) WHERE variant_id IS NULL
          DO UPDATE SET reorder_point = excluded.reorder_point, reorder_qty = excluded.reorder_qty,
-                       updated_at = datetime('now')`
+                       updated_at = datetime('now')`,
       )
-      .bind(crypto.randomUUID(), args.shop_id, args.product_id, args.reorder_point, args.reorder_qty)
+      .bind(
+        crypto.randomUUID(),
+        args.shop_id,
+        args.product_id,
+        args.reorder_point,
+        args.reorder_qty,
+      )
       .run();
   }
   return db
@@ -1449,20 +1846,31 @@ export function setReorderLevels(
        VALUES (?, ?, ?, ?, 0, ?, ?)
        ON CONFLICT(shop_id, product_id, variant_id) WHERE variant_id IS NOT NULL
        DO UPDATE SET reorder_point = excluded.reorder_point, reorder_qty = excluded.reorder_qty,
-                     updated_at = datetime('now')`
+                     updated_at = datetime('now')`,
     )
-    .bind(crypto.randomUUID(), args.shop_id, args.product_id, variantId, args.reorder_point, args.reorder_qty)
+    .bind(
+      crypto.randomUUID(),
+      args.shop_id,
+      args.product_id,
+      variantId,
+      args.reorder_point,
+      args.reorder_qty,
+    )
     .run();
 }
 
-export async function getStockLevelsByProduct(db: D1Database, shopId: string, productId: string) {
+export async function getStockLevelsByProduct(
+  db: D1Database,
+  shopId: string,
+  productId: string,
+) {
   const { results } = await db
     .prepare(
       `SELECT sl.*, v.name AS variant_name
        FROM stock_levels sl
        LEFT JOIN product_variants v ON v.id = sl.variant_id
        WHERE sl.shop_id = ? AND sl.product_id = ?
-       ORDER BY v.name`
+       ORDER BY v.name`,
     )
     .bind(shopId, productId)
     .all<DBStockLevel & { variant_name: string | null }>();
@@ -1483,17 +1891,23 @@ export async function getLowStockByShop(db: D1Database, shopId: string) {
        WHERE sl.shop_id = ?
          AND p.is_active = 1 AND p.track_stock = 1
          AND (sl.quantity <= 0 OR (sl.reorder_point > 0 AND sl.quantity <= sl.reorder_point))
-       ORDER BY sl.quantity ASC`
+       ORDER BY sl.quantity ASC`,
     )
     .bind(shopId)
-    .all<DBStockLevel & { product_name: string; product_sku: string | null; variant_name: string | null }>();
+    .all<
+      DBStockLevel & {
+        product_name: string;
+        product_sku: string | null;
+        variant_name: string | null;
+      }
+    >();
   return results;
 }
 
 export async function getStockMovementsByShop(
   db: D1Database,
   shopId: string,
-  opts: { product_id?: string; limit?: number } = {}
+  opts: { product_id?: string; limit?: number } = {},
 ) {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const vals: unknown[] = [shopId];
@@ -1511,10 +1925,12 @@ export async function getStockMovementsByShop(
        LEFT JOIN product_variants v ON v.id = m.variant_id
        WHERE ${where}
        ORDER BY m.created_at DESC
-       LIMIT ?`
+       LIMIT ?`,
     )
     .bind(...vals)
-    .all<DBStockMovement & { product_name: string; variant_name: string | null }>();
+    .all<
+      DBStockMovement & { product_name: string; variant_name: string | null }
+    >();
   return results;
 }
 
@@ -1578,16 +1994,29 @@ export async function getPurchaseOrdersByShop(db: D1Database, shopId: string) {
        WHERE po.shop_id = ?
        GROUP BY po.id
        ORDER BY po.created_at DESC
-       LIMIT 100`
+       LIMIT 100`,
     )
     .bind(shopId)
-    .all<DBPurchaseOrder & { supplier_name: string | null; total_pence: number; total_qty: number; total_received_qty: number }>();
+    .all<
+      DBPurchaseOrder & {
+        supplier_name: string | null;
+        total_pence: number;
+        total_qty: number;
+        total_received_qty: number;
+      }
+    >();
   return results;
 }
 
-export function getPurchaseOrderById(db: D1Database, shopId: string, poId: string) {
+export function getPurchaseOrderById(
+  db: D1Database,
+  shopId: string,
+  poId: string,
+) {
   return db
-    .prepare("SELECT * FROM purchase_orders WHERE id = ? AND shop_id = ? LIMIT 1")
+    .prepare(
+      "SELECT * FROM purchase_orders WHERE id = ? AND shop_id = ? LIMIT 1",
+    )
     .bind(poId, shopId)
     .first<DBPurchaseOrder>();
 }
@@ -1600,15 +2029,25 @@ export async function getPurchaseOrderItems(db: D1Database, poId: string) {
        JOIN products p ON p.id = i.product_id
        LEFT JOIN product_variants v ON v.id = i.variant_id
        WHERE i.po_id = ?
-       ORDER BY p.name`
+       ORDER BY p.name`,
     )
     .bind(poId)
-    .all<DBPurchaseOrderItem & { product_name: string; product_sku: string | null; variant_name: string | null }>();
+    .all<
+      DBPurchaseOrderItem & {
+        product_name: string;
+        product_sku: string | null;
+        variant_name: string | null;
+      }
+    >();
   return results;
 }
 
 /** BOM rows for one service, joined with the product facts the UI needs. */
-export async function getServiceProducts(db: D1Database, shopId: string, serviceId: string) {
+export async function getServiceProducts(
+  db: D1Database,
+  shopId: string,
+  serviceId: string,
+) {
   const { results } = await db
     .prepare(
       `SELECT sp.service_id, sp.product_id, sp.quantity, p.name AS product_name,
@@ -1616,10 +2055,18 @@ export async function getServiceProducts(db: D1Database, shopId: string, service
        FROM service_products sp
        JOIN products p ON p.id = sp.product_id
        WHERE sp.shop_id = ? AND sp.service_id = ?
-       ORDER BY p.name`
+       ORDER BY p.name`,
     )
     .bind(shopId, serviceId)
-    .all<{ service_id: string; product_id: string; quantity: number; product_name: string; cost_price_pence: number; track_stock: number; is_professional: number }>();
+    .all<{
+      service_id: string;
+      product_id: string;
+      quantity: number;
+      product_name: string;
+      cost_price_pence: number;
+      track_stock: number;
+      is_professional: number;
+    }>();
   return results;
 }
 
@@ -1628,22 +2075,30 @@ export async function setServiceProducts(
   db: D1Database,
   shopId: string,
   serviceId: string,
-  entries: Array<{ product_id: string; quantity: number }>
+  entries: Array<{ product_id: string; quantity: number }>,
 ) {
   const stmts = [
-    db.prepare("DELETE FROM service_products WHERE shop_id = ? AND service_id = ?").bind(shopId, serviceId),
+    db
+      .prepare(
+        "DELETE FROM service_products WHERE shop_id = ? AND service_id = ?",
+      )
+      .bind(shopId, serviceId),
     ...entries.map((e) =>
       db
         .prepare(
-          "INSERT INTO service_products (service_id, product_id, shop_id, quantity) VALUES (?, ?, ?, ?)"
+          "INSERT INTO service_products (service_id, product_id, shop_id, quantity) VALUES (?, ?, ?, ?)",
         )
-        .bind(serviceId, e.product_id, shopId, e.quantity)
+        .bind(serviceId, e.product_id, shopId, e.quantity),
     ),
   ];
   await db.batch(stmts);
 }
 
-export function getStockTakeById(db: D1Database, shopId: string, stockTakeId: string) {
+export function getStockTakeById(
+  db: D1Database,
+  shopId: string,
+  stockTakeId: string,
+) {
   return db
     .prepare("SELECT * FROM stock_takes WHERE id = ? AND shop_id = ? LIMIT 1")
     .bind(stockTakeId, shopId)
@@ -1660,7 +2115,7 @@ export async function getStockTakesByShop(db: D1Database, shopId: string) {
        WHERE st.shop_id = ?
        GROUP BY st.id
        ORDER BY st.created_at DESC
-       LIMIT 50`
+       LIMIT 50`,
     )
     .bind(shopId)
     .all<DBStockTake & { item_count: number; variance_qty: number }>();
@@ -1675,10 +2130,16 @@ export async function getStockTakeItems(db: D1Database, stockTakeId: string) {
        JOIN products p ON p.id = i.product_id
        LEFT JOIN product_variants v ON v.id = i.variant_id
        WHERE i.stock_take_id = ?
-       ORDER BY p.name`
+       ORDER BY p.name`,
     )
     .bind(stockTakeId)
-    .all<DBStockTakeItem & { product_name: string; product_sku: string | null; variant_name: string | null }>();
+    .all<
+      DBStockTakeItem & {
+        product_name: string;
+        product_sku: string | null;
+        variant_name: string | null;
+      }
+    >();
   return results;
 }
 
@@ -1687,19 +2148,19 @@ export async function getCurrentQuantity(
   db: D1Database,
   shopId: string,
   productId: string,
-  variantId: string | null
+  variantId: string | null,
 ): Promise<number> {
   const row =
     variantId === null
       ? await db
           .prepare(
-            "SELECT quantity FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1"
+            "SELECT quantity FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1",
           )
           .bind(shopId, productId)
           .first<{ quantity: number }>()
       : await db
           .prepare(
-            "SELECT quantity FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1"
+            "SELECT quantity FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
           )
           .bind(shopId, productId, variantId)
           .first<{ quantity: number }>();
@@ -1711,7 +2172,12 @@ export async function getCurrentQuantity(
  * sales are excluded; refund adjustments arrive with the returns work.
  * Dates are inclusive YYYY-MM-DD, matched on substr(created_at, 1, 10).
  */
-export async function getInventoryReport(db: D1Database, shopId: string, from: string, to: string) {
+export async function getInventoryReport(
+  db: D1Database,
+  shopId: string,
+  from: string,
+  to: string,
+) {
   const [summary, byProduct, byStaff, consumption] = await Promise.all([
     db
       .prepare(
@@ -1721,10 +2187,14 @@ export async function getInventoryReport(db: D1Database, shopId: string, from: s
          FROM sale_items si JOIN sales s ON s.id = si.sale_id
          WHERE si.shop_id = ? AND si.item_type = 'product'
            AND s.status != 'voided'
-           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?`
+           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?`,
       )
       .bind(shopId, from, to)
-      .first<{ retail_revenue_pence: number; cogs_pence: number; units_sold: number }>(),
+      .first<{
+        retail_revenue_pence: number;
+        cogs_pence: number;
+        units_sold: number;
+      }>(),
     db
       .prepare(
         `SELECT si.product_id, si.name,
@@ -1737,10 +2207,16 @@ export async function getInventoryReport(db: D1Database, shopId: string, from: s
            AND substr(s.created_at, 1, 10) BETWEEN ? AND ?
          GROUP BY si.product_id, si.name
          ORDER BY revenue_pence DESC
-         LIMIT 50`
+         LIMIT 50`,
       )
       .bind(shopId, from, to)
-      .all<{ product_id: string | null; name: string; units_sold: number; revenue_pence: number; cogs_pence: number }>(),
+      .all<{
+        product_id: string | null;
+        name: string;
+        units_sold: number;
+        revenue_pence: number;
+        cogs_pence: number;
+      }>(),
     db
       .prepare(
         `SELECT si.staff_id, st.display_name AS staff_name,
@@ -1753,17 +2229,22 @@ export async function getInventoryReport(db: D1Database, shopId: string, from: s
            AND s.status != 'voided'
            AND substr(s.created_at, 1, 10) BETWEEN ? AND ?
          GROUP BY si.staff_id
-         ORDER BY revenue_pence DESC`
+         ORDER BY revenue_pence DESC`,
       )
       .bind(shopId, from, to)
-      .all<{ staff_id: string | null; staff_name: string | null; units_sold: number; revenue_pence: number }>(),
+      .all<{
+        staff_id: string | null;
+        staff_name: string | null;
+        units_sold: number;
+        revenue_pence: number;
+      }>(),
     db
       .prepare(
         `SELECT COALESCE(SUM(-m.quantity_delta), 0) AS units_consumed,
                 COALESCE(SUM(-m.quantity_delta * COALESCE(m.unit_cost_pence, 0)), 0) AS cost_pence
          FROM stock_movements m
          WHERE m.shop_id = ? AND m.type = 'consumption'
-           AND substr(m.created_at, 1, 10) BETWEEN ? AND ?`
+           AND substr(m.created_at, 1, 10) BETWEEN ? AND ?`,
       )
       .bind(shopId, from, to)
       .first<{ units_consumed: number; cost_pence: number }>(),
@@ -1773,7 +2254,8 @@ export async function getInventoryReport(db: D1Database, shopId: string, from: s
     retail: {
       revenue_pence: summary?.retail_revenue_pence ?? 0,
       cogs_pence: summary?.cogs_pence ?? 0,
-      margin_pence: (summary?.retail_revenue_pence ?? 0) - (summary?.cogs_pence ?? 0),
+      margin_pence:
+        (summary?.retail_revenue_pence ?? 0) - (summary?.cogs_pence ?? 0),
       units_sold: summary?.units_sold ?? 0,
     },
     by_product: byProduct.results ?? [],
@@ -1793,11 +2275,15 @@ export async function getInventoryReport(db: D1Database, shopId: string, from: s
 // touched: UK financial-record retention outlives every window here.
 
 /** Visitor chat transcripts contain free text; delete whole sessions. */
-export async function deleteExpiredChatSessions(db: D1Database, olderThanDays: number, limit: number) {
+export async function deleteExpiredChatSessions(
+  db: D1Database,
+  olderThanDays: number,
+  limit: number,
+) {
   const r = await db
     .prepare(
       `DELETE FROM chat_sessions WHERE id IN (
-         SELECT id FROM chat_sessions WHERE updated_at < datetime('now', ?) LIMIT ?)`
+         SELECT id FROM chat_sessions WHERE updated_at < datetime('now', ?) LIMIT ?)`,
     )
     .bind(`-${olderThanDays} days`, limit)
     .run();
@@ -1805,11 +2291,15 @@ export async function deleteExpiredChatSessions(db: D1Database, olderThanDays: n
 }
 
 /** Waitlist rows are operational; anything this old is finished or abandoned. */
-export async function deleteStaleWaitlist(db: D1Database, olderThanDays: number, limit: number) {
+export async function deleteStaleWaitlist(
+  db: D1Database,
+  olderThanDays: number,
+  limit: number,
+) {
   const r = await db
     .prepare(
       `DELETE FROM waitlist WHERE id IN (
-         SELECT id FROM waitlist WHERE created_at < datetime('now', ?) LIMIT ?)`
+         SELECT id FROM waitlist WHERE created_at < datetime('now', ?) LIMIT ?)`,
     )
     .bind(`-${olderThanDays} days`, limit)
     .run();
@@ -1817,14 +2307,18 @@ export async function deleteStaleWaitlist(db: D1Database, olderThanDays: number,
 }
 
 /** Used or expired invites past the grace window (email + live token hygiene). */
-export async function deleteExpiredInvites(db: D1Database, graceDays: number, limit: number) {
+export async function deleteExpiredInvites(
+  db: D1Database,
+  graceDays: number,
+  limit: number,
+) {
   const r = await db
     .prepare(
       `DELETE FROM invites WHERE id IN (
          SELECT id FROM invites
          WHERE (used_at IS NOT NULL AND used_at < datetime('now', ?))
             OR expires_at < datetime('now', ?)
-         LIMIT ?)`
+         LIMIT ?)`,
     )
     .bind(`-${graceDays} days`, `-${graceDays} days`, limit)
     .run();
@@ -1833,14 +2327,18 @@ export async function deleteExpiredInvites(db: D1Database, graceDays: number, li
 
 /** Marketing enquiries that never onboarded; onboarded contacts are a
  *  business relationship record and are kept. */
-export async function deleteStaleContacts(db: D1Database, olderThanMonths: number, limit: number) {
+export async function deleteStaleContacts(
+  db: D1Database,
+  olderThanMonths: number,
+  limit: number,
+) {
   const r = await db
     .prepare(
       `DELETE FROM contacts WHERE id IN (
          SELECT id FROM contacts
          WHERE onboarded_at IS NULL AND shop_id IS NULL
            AND created_at < datetime('now', ?)
-         LIMIT ?)`
+         LIMIT ?)`,
     )
     .bind(`-${olderThanMonths} months`, limit)
     .run();
@@ -1854,7 +2352,11 @@ export const REDACTED_EMAIL = "redacted@retention.invalid";
  *  reports and the financial audit trail; name/email/phone/notes go. The
  *  email marker makes the sweep idempotent and keeps already-anonymised rows
  *  out of later scans. */
-export async function anonymiseOldBookings(db: D1Database, olderThanMonths: number, limit: number) {
+export async function anonymiseOldBookings(
+  db: D1Database,
+  olderThanMonths: number,
+  limit: number,
+) {
   const r = await db
     .prepare(
       `UPDATE bookings
@@ -1863,19 +2365,29 @@ export async function anonymiseOldBookings(db: D1Database, olderThanMonths: numb
          SELECT id FROM bookings
          WHERE booking_date < date('now', ?)
            AND customer_email != ?
-         LIMIT ?)`
+         LIMIT ?)`,
     )
-    .bind(REDACTED_NAME, REDACTED_EMAIL, `-${olderThanMonths} months`, REDACTED_EMAIL, limit)
+    .bind(
+      REDACTED_NAME,
+      REDACTED_EMAIL,
+      `-${olderThanMonths} months`,
+      REDACTED_EMAIL,
+      limit,
+    )
     .run();
   return r.meta.changes ?? 0;
 }
 
 /** AI usage rows are ops metrics only (tokens/cost, no PII); pruned for size. */
-export async function pruneAiUsageLog(db: D1Database, olderThanMonths: number, limit: number) {
+export async function pruneAiUsageLog(
+  db: D1Database,
+  olderThanMonths: number,
+  limit: number,
+) {
   const r = await db
     .prepare(
       `DELETE FROM ai_usage_log WHERE id IN (
-         SELECT id FROM ai_usage_log WHERE created_at < datetime('now', ?) LIMIT ?)`
+         SELECT id FROM ai_usage_log WHERE created_at < datetime('now', ?) LIMIT ?)`,
     )
     .bind(`-${olderThanMonths} months`, limit)
     .run();

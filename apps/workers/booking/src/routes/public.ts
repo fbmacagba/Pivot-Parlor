@@ -11,8 +11,12 @@
 import { Hono } from "hono";
 import type { Env } from "../types.js";
 import {
-  getShopById, getShopBySlug, getServiceById, getStaffById,
-  createBooking, checkSlotConflict,
+  getShopById,
+  getShopBySlug,
+  getServiceById,
+  getStaffById,
+  createBooking,
+  checkSlotConflict,
 } from "../db/queries.js";
 import { getAvailableSlots } from "../services/slots.js";
 import { runBookingSideEffects } from "../services/booking-side-effects.js";
@@ -35,11 +39,17 @@ publicRoutes.get("/shops/:shopId/slots", async (c) => {
   const { date, service_id, staff_id } = c.req.query();
 
   if (!date || !service_id) {
-    return c.json({ success: false, error: "date and service_id are required" }, 400);
+    return c.json(
+      { success: false, error: "date and service_id are required" },
+      400,
+    );
   }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return c.json({ success: false, error: "date must be in YYYY-MM-DD format" }, 400);
+    return c.json(
+      { success: false, error: "date must be in YYYY-MM-DD format" },
+      400,
+    );
   }
 
   const service = await getServiceById(c.env.DB, service_id);
@@ -53,7 +63,7 @@ publicRoutes.get("/shops/:shopId/slots", async (c) => {
     date,
     service.duration_min,
     c.env.DB,
-    c.env.KV
+    c.env.KV,
   );
 
   return c.json({ success: true, data: slotList });
@@ -63,209 +73,340 @@ publicRoutes.get("/shops/:shopId/slots", async (c) => {
 
 publicRoutes.post(
   "/bookings",
-  rateLimit({ name: "public-booking", limit: 30, windowS: 3600, key: clientIp }),
+  rateLimit({
+    name: "public-booking",
+    limit: 30,
+    windowS: 3600,
+    key: clientIp,
+  }),
   async (c) => {
-  const body = await c.req.json<{
-    shop_id?: string;
-    shop_slug?: string;
-    staff_id?: string;
-    service_id?: string;
-    customer_name?: string;
-    customer_email?: string;
-    customer_phone?: string;
-    start_time?: string;   // ISO string
-    date?: string;         // shop-local YYYY-MM-DD the slot was offered for
-    notes?: string;
-  }>();
+    const body = await c.req.json<{
+      shop_id?: string;
+      shop_slug?: string;
+      staff_id?: string;
+      service_id?: string;
+      customer_name?: string;
+      customer_email?: string;
+      customer_phone?: string;
+      start_time?: string; // ISO string
+      date?: string; // shop-local YYYY-MM-DD the slot was offered for
+      notes?: string;
+    }>();
 
-  const { shop_id, shop_slug, staff_id, service_id, customer_name, customer_email, start_time } = body;
-  if ((!shop_id && !shop_slug) || !staff_id || !service_id || !customer_name || !customer_email || !start_time) {
-    return c.json(
-      {
-        success: false,
-        error:
-          "shop_id (or shop_slug), staff_id, service_id, customer_name, customer_email and start_time are required",
-      },
-      400
-    );
-  }
-
-  // Validate shop — accept either id or slug (the booking UI sends the slug)
-  const shop = shop_id
-    ? await getShopById(c.env.DB, shop_id)
-    : await getShopBySlug(c.env.DB, shop_slug!);
-  if (!shop || !shop.is_active) return c.json({ success: false, error: "Shop not found" }, 404);
-
-  // Validate service
-  const service = await getServiceById(c.env.DB, service_id);
-  if (!service || service.shop_id !== shop.id) {
-    return c.json({ success: false, error: "Service not found" }, 404);
-  }
-
-  // Parse + range-check the requested time
-  const startDate = new Date(start_time);
-  if (Number.isNaN(startDate.getTime())) {
-    return c.json({ success: false, error: "start_time must be a valid ISO date-time" }, 400);
-  }
-  if (startDate.getTime() <= Date.now()) {
-    return c.json({ success: false, error: "start_time must be in the future" }, 400);
-  }
-  const startISO = startDate.toISOString();
-
-  // For a specific staff request, validate the staff up front so an invalid or
-  // cross-shop staff_id returns a precise 404 (rather than a generic slot 409).
-  if (staff_id !== "any") {
-    const reqStaff = await getStaffById(c.env.DB, staff_id);
-    if (!reqStaff || reqStaff.shop_id !== shop.id || reqStaff.is_active !== 1) {
-      return c.json({ success: false, error: "Staff member not found" }, 404);
-    }
-  }
-
-  // Validate the time is a real, available slot in the staff schedule. Reuses
-  // the same computation the booking UI reads, so any offered slot is accepted
-  // while arbitrary / off-schedule / misaligned times are rejected. For an
-  // "any available" request, adopt the staff_id of the matching free slot.
-  const slotDate =
-    body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : toDateString(startISO);
-  const requestedStaff = staff_id === "any" ? null : staff_id;
-  const slotList = await getAvailableSlots(
-    shop.id,
-    requestedStaff,
-    slotDate,
-    service.duration_min,
-    c.env.DB,
-    c.env.KV
-  );
-  const matchingSlot = slotList.find((s) => s.start_time === startISO && s.is_available);
-  if (!matchingSlot) {
-    return c.json({ success: false, error: "Selected time is not available" }, 409);
-  }
-  const resolvedStaffId = matchingSlot.staff_id;
-
-  // Defensive: confirm the resolved staff belongs to this shop and is active
-  const bookedStaff = await getStaffById(c.env.DB, resolvedStaffId);
-  if (!bookedStaff || bookedStaff.shop_id !== shop.id || bookedStaff.is_active !== 1) {
-    return c.json({ success: false, error: "Staff member not found" }, 404);
-  }
-
-  const endDate = addMinutes(startDate, service.duration_min);
-  const bookingDate = toDateString(startISO);
-  const endISO = endDate.toISOString();
-
-  // Defense-in-depth against the read->write race (the unique active-slot index
-  // from migration 018 is the real guard; see the createBooking catch below).
-  const conflict = await checkSlotConflict(c.env.DB, resolvedStaffId, startISO, endISO);
-  if (conflict) {
-    return c.json({ success: false, error: "This time slot is no longer available" }, 409);
-  }
-
-  const { commission_pence } = calculateCommissionPence(service.price_pence, shop.commission_rate);
-  const id = crypto.randomUUID();
-
-  try {
-    await createBooking(c.env.DB, {
-      id,
-      shop_id: shop.id,
-      staff_id: resolvedStaffId,
+    const {
+      shop_id,
+      shop_slug,
+      staff_id,
       service_id,
       customer_name,
       customer_email,
-      customer_phone: body.customer_phone ?? null,
-      booking_date: bookingDate,
-      start_time: startISO,
-      end_time: endISO,
-      notes: body.notes ?? null,
-      amount_pence: service.price_pence,
-      commission_pence,
-    });
-  } catch (err) {
-    // idx_bookings_active_slot (migration 018): a concurrent request won the
-    // slot between checkSlotConflict and this INSERT.
-    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
-      return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+      start_time,
+    } = body;
+    if (
+      (!shop_id && !shop_slug) ||
+      !staff_id ||
+      !service_id ||
+      !customer_name ||
+      !customer_email ||
+      !start_time
+    ) {
+      return c.json(
+        {
+          success: false,
+          error:
+            "shop_id (or shop_slug), staff_id, service_id, customer_name, customer_email and start_time are required",
+        },
+        400,
+      );
     }
-    throw err;
-  }
 
-  // Customer-facing deposit (migration 041): when the shop has enabled
-  // deposits AND has a working Connect account, the booking stays 'pending'
-  // and the customer is sent to a hosted Stripe Checkout page. The
-  // payment_intent.succeeded webhook flips it to 'confirmed' and runs the
-  // side effects; an expired/abandoned session frees the slot (webhook +
-  // cron sweep). Everything else keeps today's free booking flow.
-  const connectId = shop.stripe_connect_account_id?.trim();
-  const depositCfg = await c.env.DB
-    .prepare(
-      "SELECT deposits_enabled, deposit_percent, deposit_min_pence FROM shop_settings WHERE shop_id = ? LIMIT 1"
-    )
-    .bind(shop.id)
-    .first<{ deposits_enabled: number | null; deposit_percent: number | null; deposit_min_pence: number | null }>();
-  const depositsOn =
-    depositCfg?.deposits_enabled === 1 && Boolean(connectId) && shop.stripe_connect_onboarded === 1;
+    // Validate shop — accept either id or slug (the booking UI sends the slug)
+    const shop = shop_id
+      ? await getShopById(c.env.DB, shop_id)
+      : await getShopBySlug(c.env.DB, shop_slug!);
+    if (!shop || !shop.is_active)
+      return c.json({ success: false, error: "Shop not found" }, 404);
 
-  if (depositsOn) {
-    const pct = Math.min(100, Math.max(1, Math.round(Number(depositCfg?.deposit_percent ?? 50))));
-    const minPence = Math.max(0, Math.round(Number(depositCfg?.deposit_min_pence ?? 500)));
-    // Deposit never exceeds the service price; a high minimum becomes full prepay.
-    const depositPence = Math.min(
-      service.price_pence,
-      Math.max(Math.round((service.price_pence * pct) / 100), minPence)
-    );
+    // Validate service
+    const service = await getServiceById(c.env.DB, service_id);
+    if (!service || service.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
 
-    if (depositPence > 0) {
-      // Platform fee on the deposit portion only — the appointment checkout
-      // collects the remaining commission on the balance charge (it reads
-      // deposit_application_fee_pence back to stay exact).
-      const depositFeePence = calculateCommissionPence(depositPence, shop.commission_rate).commission_pence;
-      const webUrl = (c.env.WEB_URL ?? "").replace(/\/$/, "");
+    // Parse + range-check the requested time
+    const startDate = new Date(start_time);
+    if (Number.isNaN(startDate.getTime())) {
+      return c.json(
+        { success: false, error: "start_time must be a valid ISO date-time" },
+        400,
+      );
+    }
+    if (startDate.getTime() <= Date.now()) {
+      return c.json(
+        { success: false, error: "start_time must be in the future" },
+        400,
+      );
+    }
+    const startISO = startDate.toISOString();
 
-      let session: { id: string; url: string };
-      try {
-        session = await createCheckoutSession({
-          secret: c.env.STRIPE_SECRET_KEY,
-          amountPence: depositPence,
-          currency: "gbp",
-          productName: `Booking deposit — ${service.name} at ${shop.name}`,
-          destinationAccount: connectId!,
-          applicationFeePence: depositFeePence,
-          metadata: { shopId: shop.id, bookingId: id, type: "booking_deposit" },
-          successUrl: `${webUrl}/${shop.slug}/confirm?id=${id}&paid=1`,
-          cancelUrl: `${webUrl}/${shop.slug}/book?payment=cancelled&booking=${id}`,
-          idempotencyKey: `deposit:${id}`,
-          // Stripe minimum is 30 min from creation; 31 keeps clock skew safe.
-          expiresAtEpochS: Math.floor(Date.now() / 1000) + 31 * 60,
-        });
-      } catch (e) {
-        // No session, no booking: release the slot instead of stranding a
-        // pending row the customer can never pay for.
-        reportError("booking.deposit_session_create", e, { shopId: shop.id, bookingId: id });
-        await c.env.DB
-          .prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'")
-          .bind(id)
-          .run();
-        return c.json({ success: false, error: "Could not start the deposit payment" }, 502);
+    // For a specific staff request, validate the staff up front so an invalid or
+    // cross-shop staff_id returns a precise 404 (rather than a generic slot 409).
+    if (staff_id !== "any") {
+      const reqStaff = await getStaffById(c.env.DB, staff_id);
+      if (
+        !reqStaff ||
+        reqStaff.shop_id !== shop.id ||
+        reqStaff.is_active !== 1
+      ) {
+        return c.json({ success: false, error: "Staff member not found" }, 404);
       }
+    }
 
-      const nowIso = new Date().toISOString();
-      await c.env.DB.batch([
-        c.env.DB
-          .prepare(
+    // Validate the time is a real, available slot in the staff schedule. Reuses
+    // the same computation the booking UI reads, so any offered slot is accepted
+    // while arbitrary / off-schedule / misaligned times are rejected. For an
+    // "any available" request, adopt the staff_id of the matching free slot.
+    const slotDate =
+      body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
+        ? body.date
+        : toDateString(startISO);
+    const requestedStaff = staff_id === "any" ? null : staff_id;
+    const slotList = await getAvailableSlots(
+      shop.id,
+      requestedStaff,
+      slotDate,
+      service.duration_min,
+      c.env.DB,
+      c.env.KV,
+    );
+    const matchingSlot = slotList.find(
+      (s) => s.start_time === startISO && s.is_available,
+    );
+    if (!matchingSlot) {
+      return c.json(
+        { success: false, error: "Selected time is not available" },
+        409,
+      );
+    }
+    const resolvedStaffId = matchingSlot.staff_id;
+
+    // Defensive: confirm the resolved staff belongs to this shop and is active
+    const bookedStaff = await getStaffById(c.env.DB, resolvedStaffId);
+    if (
+      !bookedStaff ||
+      bookedStaff.shop_id !== shop.id ||
+      bookedStaff.is_active !== 1
+    ) {
+      return c.json({ success: false, error: "Staff member not found" }, 404);
+    }
+
+    const endDate = addMinutes(startDate, service.duration_min);
+    const bookingDate = toDateString(startISO);
+    const endISO = endDate.toISOString();
+
+    // Defense-in-depth against the read->write race (the unique active-slot index
+    // from migration 018 is the real guard; see the createBooking catch below).
+    const conflict = await checkSlotConflict(
+      c.env.DB,
+      resolvedStaffId,
+      startISO,
+      endISO,
+    );
+    if (conflict) {
+      return c.json(
+        { success: false, error: "This time slot is no longer available" },
+        409,
+      );
+    }
+
+    const { commission_pence } = calculateCommissionPence(
+      service.price_pence,
+      shop.commission_rate,
+    );
+    const id = crypto.randomUUID();
+
+    try {
+      await createBooking(c.env.DB, {
+        id,
+        shop_id: shop.id,
+        staff_id: resolvedStaffId,
+        service_id,
+        customer_name,
+        customer_email,
+        customer_phone: body.customer_phone ?? null,
+        booking_date: bookingDate,
+        start_time: startISO,
+        end_time: endISO,
+        notes: body.notes ?? null,
+        amount_pence: service.price_pence,
+        commission_pence,
+      });
+    } catch (err) {
+      // idx_bookings_active_slot (migration 018): a concurrent request won the
+      // slot between checkSlotConflict and this INSERT.
+      if (
+        err instanceof Error &&
+        err.message.includes("UNIQUE constraint failed")
+      ) {
+        return c.json(
+          { success: false, error: "This time slot is no longer available" },
+          409,
+        );
+      }
+      throw err;
+    }
+
+    // Customer-facing deposit (migration 041): when the shop has enabled
+    // deposits AND has a working Connect account, the booking stays 'pending'
+    // and the customer is sent to a hosted Stripe Checkout page. The
+    // payment_intent.succeeded webhook flips it to 'confirmed' and runs the
+    // side effects; an expired/abandoned session frees the slot (webhook +
+    // cron sweep). Everything else keeps today's free booking flow.
+    const connectId = shop.stripe_connect_account_id?.trim();
+    const depositCfg = await c.env.DB.prepare(
+      "SELECT deposits_enabled, deposit_percent, deposit_min_pence FROM shop_settings WHERE shop_id = ? LIMIT 1",
+    )
+      .bind(shop.id)
+      .first<{
+        deposits_enabled: number | null;
+        deposit_percent: number | null;
+        deposit_min_pence: number | null;
+      }>();
+    const depositsOn =
+      depositCfg?.deposits_enabled === 1 &&
+      Boolean(connectId) &&
+      shop.stripe_connect_onboarded === 1;
+
+    if (depositsOn) {
+      const pct = Math.min(
+        100,
+        Math.max(1, Math.round(Number(depositCfg?.deposit_percent ?? 50))),
+      );
+      const minPence = Math.max(
+        0,
+        Math.round(Number(depositCfg?.deposit_min_pence ?? 500)),
+      );
+      // Deposit never exceeds the service price; a high minimum becomes full prepay.
+      const depositPence = Math.min(
+        service.price_pence,
+        Math.max(Math.round((service.price_pence * pct) / 100), minPence),
+      );
+
+      if (depositPence > 0) {
+        // Platform fee on the deposit portion only — the appointment checkout
+        // collects the remaining commission on the balance charge (it reads
+        // deposit_application_fee_pence back to stay exact).
+        const depositFeePence = calculateCommissionPence(
+          depositPence,
+          shop.commission_rate,
+        ).commission_pence;
+        const webUrl = (c.env.WEB_URL ?? "").replace(/\/$/, "");
+
+        let session: { id: string; url: string };
+        try {
+          session = await createCheckoutSession({
+            secret: c.env.STRIPE_SECRET_KEY,
+            amountPence: depositPence,
+            currency: "gbp",
+            productName: `Booking deposit — ${service.name} at ${shop.name}`,
+            destinationAccount: connectId!,
+            applicationFeePence: depositFeePence,
+            metadata: {
+              shopId: shop.id,
+              bookingId: id,
+              type: "booking_deposit",
+            },
+            successUrl: `${webUrl}/${shop.slug}/confirm?id=${id}&paid=1`,
+            cancelUrl: `${webUrl}/${shop.slug}/book?payment=cancelled&booking=${id}`,
+            idempotencyKey: `deposit:${id}`,
+            // Stripe minimum is 30 min from creation; 31 keeps clock skew safe.
+            expiresAtEpochS: Math.floor(Date.now() / 1000) + 31 * 60,
+          });
+        } catch (e) {
+          // No session, no booking: release the slot instead of stranding a
+          // pending row the customer can never pay for.
+          reportError("booking.deposit_session_create", e, {
+            shopId: shop.id,
+            bookingId: id,
+          });
+          await c.env.DB.prepare(
+            "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
+          )
+            .bind(id)
+            .run();
+          return c.json(
+            { success: false, error: "Could not start the deposit payment" },
+            502,
+          );
+        }
+
+        const nowIso = new Date().toISOString();
+        await c.env.DB.batch([
+          c.env.DB.prepare(
             `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount_pence,
                stripe_checkout_session_id, deposit_application_fee_pence, slot_time, updated_at)
-             VALUES (?, ?, 'online', ?, ?, ?, ?, ?)`
-          )
-          .bind(id, shop.id, depositPence, session.id, depositFeePence, startISO.slice(11, 16), nowIso),
-        c.env.DB
-          .prepare(
+             VALUES (?, ?, 'online', ?, ?, ?, ?, ?)`,
+          ).bind(
+            id,
+            shop.id,
+            depositPence,
+            session.id,
+            depositFeePence,
+            startISO.slice(11, 16),
+            nowIso,
+          ),
+          c.env.DB.prepare(
             `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
-             VALUES (?, ?, ?, 'deposit', ?, 'pending', ?)`
-          )
-          .bind(crypto.randomUUID(), id, shop.id, depositPence, session.id),
-      ]);
+             VALUES (?, ?, ?, 'deposit', ?, 'pending', ?)`,
+          ).bind(crypto.randomUUID(), id, shop.id, depositPence, session.id),
+        ]);
 
-      // No confirmation email / reminder yet — the webhook sends them once
-      // the deposit settles.
-      return c.json({
+        // No confirmation email / reminder yet — the webhook sends them once
+        // the deposit settles.
+        return c.json(
+          {
+            success: true,
+            data: {
+              id,
+              shop_id: shop.id,
+              staff_id: resolvedStaffId,
+              service_id,
+              customer_name,
+              customer_email,
+              booking_date: bookingDate,
+              start_time: startISO,
+              end_time: endISO,
+              status: "pending",
+              amount_pence: service.price_pence,
+              commission_pence,
+              deposit_pence: depositPence,
+              checkout_url: session.url,
+            },
+          },
+          201,
+        );
+      }
+    }
+
+    // Free booking (no deposit): side effects run immediately, as before.
+    await runBookingSideEffects(c.env, {
+      bookingId: id,
+      shopId: shop.id,
+      shopName: shop.name,
+      shopSlug: shop.slug,
+      customerName: customer_name,
+      customerEmail: customer_email,
+      serviceName: service.name,
+      staffName: bookedStaff.display_name ?? "your specialist",
+      bookingDate,
+      startISO,
+      timezone: shop.timezone ?? "Europe/London",
+      durationMin: service.duration_min,
+      amountPence: service.price_pence,
+    });
+
+    return c.json(
+      {
         success: true,
         data: {
           id,
@@ -280,64 +421,32 @@ publicRoutes.post(
           status: "pending",
           amount_pence: service.price_pence,
           commission_pence,
-          deposit_pence: depositPence,
-          checkout_url: session.url,
         },
-      }, 201);
-    }
-  }
-
-  // Free booking (no deposit): side effects run immediately, as before.
-  await runBookingSideEffects(c.env, {
-    bookingId: id,
-    shopId: shop.id,
-    shopName: shop.name,
-    shopSlug: shop.slug,
-    customerName: customer_name,
-    customerEmail: customer_email,
-    serviceName: service.name,
-    staffName: bookedStaff.display_name ?? "your specialist",
-    bookingDate,
-    startISO,
-    durationMin: service.duration_min,
-    amountPence: service.price_pence,
-  });
-
-  return c.json({
-    success: true,
-    data: {
-      id,
-      shop_id: shop.id,
-      staff_id: resolvedStaffId,
-      service_id,
-      customer_name,
-      customer_email,
-      booking_date: bookingDate,
-      start_time: startISO,
-      end_time: endISO,
-      status: "pending",
-      amount_pence: service.price_pence,
-      commission_pence,
-    },
-  }, 201);
-});
+      },
+      201,
+    );
+  },
+);
 
 // ─── GET /public/bookings/:bookingId — minimal status for the confirm page ───
 // Knowing the UUID ≈ having created the booking; still, only non-PII fields.
 
 publicRoutes.get("/bookings/:bookingId", async (c) => {
   const bookingId = c.req.param("bookingId");
-  const row = await c.env.DB
-    .prepare(
-      `SELECT b.id, b.status, b.booking_date, b.start_time,
+  const row = await c.env.DB.prepare(
+    `SELECT b.id, b.status, b.booking_date, b.start_time,
               st.deposit_amount_pence, st.deposit_paid_at
        FROM bookings b LEFT JOIN bw_booking_state st ON st.booking_id = b.id
-       WHERE b.id = ? LIMIT 1`
-    )
+       WHERE b.id = ? LIMIT 1`,
+  )
     .bind(bookingId)
     .first<{
-      id: string; status: string; booking_date: string; start_time: string;
-      deposit_amount_pence: number | null; deposit_paid_at: string | null;
+      id: string;
+      status: string;
+      booking_date: string;
+      start_time: string;
+      deposit_amount_pence: number | null;
+      deposit_paid_at: string | null;
     }>();
   if (!row) return c.json({ success: false, error: "Booking not found" }, 404);
   return c.json({
@@ -360,30 +469,32 @@ publicRoutes.get("/bookings/:bookingId", async (c) => {
 
 publicRoutes.post(
   "/bookings/:bookingId/abandon",
-  rateLimit({ name: "public-booking-abandon", limit: 30, windowS: 3600, key: clientIp }),
+  rateLimit({
+    name: "public-booking-abandon",
+    limit: 30,
+    windowS: 3600,
+    key: clientIp,
+  }),
   async (c) => {
     const bookingId = c.req.param("bookingId");
-    const st = await c.env.DB
-      .prepare(
-        `SELECT booking_id FROM bw_booking_state
-         WHERE booking_id = ? AND stripe_checkout_session_id IS NOT NULL AND deposit_paid_at IS NULL LIMIT 1`
-      )
+    const st = await c.env.DB.prepare(
+      `SELECT booking_id FROM bw_booking_state
+         WHERE booking_id = ? AND stripe_checkout_session_id IS NOT NULL AND deposit_paid_at IS NULL LIMIT 1`,
+    )
       .bind(bookingId)
       .first<{ booking_id: string }>();
     if (!st) return c.json({ success: false, error: "Booking not found" }, 404);
 
     await c.env.DB.batch([
-      c.env.DB
-        .prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'")
-        .bind(bookingId),
-      c.env.DB
-        .prepare(
-          "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
-        )
-        .bind(bookingId),
+      c.env.DB.prepare(
+        "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
+      ).bind(bookingId),
+      c.env.DB.prepare(
+        "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'",
+      ).bind(bookingId),
     ]);
     return c.json({ success: true });
-  }
+  },
 );
 
 export default publicRoutes;

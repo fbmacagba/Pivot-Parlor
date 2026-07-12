@@ -15,20 +15,24 @@ export interface ReminderPayload {
  * Process a single reminder payload (called from the Queue consumer).
  * Extend to integrate Resend / SendGrid / Twilio.
  */
-export async function processReminder(payload: ReminderPayload, db: D1Database, resendApiKey?: string): Promise<void> {
+export async function processReminder(
+  payload: ReminderPayload,
+  db: D1Database,
+  resendApiKey?: string,
+): Promise<void> {
   const booking = await db
     .prepare(
       `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
-              sh.name AS shop_name, sh.slug AS shop_slug
+              sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
        JOIN shops sh ON sh.id = b.shop_id
        WHERE b.id = ? AND b.status IN ('pending', 'confirmed') AND b.reminder_sent = 0
-       LIMIT 1`
+       LIMIT 1`,
     )
     .bind(payload.bookingId)
     .first<{
@@ -45,6 +49,7 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
       staff_name: string;
       shop_name: string;
       shop_slug: string;
+      shop_timezone: string | null;
     }>();
 
   if (!booking) return; // already sent or cancelled
@@ -53,17 +58,18 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
   if (resendApiKey) {
     try {
       await sendBookingReminder(resendApiKey, {
-        customer_name:  booking.customer_name,
+        customer_name: booking.customer_name,
         customer_email: booking.customer_email,
-        service_name:   booking.service_name,
-        staff_name:     booking.staff_name,
-        shop_name:      booking.shop_name,
-        shop_slug:      booking.shop_slug,
-        booking_date:   booking.booking_date,
-        start_time:     booking.start_time,
-        duration_min:   booking.duration_min,
-        amount_pence:   booking.amount_pence,
-        booking_id:     booking.id,
+        service_name: booking.service_name,
+        staff_name: booking.staff_name,
+        shop_name: booking.shop_name,
+        shop_slug: booking.shop_slug,
+        booking_date: booking.booking_date,
+        start_time: booking.start_time,
+        timezone: booking.shop_timezone ?? "Europe/London",
+        duration_min: booking.duration_min,
+        amount_pence: booking.amount_pence,
+        booking_id: booking.id,
       });
     } catch (err) {
       // Non-fatal, but the reminder is still marked sent below and will not
@@ -73,7 +79,7 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
   } else {
     console.log(
       `[Reminder] ${booking.customer_name} <${booking.customer_email}> — ` +
-      `${booking.service_name} at ${booking.shop_name} on ${booking.booking_date}`
+        `${booking.service_name} at ${booking.shop_name} on ${booking.booking_date}`,
     );
   }
 
@@ -95,7 +101,10 @@ export const REMINDER_CONCURRENCY = 20;
  * per-booking Queue consumer (processReminder) does the sending; this is the
  * catch-all for stragglers, so it should normally process a small set.
  */
-export async function sendPendingReminders(db: D1Database, resendApiKey?: string): Promise<void> {
+export async function sendPendingReminders(
+  db: D1Database,
+  resendApiKey?: string,
+): Promise<void> {
   const bookings = await getBookingsDueForReminder(db, REMINDER_MAX_PER_RUN);
 
   if (bookings.length >= REMINDER_MAX_PER_RUN) {
@@ -105,7 +114,7 @@ export async function sendPendingReminders(db: D1Database, resendApiKey?: string
     reportError(
       "reminder.cron_page_full",
       new Error(`reminder cron hit its per-run cap of ${REMINDER_MAX_PER_RUN}`),
-      { cap: REMINDER_MAX_PER_RUN }
+      { cap: REMINDER_MAX_PER_RUN },
     );
   }
 
@@ -116,27 +125,30 @@ export async function sendPendingReminders(db: D1Database, resendApiKey?: string
         if (resendApiKey) {
           try {
             await sendBookingReminder(resendApiKey, {
-              customer_name:  b.customer_name,
+              customer_name: b.customer_name,
               customer_email: b.customer_email,
-              service_name:   b.service_name,
-              staff_name:     b.staff_name,
-              shop_name:      b.shop_name,
-              shop_slug:      b.shop_slug,
-              booking_date:   b.booking_date,
-              start_time:     b.start_time,
-              duration_min:   b.duration_min,
-              amount_pence:   b.amount_pence,
-              booking_id:     b.id,
+              service_name: b.service_name,
+              staff_name: b.staff_name,
+              shop_name: b.shop_name,
+              shop_slug: b.shop_slug,
+              booking_date: b.booking_date,
+              start_time: b.start_time,
+              timezone: b.shop_timezone ?? "Europe/London",
+              duration_min: b.duration_min,
+              amount_pence: b.amount_pence,
+              booking_id: b.id,
             });
           } catch (err) {
             // Non-fatal, but marked sent below — no retry for this booking.
             reportError("reminder.cron_email_send", err, { bookingId: b.id });
           }
         } else {
-          console.log(`[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`);
+          console.log(
+            `[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`,
+          );
         }
         await markReminderSent(db, b.id);
-      })
+      }),
     );
   }
 }

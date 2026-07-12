@@ -1,5 +1,6 @@
 export * from "./siteTheme";
 export * from "./curatedFonts";
+export * from "./emailTemplate";
 
 /** Generate a URL-friendly slug from a string */
 export function slugify(text: string): string {
@@ -29,7 +30,7 @@ export interface CommissionBreakdownPence {
  */
 export function calculateCommissionPence(
   amountPence: number,
-  commissionRate: number
+  commissionRate: number,
 ): CommissionBreakdownPence {
   if (!Number.isInteger(amountPence)) {
     throw new Error(`amountPence must be an integer, got ${amountPence}`);
@@ -99,7 +100,7 @@ export function rangesOverlap(
   aStart: Date,
   aEnd: Date,
   bStart: Date,
-  bEnd: Date
+  bEnd: Date,
 ): boolean {
   return aStart < bEnd && bStart < aEnd;
 }
@@ -116,7 +117,9 @@ export function generateId(length = 16): string {
  * parse error — use for KV/DB-stored JSON where a corrupt value must degrade
  * to "absent" (cache miss, no theme, empty list) rather than crash the handler.
  */
-export function safeJsonParse<T = unknown>(raw: string | null | undefined): T | null {
+export function safeJsonParse<T = unknown>(
+  raw: string | null | undefined,
+): T | null {
   if (raw == null) return null;
   try {
     return JSON.parse(raw) as T;
