@@ -201,6 +201,8 @@ shops.get("/:shopId/site", async (c) => {
     about_title?: string | null;
     palette_json?: string | null;
     design_version?: number | null;
+    heading_weight?: string | null;
+    heading_style?: string | null;
   };
   const designIntent = {
     trust_signals: safeJsonParse<string[]>(siteExtra.trust_signals_json) ?? [],
@@ -213,6 +215,10 @@ shops.get("/:shopId/site", async (c) => {
     // whether the web renders palette tokens (>= 2) or the legacy dark theme.
     palette: safeJsonParse<Record<string, string>>(siteExtra.palette_json),
     design_version: siteExtra.design_version ?? 1,
+    // WS-6 item 5: curated typography — the web honours heading_weight only on
+    // v2 sites; heading_style hints serif/sans when resolving legacy fonts.
+    heading_weight: siteExtra.heading_weight ?? null,
+    heading_style: siteExtra.heading_style ?? null,
   };
 
   const cached = await c.env.KV.get(`site:${shop.slug}`);

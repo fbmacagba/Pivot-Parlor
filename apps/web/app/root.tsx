@@ -1,19 +1,12 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
 import tailwindStylesheet from "~/tailwind.css?url";
+// Self-hosted fonts (WS-6 item 5 / LEG-5): the whole curated set registers its
+// @font-face rules here — no Google Fonts requests anywhere in the app.
+import "~/fonts";
 import { PlatformCookieBanner } from "~/components/PlatformCookieBanner";
 import { ErrorScreen } from "~/components/ErrorScreen";
 
 export const links = () => [
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
-    crossOrigin: "anonymous" as const,
-  },
-  {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap",
-  },
   { rel: "stylesheet", href: tailwindStylesheet },
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
   { rel: "icon", type: "image/x-icon", href: "/favicon.ico", sizes: "32x32" },

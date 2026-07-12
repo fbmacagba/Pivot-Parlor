@@ -126,6 +126,35 @@ function layoutMoodForTemplate(template: string | undefined): string | null {
   return TEMPLATE_TO_LAYOUT_MOOD[template.trim().toLowerCase()] ?? null;
 }
 
+// Curated typography (WS-6 item 5). KEEP IN SYNC with CURATED_FONTS in
+// packages/utils/src/curatedFonts.ts — the web self-hosts exactly these
+// families, so a font outside the set would silently fall back at render.
+const CURATED_FONT_NAMES = [
+  "Playfair Display",
+  "Cormorant Garamond",
+  "Libre Baskerville",
+  "Lora",
+  "DM Sans",
+  "Jost",
+  "Montserrat",
+  "Inter",
+  "Work Sans",
+  "Space Grotesk",
+];
+
+/** Map a model-proposed font onto the curated set (exact match keeps it;
+ *  anything else falls to the role default, honouring a serif/sans hint). */
+function coerceCuratedFont(name: string, role: "heading" | "body", styleHint: string): string {
+  const wanted = name.trim().toLowerCase();
+  const match = CURATED_FONT_NAMES.find((f) => f.toLowerCase() === wanted);
+  if (match) return match;
+  const h = styleHint.toLowerCase();
+  // "sans-serif".includes("serif") is true — check sans first.
+  const serif = !h.includes("sans") && h.includes("serif");
+  if (role === "heading") return serif ? "Playfair Display" : "Montserrat";
+  return serif ? "Lora" : "DM Sans";
+}
+
 const SYSTEM_PROMPT =
   "You are a world-class brand strategist and visual designer specialising in barber shops and beauty salons. Your job is to produce a complete visual identity and content specification for a high-converting booking website. You have deep knowledge of what makes barber and beauty shop websites convert visitors into bookings. Return valid JSON only. No markdown. No backticks. No explanation.";
 
@@ -192,8 +221,8 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
     "muted": string (hex — secondary text, captions)
   },
   "typography": {
-    "heading_font": string (Google Font name — matches brand personality),
-    "body_font": string (Google Font name — highly readable, pairs well with heading),
+    "heading_font": string (one of: ${CURATED_FONT_NAMES.join(", ")} — matches brand personality),
+    "body_font": string (one of: DM Sans, Jost, Inter, Work Sans, Lora — highly readable, pairs well with heading),
     "heading_weight": string (e.g. 700 or 800),
     "heading_style": string (e.g. serif, sans-serif)
   },
@@ -536,6 +565,12 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     // model to comply, but the owner's pick must win even if it strayed.
     const pinnedMood = layoutMoodForTemplate(input.template);
     if (pinnedMood) spec.layout_mood = pinnedMood;
+    // Curated typography (WS-6 item 5): the prompt pins the choices, this
+    // post-force guarantees them — the web self-hosts exactly these families.
+    spec.typography.heading_font = coerceCuratedFont(
+      spec.typography.heading_font, "heading", spec.typography.heading_style
+    );
+    spec.typography.body_font = coerceCuratedFont(spec.typography.body_font, "body", "");
     const fullJson = JSON.stringify(spec);
 
     const payload: GenResearchKvPayload = {

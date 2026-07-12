@@ -1,4 +1,5 @@
 export * from "./siteTheme";
+export * from "./curatedFonts";
 
 /** Generate a URL-friendly slug from a string */
 export function slugify(text: string): string {

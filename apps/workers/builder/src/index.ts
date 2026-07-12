@@ -60,6 +60,10 @@ interface GenResearchKvPayload {
       text?: string;
       muted?: string;
     };
+    typography?: {
+      heading_weight?: string;
+      heading_style?: string;
+    };
     content?: {
       hero_cta?: string;
       about_title?: string;
@@ -82,12 +86,44 @@ interface DesignIntent {
   trust_signals_json: string | null;
   usps_json: string | null;
   palette_json: string | null;
+  /** Curated typography (WS-6 item 5, migration 042). */
+  heading_weight: string | null;
+  heading_style: string | null;
 }
 
 function cleanString(v: unknown, maxLen = 200): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return t ? t.slice(0, maxLen) : null;
+}
+
+// Curated typography (WS-6 item 5). KEEP IN SYNC with CURATED_FONTS in
+// packages/utils/src/curatedFonts.ts and the copy in the research worker —
+// the web self-hosts exactly these families.
+const CURATED_FONT_NAMES = [
+  "Playfair Display",
+  "Cormorant Garamond",
+  "Libre Baskerville",
+  "Lora",
+  "DM Sans",
+  "Jost",
+  "Montserrat",
+  "Inter",
+  "Work Sans",
+  "Space Grotesk",
+];
+
+/** Map a proposed font onto the curated set (exact match keeps it; anything
+ *  else falls to the role default, honouring a serif/sans hint). */
+function coerceCuratedFont(name: string, role: "heading" | "body", styleHint: string): string {
+  const wanted = (name ?? "").trim().toLowerCase();
+  const match = CURATED_FONT_NAMES.find((f) => f.toLowerCase() === wanted);
+  if (match) return match;
+  const h = styleHint.toLowerCase();
+  // "sans-serif".includes("serif") is true — check sans first.
+  const serif = !h.includes("sans") && h.includes("serif");
+  if (role === "heading") return serif ? "Playfair Display" : "Montserrat";
+  return serif ? "Lora" : "DM Sans";
 }
 
 /** JSON array of non-empty strings, or null when empty — the audit worker
@@ -112,6 +148,10 @@ function designIntentFrom(spec: GenResearchKvPayload["spec"] | undefined): Desig
     );
     if (entries.length > 0) palette_json = JSON.stringify(Object.fromEntries(entries));
   }
+  // heading_weight must be a CSS weight keyword the web's guard accepts
+  // ("100".."900"); anything else persists as NULL (renderer default).
+  const weightRaw = cleanString(spec?.typography?.heading_weight, 8);
+  const heading_weight = weightRaw && /^[1-9]00$/.test(weightRaw) ? weightRaw : null;
   return {
     layout_mood: cleanString(spec?.layout_mood, 40),
     brand_voice: cleanString(spec?.brand_voice, 400),
@@ -120,6 +160,8 @@ function designIntentFrom(spec: GenResearchKvPayload["spec"] | undefined): Desig
     trust_signals_json: cleanStringArrayJson(spec?.content?.trust_signals),
     usps_json: cleanStringArrayJson(spec?.content?.unique_selling_points),
     palette_json,
+    heading_weight,
+    heading_style: cleanString(spec?.typography?.heading_style, 20),
   };
 }
 
@@ -208,6 +250,9 @@ async function ensureShopSitesSeoColumns(db: D1Database): Promise<void> {
   await tryAdd("about_title", "TEXT");
   await tryAdd("palette_json", "TEXT");
   await tryAdd("design_version", "INTEGER NOT NULL DEFAULT 1");
+  // Curated typography (WS-6 item 5). Canonical DDL: migration 042.
+  await tryAdd("heading_weight", "TEXT");
+  await tryAdd("heading_style", "TEXT");
 }
 
 async function processOne(body: unknown, env: Env): Promise<void> {
@@ -324,6 +369,12 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const hero_image_url = images.heroUrl?.trim() || null;
   const logo_url = images.logoUrl?.trim() || null;
 
+  // Curated typography (WS-6 item 5): the research worker already pins fonts,
+  // but text output from older payloads may carry anything — coerce again so
+  // shop_sites only ever stores families the web self-hosts.
+  const font_heading = coerceCuratedFont(text.font_heading, "heading", intent.heading_style ?? "");
+  const font_body = coerceCuratedFont(text.font_body, "body", "");
+
   const upd = await env.DB.prepare(
     `UPDATE shop_sites SET
       headline = ?, tagline = ?, about = ?,
@@ -333,6 +384,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       seo_title = ?, seo_description = ?,
       trust_signals_json = ?, usps_json = ?, layout_mood = ?, brand_voice = ?,
       hero_cta = ?, about_title = ?, palette_json = ?,
+      heading_weight = ?, heading_style = ?,
       design_version = 2,
       status = 'active', generated_at = ?
     WHERE shop_id = ?`
@@ -347,8 +399,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       catalog_images_json,
       text.color_primary,
       text.color_accent,
-      text.font_heading,
-      text.font_body,
+      font_heading,
+      font_body,
       text.seo_title,
       text.seo_description,
       intent.trust_signals_json,
@@ -358,6 +410,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       intent.hero_cta,
       intent.about_title,
       intent.palette_json,
+      intent.heading_weight,
+      intent.heading_style,
       now,
       shopId
     )
@@ -373,8 +427,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         hero_image_url, logo_url, catalog_images_json, generated_at, status,
         seo_title, seo_description,
         trust_signals_json, usps_json, layout_mood, brand_voice,
-        hero_cta, about_title, palette_json, design_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)`
+        hero_cta, about_title, palette_json, heading_weight, heading_style, design_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)`
     )
       .bind(
         siteId,
@@ -386,8 +440,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         services_json,
         text.color_primary,
         text.color_accent,
-        text.font_heading,
-        text.font_body,
+        font_heading,
+        font_body,
         hero_image_url,
         logo_url,
         catalog_images_json,
@@ -400,7 +454,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         intent.brand_voice,
         intent.hero_cta,
         intent.about_title,
-        intent.palette_json
+        intent.palette_json,
+        intent.heading_weight,
+        intent.heading_style
       )
       .run();
     console.log(`[${jobId}] [pivot-parlor-assembler] INSERT shop_sites id=${siteId} shopId=${shopId}`);

@@ -16,9 +16,9 @@ async function seedSite(shopId: string, withIntent: boolean): Promise<void> {
        id, shop_id, template, headline, tagline, about, services_json,
        color_primary, color_accent, font_heading, font_body, status,
        trust_signals_json, usps_json, layout_mood, brand_voice, hero_cta, about_title, palette_json,
-       design_version
+       heading_weight, heading_style, design_version
      ) VALUES (?, ?, 'minimal', 'H', 'T', 'A', '[]', '#111111', '#c9a84c', 'Playfair Display', 'DM Sans', 'active',
-       ?, ?, ?, ?, ?, ?, ?, ?)`
+       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       crypto.randomUUID(),
@@ -30,6 +30,8 @@ async function seedSite(shopId: string, withIntent: boolean): Promise<void> {
       withIntent ? "Reserve your chair" : null,
       withIntent ? "The neighbourhood favourite" : null,
       withIntent ? JSON.stringify({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" }) : null,
+      withIntent ? "800" : null,
+      withIntent ? "serif" : null,
       withIntent ? 2 : 1
     )
     .run();
@@ -57,6 +59,9 @@ describe("GET /api/shops/:slug/site design intent (WS-6)", () => {
     // WS-6 item 3: the full palette + version gate ride along.
     expect(data.palette).toEqual({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" });
     expect(data.design_version).toBe(2);
+    // WS-6 item 5: curated typography rides along too.
+    expect(data.heading_weight).toBe("800");
+    expect(data.heading_style).toBe("serif");
   });
 
   it("returns empty arrays / nulls for a pre-WS-6 site row", async () => {
@@ -72,6 +77,8 @@ describe("GET /api/shops/:slug/site design intent (WS-6)", () => {
     expect(data.hero_cta).toBeNull();
     expect(data.palette).toBeNull();
     expect(data.design_version).toBe(1);
+    expect(data.heading_weight).toBeNull();
+    expect(data.heading_style).toBeNull();
   });
 
   it("overlays the intent onto a stale KV cache snapshot", async () => {
@@ -94,5 +101,7 @@ describe("GET /api/shops/:slug/site design intent (WS-6)", () => {
     expect(data.hero_cta).toBe("Reserve your chair");
     expect(data.palette).toEqual({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" });
     expect(data.design_version).toBe(2);
+    expect(data.heading_weight).toBe("800");
+    expect(data.heading_style).toBe("serif");
   });
 });
