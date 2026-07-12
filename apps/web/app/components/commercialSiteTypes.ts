@@ -23,6 +23,10 @@ export type SiteData = {
   about_title?: string;
   trust_signals?: string[];
   usps?: string[];
+  /** Full 5-colour research palette (WS-6 item 3) — drives the page tokens. */
+  palette?: Record<string, string> | null;
+  /** Palette theming gate: tokens follow the palette only when >= 2. */
+  design_version?: number;
 };
 
 export type ShopSettings = {

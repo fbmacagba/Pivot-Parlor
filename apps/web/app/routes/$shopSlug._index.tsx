@@ -109,6 +109,8 @@ export default function ShopLanding() {
     about_title: s.about_title ?? undefined,
     trust_signals: Array.isArray(s.trust_signals) ? s.trust_signals : undefined,
     usps: Array.isArray(s.usps) ? s.usps : undefined,
+    palette: s.palette && typeof s.palette === "object" ? s.palette : undefined,
+    design_version: typeof s.design_version === "number" ? s.design_version : undefined,
   };
 
   return (

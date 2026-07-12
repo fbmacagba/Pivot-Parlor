@@ -121,6 +121,8 @@ export interface ShopSiteData {
   brand_voice?: string | null;
   hero_cta?: string | null;
   about_title?: string | null;
+  palette?: Record<string, string> | null;
+  design_version?: number | null;
 }
 
 export async function loader({ params, context }: LoaderFunctionArgs) {

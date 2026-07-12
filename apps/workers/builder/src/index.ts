@@ -207,6 +207,7 @@ async function ensureShopSitesSeoColumns(db: D1Database): Promise<void> {
   await tryAdd("hero_cta", "TEXT");
   await tryAdd("about_title", "TEXT");
   await tryAdd("palette_json", "TEXT");
+  await tryAdd("design_version", "INTEGER NOT NULL DEFAULT 1");
 }
 
 async function processOne(body: unknown, env: Env): Promise<void> {
@@ -332,6 +333,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       seo_title = ?, seo_description = ?,
       trust_signals_json = ?, usps_json = ?, layout_mood = ?, brand_voice = ?,
       hero_cta = ?, about_title = ?, palette_json = ?,
+      design_version = 2,
       status = 'active', generated_at = ?
     WHERE shop_id = ?`
   )
@@ -371,8 +373,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         hero_image_url, logo_url, catalog_images_json, generated_at, status,
         seo_title, seo_description,
         trust_signals_json, usps_json, layout_mood, brand_voice,
-        hero_cta, about_title, palette_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        hero_cta, about_title, palette_json, design_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)`
     )
       .bind(
         siteId,

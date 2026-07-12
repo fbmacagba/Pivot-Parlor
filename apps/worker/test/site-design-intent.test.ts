@@ -15,9 +15,10 @@ async function seedSite(shopId: string, withIntent: boolean): Promise<void> {
     `INSERT INTO shop_sites (
        id, shop_id, template, headline, tagline, about, services_json,
        color_primary, color_accent, font_heading, font_body, status,
-       trust_signals_json, usps_json, layout_mood, brand_voice, hero_cta, about_title, palette_json
+       trust_signals_json, usps_json, layout_mood, brand_voice, hero_cta, about_title, palette_json,
+       design_version
      ) VALUES (?, ?, 'minimal', 'H', 'T', 'A', '[]', '#111111', '#c9a84c', 'Playfair Display', 'DM Sans', 'active',
-       ?, ?, ?, ?, ?, ?, ?)`
+       ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       crypto.randomUUID(),
@@ -28,7 +29,8 @@ async function seedSite(shopId: string, withIntent: boolean): Promise<void> {
       withIntent ? "warm and personal" : null,
       withIntent ? "Reserve your chair" : null,
       withIntent ? "The neighbourhood favourite" : null,
-      withIntent ? JSON.stringify({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" }) : null
+      withIntent ? JSON.stringify({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" }) : null,
+      withIntent ? 2 : 1
     )
     .run();
 }
@@ -52,6 +54,9 @@ describe("GET /api/shops/:slug/site design intent (WS-6)", () => {
     expect(data.brand_voice).toBe("warm and personal");
     expect(data.hero_cta).toBe("Reserve your chair");
     expect(data.about_title).toBe("The neighbourhood favourite");
+    // WS-6 item 3: the full palette + version gate ride along.
+    expect(data.palette).toEqual({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" });
+    expect(data.design_version).toBe(2);
   });
 
   it("returns empty arrays / nulls for a pre-WS-6 site row", async () => {
@@ -65,6 +70,8 @@ describe("GET /api/shops/:slug/site design intent (WS-6)", () => {
     expect(data.usps).toEqual([]);
     expect(data.layout_mood).toBeNull();
     expect(data.hero_cta).toBeNull();
+    expect(data.palette).toBeNull();
+    expect(data.design_version).toBe(1);
   });
 
   it("overlays the intent onto a stale KV cache snapshot", async () => {
@@ -85,5 +92,7 @@ describe("GET /api/shops/:slug/site design intent (WS-6)", () => {
     expect(data.trust_signals).toEqual(["Fully insured", "5 star rated", "Walk-ins welcome"]);
     expect(data.layout_mood).toBe("warm-editorial");
     expect(data.hero_cta).toBe("Reserve your chair");
+    expect(data.palette).toEqual({ primary: "#111111", accent: "#c9a84c", background: "#faf6ef" });
+    expect(data.design_version).toBe(2);
   });
 });
