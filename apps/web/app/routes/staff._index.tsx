@@ -5,6 +5,7 @@ import { Clock, ArrowRight, CheckCircle } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
+import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
 
 interface TodayBooking {
   id: string;
@@ -19,8 +20,14 @@ interface TodayBooking {
 }
 
 function formatTime(iso: string) {
-  try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); }
-  catch { return iso; }
+  try {
+    return new Date(iso).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function minutesUntil(iso: string): number {
@@ -37,21 +44,45 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   try {
     todayBookings = await api.get<TodayBooking[]>("/api/staff/me/today");
     if (!Array.isArray(todayBookings)) todayBookings = [];
-  } catch { /* empty */ }
+  } catch {
+    /* empty */
+  }
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const greeting =
+    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const displayName = user.sub ?? "there";
 
-  return json({ todayBookings, greeting, displayName });
+  // Public shop-site URL for the share card. Built from the request origin so
+  // staging previews link to themselves rather than production.
+  let shopShare: { url: string; name: string } | null = null;
+  if (user.shop_id) {
+    try {
+      const shop = await api.get<{ slug: string; name: string }>(
+        `/api/shops/${user.shop_id}`,
+      );
+      if (shop?.slug) {
+        shopShare = {
+          url: `${new URL(request.url).origin}/${shop.slug}`,
+          name: shop.name,
+        };
+      }
+    } catch {
+      /* non-fatal: card simply not shown */
+    }
+  }
+
+  return json({ todayBookings, greeting, displayName, shopShare });
 }
 
 export default function StaffToday() {
-  const { todayBookings, greeting } = useLoaderData<typeof loader>();
+  const { todayBookings, greeting, shopShare } = useLoaderData<typeof loader>();
 
-  const upcoming  = todayBookings.filter(b => b.status !== "completed" && b.status !== "cancelled");
-  const completed = todayBookings.filter(b => b.status === "completed");
-  const next      = upcoming[0] ?? null;
+  const upcoming = todayBookings.filter(
+    (b) => b.status !== "completed" && b.status !== "cancelled",
+  );
+  const completed = todayBookings.filter((b) => b.status === "completed");
+  const next = upcoming[0] ?? null;
 
   const minsUntilNext = next ? minutesUntil(next.start_time) : null;
 
@@ -60,12 +91,21 @@ export default function StaffToday() {
       {/* Greeting */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-white">{greeting}</h1>
+          <h1 className="font-heading text-2xl font-bold text-white">
+            {greeting}
+          </h1>
           <p className="mt-0.5 text-sm text-white/40">
-            {new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })}
+            {new Date().toLocaleDateString("en-GB", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}
           </p>
         </div>
-        <Link to="/staff/bookings" className="flex items-center gap-1.5 text-sm text-gold hover:text-gold/80">
+        <Link
+          to="/staff/bookings"
+          className="flex items-center gap-1.5 text-sm text-gold hover:text-gold/80"
+        >
           All bookings <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
@@ -73,22 +113,37 @@ export default function StaffToday() {
       {/* Next appointment card */}
       {next ? (
         <div className="rounded-xl border border-gold/25 bg-gold/5 p-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gold/70 mb-3">Next appointment</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-gold/70 mb-3">
+            Next appointment
+          </p>
           <div className="flex items-start gap-4">
             <div className="flex flex-col items-center justify-center rounded-lg bg-gold/10 px-4 py-3 min-w-[72px]">
-              <span className="text-xl font-bold text-gold">{formatTime(next.start_time)}</span>
-              <span className="text-xs text-gold/60 mt-0.5">{next.duration_min}m</span>
+              <span className="text-xl font-bold text-gold">
+                {formatTime(next.start_time)}
+              </span>
+              <span className="text-xs text-gold/60 mt-0.5">
+                {next.duration_min}m
+              </span>
             </div>
             <div className="flex-1">
-              <p className="text-base font-semibold text-white">{next.customer_name}</p>
-              <p className="text-sm text-white/60 mt-0.5">{next.service_name}</p>
-              {next.notes && <p className="text-xs text-white/40 mt-1 italic">{next.notes}</p>}
+              <p className="text-base font-semibold text-white">
+                {next.customer_name}
+              </p>
+              <p className="text-sm text-white/60 mt-0.5">
+                {next.service_name}
+              </p>
+              {next.notes && (
+                <p className="text-xs text-white/40 mt-1 italic">
+                  {next.notes}
+                </p>
+              )}
             </div>
             <div className="text-right">
               {minsUntilNext !== null && minsUntilNext > 0 && (
                 <div className="flex items-center gap-1.5 text-sm text-white/50">
                   <Clock className="h-3.5 w-3.5" />
-                  in {minsUntilNext < 60
+                  in{" "}
+                  {minsUntilNext < 60
                     ? `${minsUntilNext}m`
                     : `${Math.floor(minsUntilNext / 60)}h ${minsUntilNext % 60}m`}
                 </div>
@@ -116,23 +171,39 @@ export default function StaffToday() {
           </h2>
           <div className="space-y-2">
             {upcoming.map((b, i) => (
-              <div key={b.id}
+              <div
+                key={b.id}
                 className={`flex items-center gap-4 rounded-xl border px-4 py-3 transition-colors ${
                   i === 0
                     ? "border-gold/20 bg-gold/5"
                     : "border-white/8 bg-dark-100 hover:border-white/15"
-                }`}>
+                }`}
+              >
                 <div className="w-14 shrink-0 text-center">
-                  <p className="text-sm font-semibold text-white">{formatTime(b.start_time)}</p>
+                  <p className="text-sm font-semibold text-white">
+                    {formatTime(b.start_time)}
+                  </p>
                   <p className="text-xs text-white/35">{b.duration_min}m</p>
                 </div>
                 <div className="h-8 w-px bg-white/10 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">{b.customer_name}</p>
-                  <p className="text-xs text-white/50 truncate">{b.service_name}</p>
+                  <p className="text-sm font-medium text-white truncate">
+                    {b.customer_name}
+                  </p>
+                  <p className="text-xs text-white/50 truncate">
+                    {b.service_name}
+                  </p>
                 </div>
-                <Badge variant={b.status === "in_progress" ? "gold" : b.status === "confirmed" ? "outline" : "default"}>
-                  {b.status.replace("_"," ")}
+                <Badge
+                  variant={
+                    b.status === "in_progress"
+                      ? "gold"
+                      : b.status === "confirmed"
+                        ? "outline"
+                        : "default"
+                  }
+                >
+                  {b.status.replace("_", " ")}
                 </Badge>
               </div>
             ))}
@@ -148,20 +219,34 @@ export default function StaffToday() {
             {completed.length} completed
           </summary>
           <div className="mt-2 space-y-2">
-            {completed.map(b => (
-              <div key={b.id} className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-55">
+            {completed.map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-55"
+              >
                 <div className="w-14 shrink-0 text-center">
-                  <p className="text-sm text-white/60">{formatTime(b.start_time)}</p>
+                  <p className="text-sm text-white/60">
+                    {formatTime(b.start_time)}
+                  </p>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white/60 truncate">{b.customer_name}</p>
-                  <p className="text-xs text-white/35 truncate">{b.service_name}</p>
+                  <p className="text-sm text-white/60 truncate">
+                    {b.customer_name}
+                  </p>
+                  <p className="text-xs text-white/35 truncate">
+                    {b.service_name}
+                  </p>
                 </div>
                 <Badge variant="success">done</Badge>
               </div>
             ))}
           </div>
         </details>
+      )}
+
+      {/* Share your shop */}
+      {shopShare && (
+        <ShareShopCard shopUrl={shopShare.url} shopName={shopShare.name} />
       )}
     </div>
   );
