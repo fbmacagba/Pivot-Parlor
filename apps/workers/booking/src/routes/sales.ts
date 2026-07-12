@@ -29,6 +29,8 @@ import {
   computeCommission,
   buildSaleBatch,
   stockMovementStatements,
+  claimSaleStock,
+  releaseSaleStock,
   type SaleLineInput,
 } from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
@@ -150,43 +152,60 @@ r.post("/:shopId/sales", async (c) => {
   const isRecordOnly = tender !== "stripe";
   const consumption = await resolveConsumption(db, shopId, lines);
 
-  await db.batch(
-    buildSaleBatch(db, {
-      saleId,
-      shopId,
-      businessDayId: openDay?.id ?? null,
-      staffId: body.staff_id ?? null,
-      customerName: body.customer_name?.toString().trim() || null,
-      customerEmail: body.customer_email?.toString().trim() || null,
-      lines,
-      consumption,
-      subtotalPence,
-      discountPence,
-      tipPence,
-      totalPence: customerTotalPence,
-      tenderType: tender,
-      status: isRecordOnly ? "completed" : "pending",
-      note: body.note?.toString().trim() || null,
-      ledger: {
-        servicesAmountPence: discountedServicesPence,
-        retailAmountPence: discountedRetailPence,
-        commissionRate,
-        retailCommissionRate,
-        commissionPence,
-        commissionBearer,
-        // Record-only money never settles through Stripe, so the commission
-        // stays 'pending' (owed) — it is collected out-of-band.
-        status: "pending",
-      },
-      transactions: [
-        {
-          type: "sale",
-          amountPence: customerTotalPence,
-          status: isRecordOnly ? "captured" : "pending",
+  // Oversell floor: atomically claim tracked stock before the sale persists.
+  // A losing claim names the short products; the cashier fixes the count (or
+  // unticks track_stock on the product) and re-rings.
+  const stockClaim = await claimSaleStock(db, shopId, lines);
+  if (!stockClaim.ok) {
+    return c.json(
+      { success: false, error: `Not enough stock: ${stockClaim.insufficient.join(", ")}` },
+      400
+    );
+  }
+
+  try {
+    await db.batch(
+      buildSaleBatch(db, {
+        saleId,
+        shopId,
+        businessDayId: openDay?.id ?? null,
+        staffId: body.staff_id ?? null,
+        customerName: body.customer_name?.toString().trim() || null,
+        customerEmail: body.customer_email?.toString().trim() || null,
+        lines,
+        consumption,
+        subtotalPence,
+        discountPence,
+        tipPence,
+        totalPence: customerTotalPence,
+        tenderType: tender,
+        status: isRecordOnly ? "completed" : "pending",
+        note: body.note?.toString().trim() || null,
+        ledger: {
+          servicesAmountPence: discountedServicesPence,
+          retailAmountPence: discountedRetailPence,
+          commissionRate,
+          retailCommissionRate,
+          commissionPence,
+          commissionBearer,
+          // Record-only money never settles through Stripe, so the commission
+          // stays 'pending' (owed) — it is collected out-of-band.
+          status: "pending",
         },
-      ],
-    })
-  );
+        transactions: [
+          {
+            type: "sale",
+            amountPence: customerTotalPence,
+            status: isRecordOnly ? "captured" : "pending",
+          },
+        ],
+      })
+    );
+  } catch (e) {
+    // The sale never persisted (batch is atomic) — give the claimed stock back.
+    await releaseSaleStock(db, shopId, stockClaim.claims);
+    throw e;
+  }
 
   let paymentUrl: string | null = null;
   if (tender === "stripe") {
