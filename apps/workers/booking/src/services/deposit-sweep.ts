@@ -12,9 +12,17 @@ import type { D1Database } from "@cloudflare/workers-types";
 
 export const DEPOSIT_SWEEP_CUTOFF_MIN = 40;
 
+// Bound the work per cron tick so one invocation can never approach the Workers
+// subrequest ceiling (each cancelled booking is one db.batch = one subrequest).
+// The sweep runs every 15 min, so any backlog above this drains over the next
+// few ticks rather than failing the whole run. miniflare does not enforce the
+// ceiling, so an unbounded loop looks fine in tests and only bites at scale.
+export const DEPOSIT_SWEEP_MAX_PER_RUN = 200;
+
 export async function sweepExpiredDepositBookings(
   db: D1Database,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  maxPerRun: number = DEPOSIT_SWEEP_MAX_PER_RUN
 ): Promise<number> {
   const cutoffIso = new Date(nowMs - DEPOSIT_SWEEP_CUTOFF_MIN * 60_000).toISOString();
   // updated_at is written at creation and only touched again when the deposit
@@ -26,9 +34,10 @@ export async function sweepExpiredDepositBookings(
        WHERE b.status = 'pending'
          AND st.stripe_checkout_session_id IS NOT NULL
          AND st.deposit_paid_at IS NULL
-         AND st.updated_at < ?`
+         AND st.updated_at < ?
+       LIMIT ?`
     )
-    .bind(cutoffIso)
+    .bind(cutoffIso, maxPerRun)
     .all<{ id: string }>();
 
   const ids = (stale.results ?? []).map((r) => r.id);
