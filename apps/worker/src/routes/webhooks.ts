@@ -55,7 +55,17 @@ webhooks.post("/stripe", async (c) => {
     const stripe = new Stripe(c.env.STRIPE_SECRET_KEY!, {
       httpClient: Stripe.createFetchHttpClient(),
     });
-    event = stripe.webhooks.constructEvent(rawBody, signature, secret);
+    // Workers' Web Crypto is async-only: the sync constructEvent() throws
+    // ("SubtleCryptoProvider cannot be used in a synchronous context") on
+    // workerd, which made this endpoint 400 every signed event regardless
+    // of the configured secret.
+    event = await stripe.webhooks.constructEventAsync(
+      rawBody,
+      signature,
+      secret,
+      undefined,
+      Stripe.createSubtleCryptoProvider()
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Invalid signature";
     return c.json({ error: msg }, 400);

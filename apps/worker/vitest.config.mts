@@ -14,6 +14,11 @@ export default defineConfig({
           JWT_SECRET: "test-secret",
           OPENROUTER_API_KEY: "test-openrouter-key",
           GOOGLE_AI_API_KEY: "test-google-key",
+          // Webhook signature tests sign payloads with this and dispatch
+          // through the real route (the sync-crypto regression hid behind
+          // handler-only tests).
+          STRIPE_WEBHOOK_SECRET: "whsec_test_signing_secret",
+          STRIPE_SECRET_KEY: "sk_test_dummy_never_called",
         },
         serviceBindings: {
           // WS-1: stub of the pivot-parlor-booking binding. Echoes the request
