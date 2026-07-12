@@ -302,6 +302,134 @@ describe("Stripe refunds", () => {
     expect(sale?.status).toBe("refunded");
   });
 
+  it("a dashboard-initiated PARTIAL refund books the delta: refunded_pence, refund tx, pending pro-rata reversal", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    // services 2500 @10%, retail 2000 @20%, subtotal 4500, no discount.
+    const { saleId, piId } = await settledStripeSale(shop, staff, service, product, token);
+
+    const wh = await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: {
+        object: {
+          id: "ch_dash_p1",
+          payment_intent: piId,
+          amount: 4500,
+          amount_refunded: 900,
+          refunds: { data: [{ id: "re_dash_p1" }] },
+        },
+      },
+    });
+    expect(wh.status).toBe(200);
+
+    const sale = await env.DB
+      .prepare("SELECT status, refunded_pence FROM sales WHERE id = ?")
+      .bind(saleId)
+      .first<{ status: string; refunded_pence: number }>();
+    expect(sale).toMatchObject({ status: "completed", refunded_pence: 900 });
+
+    const tx = await env.DB
+      .prepare("SELECT amount_pence, status, stripe_id FROM bw_transactions WHERE sale_id = ? AND type = 'refund'")
+      .bind(saleId)
+      .first<{ amount_pence: number; status: string; stripe_id: string }>();
+    expect(tx).toMatchObject({ amount_pence: 900, status: "completed", stripe_id: "re_dash_p1" });
+
+    // Pro-rata: 900 splits 500 services / 400 retail → reversal 50 + 80 = 130,
+    // 'pending' (owed adjustment — nothing confirms the app fee came back).
+    const reversal = await env.DB
+      .prepare(
+        "SELECT services_amount_pence, retail_amount_pence, commission_amount_pence, status FROM bw_commission_ledger WHERE sale_id = ? AND commission_amount_pence < 0"
+      )
+      .bind(saleId)
+      .first<Record<string, unknown>>();
+    expect(reversal).toMatchObject({
+      services_amount_pence: -500,
+      retail_amount_pence: -400,
+      commission_amount_pence: -130,
+      status: "pending",
+    });
+  });
+
+  it("a redelivered cumulative amount books nothing new; reaching FULL flips the sale", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, piId } = await settledStripeSale(shop, staff, service, product, token);
+
+    await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: { object: { id: "ch_dash_p2", payment_intent: piId, amount: 4500, amount_refunded: 900 } },
+    });
+    // New event id, SAME cumulative amount → delta 0 → no double booking.
+    await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: { object: { id: "ch_dash_p2", payment_intent: piId, amount: 4500, amount_refunded: 900 } },
+    });
+    const afterEcho = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM bw_transactions WHERE sale_id = ? AND type = 'refund'")
+      .bind(saleId)
+      .first<{ n: number }>();
+    expect(Number(afterEcho?.n)).toBe(1);
+
+    // Second partial reaches the full charge → delta 3600 books, sale flips.
+    await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: { object: { id: "ch_dash_p2", payment_intent: piId, amount: 4500, amount_refunded: 4500 } },
+    });
+
+    const sale = await env.DB
+      .prepare("SELECT status, refunded_pence FROM sales WHERE id = ?")
+      .bind(saleId)
+      .first<{ status: string; refunded_pence: number }>();
+    expect(sale).toMatchObject({ status: "refunded", refunded_pence: 4500 });
+
+    // Reversals across both deltas sum to the sale's full commission (650).
+    const sum = await env.DB
+      .prepare(
+        "SELECT SUM(commission_amount_pence) AS total FROM bw_commission_ledger WHERE sale_id = ? AND commission_amount_pence < 0"
+      )
+      .bind(saleId)
+      .first<{ total: number }>();
+    expect(Number(sum?.total)).toBe(-650);
+  });
+
+  it("a dashboard partial AFTER a settled API return books only the new delta", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, piId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+
+    // API-initiated return of one product unit (1000), settled by webhook.
+    const refund = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+    });
+    expect(refund.status).toBe(200);
+    await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: { object: { id: "ch_mix_1", payment_intent: piId, amount: 4500, amount_refunded: 1000 } },
+    });
+
+    // Dashboard partial on top: cumulative 1500 → only 500 is new.
+    await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: { object: { id: "ch_mix_1", payment_intent: piId, amount: 4500, amount_refunded: 1500 } },
+    });
+
+    const sale = await env.DB
+      .prepare("SELECT status, refunded_pence FROM sales WHERE id = ?")
+      .bind(saleId)
+      .first<{ status: string; refunded_pence: number }>();
+    expect(sale).toMatchObject({ status: "completed", refunded_pence: 1500 });
+
+    const txs = await env.DB
+      .prepare("SELECT amount_pence FROM bw_transactions WHERE sale_id = ? AND type = 'refund' ORDER BY amount_pence")
+      .bind(saleId)
+      .all<{ amount_pence: number }>();
+    expect((txs.results ?? []).map((t) => t.amount_pence)).toEqual([500, 1000]);
+  });
+
   it("reverts the quantity claim when Stripe refund creation fails, so a retry works", async () => {
     const { shop, staff, service, product, token } = await seedRefundShop();
     const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);

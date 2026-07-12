@@ -19,6 +19,7 @@
  * a redelivery is acknowledged without re-applying side effects.
  */
 import { Hono } from "hono";
+import { calculateCommissionPence } from "@repo/utils";
 import type { Env } from "../types.js";
 import { verifyStripeSignature } from "../lib/stripe.js";
 import { runBookingSideEffects } from "../services/booking-side-effects.js";
@@ -281,11 +282,120 @@ r.post("/stripe", async (c) => {
                 .bind(saleId),
             ]);
           } else {
-            // Dashboard-initiated refund (no return row of ours). A FULL
-            // refund keeps the legacy behaviour; a partial one is left for
-            // manual reconciliation — we cannot attribute it to lines.
+            // Dashboard-initiated refund (no return row of ours). It cannot be
+            // attributed to lines (no sale_return_items, no restock), but the
+            // MONEY is booked so revenue and owed commission stay honest:
+            // the newly refunded delta = the charge's cumulative
+            // amount_refunded minus every refund tx already booked for this
+            // sale. Replays and API-return echoes therefore net to zero.
             const amount = Number(obj.amount ?? 0);
             const amountRefunded = Number(obj.amount_refunded ?? 0);
+
+            const sale = await db
+              .prepare(
+                "SELECT subtotal_pence, discount_pence, refunded_pence, business_day_id FROM sales WHERE id = ? LIMIT 1"
+              )
+              .bind(saleId)
+              .first<{
+                subtotal_pence: number;
+                discount_pence: number;
+                refunded_pence: number;
+                business_day_id: string | null;
+              }>();
+            const booked = await db
+              .prepare(
+                "SELECT COALESCE(SUM(amount_pence), 0) AS total FROM bw_transactions WHERE sale_id = ? AND type = 'refund'"
+              )
+              .bind(saleId)
+              .first<{ total: number }>();
+            const customerDelta = amountRefunded - Number(booked?.total ?? 0);
+
+            if (sale && customerDelta > 0) {
+              // Sale-value portion caps at what is still un-refunded; any
+              // excess was tip/commission coming back and lives only in the
+              // tx row (refunded_pence tracks sale value, matching returns).
+              const outstanding = Math.max(0, sale.subtotal_pence - sale.discount_pence - sale.refunded_pence);
+              const saleDelta = Math.min(customerDelta, outstanding);
+
+              // Pro-rata split + reversal at the sale's snapshot rates, same
+              // shape as an API-initiated return's compensating ledger row.
+              const ledgerRow = await db
+                .prepare(
+                  `SELECT services_amount_pence, retail_amount_pence, commission_rate,
+                          retail_commission_rate, commission_bearer
+                   FROM bw_commission_ledger
+                   WHERE sale_id = ? AND commission_amount_pence >= 0 LIMIT 1`
+                )
+                .bind(saleId)
+                .first<{
+                  services_amount_pence: number;
+                  retail_amount_pence: number;
+                  commission_rate: number;
+                  retail_commission_rate: number;
+                  commission_bearer: string;
+                }>();
+
+              const refundsList = (obj.refunds as { data?: Array<{ id?: string }> } | undefined)?.data ?? [];
+              const lastRefundId = refundsList.length > 0 ? String(refundsList[refundsList.length - 1]?.id ?? "") : "";
+              const txStripeId = lastRefundId || `dashboard-refund:${piId}:${amountRefunded}`;
+
+              const stmts = [
+                db
+                  .prepare(
+                    `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
+                     SELECT ?, NULL, id, shop_id, 'refund', ?, 'completed', ? FROM sales WHERE id = ?`
+                  )
+                  .bind(crypto.randomUUID(), customerDelta, txStripeId, saleId),
+                db
+                  .prepare("UPDATE sales SET refunded_pence = refunded_pence + ? WHERE id = ?")
+                  .bind(saleDelta, saleId),
+                db
+                  .prepare(
+                    "UPDATE sales SET status = 'refunded' WHERE id = ? AND status = 'completed' AND refunded_pence >= subtotal_pence - discount_pence"
+                  )
+                  .bind(saleId),
+              ];
+
+              if (saleDelta > 0 && ledgerRow) {
+                const svc = Number(ledgerRow.services_amount_pence);
+                const ret = Number(ledgerRow.retail_amount_pence);
+                const base = svc + ret;
+                const refundServices = base > 0 ? Math.round((saleDelta * svc) / base) : 0;
+                const refundRetail = saleDelta - refundServices;
+                const commissionReversal =
+                  calculateCommissionPence(refundServices, Number(ledgerRow.commission_rate)).commission_pence +
+                  calculateCommissionPence(refundRetail, Number(ledgerRow.retail_commission_rate)).commission_pence;
+                // 'pending' — an owed adjustment netted off the shop's owed
+                // commission. Unlike an API return, nothing later confirms the
+                // application fee actually came back (the dashboard checkbox
+                // is not visible from charge.refunded), so it is never
+                // asserted 'transferred' here.
+                stmts.push(
+                  db
+                    .prepare(
+                      `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, sale_id,
+                         services_amount_pence, retail_amount_pence, commission_rate, retail_commission_rate,
+                         commission_amount_pence, commission_bearer, status)
+                       SELECT ?, shop_id, ?, NULL, id, ?, ?, ?, ?, ?, ?, 'pending' FROM sales WHERE id = ?`
+                    )
+                    .bind(
+                      crypto.randomUUID(),
+                      sale.business_day_id,
+                      -refundServices,
+                      -refundRetail,
+                      Number(ledgerRow.commission_rate),
+                      Number(ledgerRow.retail_commission_rate),
+                      -commissionReversal,
+                      ledgerRow.commission_bearer,
+                      saleId
+                    )
+                );
+              }
+              await db.batch(stmts);
+            }
+
+            // A cumulative FULL refund also flips the original money txs and
+            // the sale, exactly as before.
             if (amount > 0 && amountRefunded >= amount) {
               await markTransactionsByStripeId(db, piId, "refunded");
               await setSaleStatus(db, saleId, "refunded");
