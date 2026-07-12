@@ -89,4 +89,26 @@ publicBookings.post("/", (c) =>
   c.env.BOOKING.fetch(new Request("https://booking/public/bookings", c.req.raw))
 );
 
+// Minimal public status — the post-payment confirm page polls this until the
+// deposit webhook flips the booking to confirmed (migration 041).
+publicBookings.get("/:bookingId", (c) =>
+  c.env.BOOKING.fetch(
+    new Request(
+      `https://booking/public/bookings/${encodeURIComponent(c.req.param("bookingId"))}`,
+      c.req.raw
+    )
+  )
+);
+
+// Cancel an unpaid deposit booking (Stripe cancel_url) so the slot frees
+// immediately; the booking worker only honours pending+unpaid rows.
+publicBookings.post("/:bookingId/abandon", (c) =>
+  c.env.BOOKING.fetch(
+    new Request(
+      `https://booking/public/bookings/${encodeURIComponent(c.req.param("bookingId"))}/abandon`,
+      c.req.raw
+    )
+  )
+);
+
 export { bookings as bookingsRouter, publicBookings as publicBookingRouter };

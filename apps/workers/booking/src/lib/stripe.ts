@@ -128,6 +128,9 @@ export async function createCheckoutSession(params: {
   successUrl: string;
   cancelUrl: string;
   idempotencyKey: string;
+  /** Unix seconds; Stripe accepts 30 min – 24 h from creation. Used by the
+   *  customer deposit flow so an abandoned session frees the slot quickly. */
+  expiresAtEpochS?: number;
 }): Promise<{ id: string; url: string }> {
   const body: Record<string, string | number | undefined> = {
     mode: "payment",
@@ -139,6 +142,7 @@ export async function createCheckoutSession(params: {
     "line_items[0][price_data][product_data][name]": params.productName,
     "payment_intent_data[transfer_data][destination]": params.destinationAccount,
     "payment_intent_data[application_fee_amount]": params.applicationFeePence,
+    ...(params.expiresAtEpochS ? { expires_at: params.expiresAtEpochS } : {}),
   };
   for (const [k, v] of Object.entries(params.metadata)) {
     body[`payment_intent_data[metadata][${k}]`] = v;

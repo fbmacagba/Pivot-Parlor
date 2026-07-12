@@ -7,6 +7,8 @@ export type Env = {
   STRIPE_SECRET_KEY: string;
   ENVIRONMENT: string;
   PLATFORM_URL: string;
+  /** Public web (Pages) origin — deposit Checkout success/cancel URLs. */
+  WEB_URL?: string;
   /** Reminder queue producer (pivot-parlor-reminders); consumer stays in the main worker. */
   QUEUE?: Queue;
   /** Resend key for booking confirmation emails (wrangler secret). */
