@@ -107,4 +107,43 @@ describe("back-bar consumption (service_products BOM)", () => {
       .first<{ quantity_delta: number }>();
     expect(movement?.quantity_delta).toBe(-2);
   });
+
+  it("the checkout blocks an oversold product extra BEFORE any money moves, and stays retryable", async () => {
+    const { shop, staff, service, token } = await seedBomShop();
+    const retail = await seedProduct(shop, { retailPence: 800, stock: 1 });
+
+    const bookingId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
+        booking_date, start_time, end_time, status, amount_pence, commission_pence)
+       VALUES (?, ?, ?, ?, 'C', 'c@t.local', '2099-01-02', '10:00', '10:30', 'confirmed', 2500, 250)`
+    ).bind(bookingId, shop, staff, service).run();
+    await env.DB.prepare(
+      `INSERT INTO bw_booking_state (booking_id, shop_id, deposit_amount_pence, stripe_payment_intent_id, checked_in_at, updated_at)
+       VALUES (?, ?, 1000, 'pi_hold_bom2', datetime('now'), datetime('now'))`
+    ).bind(bookingId, shop).run();
+
+    const blocked = await dispatch("POST", `/booking/shops/${shop}/bookings/${bookingId}/checkout`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tipPercent: 0, products: [{ productId: retail, quantity: 2 }] },
+    });
+    expect(blocked.status).toBe(400);
+    const err = (await blocked.json()) as { error: string };
+    expect(err.error).toContain("Not enough stock");
+    expect(await stockQty(shop, retail)).toBe(1);
+    // No sale, no capture — the deposit hold is untouched.
+    const sale = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM sales WHERE booking_id = ?")
+      .bind(bookingId)
+      .first<{ n: number }>();
+    expect(Number(sale?.n)).toBe(0);
+
+    // The 400 reverted the checkout status claim: a corrected cart succeeds.
+    const retry = await dispatch("POST", `/booking/shops/${shop}/bookings/${bookingId}/checkout`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tipPercent: 0, products: [{ productId: retail, quantity: 1 }] },
+    });
+    expect(retry.status).toBe(200);
+    expect(await stockQty(shop, retail)).toBe(0);
+  });
 });

@@ -229,6 +229,102 @@ export function computeCommission(args: {
   return { discountedServicesPence, discountedRetailPence, commissionPence };
 }
 
+export interface SaleStockClaim {
+  product_id: string;
+  variant_id: string | null;
+  /** Positive units claimed out of stock. */
+  quantity: number;
+  /** Line name, for the insufficient-stock error message. */
+  name: string;
+}
+
+/** One claim per (product, variant) — duplicate cart lines are summed so the
+ *  guarded UPDATE checks the cart's TOTAL demand against the level once. */
+function aggregateSaleStockClaims(lines: ResolvedLine[]): SaleStockClaim[] {
+  const byKey = new Map<string, SaleStockClaim>();
+  for (const l of lines) {
+    if (!l.decrements_stock || !l.product_id) continue;
+    const key = `${l.product_id}::${l.variant_id ?? ""}`;
+    const existing = byKey.get(key);
+    if (existing) existing.quantity += l.quantity;
+    else byKey.set(key, { product_id: l.product_id, variant_id: l.variant_id, quantity: l.quantity, name: l.name });
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Oversell floor: atomically claim stock for every tracked product line before
+ * the sale persists (and before any Stripe money moves). Each claim is a
+ * guarded UPDATE (`quantity >= demanded`) so two concurrent sales of the last
+ * unit cannot both win — the loser gets `ok: false` with the product names and
+ * any partial winners are released. A tracked product with no stock_levels row
+ * is treated as stock 0 and blocked; `track_stock = 0` products never claim
+ * (the per-product escape hatch), and back-bar consumption never claims.
+ *
+ * Callers that get `ok: true` MUST later either persist the sale via
+ * buildSaleBatch (whose 'sale' movements deliberately skip the level upsert —
+ * the level was already decremented here) or call releaseSaleStock on failure.
+ */
+export async function claimSaleStock(
+  db: D1Database,
+  shopId: string,
+  lines: ResolvedLine[]
+): Promise<{ ok: true; claims: SaleStockClaim[] } | { ok: false; insufficient: string[] }> {
+  const claims = aggregateSaleStockClaims(lines);
+  if (claims.length === 0) return { ok: true, claims };
+
+  const results = await db.batch(
+    claims.map((cl) =>
+      cl.variant_id === null
+        ? db
+            .prepare(
+              `UPDATE stock_levels SET quantity = quantity - ?, updated_at = datetime('now')
+               WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL AND quantity >= ?`
+            )
+            .bind(cl.quantity, shopId, cl.product_id, cl.quantity)
+        : db
+            .prepare(
+              `UPDATE stock_levels SET quantity = quantity - ?, updated_at = datetime('now')
+               WHERE shop_id = ? AND product_id = ? AND variant_id = ? AND quantity >= ?`
+            )
+            .bind(cl.quantity, shopId, cl.product_id, cl.variant_id, cl.quantity)
+    )
+  );
+
+  const winners: SaleStockClaim[] = [];
+  const insufficient: string[] = [];
+  results.forEach((r, i) => {
+    if ((r.meta?.changes ?? 0) === 1) winners.push(claims[i]!);
+    else insufficient.push(claims[i]!.name);
+  });
+  if (insufficient.length === 0) return { ok: true, claims };
+  if (winners.length > 0) await releaseSaleStock(db, shopId, winners);
+  return { ok: false, insufficient };
+}
+
+/** Give claimed stock back — the sale did not happen (Stripe failure, batch
+ *  failure, or a sibling claim losing). Winners always have a level row. */
+export async function releaseSaleStock(db: D1Database, shopId: string, claims: SaleStockClaim[]): Promise<void> {
+  if (claims.length === 0) return;
+  await db.batch(
+    claims.map((cl) =>
+      cl.variant_id === null
+        ? db
+            .prepare(
+              `UPDATE stock_levels SET quantity = quantity + ?, updated_at = datetime('now')
+               WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL`
+            )
+            .bind(cl.quantity, shopId, cl.product_id)
+        : db
+            .prepare(
+              `UPDATE stock_levels SET quantity = quantity + ?, updated_at = datetime('now')
+               WHERE shop_id = ? AND product_id = ? AND variant_id = ?`
+            )
+            .bind(cl.quantity, shopId, cl.product_id, cl.variant_id)
+    )
+  );
+}
+
 export interface SaleBatchArgs {
   saleId: string;
   shopId: string;
@@ -268,10 +364,15 @@ export interface SaleBatchArgs {
 }
 
 /**
- * Build the atomic statement list for a sale. Every quantity change is a
- * stock_movements row + stock_levels upsert in the SAME batch — mirrors
- * applyStockMovement in the main worker's queries.ts (keep the ON CONFLICT
- * targets in sync with migration 034's partial unique indexes).
+ * Build the atomic statement list for a sale.
+ *
+ * Stock contract (oversell floor): callers MUST have won claimSaleStock for
+ * these lines first — 'sale' movements here record the movement row ONLY (the
+ * level was already decremented by the claim's guarded UPDATE). 'consumption'
+ * movements are exempt from the floor and keep the movement + level upsert
+ * pair (back-bar stock may legitimately go negative). voidSale stays correct
+ * for both: it reverses every movement row with a full pair, netting the
+ * pre-claimed level back to zero.
  */
 export function buildSaleBatch(db: D1Database, args: SaleBatchArgs): D1PreparedStatement[] {
   const now = new Date().toISOString();
@@ -339,6 +440,8 @@ export function buildSaleBatch(db: D1Database, args: SaleBatchArgs): D1PreparedS
         referenceType: "sale",
         referenceId: args.saleId,
         staffId: line.staff_id,
+        // Level already decremented by claimSaleStock's guarded UPDATE.
+        skipLevel: true,
       }));
     }
   }
@@ -428,6 +531,9 @@ export function stockMovementStatements(
     referenceId: string | null;
     staffId: string | null;
     note?: string | null;
+    /** True when the caller already applied the level change (claimSaleStock) —
+     *  emit only the movement row. */
+    skipLevel?: boolean;
   }
 ): D1PreparedStatement[] {
   const movement = db
@@ -449,6 +555,7 @@ export function stockMovementStatements(
       m.staffId,
       m.note ?? null
     );
+  if (m.skipLevel) return [movement];
   const level =
     m.variantId === null
       ? db

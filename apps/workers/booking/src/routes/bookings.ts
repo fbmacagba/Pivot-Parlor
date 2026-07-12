@@ -10,6 +10,8 @@ import {
   sumByType,
   computeCommission,
   buildSaleBatch,
+  claimSaleStock,
+  releaseSaleStock,
   type ResolvedLine,
 } from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
@@ -162,6 +164,23 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   } catch (e) {
     await revertClaim();
     throw e;
+  }
+
+  // Oversell floor: claim tracked product stock BEFORE any Stripe money moves,
+  // so an insufficient cart fails cleanly instead of after a capture.
+  let stockClaim;
+  try {
+    stockClaim = await claimSaleStock(db, shopId, lines);
+  } catch (e) {
+    await revertClaim();
+    throw e;
+  }
+  if (!stockClaim.ok) {
+    await revertClaim();
+    return c.json(
+      { success: false, error: `Not enough stock: ${stockClaim.insufficient.join(", ")}` },
+      400
+    );
   }
 
   const tipPct = [0, 5, 10, 15, 20].includes(Number(body.tipPercent)) ? Number(body.tipPercent) : 0;
@@ -333,10 +352,13 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       balanceClientSecret,
     });
   } catch (e) {
-    // Revert the checkout claim so the shop can retry once Stripe recovers;
-    // the idempotency keys above make the retry safe.
+    // Revert the checkout claim AND the stock claim so the shop can retry once
+    // Stripe recovers; the idempotency keys above make the retry safe. The
+    // sale batch is atomic, so on any throw here no movement rows exist and
+    // the release restores the exact pre-claim level.
     reportError("checkout.stripe", e, { shopId, bookingId });
     await revertClaim();
+    await releaseSaleStock(db, shopId, stockClaim.claims);
     return c.json({ success: false, error: e instanceof Error ? e.message : "Checkout failed" }, 500);
   }
 });

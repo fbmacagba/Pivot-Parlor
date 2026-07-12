@@ -155,6 +155,141 @@ describe("POST /booking/shops/:shopId/sales — record-only tenders", () => {
   });
 });
 
+describe("oversell floor (tracked products cannot sell below recorded stock)", () => {
+  async function saleCount(shop: string): Promise<number> {
+    const row = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM sales WHERE shop_id = ?")
+      .bind(shop)
+      .first<{ n: number }>();
+    return Number(row?.n ?? 0);
+  }
+
+  it("blocks a sale exceeding recorded stock, naming the product, changing nothing", async () => {
+    const { shop, product, token } = await seedPosShop(); // stock 5
+
+    const res = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "product", productId: product, quantity: 6 }] },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { success: boolean; error: string };
+    expect(body.error).toContain("Not enough stock");
+    expect(body.error).toContain("Pomade");
+
+    expect(await stockQty(shop, product)).toBe(5);
+    expect(await saleCount(shop)).toBe(0);
+  });
+
+  it("sells exactly to zero, then blocks the next unit", async () => {
+    const { shop, product, token } = await seedPosShop(); // stock 5
+
+    const drain = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "product", productId: product, quantity: 5 }] },
+    });
+    expect(drain.status).toBe(200);
+    expect(await stockQty(shop, product)).toBe(0);
+
+    const oneMore = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "product", productId: product, quantity: 1 }] },
+    });
+    expect(oneMore.status).toBe(400);
+    expect(await stockQty(shop, product)).toBe(0);
+  });
+
+  it("a tracked product with no stock_levels row is stock 0 and blocked; track_stock=0 always sells", async () => {
+    const { shop, token } = await seedPosShop();
+    const neverStocked = await seedProduct(shop); // tracked, no stock row
+    const untracked = await seedProduct(shop, { trackStock: false });
+
+    const blocked = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "product", productId: neverStocked, quantity: 1 }] },
+    });
+    expect(blocked.status).toBe(400);
+
+    const sold = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "product", productId: untracked, quantity: 1 }] },
+    });
+    expect(sold.status).toBe(200);
+  });
+
+  it("a losing cart releases sibling claims (winner's stock unchanged after the 400)", async () => {
+    const { shop, product, token } = await seedPosShop(); // Pomade, stock 5
+    const scarce = await seedProduct(shop, { stock: 1 });
+
+    const res = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: {
+        tender: "cash",
+        items: [
+          { type: "product", productId: product, quantity: 2 },
+          { type: "product", productId: scarce, quantity: 2 },
+        ],
+      },
+    });
+    expect(res.status).toBe(400);
+
+    // The Pomade claim won and must have been released with the sale rejected.
+    expect(await stockQty(shop, product)).toBe(5);
+    expect(await stockQty(shop, scarce)).toBe(1);
+    expect(await saleCount(shop)).toBe(0);
+  });
+
+  it("duplicate lines of one product are checked against their SUMMED demand", async () => {
+    const { shop, product, token } = await seedPosShop(); // stock 5
+
+    const res = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: {
+        tender: "cash",
+        items: [
+          { type: "product", productId: product, quantity: 3 },
+          { type: "product", productId: product, quantity: 3 },
+        ],
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(await stockQty(shop, product)).toBe(5);
+  });
+
+  it("back-bar consumption is exempt: a service whose BOM outruns stock still sells, stock goes negative", async () => {
+    const { shop, staff, service, token } = await seedPosShop();
+    const backBar = await seedProduct(shop); // tracked, stock 0 (no row)
+    await env.DB
+      .prepare("INSERT INTO service_products (service_id, product_id, shop_id, quantity) VALUES (?, ?, ?, 2)")
+      .bind(service, backBar, shop)
+      .run();
+
+    const res = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "service", serviceId: service, quantity: 1, staffId: staff }] },
+    });
+    expect(res.status).toBe(200);
+    expect(await stockQty(shop, backBar)).toBe(-2);
+  });
+
+  it("voiding a sale returns the claimed stock", async () => {
+    const { shop, product, token } = await seedPosShop(); // stock 5
+
+    const res = await dispatch("POST", `/booking/shops/${shop}/sales`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { tender: "cash", items: [{ type: "product", productId: product, quantity: 3 }] },
+    });
+    expect(res.status).toBe(200);
+    const saleId = ((await res.json()) as { sale: { id: string } }).sale.id;
+    expect(await stockQty(shop, product)).toBe(2);
+
+    const voided = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/void`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(voided.status).toBe(200);
+    expect(await stockQty(shop, product)).toBe(5);
+  });
+});
+
 describe("POST /booking/shops/:shopId/sales — stripe tender", () => {
   it("creates a Checkout Session and settles the sale on payment_intent.succeeded", async () => {
     const { shop, product, token } = await seedPosShop();
