@@ -28,6 +28,7 @@ import { purchaseOrdersRouter } from "./routes/purchase-orders.js";
 import { stockTakesRouter } from "./routes/stock-takes.js";
 import { bookingsRouter, publicBookingRouter } from "./routes/bookings.js";
 import { processReminder, sendPendingReminders, type ReminderPayload } from "./services/reminder.js";
+import { runRetentionSweep } from "./services/retention.js";
 import { reminderDelaySeconds } from "@repo/utils";
 import { sendEodAlert } from "./services/email.js";
 import { walkinRouter, adminWalkinRouter } from "./routes/walkin.js";
@@ -236,6 +237,17 @@ export default {
    */
   async scheduled(event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
     const cron = event.cron;
+
+    // 03:00 UTC — LEG-6 retention: bounded, idempotent sweeps (WS-8 phase 2).
+    if (cron === "0 3 * * *") {
+      console.log("[Cron 03:00] Running retention sweep...");
+      const { counts, errors } = await runRetentionSweep(env.DB);
+      console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
+      for (const e of errors) {
+        console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);
+      }
+      return;
+    }
 
     // 08:00 UTC — send 24h-ahead booking reminders
     if (cron === "0 8 * * *") {

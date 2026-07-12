@@ -1784,3 +1784,100 @@ export async function getInventoryReport(db: D1Database, shopId: string, from: s
     },
   };
 }
+
+// ─── WS-8 / LEG-6: time-based retention ──────────────────────────────────────
+// Every sweep is bounded per run (no unbounded fan-out on a cron — the WS-7
+// parity-gap lesson) and idempotent. The retention WINDOWS are policy and live
+// in services/retention.ts; these helpers only implement the SQL. Financial
+// rows (bw_transactions, bw_commission_ledger, sales) are deliberately NOT
+// touched: UK financial-record retention outlives every window here.
+
+/** Visitor chat transcripts contain free text; delete whole sessions. */
+export async function deleteExpiredChatSessions(db: D1Database, olderThanDays: number, limit: number) {
+  const r = await db
+    .prepare(
+      `DELETE FROM chat_sessions WHERE id IN (
+         SELECT id FROM chat_sessions WHERE updated_at < datetime('now', ?) LIMIT ?)`
+    )
+    .bind(`-${olderThanDays} days`, limit)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+/** Waitlist rows are operational; anything this old is finished or abandoned. */
+export async function deleteStaleWaitlist(db: D1Database, olderThanDays: number, limit: number) {
+  const r = await db
+    .prepare(
+      `DELETE FROM waitlist WHERE id IN (
+         SELECT id FROM waitlist WHERE created_at < datetime('now', ?) LIMIT ?)`
+    )
+    .bind(`-${olderThanDays} days`, limit)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+/** Used or expired invites past the grace window (email + live token hygiene). */
+export async function deleteExpiredInvites(db: D1Database, graceDays: number, limit: number) {
+  const r = await db
+    .prepare(
+      `DELETE FROM invites WHERE id IN (
+         SELECT id FROM invites
+         WHERE (used_at IS NOT NULL AND used_at < datetime('now', ?))
+            OR expires_at < datetime('now', ?)
+         LIMIT ?)`
+    )
+    .bind(`-${graceDays} days`, `-${graceDays} days`, limit)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+/** Marketing enquiries that never onboarded; onboarded contacts are a
+ *  business relationship record and are kept. */
+export async function deleteStaleContacts(db: D1Database, olderThanMonths: number, limit: number) {
+  const r = await db
+    .prepare(
+      `DELETE FROM contacts WHERE id IN (
+         SELECT id FROM contacts
+         WHERE onboarded_at IS NULL AND shop_id IS NULL
+           AND created_at < datetime('now', ?)
+         LIMIT ?)`
+    )
+    .bind(`-${olderThanMonths} months`, limit)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+export const REDACTED_NAME = "[redacted]";
+export const REDACTED_EMAIL = "redacted@retention.invalid";
+
+/** Anonymise booking PII in place: the row (and its money fields) stays for
+ *  reports and the financial audit trail; name/email/phone/notes go. The
+ *  email marker makes the sweep idempotent and keeps already-anonymised rows
+ *  out of later scans. */
+export async function anonymiseOldBookings(db: D1Database, olderThanMonths: number, limit: number) {
+  const r = await db
+    .prepare(
+      `UPDATE bookings
+       SET customer_name = ?, customer_email = ?, customer_phone = NULL, notes = NULL
+       WHERE id IN (
+         SELECT id FROM bookings
+         WHERE booking_date < date('now', ?)
+           AND customer_email != ?
+         LIMIT ?)`
+    )
+    .bind(REDACTED_NAME, REDACTED_EMAIL, `-${olderThanMonths} months`, REDACTED_EMAIL, limit)
+    .run();
+  return r.meta.changes ?? 0;
+}
+
+/** AI usage rows are ops metrics only (tokens/cost, no PII); pruned for size. */
+export async function pruneAiUsageLog(db: D1Database, olderThanMonths: number, limit: number) {
+  const r = await db
+    .prepare(
+      `DELETE FROM ai_usage_log WHERE id IN (
+         SELECT id FROM ai_usage_log WHERE created_at < datetime('now', ?) LIMIT ?)`
+    )
+    .bind(`-${olderThanMonths} months`, limit)
+    .run();
+  return r.meta.changes ?? 0;
+}
