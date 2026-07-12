@@ -27,6 +27,11 @@ export type SiteData = {
   palette?: Record<string, string> | null;
   /** Palette theming gate: tokens follow the palette only when >= 2. */
   design_version?: number;
+  /** Curated typography (WS-6 item 5): generated heading weight ("400".."900"),
+   *  honoured only on v2 sites; heading_style hints serif/sans for resolving
+   *  legacy font names onto the curated self-hosted set. */
+  heading_weight?: string;
+  heading_style?: string;
 };
 
 export type ShopSettings = {

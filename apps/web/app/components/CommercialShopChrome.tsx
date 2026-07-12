@@ -1,7 +1,7 @@
 import { Link } from "@remix-run/react";
 import { MessageCircle, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { resolveSiteTheme } from "@repo/utils";
+import { resolveSiteTheme, resolveCuratedFont, curatedFontStack } from "@repo/utils";
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 
@@ -52,26 +52,6 @@ function renderMarkdownLinks(text: string): ReactNode {
 function trimMediaUrl(url: string | undefined | null): string {
   if (typeof url !== "string") return "";
   return url.trim();
-}
-
-function googleFontFamilyToken(name: string): string | null {
-  const safe = name.replace(/[^\w\s-]/g, "").replace(/\s+/g, " ").trim();
-  return safe.length ? safe : null;
-}
-
-function buildGoogleFontsHref(heading?: string, body?: string): string | null {
-  const seen = new Set<string>();
-  const tokens: string[] = [];
-  for (const raw of [heading, body]) {
-    const t = raw ? googleFontFamilyToken(raw) : null;
-    if (t && !seen.has(t.toLowerCase())) {
-      seen.add(t.toLowerCase());
-      tokens.push(t);
-    }
-  }
-  if (tokens.length === 0) return null;
-  const params = tokens.map((t) => `family=${t.replace(/ /g, "+")}:wght@400;500;600;700`);
-  return `https://fonts.googleapis.com/css2?${params.join("&")}&display=swap`;
 }
 
 function shopNameInitials(name: string): string {
@@ -217,30 +197,21 @@ export function CommercialShopChrome({
 
   const bookingEnabled = settings.booking_enabled !== false;
 
-  const fontHeadingName = site.font_heading?.trim();
-  const fontBodyName = site.font_body?.trim();
-  const headingFallback = '"Playfair Display", Georgia, serif';
-  const bodyFallback = '"DM Sans", system-ui, sans-serif';
-  const fontHeadingStack = fontHeadingName
-    ? `"${fontHeadingName.replace(/"/g, "")}", ${headingFallback}`
-    : headingFallback;
-  const fontBodyStack = fontBodyName
-    ? `"${fontBodyName.replace(/"/g, "")}", ${bodyFallback}`
-    : bodyFallback;
+  // Fonts resolve onto the curated SELF-HOSTED set (WS-6 item 5 / LEG-5) —
+  // exact matches keep their family; unknown legacy names fall to the role's
+  // default via the stored heading_style hint. No Google Fonts request.
+  const headingFont = resolveCuratedFont(site.font_heading, "heading", site.heading_style);
+  const bodyFont = resolveCuratedFont(site.font_body, "body");
+  const fontHeadingStack = curatedFontStack(headingFont.family);
+  const fontBodyStack = curatedFontStack(bodyFont.family);
 
-  useEffect(() => {
-    const href = buildGoogleFontsHref(fontHeadingName, fontBodyName);
-    if (!href) return;
-    const id = "pp-commercial-site-fonts";
-    let link = document.getElementById(id) as HTMLLinkElement | null;
-    if (!link) {
-      link = document.createElement("link");
-      link.id = id;
-      link.rel = "stylesheet";
-      document.head.appendChild(link);
-    }
-    if (link.getAttribute("href") !== href) link.setAttribute("href", href);
-  }, [fontHeadingName, fontBodyName]);
+  // Honour the generated heading_weight (WS-6 item 5) — ONLY for v2 sites
+  // that carry one: the `.pp-commercial h1..` rule outweighs Tailwind's
+  // per-element font classes, so emitting it unconditionally would restyle
+  // every legacy site's headings.
+  const headingWeightRaw = site.heading_weight?.trim() ?? "";
+  const headingWeight =
+    (site.design_version ?? 1) >= 2 && /^[1-9]00$/.test(headingWeightRaw) ? headingWeightRaw : null;
 
   // Palette-driven theme tokens (WS-6 item 3+4). Legacy sites
   // (design_version < 2 or no palette) resolve to the exact colours this
@@ -275,7 +246,7 @@ export function CommercialShopChrome({
     <div className="pp-commercial min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]"
       style={{ ...rootStyle, fontFamily: "var(--pp-font-body)" }}>
       <style dangerouslySetInnerHTML={{
-        __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}`,
+        __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);${headingWeight ? `font-weight:${headingWeight};` : ""}}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}`,
       }} />
 
       <header className="sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">

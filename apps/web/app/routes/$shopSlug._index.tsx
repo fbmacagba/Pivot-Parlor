@@ -111,6 +111,10 @@ export default function ShopLanding() {
     usps: Array.isArray(s.usps) ? s.usps : undefined,
     palette: s.palette && typeof s.palette === "object" ? s.palette : undefined,
     design_version: typeof s.design_version === "number" ? s.design_version : undefined,
+    heading_weight:
+      typeof s.heading_weight === "string" && s.heading_weight.trim() ? s.heading_weight.trim() : undefined,
+    heading_style:
+      typeof s.heading_style === "string" && s.heading_style.trim() ? s.heading_style.trim() : undefined,
   };
 
   return (

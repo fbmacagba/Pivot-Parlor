@@ -123,6 +123,9 @@ export interface ShopSiteData {
   about_title?: string | null;
   palette?: Record<string, string> | null;
   design_version?: number | null;
+  /** Curated typography (WS-6 item 5). */
+  heading_weight?: string | null;
+  heading_style?: string | null;
 }
 
 export async function loader({ params, context }: LoaderFunctionArgs) {

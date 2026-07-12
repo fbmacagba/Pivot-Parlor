@@ -12,6 +12,8 @@ export function siteDataForChrome(
     headline?: string | null;
     palette?: Record<string, string> | null;
     design_version?: number | null;
+    heading_weight?: string | null;
+    heading_style?: string | null;
   },
   shopId?: string
 ): SiteData {
@@ -30,5 +32,9 @@ export function siteDataForChrome(
     // same scheme as the landing page or a light shop gets a dark footer.
     palette: s?.palette && typeof s.palette === "object" ? s.palette : undefined,
     design_version: typeof s?.design_version === "number" ? s.design_version : undefined,
+    heading_weight:
+      typeof s?.heading_weight === "string" && s.heading_weight.trim() ? s.heading_weight.trim() : undefined,
+    heading_style:
+      typeof s?.heading_style === "string" && s.heading_style.trim() ? s.heading_style.trim() : undefined,
   };
 }
