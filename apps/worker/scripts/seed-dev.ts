@@ -22,8 +22,10 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ─── PBKDF2 hash — mirrors hashPassword() in src/lib/password.ts exactly ─────
+// Must match PBKDF2_ITERATIONS there: the Cloudflare Workers Web Crypto cap is
+// 100_000, and seeded hashes have to verify under the worker runtime.
 
-const PBKDF2_ITERATIONS = 600_000;
+const PBKDF2_ITERATIONS = 100_000;
 
 async function hashPassword(password: string): Promise<string> {
   const enc = new TextEncoder();

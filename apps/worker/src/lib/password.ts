@@ -9,7 +9,16 @@
 // formats so pre-WS-7 rows keep working, and needsRehash() lets the login
 // route transparently upgrade them while it holds the plaintext.
 
-export const PBKDF2_ITERATIONS = 600_000;
+// Cloudflare Workers' Web Crypto rejects PBKDF2 with a NotSupportedError once
+// iterations exceed this ceiling ("iteration counts above 100000 are not
+// supported"). WS-7 shipped PBKDF2_ITERATIONS = 600_000 and every hash-creating
+// path (register / staff / invite) returned 500 in production on 2026-07-12 —
+// miniflare doesn't enforce the cap, so CI was green while prod was broken.
+// DO NOT raise PBKDF2_ITERATIONS above this without moving to a chunked KDF that
+// keeps each deriveBits() call at or below the cap.
+const WORKERS_PBKDF2_MAX = 100_000;
+
+export const PBKDF2_ITERATIONS = WORKERS_PBKDF2_MAX;
 const LEGACY_ITERATIONS = 100_000;
 
 async function derive(password: string, salt: Uint8Array, iterations: number): Promise<string> {
@@ -39,8 +48,11 @@ export async function verifyPassword(password: string, storedHash: string): Prom
   if (parts.length === 4 && parts[0] === "v2") {
     iterations = Number(parts[1]);
     // A corrupt iteration count must not turn login into a CPU sink or a
-    // 1-iteration downgrade; reject outside a sane band.
-    if (!Number.isInteger(iterations) || iterations < 1_000 || iterations > 5_000_000) return false;
+    // 1-iteration downgrade; reject outside a sane band. The upper bound is the
+    // Workers PBKDF2 cap: a stored count above it could never have been written
+    // (hashPassword would have thrown) and deriving at it would throw here too,
+    // so reject early rather than 500 the login.
+    if (!Number.isInteger(iterations) || iterations < 1_000 || iterations > WORKERS_PBKDF2_MAX) return false;
     saltB64 = parts[2]!;
     expected = parts[3]!;
   } else if (parts.length === 2 && parts[0] && parts[1]) {
