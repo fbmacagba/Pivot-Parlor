@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
 import type { Env } from "./types.js";
 import { ensureBookingSchema } from "./db/ensure-schema.js";
 import { authMiddleware } from "./middleware/auth.js";
@@ -11,6 +12,8 @@ import platformAlertsRoutes from "./routes/platform-alerts.js";
 import publicRoutes from "./routes/public.js";
 import connectRoutes from "./routes/connect.js";
 import stripeWebhookRoutes from "./routes/stripe-webhook.js";
+import { sweepExpiredDepositBookings } from "./services/deposit-sweep.js";
+import { reportError } from "./services/report-error.js";
 
 const root = new Hono<{ Bindings: Env }>();
 
@@ -59,4 +62,16 @@ root.route("/webhooks", stripeWebhookRoutes);
 
 root.get("/health", (c) => c.json({ ok: true, worker: "pivot-parlor-booking" }));
 
-export default root;
+export default {
+  fetch: root.fetch,
+  // Cron (*/15): backstop for checkout.session.expired — releases slots held
+  // by abandoned deposit payments (see services/deposit-sweep.ts).
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    await ensureBookingSchema(env.DB);
+    ctx.waitUntil(
+      sweepExpiredDepositBookings(env.DB).catch((err) =>
+        reportError("deposit.sweep", err, {})
+      )
+    );
+  },
+};

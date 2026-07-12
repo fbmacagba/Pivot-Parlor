@@ -182,12 +182,29 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   const customerTotalPence =
     commissionBearer === "customer" ? grandTotalPence + commissionPence : grandTotalPence;
 
-  const piId = typeof st.stripe_payment_intent_id === "string" ? st.stripe_payment_intent_id.trim() || null : null;
+  // Two deposit shapes (migration 041): a CHARGED deposit (hosted Checkout,
+  // deposit_paid_at stamped by the webhook) is money already received — a
+  // credit against today's total, never captured. A legacy HOLD (manual-
+  // capture PI, no deposit_paid_at) is captured here exactly as before.
+  const depositPaid = typeof st.deposit_paid_at === "string" && st.deposit_paid_at.length > 0;
+  const piId =
+    !depositPaid && typeof st.stripe_payment_intent_id === "string"
+      ? st.stripe_payment_intent_id.trim() || null
+      : null;
   const depositPence = piId ? Number(st.deposit_amount_pence ?? 0) : 0;
 
   const captureFromHoldPence = piId ? Math.min(depositPence, customerTotalPence) : 0;
-  const remainderPence = Math.max(0, customerTotalPence - captureFromHoldPence);
-  const balanceApplicationFeePence = Math.min(commissionPence, remainderPence);
+  const depositCreditPence = depositPaid
+    ? Math.min(Number(st.deposit_amount_pence ?? 0), customerTotalPence)
+    : 0;
+  // The deposit charge already carried this much application fee; the balance
+  // charge collects only the remaining commission so the platform's Stripe
+  // take equals the ledger's commission exactly.
+  const depositFeePaidPence = depositPaid ? Number(st.deposit_application_fee_pence ?? 0) : 0;
+  const remainderPence = Math.max(0, customerTotalPence - captureFromHoldPence - depositCreditPence);
+  const balanceApplicationFeePence = depositPaid
+    ? Math.min(Math.max(0, commissionPence - depositFeePaidPence), remainderPence)
+    : Math.min(commissionPence, remainderPence);
 
   let stripeChargeId = "";
   let balanceClientSecret: string | null = null;
@@ -273,6 +290,16 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
       ],
     });
 
+    // A charged deposit's tx row was created at booking time against the
+    // booking only — attach it to the sale so the sale's money trail is whole.
+    if (depositCreditPence > 0) {
+      stmts.push(
+        db
+          .prepare("UPDATE bw_transactions SET sale_id = ? WHERE booking_id = ? AND type = 'deposit'")
+          .bind(saleId, bookingId)
+      );
+    }
+
     // bookings keeps only canonical columns; total_amount_pence + completed_at
     // live in bw_booking_state (completed_at only once fully settled).
     stmts.push(
@@ -299,6 +326,8 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         subtotal_pence: grandTotalPence,
         commission_pence: commissionBearer === "customer" ? commissionPence : 0,
         total_pence: customerTotalPence,
+        deposit_credit_pence: depositCreditPence,
+        due_now_pence: remainderPence,
       },
       stripeChargeId,
       balanceClientSecret,

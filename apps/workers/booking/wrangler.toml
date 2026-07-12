@@ -25,6 +25,12 @@ queue = "pivot-parlor-reminders"
 [vars]
 ENVIRONMENT = "production"
 PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
+WEB_URL = "https://pivotparlor.com"
+
+# Deposit-expiry sweep: cancels pending-payment bookings whose Checkout
+# Session lapsed (backstop for the checkout.session.expired webhook).
+[triggers]
+crons = ["*/15 * * * *"]
 
 # Secrets:
 #   STRIPE_SECRET_KEY
@@ -62,3 +68,7 @@ queue = "pivot-parlor-reminders-staging"
 [env.staging.vars]
 ENVIRONMENT = "staging"
 PLATFORM_URL = "https://pivot-parlor-api-staging.bmorris0565.workers.dev"
+WEB_URL = "https://staging.pivot-parlor-web.pages.dev"
+
+[env.staging.triggers]
+crons = ["*/15 * * * *"]

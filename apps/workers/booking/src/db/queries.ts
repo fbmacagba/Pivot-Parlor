@@ -11,6 +11,8 @@ export interface ShopRow {
   is_active: number;
   commission_rate: number;
   timezone: string | null;
+  stripe_connect_account_id?: string | null;
+  stripe_connect_onboarded?: number | null;
 }
 
 export interface ServiceRow {

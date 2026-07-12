@@ -21,6 +21,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { verifyStripeSignature } from "../lib/stripe.js";
+import { runBookingSideEffects } from "../services/booking-side-effects.js";
 import { reportError } from "../services/report-error.js";
 
 const r = new Hono<{ Bindings: Env }>();
@@ -155,6 +156,69 @@ r.post("/stripe", async (c) => {
         const bookingId =
           marked.bookingId ??
           (typeof metadata.bookingId === "string" ? String(metadata.bookingId) : null);
+
+        // Customer deposit (migration 041): the charge settled, so the
+        // booking becomes real — flip pending → confirmed, point the deposit
+        // tx at the PI (refunds/disputes resolve by stripe_id), stamp
+        // deposit_paid_at (the appointment checkout treats the deposit as a
+        // paid credit, never a capturable hold), and only now send the
+        // confirmation email + enqueue the reminder.
+        if (bookingId && metadata.type === "booking_deposit") {
+          await db.batch([
+            db
+              .prepare(
+                "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
+              )
+              .bind(piId, bookingId),
+            db
+              .prepare(
+                `UPDATE bw_booking_state SET deposit_paid_at = datetime('now'), stripe_payment_intent_id = ?,
+                   updated_at = datetime('now')
+                 WHERE booking_id = ? AND deposit_paid_at IS NULL`
+              )
+              .bind(piId, bookingId),
+          ]);
+          const flip = await db
+            .prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'pending'")
+            .bind(bookingId)
+            .run();
+          if ((flip.meta?.changes ?? 0) === 1) {
+            const details = await db
+              .prepare(
+                `SELECT b.shop_id, b.customer_name, b.customer_email, b.booking_date, b.start_time, b.amount_pence,
+                        s.name AS shop_name, s.slug AS shop_slug,
+                        sv.name AS service_name, sv.duration_min,
+                        stf.display_name AS staff_name
+                 FROM bookings b
+                 JOIN shops s ON s.id = b.shop_id
+                 JOIN services sv ON sv.id = b.service_id
+                 LEFT JOIN staff stf ON stf.id = b.staff_id
+                 WHERE b.id = ? LIMIT 1`
+              )
+              .bind(bookingId)
+              .first<{
+                shop_id: string; customer_name: string; customer_email: string; booking_date: string;
+                start_time: string; amount_pence: number; shop_name: string; shop_slug: string;
+                service_name: string; duration_min: number; staff_name: string | null;
+              }>();
+            if (details) {
+              await runBookingSideEffects(c.env, {
+                bookingId,
+                shopId: details.shop_id,
+                shopName: details.shop_name,
+                shopSlug: details.shop_slug,
+                customerName: details.customer_name,
+                customerEmail: details.customer_email,
+                serviceName: details.service_name,
+                staffName: details.staff_name ?? "your specialist",
+                bookingDate: details.booking_date,
+                startISO: details.start_time,
+                durationMin: details.duration_min,
+                amountPence: details.amount_pence,
+              });
+            }
+          }
+        }
         if (bookingId) {
           // Money has actually settled: the commission is now real.
           await setLedgerStatus(db, bookingId, "pending", "transferred");
@@ -233,6 +297,37 @@ r.post("/stripe", async (c) => {
         // Booking-only money (deposits/balances without a sale): legacy path.
         const marked = await markTransactionsByStripeId(db, piId, "refunded");
         if (marked.bookingId) await setLedgerStatus(db, marked.bookingId, null, "refunded");
+        break;
+      }
+
+      case "checkout.session.expired": {
+        // Customer deposit abandoned: the session lapsed unpaid, so the
+        // pending booking releases its slot (idx_bookings_active_slot ignores
+        // cancelled rows). Guarded on deposit_paid_at so a stale/duplicate
+        // event can never cancel a booking whose money actually arrived.
+        const sessionId = String(obj.id ?? "");
+        const metadata = (obj.metadata ?? {}) as Record<string, unknown>;
+        const bookingId = typeof metadata.bookingId === "string" ? metadata.bookingId : null;
+        if (!sessionId || !bookingId || metadata.type !== "booking_deposit") break;
+        const st = await db
+          .prepare(
+            `SELECT booking_id FROM bw_booking_state
+             WHERE booking_id = ? AND stripe_checkout_session_id = ? AND deposit_paid_at IS NULL LIMIT 1`
+          )
+          .bind(bookingId, sessionId)
+          .first<{ booking_id: string }>();
+        if (st) {
+          await db.batch([
+            db
+              .prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'")
+              .bind(bookingId),
+            db
+              .prepare(
+                "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
+              )
+              .bind(bookingId),
+          ]);
+        }
         break;
       }
 

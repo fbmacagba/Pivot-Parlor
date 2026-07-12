@@ -19,21 +19,44 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const serviceId = url.searchParams.get("service_id");
   const staffId = url.searchParams.get("staff_id");
 
+  // Returning from an abandoned Stripe deposit page: cancel the unpaid
+  // booking straight away so its slot frees for an immediate retry (the
+  // worker only honours pending+unpaid rows, so this cannot cancel real
+  // bookings).
+  const cancelledBookingId = url.searchParams.get("payment") === "cancelled"
+    ? url.searchParams.get("booking")
+    : null;
+  if (cancelledBookingId) {
+    try {
+      await api.post(`/api/bookings/${cancelledBookingId}/abandon`, {});
+    } catch { /* already released or paid — nothing to do */ }
+  }
+
   let services: Service[] = [];
   let staff: Staff[] = [];
   let slots: Slot[] = [];
   let shopTimezone = "Europe/London";
+  let deposit: { percent: number; min_pence: number } | null = null;
 
   try {
     const shopRes = await api.get<{ id: string; timezone?: string }>(`/api/shops/${params.shopSlug}`);
     shopTimezone = shopRes.timezone || "Europe/London";
     // Do not use Promise.all: /staff requires auth and would reject the whole loader, clearing services.
-    const [svcResult, staffResult] = await Promise.allSettled([
+    const [svcResult, staffResult, settingsResult] = await Promise.allSettled([
       api.get<Service[]>(`/api/shops/${shopRes.id}/services`),
       api.get<Staff[]>(`/api/shops/${shopRes.id}/booking-staff`),
+      api.get<{ deposits_enabled?: boolean; deposit_percent?: number; deposit_min_pence?: number }>(
+        `/api/shops/${shopRes.id}/settings`
+      ),
     ]);
     services = svcResult.status === "fulfilled" ? svcResult.value : [];
     staff = staffResult.status === "fulfilled" ? staffResult.value : [];
+    if (settingsResult.status === "fulfilled" && settingsResult.value.deposits_enabled) {
+      deposit = {
+        percent: settingsResult.value.deposit_percent ?? 50,
+        min_pence: settingsResult.value.deposit_min_pence ?? 500,
+      };
+    }
     // The slots endpoint requires date + service_id; a specific staff scopes
     // the result, "any" (no staff_id) returns all staff (deduped client-side).
     if (date && serviceId) {
@@ -49,7 +72,15 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     }
   } catch { /* empty */ }
 
-  return json({ slug: params.shopSlug, services, staff, slots, shopTimezone });
+  return json({
+    slug: params.shopSlug,
+    services,
+    staff,
+    slots,
+    shopTimezone,
+    deposit,
+    paymentCancelled: Boolean(cancelledBookingId),
+  });
 }
 
 export async function action({ params, request, context }: ActionFunctionArgs) {
@@ -57,7 +88,7 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
   const api = createApiClient(env.API_URL);
   const form = await request.formData();
 
-  const booking = await api.post<{ id: string }>("/api/bookings", {
+  const booking = await api.post<{ id: string; checkout_url?: string }>("/api/bookings", {
     shop_slug: params.shopSlug,
     service_id: form.get("service_id"),
     staff_id: form.get("staff_id"),
@@ -69,13 +100,26 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
     notes: form.get("notes"),
   });
 
+  // Deposit-gated shop: hand the customer to the hosted Stripe page; the
+  // success URL returns them to /confirm and the webhook confirms the booking.
+  if (booking.checkout_url) {
+    return redirect(booking.checkout_url);
+  }
+
   return redirect(`/${params.shopSlug}/confirm?id=${booking.id}`);
 }
 
 const STEPS = ["Service", "Staff", "Date & Time", "Your Details", "Review"];
 
+/** Deposit due for a service under the shop's config: percent of price with a
+ *  floor, never more than the price itself (matches the worker's clamp). */
+function depositDuePence(pricePence: number, cfg: { percent: number; min_pence: number }): number {
+  return Math.min(pricePence, Math.max(Math.round((pricePence * cfg.percent) / 100), cfg.min_pence));
+}
+
 export default function BookingWizard() {
-  const { slug, services, staff, slots, shopTimezone } = useLoaderData<typeof loader>();
+  const { slug, services, staff, slots, shopTimezone, deposit, paymentCancelled } =
+    useLoaderData<typeof loader>();
   const nav = useNavigation();
   const slotsFetcher = useFetcher<typeof loader>();
   const [step, setStep] = useState(0);
@@ -101,6 +145,11 @@ export default function BookingWizard() {
   return (
     <div className="min-h-screen bg-dark px-4 py-12 sm:px-6">
       <div className="mx-auto max-w-2xl">
+        {paymentCancelled && (
+          <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            Payment cancelled — your slot has been released. Pick a time below to book again.
+          </div>
+        )}
         {/* Progress bar */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
@@ -267,15 +316,31 @@ export default function BookingWizard() {
               <div className="space-y-3 rounded-xl border border-white/10 bg-dark p-4 text-sm">
                 <Row label="Service" value={selection.service?.name ?? "—"} />
                 <Row label="Price" value={formatPence(selection.service?.price_pence ?? 0)} />
+                {deposit && selection.service && (
+                  <Row
+                    label="Deposit due now"
+                    value={formatPence(depositDuePence(selection.service.price_pence, deposit))}
+                  />
+                )}
                 <Row label="Date" value={selection.date} />
                 <Row label="Time" value={selection.slot ? formatSlotTime(selection.slot, shopTimezone) : "—"} />
                 <Row label="Name" value={selection.name} />
                 <Row label="Email" value={selection.email} />
               </div>
+              {deposit && selection.service && (
+                <p className="text-xs text-white/50">
+                  You&apos;ll be taken to a secure Stripe page to pay the deposit. The remaining balance is
+                  settled at your appointment.
+                </p>
+              )}
               <div className="flex gap-3">
                 <Button type="button" variant="ghost" onClick={() => setStep(3)}>Back</Button>
                 <Button type="submit" disabled={nav.state === "submitting"} className="flex-1">
-                  {nav.state === "submitting" ? "Confirming…" : "Confirm booking →"}
+                  {nav.state === "submitting"
+                    ? "Confirming…"
+                    : deposit
+                      ? "Continue to payment →"
+                      : "Confirm booking →"}
                 </Button>
               </div>
             </Form>

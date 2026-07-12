@@ -166,6 +166,14 @@ export async function ensureBookingSchema(db: D1Database): Promise<void> {
   await tryAddColumn(db, "shop_settings", "promo_discount_code", "TEXT");
   await tryAddColumn(db, "shop_settings", "promo_discount_percent", "REAL");
 
+  // Customer-facing deposits (migration 041 is canonical).
+  await tryAddColumn(db, "shop_settings", "deposits_enabled", "INTEGER NOT NULL DEFAULT 0");
+  await tryAddColumn(db, "shop_settings", "deposit_percent", "INTEGER NOT NULL DEFAULT 50");
+  await tryAddColumn(db, "shop_settings", "deposit_min_pence", "INTEGER NOT NULL DEFAULT 500");
+  await tryAddColumn(db, "bw_booking_state", "stripe_checkout_session_id", "TEXT");
+  await tryAddColumn(db, "bw_booking_state", "deposit_paid_at", "TEXT");
+  await tryAddColumn(db, "bw_booking_state", "deposit_application_fee_pence", "INTEGER NOT NULL DEFAULT 0");
+
   await tryAddColumn(db, "services", "service_type", "TEXT NOT NULL DEFAULT 'service'");
 }
 

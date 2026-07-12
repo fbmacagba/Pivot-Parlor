@@ -461,6 +461,11 @@ shops.get("/:shopId/settings", async (c) => {
       booking_reminder_email: flag(row.booking_reminder_email) !== false,
       reminder_hours_before: typeof row.reminder_hours_before === "number" ? row.reminder_hours_before : 24,
       review_request_email: flag(row.review_request_email) !== false,
+      // Customer deposits (migration 041) — public so the booking UI can show
+      // the deposit due before the customer commits.
+      deposits_enabled: flag(row.deposits_enabled) === true,
+      deposit_percent: typeof row.deposit_percent === "number" ? row.deposit_percent : 50,
+      deposit_min_pence: typeof row.deposit_min_pence === "number" ? row.deposit_min_pence : 500,
     };
     return c.json({ success: true, data });
   } catch {
@@ -494,6 +499,9 @@ const SHOP_SETTINGS_PATCH_FIELDS = [
   "booking_reminder_email",
   "reminder_hours_before",
   "review_request_email",
+  "deposits_enabled",
+  "deposit_percent",
+  "deposit_min_pence",
 ] as const;
 
 type ShopSettingsPatchField = (typeof SHOP_SETTINGS_PATCH_FIELDS)[number];
@@ -511,6 +519,17 @@ function coerceShopSettingValue(field: ShopSettingsPatchField, raw: unknown): st
   }
   if (field === "booking_confirmation_email" || field === "booking_reminder_email" || field === "review_request_email") {
     return raw === true || raw === 1 || raw === "1" ? 1 : 0;
+  }
+  if (field === "deposits_enabled") {
+    return raw === true || raw === 1 || raw === "1" ? 1 : 0;
+  }
+  if (field === "deposit_percent") {
+    const n = typeof raw === "number" ? raw : Number(String(raw));
+    return Number.isFinite(n) ? Math.min(100, Math.max(1, Math.round(n))) : 50;
+  }
+  if (field === "deposit_min_pence") {
+    const n = typeof raw === "number" ? raw : Number(String(raw));
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : 500;
   }
   if (field === "google_business_url") {
     return typeof raw === "string" ? raw.trim() : "";

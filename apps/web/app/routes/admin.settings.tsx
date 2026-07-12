@@ -10,6 +10,7 @@ import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
+import { parsePoundsToPence } from "@repo/utils";
 
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type DayKey = (typeof DAY_KEYS)[number];
@@ -109,6 +110,9 @@ type ShopSettingsPayload = {
   booking_reminder_email?: boolean;
   reminder_hours_before?: number;
   review_request_email?: boolean;
+  deposits_enabled?: boolean;
+  deposit_percent?: number;
+  deposit_min_pence?: number;
 };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -195,6 +199,12 @@ export default function AdminSettings() {
   const [reminderHours, setReminderHours] = useState(settings.reminder_hours_before ?? 24);
   const [reviewEmail, setReviewEmail] = useState(settings.review_request_email !== false);
 
+  const [depositsEnabled, setDepositsEnabled] = useState(settings.deposits_enabled === true);
+  const [depositPercent, setDepositPercent] = useState(settings.deposit_percent ?? 50);
+  const [depositMin, setDepositMin] = useState(
+    settings.deposit_min_pence != null ? (settings.deposit_min_pence / 100).toFixed(2) : "5.00"
+  );
+
   const [showIg, setShowIg] = useState(settings.show_instagram === true);
   const [showFb, setShowFb] = useState(settings.show_facebook === true);
   const [showTt, setShowTt] = useState(settings.show_tiktok === true);
@@ -221,6 +231,15 @@ export default function AdminSettings() {
 
   const saveHours = () => {
     submitPatch({ hours_json: serializeHoursJson(hoursState) });
+  };
+
+  const saveDeposits = () => {
+    // Form-input boundary (WS-4): pounds text -> integer pence.
+    const minPence = parsePoundsToPence(depositMin) ?? 500;
+    submitPatch({
+      deposit_percent: depositPercent,
+      deposit_min_pence: minPence,
+    });
   };
 
   const saveSocial = () => {
@@ -437,7 +456,10 @@ export default function AdminSettings() {
             <p className="text-sm font-medium text-white">Booking confirmation</p>
             <p className="text-xs text-white/40 mt-0.5">Sent immediately when a booking is made</p>
           </div>
-          <Toggle value={confirmEmail} onChange={setConfirmEmail} />
+          <Toggle
+            value={confirmEmail}
+            onChange={(v) => { setConfirmEmail(v); submitPatch({ booking_confirmation_email: v }); }}
+          />
         </div>
 
         {/* Reminder email + timing */}
@@ -447,14 +469,21 @@ export default function AdminSettings() {
               <p className="text-sm font-medium text-white">Booking reminder</p>
               <p className="text-xs text-white/40 mt-0.5">Sent before the appointment</p>
             </div>
-            <Toggle value={reminderEmail} onChange={setReminderEmail} />
+            <Toggle
+              value={reminderEmail}
+              onChange={(v) => { setReminderEmail(v); submitPatch({ booking_reminder_email: v }); }}
+            />
           </div>
           {reminderEmail && (
             <div className="flex items-center gap-3 pl-1">
               <span className="text-sm text-white/50">Send</span>
               <select
                 value={reminderHours}
-                onChange={e => setReminderHours(Number(e.target.value))}
+                onChange={e => {
+                  const h = Number(e.target.value);
+                  setReminderHours(h);
+                  submitPatch({ reminder_hours_before: h });
+                }}
                 className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
               >
                 {[2, 4, 6, 12, 24, 48, 72].map(h => (
@@ -472,8 +501,66 @@ export default function AdminSettings() {
             <p className="text-sm font-medium text-white">Review request</p>
             <p className="text-xs text-white/40 mt-0.5">Sent when a booking is marked completed</p>
           </div>
-          <Toggle value={reviewEmail} onChange={setReviewEmail} />
+          <Toggle
+            value={reviewEmail}
+            onChange={(v) => { setReviewEmail(v); submitPatch({ review_request_email: v }); }}
+          />
         </div>
+      </section>
+
+      {/* Booking deposits */}
+      <section className="space-y-5 rounded-xl border border-white/10 bg-dark-100 p-6">
+        <h2 className="font-heading text-lg font-semibold text-white">Booking deposits</h2>
+        <p className="text-sm text-white/40 -mt-2">
+          Take a card deposit when customers book online. Requires Stripe payments to be set up
+          (Settings → Payments). The remaining balance is settled at the appointment.
+        </p>
+
+        <div className="flex items-center justify-between gap-4 py-1">
+          <div>
+            <p className="text-sm font-medium text-white">Require a deposit at online booking</p>
+            <p className="text-xs text-white/40 mt-0.5">
+              The slot is only confirmed once the deposit is paid; abandoned payments free the slot
+              after 30 minutes
+            </p>
+          </div>
+          <Toggle
+            value={depositsEnabled}
+            onChange={(v) => { setDepositsEnabled(v); submitPatch({ deposits_enabled: v }); }}
+          />
+        </div>
+
+        {depositsEnabled && (
+          <div className="space-y-4 border-t border-white/10 pt-4">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-white/50">Deposit is</span>
+              <select
+                value={depositPercent}
+                onChange={(e) => setDepositPercent(Number(e.target.value))}
+                className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+              >
+                {[10, 20, 25, 30, 40, 50, 75, 100].map((p) => (
+                  <option key={p} value={p} className="bg-dark">{p}%</option>
+                ))}
+              </select>
+              <span className="text-sm text-white/50">of the service price</span>
+            </div>
+            <div className="max-w-xs">
+              <Input
+                label="Minimum deposit (£)"
+                value={depositMin}
+                onChange={(e) => setDepositMin(e.target.value)}
+                placeholder="5.00"
+              />
+              <p className="mt-1 text-xs text-white/40">
+                Never more than the service price — a high minimum becomes full prepayment.
+              </p>
+            </div>
+            <Button type="button" size="sm" onClick={saveDeposits} disabled={fetcher.state !== "idle"}>
+              {fetcher.state !== "idle" ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        )}
       </section>
 
     </div>
