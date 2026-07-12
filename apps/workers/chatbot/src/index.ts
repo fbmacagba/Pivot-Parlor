@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import type { ChatMessage } from "./types.js";
 import type { Env } from "./types.js";
 import { OPENROUTER_MODEL } from "./types.js";
-import { ensureChatbotSchema } from "./ensure-schema.js";
+import { assertChatbotSchema } from "./ensure-schema.js";
 import { callOpenRouter } from "./openrouter.js";
 import { buildSystemPrompt, loadShopContext } from "./prompt.js";
 
@@ -112,7 +112,7 @@ let schemaOnce: Promise<void> | null = null;
 app.use("*", async (c, next) => {
   if (!schemaOnce) {
     // Clear on rejection — a cached rejected promise poisons every later request.
-    schemaOnce = ensureChatbotSchema(c.env.DB).catch((err) => {
+    schemaOnce = assertChatbotSchema(c.env.DB).catch((err) => {
       schemaOnce = null;
       throw err;
     });

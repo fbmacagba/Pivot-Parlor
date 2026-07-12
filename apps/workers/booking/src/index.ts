@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
 import type { Env } from "./types.js";
-import { ensureBookingSchema } from "./db/ensure-schema.js";
+import { assertBookingSchema } from "./db/ensure-schema.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { requireShopAccess, requireDeveloper } from "./middleware/shop-access.js";
 import setupRoutes from "./routes/setup.js";
@@ -22,7 +22,7 @@ root.use("*", async (c, next) => {
   if (!schemaOnce) {
     // Clear on rejection — caching a rejected promise poisons every later
     // request until the isolate restarts.
-    schemaOnce = ensureBookingSchema(c.env.DB).catch((err) => {
+    schemaOnce = assertBookingSchema(c.env.DB).catch((err) => {
       schemaOnce = null;
       throw err;
     });
@@ -67,7 +67,7 @@ export default {
   // Cron (*/15): backstop for checkout.session.expired — releases slots held
   // by abandoned deposit payments (see services/deposit-sweep.ts).
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
-    await ensureBookingSchema(env.DB);
+    await assertBookingSchema(env.DB);
     ctx.waitUntil(
       sweepExpiredDepositBookings(env.DB).catch((err) =>
         reportError("deposit.sweep", err, {})

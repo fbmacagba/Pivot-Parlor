@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * D1 migration runner with tracking (schema_migrations) and baseline support.
+ * D1 migration runner with tracking (schema_migrations), a Time Travel
+ * safety bookmark, and baseline support.
  *
  * Usage:
  *   node scripts/migrate.mjs                 # local D1 (miniflare state)
@@ -13,11 +14,21 @@
  * Semantics:
  *  - Migration list = 000_schema (apps/worker/src/db/schema.sql) + sorted
  *    apps/worker/src/db/migrations/*.sql.
- *  - schema.sql is a rolling snapshot and old migrations are deltas, so a
- *    fresh replay can re-apply DDL the snapshot already contains. Statements
- *    are executed one-by-one and exactly two error classes are treated as
- *    benign no-ops: "duplicate column name" and "already exists". Anything
- *    else aborts.
+ *  - Snapshot overlap: schema.sql is a rolling snapshot and migrations are
+ *    deltas, so a FRESH replay (empty database) legitimately re-applies DDL
+ *    the snapshot already contains. On fresh replays exactly two error
+ *    classes are benign no-ops: "duplicate column name" and "already exists".
+ *  - Strict ratchet (WS-8): on an INCREMENTAL run (the database already has
+ *    migration history) files numbered above 042 treat those same errors as
+ *    HARD failures. The ensure-schema files are assert-only since WS-8, so
+ *    nothing legitimately pre-creates schema on a tracked database — a
+ *    collision means drift (hand-run DDL, or a re-run of a half-applied
+ *    file) and a human must reconcile before continuing.
+ *  - Time Travel bookmark (WS-8): --remote runs capture a bookmark before
+ *    applying anything and print the exact restore command on failure.
+ *    Restore is destructive and in-place — it also discards user writes made
+ *    AFTER the bookmark — so it is never run automatically; forward-fixing
+ *    is usually safer on a live database. See docs/DR-RUNBOOK.md.
  *  - Refuses to replay onto a database that has tables but no migration
  *    history — run --baseline once on such databases (e.g. production).
  */
@@ -39,6 +50,11 @@ const dbFlag = args.indexOf("--db");
 const dbName = dbFlag !== -1 ? args[dbFlag + 1] : "pivot-parlor-db";
 
 const BENIGN = /duplicate column name|already exists/i;
+
+// Files numbered above this apply strictly on incremental runs (WS-8).
+// Everything up to and including it predates the assert-only ensure-schema
+// conversion, when runtime DDL could legitimately race the chain.
+const STRICT_AFTER = 42;
 
 // A migration file may declare (WS-4 pence conversion pattern):
 //   -- replay-guard: skip-if-column-absent <table>.<column>
@@ -67,6 +83,45 @@ function wranglerJson(sql) {
   return parsed[0]?.results ?? [];
 }
 
+/** Pre-flight Time Travel bookmark for remote runs. Restore-by-bookmark is
+ *  the recovery path when a migration fails mid-file; capture failure is a
+ *  warning, not an error — a restore-by-timestamp fallback always exists. */
+function captureBookmark() {
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [wranglerBin, "d1", "time-travel", "info", dbName, "--json"],
+      { cwd: workerDir, encoding: "utf8" }
+    );
+    const m = out.match(/"bookmark":\s*"([0-9a-f-]+)"/i);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function printRestoreGuidance(bookmark, startedAtIso) {
+  console.error("\n─── Recovery (WS-8) ─────────────────────────────────────────────");
+  console.error("The database may be mid-migration. To roll back to the pre-run state:");
+  if (bookmark) {
+    console.error(`  npx wrangler d1 time-travel restore ${dbName} --bookmark=${bookmark}`);
+  } else {
+    console.error(`  npx wrangler d1 time-travel restore ${dbName} --timestamp="${startedAtIso}"`);
+    console.error("  (no bookmark was captured — timestamp restore, run from apps/worker)");
+  }
+  console.error(
+    "WARNING: restore is destructive and in-place; it ALSO discards user writes\n" +
+      "made after that point. On a live database prefer fixing forward.\n" +
+      "Full procedure: docs/DR-RUNBOOK.md."
+  );
+  console.error("──────────────────────────────────────────────────────────────────");
+}
+
+function migrationNumber(name) {
+  const m = name.match(/^(\d+)_/);
+  return m ? Number(m[1]) : null;
+}
+
 function statements(sql) {
   // Strip comment lines FIRST — a ';' inside a comment would otherwise split
   // the file mid-comment and corrupt the following statement.
@@ -79,7 +134,7 @@ function statements(sql) {
     .filter((s) => s.length > 0);
 }
 
-function applyFile(name, sql) {
+function applyFile(name, sql, strict) {
   let applied = 0;
   let skipped = 0;
   for (const stmt of statements(sql)) {
@@ -88,15 +143,28 @@ function applyFile(name, sql) {
       applied++;
     } catch (err) {
       const msg = String(err.stdout ?? "") + String(err.stderr ?? "") + String(err.message ?? "");
-      if (BENIGN.test(msg)) {
+      if (BENIGN.test(msg) && !strict) {
         skipped++;
+        console.log(`    ⚠ benign-skip: ${stmt.slice(0, 80).replace(/\s+/g, " ")}`);
         continue;
+      }
+      if (BENIGN.test(msg) && strict) {
+        console.error(
+          `\n✗ ${name}: "${msg.match(BENIGN)?.[0]}" on an INCREMENTAL run is treated as drift (file > 0${STRICT_AFTER}).\n` +
+            `Statement: ${stmt.slice(0, 300)}\n` +
+            `Likely causes: hand-run DDL on this database, or a re-run of a half-applied\n` +
+            `file. Reconcile manually: verify the schema shape, then either restore to the\n` +
+            `pre-run bookmark or record the file as applied with an INSERT INTO\n` +
+            `schema_migrations once you have confirmed every statement's effect exists.`
+        );
+        throw err;
       }
       console.error(`\n✗ ${name} failed on statement:\n${stmt.slice(0, 300)}\n`);
       throw err;
     }
   }
-  console.log(`  ✓ ${name} (${applied} statements, ${skipped} benign no-ops)`);
+  const skipNote = skipped > 0 ? `, ${skipped} benign no-ops` : "";
+  console.log(`  ✓ ${name} (${applied} statements${skipNote})`);
 }
 
 // ── Build migration list ─────────────────────────────────────────────────────
@@ -118,6 +186,10 @@ const appliedRows = wranglerJson("SELECT name FROM schema_migrations");
 const appliedSet = new Set(appliedRows.map((r) => r.name));
 const pending = all.filter((m) => !appliedSet.has(m.name));
 
+// Fresh replay = empty history: snapshot overlap is expected and benign
+// swallowing applies to the whole chain. Incremental = strict for new files.
+const freshReplay = appliedSet.size === 0;
+
 if (pending.length === 0) {
   console.log("Nothing to do — all migrations recorded.");
   process.exit(0);
@@ -137,7 +209,7 @@ if (baseline) {
 }
 
 // ── Safety: never replay onto an untracked existing database ────────────────
-if (appliedSet.size === 0) {
+if (freshReplay) {
   const existing = wranglerJson(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='shops'"
   );
@@ -154,6 +226,20 @@ if (appliedSet.size === 0) {
 console.log(`Pending: ${pending.map((m) => m.name).join(", ")}`);
 if (dryRun) process.exit(0);
 
+const startedAtIso = new Date().toISOString();
+let bookmark = null;
+if (remote) {
+  bookmark = captureBookmark();
+  if (bookmark) {
+    console.log(`Time Travel bookmark (pre-run restore point): ${bookmark}`);
+  } else {
+    console.warn(
+      `⚠ Could not capture a Time Travel bookmark — if recovery is needed, restore\n` +
+        `  by timestamp instead: --timestamp="${startedAtIso}"`
+    );
+  }
+}
+
 function guardSaysSkip(sql) {
   const m = sql.match(GUARD_RE);
   if (!m) return false;
@@ -162,13 +248,20 @@ function guardSaysSkip(sql) {
   return !cols.some((c) => c.name === column);
 }
 
-for (const m of pending) {
-  const sql = m.sql();
-  if (guardSaysSkip(sql)) {
-    console.log(`  ↷ ${m.name} skipped by replay-guard (schema already at target shape)`);
-  } else {
-    applyFile(m.name, sql);
+try {
+  for (const m of pending) {
+    const sql = m.sql();
+    const num = migrationNumber(m.name);
+    const strict = !freshReplay && num !== null && num > STRICT_AFTER;
+    if (guardSaysSkip(sql)) {
+      console.log(`  ↷ ${m.name} skipped by replay-guard (schema already at target shape)`);
+    } else {
+      applyFile(m.name, sql, strict);
+    }
+    wranglerJson(`INSERT INTO schema_migrations (name) VALUES ('${m.name}')`);
   }
-  wranglerJson(`INSERT INTO schema_migrations (name) VALUES ('${m.name}')`);
+} catch (err) {
+  if (remote) printRestoreGuidance(bookmark, startedAtIso);
+  throw err;
 }
 console.log(`Done — applied ${pending.length} migration(s).`);
