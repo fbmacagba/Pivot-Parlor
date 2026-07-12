@@ -32,6 +32,8 @@ export interface ResearchQueueMessage {
   /** Owner-chosen palette override (6-digit hex). Honoured only as a complete pair. */
   color_primary?: string;
   color_accent?: string;
+  /** Owner-chosen template (WS-6) — pins layout_mood. Absent = model's choice. */
+  template?: string;
 }
 
 export interface ResearchSpec {
@@ -109,6 +111,21 @@ const LAYOUT_MOOD_TO_TEMPLATE: Record<string, string> = {
   "fresh-pastel": "fresh",
 };
 
+/** Reverse map: an owner-picked template pins the layout_mood (WS-6). */
+const TEMPLATE_TO_LAYOUT_MOOD: Record<string, string> = {
+  luxury: "luxury-dark",
+  minimal: "modern-minimal",
+  vibrant: "bold-vibrant",
+  editorial: "warm-editorial",
+  classic: "classic-traditional",
+  fresh: "fresh-pastel",
+};
+
+function layoutMoodForTemplate(template: string | undefined): string | null {
+  if (typeof template !== "string") return null;
+  return TEMPLATE_TO_LAYOUT_MOOD[template.trim().toLowerCase()] ?? null;
+}
+
 const SYSTEM_PROMPT =
   "You are a world-class brand strategist and visual designer specialising in barber shops and beauty salons. Your job is to produce a complete visual identity and content specification for a high-converting booking website. You have deep knowledge of what makes barber and beauty shop websites convert visitors into bookings. Return valid JSON only. No markdown. No backticks. No explanation.";
 
@@ -155,13 +172,17 @@ async function updateGenerationJob(
 function buildUserPrompt(msg: ResearchQueueMessage): string {
   const servicesText = msg.services.map((s) => `${s.name} (£${s.price_gbp}, ${s.duration_min} min)`).join("; ");
   const style = msg.styleNotes?.trim() || "not provided";
+  const pinnedMood = layoutMoodForTemplate(msg.template);
+  const moodLine = pinnedMood
+    ? `The owner has explicitly chosen the "${msg.template}" template: layout_mood MUST be "${pinnedMood}", and the palette, typography and imagery must express that mood.\n`
+    : "";
   return `Shop name: ${msg.shopName}
 Shop type: ${msg.shopType}
 Style notes from owner: ${style}
 Services offered: ${servicesText || "none listed"}
 Has existing logo: ${msg.hasLogoFile}
 
-Produce a complete visual and content specification. Return this exact JSON structure with no other text:
+${moodLine}Produce a complete visual and content specification. Return this exact JSON structure with no other text:
 {
   "palette": {
     "primary": string (hex — dominant brand colour, chosen to match shop personality and style notes),
@@ -511,6 +532,10 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       spec.palette.primary = input.color_primary;
       spec.palette.accent = input.color_accent;
     }
+    // Honour an owner-chosen template the same way: the prompt asked the
+    // model to comply, but the owner's pick must win even if it strayed.
+    const pinnedMood = layoutMoodForTemplate(input.template);
+    if (pinnedMood) spec.layout_mood = pinnedMood;
     const fullJson = JSON.stringify(spec);
 
     const payload: GenResearchKvPayload = {

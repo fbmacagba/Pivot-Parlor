@@ -199,6 +199,8 @@ shops.get("/:shopId/site", async (c) => {
     brand_voice?: string | null;
     hero_cta?: string | null;
     about_title?: string | null;
+    palette_json?: string | null;
+    design_version?: number | null;
   };
   const designIntent = {
     trust_signals: safeJsonParse<string[]>(siteExtra.trust_signals_json) ?? [],
@@ -207,6 +209,10 @@ shops.get("/:shopId/site", async (c) => {
     brand_voice: siteExtra.brand_voice ?? null,
     hero_cta: siteExtra.hero_cta ?? null,
     about_title: siteExtra.about_title ?? null,
+    // WS-6 item 3: full research palette + the version gate that decides
+    // whether the web renders palette tokens (>= 2) or the legacy dark theme.
+    palette: safeJsonParse<Record<string, string>>(siteExtra.palette_json),
+    design_version: siteExtra.design_version ?? 1,
   };
 
   const cached = await c.env.KV.get(`site:${shop.slug}`);
@@ -1099,6 +1105,15 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
     const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
 
+    // Owner-chosen template (WS-6): forwarded to the research worker, which
+    // pins layout_mood to it. Anything outside the known set — including the
+    // "auto" / "Let AI decide" value — leaves the choice to the model.
+    const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
+    const ownerTemplate =
+      typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
+        ? body.template.trim().toLowerCase()
+        : undefined;
+
     const queuePayload = {
       jobId,
       shopId: shop.id,
@@ -1115,6 +1130,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       ...(hasColorOverride
         ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
         : {}),
+      ...(ownerTemplate ? { template: ownerTemplate } : {}),
     };
 
     if (!c.env.site_research_queue) {

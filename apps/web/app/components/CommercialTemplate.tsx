@@ -86,7 +86,7 @@ function StarRow({ rating, className }: { rating: number; className?: string }) 
   return (
     <span className={className} aria-hidden>
       {[1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className={i <= full ? "text-[color:var(--color-accent)]" : "text-white/25"}>
+        <span key={i} className={i <= full ? "text-[color:var(--st-accent-text)]" : "text-[color:var(--st-ink-25)]"}>
           ★
         </span>
       ))}
@@ -107,14 +107,14 @@ function HoursTable({ hoursJson }: { hoursJson?: string }) {
   ] as const;
 
   return (
-    <table className="w-full text-left text-sm text-white/80">
+    <table className="w-full text-left text-sm text-[color:var(--st-ink-80)]">
       <tbody>
         {rows.map(({ k, label }) => {
           const v = hours?.[k];
           const text = v == null || v === "" ? "Closed" : String(v);
           return (
-            <tr key={k} className="border-b border-white/10">
-              <th className="py-3 pr-4 font-medium text-white/90">{label}</th>
+            <tr key={k} className="border-b border-[color:var(--st-line-10)]">
+              <th className="py-3 pr-4 font-medium text-[color:var(--st-ink-90)]">{label}</th>
               <td className="py-3">{text}</td>
             </tr>
           );
@@ -219,11 +219,11 @@ export default function CommercialTemplate({
   const sections: Record<SectionKey, ReactNode> = {
     // Trust line (replaces hero-metric strip)
     trust: (
-      <section id="stats-bar" className="scroll-mt-24 border-y border-white/10 bg-white/[0.03] py-6">
-        <div className="mx-auto max-w-7xl px-4 text-center text-sm text-white/70 md:px-6 md:text-base">
+      <section id="stats-bar" className="scroll-mt-24 border-y border-[color:var(--st-line-10)] bg-[color:var(--st-card-faint)] py-6">
+        <div className="mx-auto max-w-7xl px-4 text-center text-sm text-[color:var(--st-ink-70)] md:px-6 md:text-base">
           {hasSocialProof ? (
             <>
-              <span className="font-semibold text-[color:var(--color-accent)]">{statsRating}★</span>
+              <span className="font-semibold text-[color:var(--st-accent-text)]">{statsRating}★</span>
               {" "}average · {statsHappy} happy clients · {trustSignals.length > 0 ? trustSignals.join(" · ") : "Same-day slots when available"}
             </>
           ) : (
@@ -236,11 +236,11 @@ export default function CommercialTemplate({
     services: (
       <section id="services" className="relative scroll-mt-24 overflow-hidden px-4 py-16 md:px-6 md:py-24">
         {archetype.glow && (
-          <div className="pointer-events-none absolute -right-32 top-8 h-72 w-72 rounded-full bg-[color:var(--color-accent)]/[0.07] blur-3xl" aria-hidden />
+          <div className="pointer-events-none absolute -right-32 top-8 h-72 w-72 rounded-full bg-[color:var(--st-accent-07)] blur-3xl" aria-hidden />
         )}
         <div className="relative mx-auto max-w-7xl">
-          <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">Services</h2>
-          <p className="mt-2 max-w-2xl text-white/60">Choose a treatment and book in a few clicks.</p>
+          <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--st-ink)]">Services</h2>
+          <p className="mt-2 max-w-2xl text-[color:var(--st-ink-60)]">Choose a treatment and book in a few clicks.</p>
 
           {categories.length > 1 && (
             <div className="mt-8 flex flex-wrap gap-2">
@@ -248,8 +248,8 @@ export default function CommercialTemplate({
                 <button key={c} type="button" onClick={() => setCategory(c)}
                   className={`min-h-12 rounded-full px-5 text-sm font-medium transition ${
                     category === c
-                      ? "bg-[color:var(--color-accent)] text-black"
-                      : "border border-white/20 text-white/80 hover:border-[color:var(--color-accent)]"
+                      ? "bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)]"
+                      : "border border-[color:var(--st-line-20)] text-[color:var(--st-ink-80)] hover:border-[color:var(--color-accent)]"
                   }`}>
                   {c}
                 </button>
@@ -260,15 +260,15 @@ export default function CommercialTemplate({
           <div className={`mt-10 grid gap-6 sm:grid-cols-2 ${servicesColsClass}`}>
             {services.length === 0
               ? [0, 1, 2].map((i) => (
-                  <article key={`placeholder-${i}`} className="group flex flex-col overflow-hidden rounded-2xl border border-dashed border-white/20 bg-white/[0.03] shadow-xl shadow-black/20">
-                    <div className="relative aspect-[4/3] overflow-hidden bg-[color:var(--color-accent)]/15">
-                      <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-[color:var(--color-accent)]/25 to-transparent opacity-70" />
+                  <article key={`placeholder-${i}`} className="group flex flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-dashed border-[color:var(--st-line-20)] bg-[color:var(--st-card-faint)] shadow-xl shadow-[color:var(--st-shadow-20)]">
+                    <div className="relative aspect-[4/3] overflow-hidden bg-[color:var(--st-accent-15)]">
+                      <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-[color:var(--st-accent-25)] to-transparent opacity-70" />
                     </div>
                     <div className="flex flex-1 flex-col p-6">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--color-accent)]/90">Coming soon</p>
-                      <div className="mt-3 h-6 w-3/4 animate-pulse rounded bg-white/10" />
-                      <div className="mt-3 h-4 w-1/2 animate-pulse rounded bg-white/10" />
-                      <div className="mt-4 h-12 w-full animate-pulse rounded-lg bg-white/10" />
+                      <p className="text-xs font-semibold uppercase tracking-wide text-[color:var(--st-accent-text)]">Coming soon</p>
+                      <div className="mt-3 h-6 w-3/4 animate-pulse rounded bg-[color:var(--st-chip)]" />
+                      <div className="mt-3 h-4 w-1/2 animate-pulse rounded bg-[color:var(--st-chip)]" />
+                      <div className="mt-4 h-12 w-full animate-pulse rounded-[var(--st-r-sm)] bg-[color:var(--st-chip)]" />
                     </div>
                   </article>
                 ))
@@ -280,7 +280,7 @@ export default function CommercialTemplate({
                   // (mirrors the filter-chip exclusion above).
                   const showCategory = !isGenericCategory(svc.category);
                   return (
-                    <article key={svc.id} className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] shadow-xl shadow-black/25 transition duration-300 hover:-translate-y-0.5 hover:border-[color:var(--color-accent)]/40 hover:bg-white/[0.06]">
+                    <article key={svc.id} className="group relative flex flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card)] shadow-xl shadow-[color:var(--st-shadow-25)] transition duration-300 hover:-translate-y-0.5 hover:border-[color:var(--st-accent-40)] hover:bg-[color:var(--st-card-hover)]">
                       {hasImage ? (
                         <div className="relative aspect-[16/10] overflow-hidden">
                           <img
@@ -293,24 +293,24 @@ export default function CommercialTemplate({
                           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 to-transparent" aria-hidden />
                         </div>
                       ) : (
-                        <div className="aspect-[16/5] w-full bg-gradient-to-br from-[color:var(--color-accent)]/25 via-[color:var(--color-accent)]/[0.08] to-transparent" aria-hidden />
+                        <div className="aspect-[16/5] w-full bg-gradient-to-br from-[color:var(--st-accent-25)] via-[color:var(--st-accent-08)] to-transparent" aria-hidden />
                       )}
                       <div className="flex flex-1 flex-col p-6">
                         {showCategory && (
-                          <p className="mb-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--color-accent)]">{svc.category}</p>
+                          <p className="mb-1.5 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-[color:var(--st-accent-text)]">{svc.category}</p>
                         )}
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="pp-heading text-xl font-semibold leading-snug text-white">{svc.name}</h3>
-                          <span className="pp-heading shrink-0 text-2xl font-bold leading-none text-[color:var(--color-accent)]">£{formatPrice(svc.price_gbp)}</span>
+                          <h3 className="pp-heading text-xl font-semibold leading-snug text-[color:var(--st-ink)]">{svc.name}</h3>
+                          <span className="pp-heading shrink-0 text-2xl font-bold leading-none text-[color:var(--st-accent-text)]">£{formatPrice(svc.price_gbp)}</span>
                         </div>
-                        <p className="mt-2 text-sm text-white/55 tabular-nums">{svc.duration_minutes} min</p>
+                        <p className="mt-2 text-sm text-[color:var(--st-ink-55)] tabular-nums">{svc.duration_minutes} min</p>
                         {svc.description ? (
-                          <p className="mt-3 flex-1 text-sm leading-relaxed text-white/55 line-clamp-2">{svc.description}</p>
+                          <p className="mt-3 flex-1 text-sm leading-relaxed text-[color:var(--st-ink-55)] line-clamp-2">{svc.description}</p>
                         ) : (
                           <div className="flex-1" aria-hidden />
                         )}
                         <Link to={`/${shopSlug}/book?serviceId=${encodeURIComponent(svc.id)}`}
-                          className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-xl bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black transition hover:brightness-110">
+                          className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition hover:brightness-110">
                           Book this <span aria-hidden>→</span>
                         </Link>
                       </div>
@@ -323,21 +323,21 @@ export default function CommercialTemplate({
     ),
     // Trust / about
     about: (
-      <section id="about" className="border-t border-white/10 bg-black/20 px-4 py-16 md:px-6 md:py-24">
+      <section id="about" className="border-t border-[color:var(--st-line-10)] bg-[color:var(--st-panel-2)] px-4 py-16 md:px-6 md:py-24">
         <div className="mx-auto max-w-7xl">
           <div className={`grid gap-12 lg:gap-16 ${aboutText ? "lg:grid-cols-12" : "lg:grid-cols-1"}`}>
             {aboutText ? (
               <div className="lg:col-span-7">
-                <div className="rounded-xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
-                  <h2 className="pp-heading text-[clamp(1.5rem,3.5vw,2rem)] font-bold text-white">{aboutHeading}</h2>
-                  <p className="mt-4 whitespace-pre-line text-base leading-relaxed text-white/75 md:text-lg">{aboutText}</p>
+                <div className="rounded-[var(--st-r-md)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card)] p-6 md:p-8">
+                  <h2 className="pp-heading text-[clamp(1.5rem,3.5vw,2rem)] font-bold text-[color:var(--st-ink)]">{aboutHeading}</h2>
+                  <p className="mt-4 whitespace-pre-line text-base leading-relaxed text-[color:var(--st-ink-75)] md:text-lg">{aboutText}</p>
                 </div>
               </div>
             ) : null}
             {archetype.pillarStyle === "chips" ? (
               <ul className={`flex flex-wrap content-center items-start gap-3 ${aboutText ? "lg:col-span-5" : "mx-auto w-full max-w-xl justify-center"}`}>
                 {pillars.map((pillar) => (
-                  <li key={pillar.title} className="inline-flex min-h-11 items-center rounded-full border border-[color:var(--color-accent)]/50 bg-[color:var(--color-accent)]/10 px-5 pp-heading text-sm font-semibold text-white/90">
+                  <li key={pillar.title} className="inline-flex min-h-11 items-center rounded-full border border-[color:var(--st-accent-50)] bg-[color:var(--st-accent-10)] px-5 pp-heading text-sm font-semibold text-[color:var(--st-ink-90)]">
                     {pillar.title}
                   </li>
                 ))}
@@ -346,12 +346,12 @@ export default function CommercialTemplate({
               <ul className={`flex flex-col gap-8 lg:justify-center ${aboutText ? "lg:col-span-5" : "mx-auto w-full max-w-xl"}`}>
                 {pillars.map((pillar) => (
                   <li key={pillar.title} className="flex gap-4">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[color:var(--color-accent)]/20 text-[color:var(--color-accent)]">
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--st-accent-20)] text-[color:var(--st-accent-text)]">
                       <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">{pillar.icon}</svg>
                     </span>
                     <div>
-                      <h3 className="pp-heading text-lg font-semibold text-white">{pillar.title}</h3>
-                      {pillar.body ? <p className="mt-1 text-sm text-white/60">{pillar.body}</p> : null}
+                      <h3 className="pp-heading text-lg font-semibold text-[color:var(--st-ink)]">{pillar.title}</h3>
+                      {pillar.body ? <p className="mt-1 text-sm text-[color:var(--st-ink-60)]">{pillar.body}</p> : null}
                     </div>
                   </li>
                 ))}
@@ -364,15 +364,15 @@ export default function CommercialTemplate({
     // Team
     team:
       staff.length > 0 ? (
-        <section className="border-t border-white/10 bg-black/15 px-4 py-16 md:px-6 md:py-24">
+        <section className="border-t border-[color:var(--st-line-10)] bg-[color:var(--st-panel-1)] px-4 py-16 md:px-6 md:py-24">
           <div className="mx-auto max-w-7xl">
-            <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">Meet the team</h2>
+            <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--st-ink)]">Meet the team</h2>
             <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
               {staff.map((m) => {
                 const initials = m.display_name.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase();
                 return (
-                  <article key={m.id} className="flex flex-col rounded-2xl border border-white/10 bg-white/5 p-5 text-center">
-                    <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[color:var(--color-accent)]/25 text-xl font-bold text-[color:var(--color-accent)]">
+                  <article key={m.id} className="flex flex-col rounded-[var(--st-r-lg)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card-5)] p-5 text-center">
+                    <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[color:var(--st-accent-25)] text-xl font-bold text-[color:var(--st-accent-text)]">
                       {m.avatar_url ? (
                         <img
                           src={m.avatar_url}
@@ -384,10 +384,10 @@ export default function CommercialTemplate({
                       )}
                     </div>
                     <h3 className="mt-4 pp-heading text-lg font-semibold">{m.display_name}</h3>
-                    {m.speciality && <p className="text-sm text-[color:var(--color-accent)]">{m.speciality}</p>}
-                    {m.bio && <p className="mt-3 text-sm text-white/55 line-clamp-4">{m.bio}</p>}
+                    {m.speciality && <p className="text-sm text-[color:var(--st-accent-text)]">{m.speciality}</p>}
+                    {m.bio && <p className="mt-3 text-sm text-[color:var(--st-ink-55)] line-clamp-4">{m.bio}</p>}
                     <Link to={`/${shopSlug}/book?staffId=${encodeURIComponent(m.id)}`}
-                      className="mt-5 inline-flex min-h-12 items-center justify-center rounded-lg border border-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--color-accent)]">
+                      className="mt-5 inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] border border-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--st-accent-text)]">
                       Book with {m.display_name.split(" ")[0]}
                     </Link>
                   </article>
@@ -399,23 +399,23 @@ export default function CommercialTemplate({
       ) : null,
     // How it works
     how: (
-      <section className="relative overflow-hidden border-t border-white/10 bg-black/20 px-4 py-16 md:px-6 md:py-24">
+      <section className="relative overflow-hidden border-t border-[color:var(--st-line-10)] bg-[color:var(--st-panel-2)] px-4 py-16 md:px-6 md:py-24">
         {archetype.glow && (
-          <div className="pointer-events-none absolute left-1/2 top-0 h-64 w-[40rem] max-w-full -translate-x-1/2 rounded-full bg-[color:var(--color-accent)]/10 blur-3xl" aria-hidden />
+          <div className="pointer-events-none absolute left-1/2 top-0 h-64 w-[40rem] max-w-full -translate-x-1/2 rounded-full bg-[color:var(--st-accent-10)] blur-3xl" aria-hidden />
         )}
         <div className="relative mx-auto max-w-7xl">
-          <h2 className="text-center pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">How it works</h2>
-          <p className="mx-auto mt-3 max-w-md text-center text-white/55">{archetype.howSub}</p>
+          <h2 className="text-center pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--st-ink)]">How it works</h2>
+          <p className="mx-auto mt-3 max-w-md text-center text-[color:var(--st-ink-55)]">{archetype.howSub}</p>
           {archetype.stepsStyle === "row" ? (
             <ol className="mx-auto mt-12 flex w-full max-w-2xl flex-col gap-8">
               {steps.map((step) => (
                 <li key={step.n} className="flex gap-5 text-left">
-                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[color:var(--color-accent)]/15 pp-heading text-lg font-bold text-[color:var(--color-accent)] ring-1 ring-[color:var(--color-accent)]/25">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[color:var(--st-accent-15)] pp-heading text-lg font-bold text-[color:var(--st-accent-text)] ring-1 ring-[color:var(--st-accent-25)]">
                     {step.n}
                   </span>
                   <div>
-                    <h3 className="text-xl font-semibold text-white pp-heading">{step.t}</h3>
-                    <p className="mt-2 text-sm text-white/60">{step.d}</p>
+                    <h3 className="text-xl font-semibold text-[color:var(--st-ink)] pp-heading">{step.t}</h3>
+                    <p className="mt-2 text-sm text-[color:var(--st-ink-60)]">{step.d}</p>
                   </div>
                 </li>
               ))}
@@ -424,12 +424,12 @@ export default function CommercialTemplate({
             <div className="mt-12 grid gap-8 md:grid-cols-3">
               {steps.map((step) => (
                 <div key={step.n} className="text-center">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-[color:var(--color-accent)]/15 text-[color:var(--color-accent)] ring-1 ring-[color:var(--color-accent)]/25">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[var(--st-r-lg)] bg-[color:var(--st-accent-15)] text-[color:var(--st-accent-text)] ring-1 ring-[color:var(--st-accent-25)]">
                     <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.6} stroke="currentColor">{step.icon}</svg>
                   </div>
-                  <p className="mt-4 text-sm font-bold text-[color:var(--color-accent)]">Step {step.n}</p>
-                  <h3 className="mt-2 text-xl font-semibold text-white pp-heading">{step.t}</h3>
-                  <p className="mt-2 text-sm text-white/60">{step.d}</p>
+                  <p className="mt-4 text-sm font-bold text-[color:var(--st-accent-text)]">Step {step.n}</p>
+                  <h3 className="mt-2 text-xl font-semibold text-[color:var(--st-ink)] pp-heading">{step.t}</h3>
+                  <p className="mt-2 text-sm text-[color:var(--st-ink-60)]">{step.d}</p>
                 </div>
               ))}
             </div>
@@ -442,14 +442,14 @@ export default function CommercialTemplate({
       sortedReviews.length > 0 ? (
         <section className="px-4 py-16 md:px-6 md:py-24">
           <div className="mx-auto max-w-7xl">
-            <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">Reviews</h2>
+            <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--st-ink)]">Reviews</h2>
             <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {sortedReviews.map((r) => (
-                <blockquote key={r.id} className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                <blockquote key={r.id} className="rounded-[var(--st-r-lg)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card-5)] p-6">
                   <StarRow rating={r.rating} className="text-base" />
-                  <p className="mt-3 text-white/90">&ldquo;{r.body}&rdquo;</p>
-                  <footer className="mt-4 flex items-center justify-between text-sm text-white/50">
-                    <cite className="not-italic font-medium text-white/70">{r.customer_name}</cite>
+                  <p className="mt-3 text-[color:var(--st-ink-90)]">&ldquo;{r.body}&rdquo;</p>
+                  <footer className="mt-4 flex items-center justify-between text-sm text-[color:var(--st-ink-50)]">
+                    <cite className="not-italic font-medium text-[color:var(--st-ink-70)]">{r.customer_name}</cite>
                     <span>{formatReviewDate(r.created_at)}</span>
                   </footer>
                 </blockquote>
@@ -461,24 +461,24 @@ export default function CommercialTemplate({
     // Location
     location:
       hasAddress ? (
-        <section className="border-t border-white/10 px-4 py-16 md:px-6 md:py-24">
+        <section className="border-t border-[color:var(--st-line-10)] px-4 py-16 md:px-6 md:py-24">
           <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-2">
             <div>
-              <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-white">Location &amp; hours</h2>
+              <h2 className="pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--st-ink)]">Location &amp; hours</h2>
               {settings.phone && (
                 <p className="mt-4 text-lg">
-                  <a href={`tel:${settings.phone.replace(/\s/g, "")}`} className="text-[color:var(--color-accent)]">{settings.phone}</a>
+                  <a href={`tel:${settings.phone.replace(/\s/g, "")}`} className="text-[color:var(--st-accent-text)]">{settings.phone}</a>
                 </p>
               )}
-              <p className="mt-2 text-white/70">{settings.address}</p>
+              <p className="mt-2 text-[color:var(--st-ink-70)]">{settings.address}</p>
               <div className="mt-8"><HoursTable hoursJson={settings.hours_json} /></div>
             </div>
-            <div className="min-h-[280px] overflow-hidden rounded-2xl border border-white/10 bg-white/5">
+            <div className="min-h-[280px] overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card-5)]">
               {settings.lat != null && settings.lng != null ? (
                 <iframe title="Map" className="h-full min-h-[280px] w-full border-0" loading="lazy" referrerPolicy="no-referrer-when-downgrade"
                   src={`https://www.google.com/maps?q=${settings.lat}%2C${settings.lng}&z=15&output=embed`} />
               ) : (
-                <div className="flex h-full min-h-[280px] items-center justify-center p-6 text-center text-white/60">{settings.address}</div>
+                <div className="flex h-full min-h-[280px] items-center justify-center p-6 text-center text-[color:var(--st-ink-60)]">{settings.address}</div>
               )}
             </div>
           </div>
@@ -536,12 +536,14 @@ export default function CommercialTemplate({
               </h2>
             ) : null}
 
+            {/* Hero sits over a dark image scrim in both schemes, so its copy
+                stays literal white — only accent-filled controls tokenize. */}
             <div className={`mt-10 flex flex-wrap gap-4${heroCentered ? " justify-center" : ""}`}>
-              <Link to={`/${shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-xl bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-black shadow-lg shadow-black/30 transition hover:brightness-110">
+              <Link to={`/${shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-black/30 transition hover:brightness-110">
                 {bookLabel} →
               </Link>
               <button type="button" onClick={() => scrollToId("services")}
-                className="inline-flex min-h-[3.25rem] items-center justify-center rounded-xl border-2 border-white/50 bg-transparent px-8 pp-heading text-base font-semibold text-white transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]">
+                className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] border-2 border-white/50 bg-transparent px-8 pp-heading text-base font-semibold text-white transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]">
                 See Our Services
               </button>
             </div>
@@ -564,18 +566,18 @@ export default function CommercialTemplate({
       ))}
 
       {/* Final CTA */}
-      <section className="relative overflow-hidden border-t border-white/10 bg-[color:var(--color-accent)]/10 px-4 py-20 md:px-6 md:py-28">
+      <section className="relative overflow-hidden border-t border-[color:var(--st-line-10)] bg-[color:var(--st-accent-10)] px-4 py-20 md:px-6 md:py-28">
         {archetype.glow && (
-          <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-[44rem] max-w-full -translate-x-1/2 -translate-y-1/2 rounded-full bg-[color:var(--color-accent)]/15 blur-3xl" aria-hidden />
+          <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-[44rem] max-w-full -translate-x-1/2 -translate-y-1/2 rounded-full bg-[color:var(--st-accent-15)] blur-3xl" aria-hidden />
         )}
         <div className="relative mx-auto max-w-3xl text-center">
-          <h2 className="pp-heading text-[clamp(1.85rem,4.5vw,3rem)] font-bold leading-tight text-white">{archetype.ctaHeading}</h2>
-          <p className="mt-4 text-lg text-white/70">{archetype.ctaSub}</p>
+          <h2 className="pp-heading text-[clamp(1.85rem,4.5vw,3rem)] font-bold leading-tight text-[color:var(--st-ink)]">{archetype.ctaHeading}</h2>
+          <p className="mt-4 text-lg text-[color:var(--st-ink-70)]">{archetype.ctaSub}</p>
           <Link to={`/${shopSlug}/book`}
-            className="mt-10 inline-flex min-h-14 min-w-[14rem] items-center justify-center rounded-xl bg-[color:var(--color-accent)] px-12 pp-heading text-lg font-semibold text-black shadow-lg shadow-[color:var(--color-accent)]/25 transition hover:brightness-110">
+            className="mt-10 inline-flex min-h-14 min-w-[14rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-12 pp-heading text-lg font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-accent-25)] transition hover:brightness-110">
             {bookLabel} →
           </Link>
-          <p className="mt-6 text-sm text-white/55">Book in under a minute · No account needed</p>
+          <p className="mt-6 text-sm text-[color:var(--st-ink-55)]">Book in under a minute · No account needed</p>
         </div>
       </section>
     </CommercialShopChrome>

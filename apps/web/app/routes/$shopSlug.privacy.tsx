@@ -29,7 +29,7 @@ export default function ShopPrivacyPolicy() {
       <ShopLegalDocument title="Privacy Policy" shopName={shopName} address={address}>
 
         {/* 1. Who we are */}
-        <h2 className="text-lg font-semibold text-white/90">1. Who We Are</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">1. Who We Are</h2>
         <p>
           <strong>{shopName}</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) is the data
           controller responsible for your personal data collected through this website and booking service, which is
@@ -44,7 +44,7 @@ export default function ShopPrivacyPolicy() {
         </p>
 
         {/* 2. Data we collect */}
-        <h2 className="text-lg font-semibold text-white/90">2. Personal Data We Collect</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">2. Personal Data We Collect</h2>
         <p>We collect and process the following categories of personal data:</p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
@@ -73,7 +73,7 @@ export default function ShopPrivacyPolicy() {
         </p>
 
         {/* 3. How we use your data */}
-        <h2 className="text-lg font-semibold text-white/90">3. How We Use Your Personal Data</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">3. How We Use Your Personal Data</h2>
         <p>We use your personal data for the following purposes and on the following lawful bases:</p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
@@ -106,7 +106,7 @@ export default function ShopPrivacyPolicy() {
         </p>
 
         {/* 4. Data sharing */}
-        <h2 className="text-lg font-semibold text-white/90">4. Who We Share Your Data With</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">4. Who We Share Your Data With</h2>
         <p>
           We do not sell your personal data. We may share it with the following third parties, all of whom are
           required to process your data securely and in accordance with the law:
@@ -136,7 +136,7 @@ export default function ShopPrivacyPolicy() {
         </ul>
 
         {/* 5. Data retention */}
-        <h2 className="text-lg font-semibold text-white/90">5. Data Retention</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">5. Data Retention</h2>
         <p>
           We retain personal data only for as long as necessary to fulfil the purposes for which it was
           collected, including for the purposes of satisfying any legal, accounting, or reporting requirements.
@@ -151,7 +151,7 @@ export default function ShopPrivacyPolicy() {
         </ul>
 
         {/* 6. Your rights */}
-        <h2 className="text-lg font-semibold text-white/90">6. Your Rights Under UK GDPR</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">6. Your Rights Under UK GDPR</h2>
         <p>Under UK GDPR, you have the following rights in relation to your personal data:</p>
         <ul className="list-disc space-y-1 pl-5">
           <li><strong>Right of access</strong> — to request a copy of the personal data we hold about you.</li>
@@ -171,7 +171,7 @@ export default function ShopPrivacyPolicy() {
             href="https://ico.org.uk"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-white/60 hover:text-white/90"
+            className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
           >
             ico.org.uk
           </a>{" "}
@@ -179,7 +179,7 @@ export default function ShopPrivacyPolicy() {
         </p>
 
         {/* 7. Security */}
-        <h2 className="text-lg font-semibold text-white/90">7. Data Security</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">7. Data Security</h2>
         <p>
           We have implemented appropriate technical and organisational measures to protect your personal data
           against accidental loss, unauthorised access, disclosure, alteration, or destruction. These measures
@@ -192,17 +192,17 @@ export default function ShopPrivacyPolicy() {
         </p>
 
         {/* 8. Cookies */}
-        <h2 className="text-lg font-semibold text-white/90">8. Cookies</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">8. Cookies</h2>
         <p>
           Our website uses cookies and similar technologies. Please see our{" "}
-          <a href={`/${slug}/cookies`} className="underline text-white/60 hover:text-white/90">
+          <a href={`/${slug}/cookies`} className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]">
             Cookie Policy
           </a>{" "}
           for full details on what cookies we use, why, and how to manage your preferences.
         </p>
 
         {/* 9. Third-party links */}
-        <h2 className="text-lg font-semibold text-white/90">9. Third-Party Links</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">9. Third-Party Links</h2>
         <p>
           Our website may include links to third-party websites, plug-ins, and applications. Clicking on those
           links may allow third parties to collect or share data about you. We do not control those third-party
@@ -211,7 +211,7 @@ export default function ShopPrivacyPolicy() {
         </p>
 
         {/* 10. Changes */}
-        <h2 className="text-lg font-semibold text-white/90">10. Changes to This Policy</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">10. Changes to This Policy</h2>
         <p>
           We may update this Privacy Policy from time to time. Any changes will be posted on this page with an
           updated &ldquo;Last updated&rdquo; date. We encourage you to review this policy periodically.

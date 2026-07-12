@@ -1,6 +1,7 @@
 import { Link } from "@remix-run/react";
 import { MessageCircle, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { resolveSiteTheme } from "@repo/utils";
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 
@@ -33,7 +34,7 @@ function renderMarkdownLinks(text: string): ReactNode {
     if (isSafeChatHref(href)) {
       parts.push(
         <a key={`chat-md-${key++}`} href={href} target="_blank" rel="noopener noreferrer"
-          className="font-medium underline text-[color:var(--color-accent)]">
+          className="font-medium underline text-[color:var(--st-accent-text)]">
           {label}
         </a>
       );
@@ -89,7 +90,7 @@ function looksLikeProduct(name: string, category?: string | null): boolean {
 function SocialIcon({ href, label, children }: { href: string; label: string; children: ReactNode }) {
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" aria-label={label}
-      className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-[color:var(--color-accent)]/20 hover:text-[color:var(--color-accent)]">
+      className="flex h-12 w-12 items-center justify-center rounded-full bg-[color:var(--st-chip)] text-[color:var(--st-ink)] transition hover:bg-[color:var(--st-accent-20)] hover:text-[color:var(--st-accent-text)]">
       {children}
     </a>
   );
@@ -97,8 +98,8 @@ function SocialIcon({ href, label, children }: { href: string; label: string; ch
 
 function navLinkClass(active: boolean) {
   return active
-    ? "pp-heading text-sm font-semibold text-[color:var(--color-accent)]"
-    : "pp-heading text-sm font-medium text-white/85 transition hover:text-[color:var(--color-accent)]";
+    ? "pp-heading text-sm font-semibold text-[color:var(--st-accent-text)]"
+    : "pp-heading text-sm font-medium text-[color:var(--st-ink-85)] transition hover:text-[color:var(--st-accent-text)]";
 }
 
 export type CommercialShopChromeProps = {
@@ -241,9 +242,20 @@ export function CommercialShopChrome({
     if (link.getAttribute("href") !== href) link.setAttribute("href", href);
   }, [fontHeadingName, fontBodyName]);
 
+  // Palette-driven theme tokens (WS-6 item 3+4). Legacy sites
+  // (design_version < 2 or no palette) resolve to the exact colours this
+  // component used to hardcode; v2 sites follow their generated palette,
+  // including light schemes, with WCAG-guarded ink and accent.
+  const theme = resolveSiteTheme({
+    color_primary: site.color_primary,
+    color_accent: site.color_accent,
+    palette: site.palette,
+    design_version: site.design_version,
+    shop_id: site.shop_id,
+  });
+
   const rootStyle = {
-    "--color-brand": site.color_primary || "#1a1a1a",
-    "--color-accent": site.color_accent || "#d4a853",
+    ...theme.vars,
     "--pp-font-heading": fontHeadingStack,
     "--pp-font-body": fontBodyStack,
   } as CSSProperties;
@@ -260,23 +272,23 @@ export function CommercialShopChrome({
   const li = settings.linkedin_url?.trim();
 
   return (
-    <div className="pp-commercial min-h-screen bg-[color:var(--color-brand)] text-white"
+    <div className="pp-commercial min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]"
       style={{ ...rootStyle, fontFamily: "var(--pp-font-body)" }}>
       <style dangerouslySetInnerHTML={{
         __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}`,
       }} />
 
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[color:var(--color-brand)]/95 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
           <Link to={`/${shopSlug}`} className="flex min-h-12 min-w-0 shrink-0 items-center gap-3" onClick={closeNav}>
             {logoSrc ? (
               <img src={logoSrc} alt="" className="h-10 w-auto max-w-[min(12rem,40vw)] object-contain" loading="eager" decoding="async" />
             ) : (
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--color-accent)]/50 bg-[color:var(--color-accent)]/15 pp-heading text-sm font-bold text-[color:var(--color-accent)]" aria-hidden>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--st-accent-50)] bg-[color:var(--st-accent-15)] pp-heading text-sm font-bold text-[color:var(--st-accent-text)]" aria-hidden>
                 {shopNameInitials(site.shop_name)}
               </span>
             )}
-            <span className="pp-heading truncate text-[clamp(1rem,2.5vw,1.25rem)] font-semibold text-white">
+            <span className="pp-heading truncate text-[clamp(1rem,2.5vw,1.25rem)] font-semibold text-[color:var(--st-ink)]">
               {site.shop_name}
             </span>
           </Link>
@@ -295,16 +307,16 @@ export function CommercialShopChrome({
                 straight there). ?shop= powers a "back to shop" link on /login. */}
             <Link
               to={`/login?shop=${encodeURIComponent(shopSlug)}`}
-              className="inline-flex min-h-12 items-center justify-center rounded-lg border border-white/40 px-5 pp-heading text-sm font-semibold text-white/90 transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]"
+              className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] border border-[color:var(--st-line-40)] px-5 pp-heading text-sm font-semibold text-[color:var(--st-ink-90)] transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--st-accent-text)]"
             >
               Sign in
             </Link>
             {bookingEnabled ? (
-              <Link to={`/${shopSlug}/book`} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-black">
+              <Link to={`/${shopSlug}/book`} className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]">
                 Book Now →
               </Link>
             ) : (
-              <Link to={`/${shopSlug}#services`} className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-black">
+              <Link to={`/${shopSlug}#services`} className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]">
                 View services →
               </Link>
             )}
@@ -314,11 +326,11 @@ export function CommercialShopChrome({
           <div className="flex items-center gap-2 md:hidden">
             {bookingEnabled ? (
               <Link to={`/${shopSlug}/book`} onClick={closeNav}
-                className="inline-flex min-h-12 items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black">
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]">
                 Book
               </Link>
             ) : null}
-            <button type="button" className="flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-lg border border-white/20"
+            <button type="button" className="flex min-h-12 min-w-12 shrink-0 items-center justify-center rounded-[var(--st-r-sm)] border border-[color:var(--st-line-20)]"
               aria-label="Open menu" onClick={() => setNavOpen(true)}>
               <span className="text-2xl">☰</span>
             </button>
@@ -326,24 +338,24 @@ export function CommercialShopChrome({
         </div>
 
         {navOpen ? (
-          <div className="fixed inset-0 z-50 flex flex-col bg-[color:var(--color-brand)] md:hidden">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <div className="fixed inset-0 z-50 flex flex-col bg-[color:var(--st-bg)] md:hidden">
+            <div className="flex items-center justify-between border-b border-[color:var(--st-line-10)] px-4 py-3">
               <span className="pp-heading truncate text-lg">{site.shop_name}</span>
               <button type="button" className="min-h-12 min-w-12 text-2xl" aria-label="Close menu" onClick={closeNav}>×</button>
             </div>
             <nav className="flex flex-1 flex-col gap-1 p-6" aria-label="Mobile">
-              <Link to={`/${shopSlug}`} className="min-h-12 rounded-lg px-4 py-3 text-left font-medium text-white/90" onClick={closeNav}>Home</Link>
-              <Link to={`/${shopSlug}#services`} className="min-h-12 rounded-lg px-4 py-3 text-left font-medium text-white/90" onClick={closeNav}>Services</Link>
+              <Link to={`/${shopSlug}`} className="min-h-12 rounded-[var(--st-r-sm)] px-4 py-3 text-left font-medium text-[color:var(--st-ink-90)]" onClick={closeNav}>Home</Link>
+              <Link to={`/${shopSlug}#services`} className="min-h-12 rounded-[var(--st-r-sm)] px-4 py-3 text-left font-medium text-[color:var(--st-ink-90)]" onClick={closeNav}>Services</Link>
               {bookingEnabled ? (
-                <Link to={`/${shopSlug}/book`} className="min-h-12 rounded-lg px-4 py-3 text-left font-medium text-white/90" onClick={closeNav}>Book</Link>
+                <Link to={`/${shopSlug}/book`} className="min-h-12 rounded-[var(--st-r-sm)] px-4 py-3 text-left font-medium text-[color:var(--st-ink-90)]" onClick={closeNav}>Book</Link>
               ) : null}
               {/* Owner / staff / customer sign-in — /login role-routes each to its own dashboard. */}
-              <div className="my-1 border-t border-white/10" aria-hidden />
-              <Link to={`/login?shop=${encodeURIComponent(shopSlug)}`} className="min-h-12 rounded-lg px-4 py-3 text-left font-medium text-white/90" onClick={closeNav}>Sign in</Link>
+              <div className="my-1 border-t border-[color:var(--st-line-10)]" aria-hidden />
+              <Link to={`/login?shop=${encodeURIComponent(shopSlug)}`} className="min-h-12 rounded-[var(--st-r-sm)] px-4 py-3 text-left font-medium text-[color:var(--st-ink-90)]" onClick={closeNav}>Sign in</Link>
               {bookingEnabled ? (
-                <Link to={`/${shopSlug}/book`} className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-black" onClick={closeNav}>Book Now →</Link>
+                <Link to={`/${shopSlug}/book`} className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)]" onClick={closeNav}>Book Now →</Link>
               ) : (
-                <Link to={`/${shopSlug}#services`} className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-lg bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-black" onClick={closeNav}>View services →</Link>
+                <Link to={`/${shopSlug}#services`} className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)]" onClick={closeNav}>View services →</Link>
               )}
             </nav>
           </div>
@@ -352,7 +364,7 @@ export function CommercialShopChrome({
 
       {children}
 
-      <footer className="border-t border-white/10 bg-black/30 px-4 py-12 md:px-6">
+      <footer className="border-t border-[color:var(--st-line-10)] bg-[color:var(--st-panel-3)] px-4 py-12 md:px-6">
         <div className="mx-auto max-w-7xl">
           <div className="flex flex-col gap-10 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-md">
@@ -360,7 +372,7 @@ export function CommercialShopChrome({
                 {logoSrc ? (
                   <img src={logoSrc} alt="" className="h-10 w-auto max-w-[min(12rem,40vw)] object-contain" loading="lazy" decoding="async" />
                 ) : (
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--color-accent)]/50 bg-[color:var(--color-accent)]/15 pp-heading text-sm font-bold text-[color:var(--color-accent)]" aria-hidden>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--st-accent-50)] bg-[color:var(--st-accent-15)] pp-heading text-sm font-bold text-[color:var(--st-accent-text)]" aria-hidden>
                     {shopNameInitials(site.shop_name)}
                   </span>
                 )}
@@ -386,21 +398,21 @@ export function CommercialShopChrome({
 
             <div className="flex flex-col gap-4">
               <nav className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-x-8" aria-label="Footer">
-                <Link to={`/${shopSlug}`} className="min-h-11 py-2 text-sm text-white/75 transition hover:text-[color:var(--color-accent)]">Home</Link>
-                <Link to={`/${shopSlug}#services`} className="min-h-11 py-2 text-sm text-white/75 transition hover:text-[color:var(--color-accent)]">Services</Link>
-                <Link to={`/${shopSlug}/privacy`} className="min-h-11 py-2 text-sm text-white/75 transition hover:text-[color:var(--color-accent)]">Privacy Policy</Link>
-                <Link to={`/${shopSlug}/terms`} className="min-h-11 py-2 text-sm text-white/75 transition hover:text-[color:var(--color-accent)]">Terms of Service</Link>
-                <Link to={`/${shopSlug}/cookies`} className="min-h-11 py-2 text-sm text-white/75 transition hover:text-[color:var(--color-accent)]">Cookie Policy</Link>
+                <Link to={`/${shopSlug}`} className="min-h-11 py-2 text-sm text-[color:var(--st-ink-75)] transition hover:text-[color:var(--st-accent-text)]">Home</Link>
+                <Link to={`/${shopSlug}#services`} className="min-h-11 py-2 text-sm text-[color:var(--st-ink-75)] transition hover:text-[color:var(--st-accent-text)]">Services</Link>
+                <Link to={`/${shopSlug}/privacy`} className="min-h-11 py-2 text-sm text-[color:var(--st-ink-75)] transition hover:text-[color:var(--st-accent-text)]">Privacy Policy</Link>
+                <Link to={`/${shopSlug}/terms`} className="min-h-11 py-2 text-sm text-[color:var(--st-ink-75)] transition hover:text-[color:var(--st-accent-text)]">Terms of Service</Link>
+                <Link to={`/${shopSlug}/cookies`} className="min-h-11 py-2 text-sm text-[color:var(--st-ink-75)] transition hover:text-[color:var(--st-accent-text)]">Cookie Policy</Link>
               </nav>
-              <button type="button" className="min-h-11 w-fit text-left text-sm text-white/60 hover:text-[color:var(--color-accent)]"
+              <button type="button" className="min-h-11 w-fit text-left text-sm text-[color:var(--st-ink-60)] hover:text-[color:var(--st-accent-text)]"
                 onClick={() => { setCookieForce(true); window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }}>
                 Manage cookie preferences
               </button>
             </div>
           </div>
 
-          <div className="mx-auto mt-10 max-w-7xl border-t border-white/10 pt-8 text-center text-sm text-white/45">
-            <a href="https://pivotparlor.com" target="_blank" rel="noopener noreferrer" className="text-[color:var(--color-accent)] hover:underline">
+          <div className="mx-auto mt-10 max-w-7xl border-t border-[color:var(--st-line-10)] pt-8 text-center text-sm text-[color:var(--st-ink-45)]">
+            <a href="https://pivotparlor.com" target="_blank" rel="noopener noreferrer" className="text-[color:var(--st-accent-text)] hover:underline">
               Powered by Pivot Parlor
             </a>
             <p className="mt-2">© {new Date().getFullYear()} {site.shop_name}</p>
@@ -411,28 +423,28 @@ export function CommercialShopChrome({
       <ShopSiteCookieConsent forceOpen={cookieForce} onClose={() => setCookieForce(false)} />
 
       {chatOpen ? (
-        <div className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-2xl border border-white/15 bg-[color:var(--color-brand)] shadow-2xl"
+        <div className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
           style={{ height: 480, maxHeight: "min(480px, calc(100vh - 7.5rem))" }}
           role="dialog" aria-label="Chat with the shop"
           onClick={(e) => e.stopPropagation()}>
 
           {/* Header */}
-          <header className="flex shrink-0 items-start gap-3 border-b border-white/10 px-4 py-3">
+          <header className="flex shrink-0 items-start gap-3 border-b border-[color:var(--st-line-10)] px-4 py-3">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               {logoSrc ? (
                 <img src={logoSrc} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" loading="lazy" decoding="async" />
               ) : (
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--color-accent)]/50 bg-[color:var(--color-accent)]/15 pp-heading text-xs font-bold text-[color:var(--color-accent)]" aria-hidden>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[color:var(--st-accent-50)] bg-[color:var(--st-accent-15)] pp-heading text-xs font-bold text-[color:var(--st-accent-text)]" aria-hidden>
                   {shopNameInitials(site.shop_name)}
                 </span>
               )}
               <div className="min-w-0">
-                <p className="pp-heading truncate text-sm font-semibold text-white">{site.shop_name}</p>
-                <p className="text-xs text-white/55">Ask us anything</p>
+                <p className="pp-heading truncate text-sm font-semibold text-[color:var(--st-ink)]">{site.shop_name}</p>
+                <p className="text-xs text-[color:var(--st-ink-55)]">Ask us anything</p>
               </div>
             </div>
             <button type="button"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 hover:text-white"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--st-r-sm)] text-[color:var(--st-ink-80)] transition hover:bg-[color:var(--st-chip)] hover:text-[color:var(--st-ink)]"
               aria-label="Close chat" onClick={handleClose}>
               <X className="h-5 w-5" strokeWidth={2} />
             </button>
@@ -446,7 +458,7 @@ export function CommercialShopChrome({
               <div className="space-y-3">
                 {/* Greeting bubble */}
                 <div className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-zinc-700 px-3 py-2 text-sm text-white/95">
+                  <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-[color:var(--st-bubble)] px-3 py-2 text-sm text-[color:var(--st-ink-95)]">
                     Hi! I&apos;m {site.shop_name}&apos;s assistant. What can I help you with?
                   </div>
                 </div>
@@ -454,14 +466,14 @@ export function CommercialShopChrome({
                 {/* Service chips */}
                 {treatmentServices.length > 0 && (
                   <div className="space-y-1.5">
-                    <p className="text-xs text-white/40 px-1">Our services</p>
+                    <p className="text-xs text-[color:var(--st-ink-40)] px-1">Our services</p>
                     <div className="flex flex-col gap-1.5">
                       {treatmentServices.map((svc) => (
                         <button key={svc.name} type="button"
                           onClick={() => sendChatMessage(`Tell me about ${svc.name}`)}
-                          className="flex items-center justify-between rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-left text-sm transition hover:border-[color:var(--color-accent)]/50 hover:bg-white/10 active:scale-[0.98]">
-                          <span className="font-medium text-white/90">{svc.name}</span>
-                          <span className="ml-3 shrink-0 font-semibold text-[color:var(--color-accent)]">
+                          className="flex items-center justify-between rounded-[var(--st-r-md)] border border-[color:var(--st-line-15)] bg-[color:var(--st-card-5)] px-3 py-2 text-left text-sm transition hover:border-[color:var(--st-accent-50)] hover:bg-[color:var(--st-chip)] active:scale-[0.98]">
+                          <span className="font-medium text-[color:var(--st-ink-90)]">{svc.name}</span>
+                          <span className="ml-3 shrink-0 font-semibold text-[color:var(--st-accent-text)]">
                             £{Number.isInteger(Number(svc.price_gbp)) ? Number(svc.price_gbp).toFixed(0) : Number(svc.price_gbp).toFixed(2)}
                           </span>
                         </button>
@@ -469,13 +481,13 @@ export function CommercialShopChrome({
                       {hasProducts && (
                         <button type="button"
                           onClick={() => sendChatMessage("What grooming products do you sell?")}
-                          className="flex items-center justify-between rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-left text-sm transition hover:border-[color:var(--color-accent)]/50 hover:bg-white/10 active:scale-[0.98]">
-                          <span className="font-medium text-white/90">Grooming products</span>
-                          <span className="ml-3 shrink-0 text-xs text-white/50">In-store</span>
+                          className="flex items-center justify-between rounded-[var(--st-r-md)] border border-[color:var(--st-line-15)] bg-[color:var(--st-card-5)] px-3 py-2 text-left text-sm transition hover:border-[color:var(--st-accent-50)] hover:bg-[color:var(--st-chip)] active:scale-[0.98]">
+                          <span className="font-medium text-[color:var(--st-ink-90)]">Grooming products</span>
+                          <span className="ml-3 shrink-0 text-xs text-[color:var(--st-ink-50)]">In-store</span>
                         </button>
                       )}
                     </div>
-                    <p className="text-xs text-white/30 px-1 pt-1">Tap a service or type your question below</p>
+                    <p className="text-xs text-[color:var(--st-ink-30)] px-1 pt-1">Tap a service or type your question below</p>
                   </div>
                 )}
               </div>
@@ -485,13 +497,13 @@ export function CommercialShopChrome({
             {chatMessages.map((m, i) =>
               m.role === "user" ? (
                 <div key={i} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[color:var(--color-accent)] px-3 py-2 text-sm text-black">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-[color:var(--color-accent)] px-3 py-2 text-sm text-[color:var(--st-on-accent)]">
                     {m.content}
                   </div>
                 </div>
               ) : (
                 <div key={i} className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-zinc-700 px-3 py-2 text-sm text-white/95">
+                  <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-[color:var(--st-bubble)] px-3 py-2 text-sm text-[color:var(--st-ink-95)]">
                     {renderMarkdownLinks(m.content)}
                   </div>
                 </div>
@@ -500,9 +512,9 @@ export function CommercialShopChrome({
 
             {chatSending ? (
               <div className="flex justify-start" aria-live="polite" aria-label="Assistant is typing">
-                <div className="flex items-center gap-1 rounded-2xl rounded-bl-md bg-zinc-700 px-4 py-3">
+                <div className="flex items-center gap-1 rounded-2xl rounded-bl-md bg-[color:var(--st-bubble)] px-4 py-3">
                   {[0, 1, 2].map((dot) => (
-                    <span key={dot} className="h-2 w-2 rounded-full bg-white/55"
+                    <span key={dot} className="h-2 w-2 rounded-full bg-[color:var(--st-ink-55)]"
                       style={{ animation: "pp-chat-bounce 1.2s ease-in-out infinite", animationDelay: `${dot * 0.2}s` }} />
                   ))}
                 </div>
@@ -511,13 +523,13 @@ export function CommercialShopChrome({
           </div>
 
           {!shopId ? (
-            <p className="shrink-0 border-t border-white/10 px-4 py-2 text-center text-xs text-white/50">
+            <p className="shrink-0 border-t border-[color:var(--st-line-10)] px-4 py-2 text-center text-xs text-[color:var(--st-ink-50)]">
               Chat is unavailable on this page.
             </p>
           ) : null}
 
           {/* Input bar */}
-          <div className="shrink-0 border-t border-white/10 p-3">
+          <div className="shrink-0 border-t border-[color:var(--st-line-10)] p-3">
             <div className="flex gap-2">
               <input type="text"
                 value={chatDraft}
@@ -525,13 +537,13 @@ export function CommercialShopChrome({
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendChatMessage(chatDraft); setChatDraft(""); } }}
                 placeholder="Type a message…"
                 disabled={!shopId || chatSending}
-                className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/15 bg-black/25 px-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-[color:var(--color-accent)]/50 disabled:opacity-50"
+                className="min-h-11 min-w-0 flex-1 rounded-[var(--st-r-md)] border border-[color:var(--st-line-15)] bg-[color:var(--st-field)] px-3 text-sm text-[color:var(--st-ink)] placeholder:text-[color:var(--st-ink-40)] outline-none focus:border-[color:var(--st-accent-50)] disabled:opacity-50"
                 aria-label="Message"
               />
               <button type="button"
                 onClick={() => { void sendChatMessage(chatDraft); setChatDraft(""); }}
                 disabled={!shopId || chatSending || !chatDraft.trim()}
-                className="shrink-0 rounded-xl bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-black transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-40">
+                className="shrink-0 rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-40">
                 Send
               </button>
             </div>
@@ -540,7 +552,7 @@ export function CommercialShopChrome({
       ) : null}
 
       <button type="button"
-        className="fixed bottom-6 right-6 z-[60] flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-black shadow-xl transition hover:opacity-95"
+        className="fixed bottom-6 right-6 z-[60] flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95"
         aria-label={chatOpen ? "Close chat" : "Open chat"}
         aria-expanded={chatOpen}
         onClick={() => { if (chatOpen) { handleClose(); } else { setChatOpen(true); } }}>

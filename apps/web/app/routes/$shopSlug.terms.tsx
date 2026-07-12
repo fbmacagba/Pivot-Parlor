@@ -29,7 +29,7 @@ export default function ShopTermsOfService() {
       <ShopLegalDocument title="Terms of Service" shopName={shopName} address={address}>
 
         {/* 1. About us */}
-        <h2 className="text-lg font-semibold text-white/90">1. About Us</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">1. About Us</h2>
         <p>
           These Terms of Service (&ldquo;Terms&rdquo;) govern your use of the website and online booking
           services operated by <strong>{shopName}</strong> (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or
@@ -44,7 +44,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 2. Our services */}
-        <h2 className="text-lg font-semibold text-white/90">2. Our Services</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">2. Our Services</h2>
         <p>
           We provide professional beauty and/or barbering services bookable through this website. Service
           descriptions, pricing, staff availability, and opening hours are provided for information purposes and
@@ -58,7 +58,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 3. Booking */}
-        <h2 className="text-lg font-semibold text-white/90">3. Making a Booking</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">3. Making a Booking</h2>
         <p>
           When making a booking through our website, you agree to provide accurate and complete information,
           including your name, contact details, and any relevant information about the service you require.
@@ -70,7 +70,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 4. Cancellation and no-shows */}
-        <h2 className="text-lg font-semibold text-white/90">4. Cancellations, Rescheduling, and No-Shows</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">4. Cancellations, Rescheduling, and No-Shows</h2>
         <p>
           We kindly ask that you give us as much notice as possible if you need to cancel or reschedule your
           appointment. Cancellations made with less than 24 hours&rsquo; notice, or failure to attend without
@@ -83,7 +83,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 5. Payments */}
-        <h2 className="text-lg font-semibold text-white/90">5. Prices and Payments</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">5. Prices and Payments</h2>
         <p>
           All prices displayed on this website are in pounds sterling (GBP) and are inclusive of VAT where
           applicable. Prices are subject to change; the price applicable to your booking will be confirmed at
@@ -96,7 +96,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 6. Your responsibilities */}
-        <h2 className="text-lg font-semibold text-white/90">6. Your Responsibilities</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">6. Your Responsibilities</h2>
         <ul className="list-disc space-y-1 pl-5">
           <li>Arrive on time for your appointment. Late arrivals may result in a shortened appointment.</li>
           <li>
@@ -110,7 +110,7 @@ export default function ShopTermsOfService() {
         </ul>
 
         {/* 7. Intellectual property */}
-        <h2 className="text-lg font-semibold text-white/90">7. Intellectual Property</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">7. Intellectual Property</h2>
         <p>
           All content on this website, including but not limited to text, images, graphics, logos, and software,
           is the property of <strong>{shopName}</strong> or its licensors and is protected by applicable
@@ -119,7 +119,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 8. Limitation of liability */}
-        <h2 className="text-lg font-semibold text-white/90">8. Limitation of Liability</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">8. Limitation of Liability</h2>
         <p>
           To the fullest extent permitted by applicable law, <strong>{shopName}</strong> shall not be liable
           for any indirect, incidental, special, consequential, or punitive damages arising from your use of
@@ -133,7 +133,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 9. Consumer rights */}
-        <h2 className="text-lg font-semibold text-white/90">9. Consumer Rights</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">9. Consumer Rights</h2>
         <p>
           If you are a consumer (i.e. you are using our services for personal, non-business purposes), nothing
           in these Terms affects your statutory rights under the Consumer Rights Act 2015 or any other
@@ -142,7 +142,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 10. Governing law */}
-        <h2 className="text-lg font-semibold text-white/90">10. Governing Law</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">10. Governing Law</h2>
         <p>
           These Terms are governed by and construed in accordance with the laws of England and Wales. Any
           disputes arising in connection with these Terms shall be subject to the exclusive jurisdiction of the
@@ -150,7 +150,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 11. Changes */}
-        <h2 className="text-lg font-semibold text-white/90">11. Changes to These Terms</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">11. Changes to These Terms</h2>
         <p>
           We may update these Terms from time to time. Any changes will be posted on this page with an updated
           &ldquo;Last updated&rdquo; date. Your continued use of our website or services after changes are
@@ -158,7 +158,7 @@ export default function ShopTermsOfService() {
         </p>
 
         {/* 12. Contact */}
-        <h2 className="text-lg font-semibold text-white/90">12. Contact Us</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">12. Contact Us</h2>
         <p>
           If you have any questions about these Terms, please contact <strong>{shopName}</strong> using the
           details on our main page{address ? <>, or write to us at <strong>{address}</strong></> : null}.

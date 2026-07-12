@@ -29,7 +29,7 @@ export default function ShopCookiePolicy() {
       <ShopLegalDocument title="Cookie Policy" shopName={shopName} address={address}>
 
         {/* 1. What are cookies */}
-        <h2 className="text-lg font-semibold text-white/90">1. What Are Cookies?</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">1. What Are Cookies?</h2>
         <p>
           Cookies are small text files that are placed on your device (computer, smartphone, or tablet) when
           you visit a website. They are widely used to make websites work efficiently, to remember your
@@ -38,7 +38,7 @@ export default function ShopCookiePolicy() {
         <p>
           This Cookie Policy explains how <strong>{shopName}</strong>, operating through the Pivot Parlor
           platform, uses cookies and similar technologies on this website. It should be read alongside our{" "}
-          <a href={`/${slug}/privacy`} className="underline text-white/60 hover:text-white/90">
+          <a href={`/${slug}/privacy`} className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]">
             Privacy Policy
           </a>
           .
@@ -49,10 +49,10 @@ export default function ShopCookiePolicy() {
         </p>
 
         {/* 2. Cookies we use */}
-        <h2 className="text-lg font-semibold text-white/90">2. Cookies We Use</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">2. Cookies We Use</h2>
         <p>We use the following categories of cookies on this website:</p>
 
-        <h3 className="font-semibold text-white/80">2.1 Strictly Necessary Cookies</h3>
+        <h3 className="font-semibold text-[color:var(--st-ink-80)]">2.1 Strictly Necessary Cookies</h3>
         <p>
           These cookies are essential for the website to function and cannot be switched off. They are usually
           set in response to actions you take, such as logging in, making a booking, or setting your privacy
@@ -70,7 +70,7 @@ export default function ShopCookiePolicy() {
           </li>
         </ul>
 
-        <h3 className="font-semibold text-white/80">2.2 Analytics Cookies</h3>
+        <h3 className="font-semibold text-[color:var(--st-ink-80)]">2.2 Analytics Cookies</h3>
         <p>
           These cookies allow us to count visits and understand how visitors interact with our website, so we
           can measure and improve its performance. All information these cookies collect is aggregated and
@@ -81,7 +81,7 @@ export default function ShopCookiePolicy() {
           We only set analytics cookies where you have given your consent via our cookie preference centre.
         </p>
 
-        <h3 className="font-semibold text-white/80">2.3 Marketing Cookies</h3>
+        <h3 className="font-semibold text-[color:var(--st-ink-80)]">2.3 Marketing Cookies</h3>
         <p>
           These cookies may be set through our site by our advertising partners. They may be used to build a
           profile of your interests and show you relevant adverts on other sites. They do not store directly
@@ -93,7 +93,7 @@ export default function ShopCookiePolicy() {
         </p>
 
         {/* 3. Third-party cookies */}
-        <h2 className="text-lg font-semibold text-white/90">3. Third-Party Cookies</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">3. Third-Party Cookies</h2>
         <p>
           Some cookies on our website are set by third-party services that appear on our pages. We do not
           control the setting of these cookies and you should check the relevant third party&rsquo;s website
@@ -108,7 +108,7 @@ export default function ShopCookiePolicy() {
               href="https://stripe.com/gb/privacy"
               target="_blank"
               rel="noopener noreferrer"
-              className="underline text-white/60 hover:text-white/90"
+              className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
             >
               Stripe&rsquo;s Privacy Policy
             </a>
@@ -121,7 +121,7 @@ export default function ShopCookiePolicy() {
         </ul>
 
         {/* 4. Managing cookies */}
-        <h2 className="text-lg font-semibold text-white/90">4. How to Manage Your Cookie Preferences</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">4. How to Manage Your Cookie Preferences</h2>
         <p>
           You can manage non-essential cookies at any time through our cookie preference centre, accessible via
           the &ldquo;Manage cookie preferences&rdquo; link in the footer of this website.
@@ -146,7 +146,7 @@ export default function ShopCookiePolicy() {
             href="https://www.aboutcookies.org"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-white/60 hover:text-white/90"
+            className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
           >
             aboutcookies.org
           </a>{" "}
@@ -155,7 +155,7 @@ export default function ShopCookiePolicy() {
             href="https://www.allaboutcookies.org"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-white/60 hover:text-white/90"
+            className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
           >
             allaboutcookies.org
           </a>
@@ -163,7 +163,7 @@ export default function ShopCookiePolicy() {
         </p>
 
         {/* 5. Your rights */}
-        <h2 className="text-lg font-semibold text-white/90">5. Your Rights</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">5. Your Rights</h2>
         <p>
           Under PECR and UK GDPR, you have the right to withdraw your consent to the use of non-essential
           cookies at any time. You can do this through our cookie preference centre or by clearing your
@@ -171,7 +171,7 @@ export default function ShopCookiePolicy() {
         </p>
         <p>
           For more information about your data rights and how we use your personal data, please see our{" "}
-          <a href={`/${slug}/privacy`} className="underline text-white/60 hover:text-white/90">
+          <a href={`/${slug}/privacy`} className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]">
             Privacy Policy
           </a>
           .
@@ -183,7 +183,7 @@ export default function ShopCookiePolicy() {
             href="https://ico.org.uk"
             target="_blank"
             rel="noopener noreferrer"
-            className="underline text-white/60 hover:text-white/90"
+            className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
           >
             ico.org.uk
           </a>
@@ -191,7 +191,7 @@ export default function ShopCookiePolicy() {
         </p>
 
         {/* 6. Changes */}
-        <h2 className="text-lg font-semibold text-white/90">6. Changes to This Cookie Policy</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">6. Changes to This Cookie Policy</h2>
         <p>
           We may update this Cookie Policy from time to time to reflect changes in technology, law, or our
           data practices. Any updates will be posted on this page with a revised &ldquo;Last updated&rdquo;
@@ -199,7 +199,7 @@ export default function ShopCookiePolicy() {
         </p>
 
         {/* 7. Contact */}
-        <h2 className="text-lg font-semibold text-white/90">7. Contact Us</h2>
+        <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">7. Contact Us</h2>
         <p>
           If you have any questions about this Cookie Policy, please contact{" "}
           <strong>{shopName}</strong> using the details on our main page

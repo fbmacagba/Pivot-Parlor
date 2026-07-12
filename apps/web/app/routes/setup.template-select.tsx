@@ -8,6 +8,12 @@ import { COLOR_PALETTES, DEFAULT_PALETTE } from "~/lib/color-palettes";
 
 const TEMPLATES = [
   {
+    id: "auto",
+    name: "Let AI decide",
+    tagline: "Recommended — the AI picks the mood that best fits your brand and style notes",
+    primaryColor: "#C9A84C",
+  },
+  {
     id: "minimal",
     name: "Minimal",
     tagline: "Clean & Modern — White space, serif headings",
@@ -159,7 +165,9 @@ export default function TemplateSelect() {
   const { shop } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const navigate = useNavigate();
-  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  // "auto" = let the AI choose the layout mood (WS-6: a named template now
+  // really pins the generated layout_mood, so the default is no override).
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>("auto");
   const [paletteId, setPaletteId] = useState<string>(DEFAULT_PALETTE.id);
   const palette = COLOR_PALETTES.find((p) => p.id === paletteId) ?? DEFAULT_PALETTE;
   const [jobId, setJobId] = useState<string | null>(null);
@@ -240,7 +248,7 @@ export default function TemplateSelect() {
     setJobStatus("");
     setRedirecting(false);
     if (redirectTimer.current) clearTimeout(redirectTimer.current);
-    setSelectedTemplate(null);
+    setSelectedTemplate("auto");
     setFormKey((k) => k + 1);
   }, []);
 
@@ -250,7 +258,9 @@ export default function TemplateSelect() {
         <h1 className="font-heading text-2xl font-bold text-white" data-shop-slug={shop.slug}>
           Choose your template for {shop.name}
         </h1>
-        <p className="mt-2 text-white/60">Select a design, customise colours, then generate.</p>
+        <p className="mt-2 text-white/60">
+          Pick a template to set your site&apos;s layout and mood, or let the AI decide. Then customise colours and generate.
+        </p>
 
         {showProgress && (
           <div className="mt-8 rounded-xl border border-gold/40 bg-gold/10 px-6 py-5">
