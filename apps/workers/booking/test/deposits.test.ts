@@ -292,6 +292,40 @@ describe("deposit-gated public booking", () => {
     expect((await bookingRow(staleId))?.status).toBe("cancelled");
     expect((await bookingRow(freshId))?.status).toBe("pending");
   });
+
+  it("bounds each run to maxPerRun and drains the backlog over subsequent runs", async () => {
+    // Guard for the subrequest-ceiling scale cliff: the sweep must cap the rows
+    // it touches per invocation (one db.batch per row = one subrequest) and let
+    // the next cron tick pick up the rest — never an unbounded loop.
+    const { shop, staff, service } = await setupDepositShop();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const b = await bookDeposit(shop, staff, service, i);
+      ids.push(((await b.res.json()) as { data: { id: string } }).data.id);
+    }
+    // Age ONLY these three past the cutoff (the sweep is global — a blanket
+    // update would age other tests' rows and the cap could cancel those first).
+    await env.DB
+      .prepare(
+        `UPDATE bw_booking_state SET updated_at = '2000-01-01T00:00:00.000Z'
+         WHERE booking_id IN (?, ?, ?)`
+      )
+      .bind(ids[0], ids[1], ids[2])
+      .run();
+
+    // First run with a cap of 2 handles exactly 2; one is left pending.
+    const first = await sweepExpiredDepositBookings(env.DB, Date.now(), 2);
+    expect(first).toBe(2);
+    const cancelledAfterFirst = (
+      await Promise.all(ids.map(async (id) => (await bookingRow(id))?.status))
+    ).filter((s) => s === "cancelled").length;
+    expect(cancelledAfterFirst).toBe(2);
+
+    // Next tick drains the remaining one.
+    const second = await sweepExpiredDepositBookings(env.DB, Date.now(), 2);
+    expect(second).toBe(1);
+    for (const id of ids) expect((await bookingRow(id))?.status).toBe("cancelled");
+  });
 });
 
 describe("appointment checkout with a charged deposit", () => {

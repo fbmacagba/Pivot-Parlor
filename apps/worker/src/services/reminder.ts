@@ -80,37 +80,63 @@ export async function processReminder(payload: ReminderPayload, db: D1Database, 
   await markReminderSent(db, booking.id);
 }
 
+// Bound one cron run so the fan-out below can never approach the Workers
+// subrequest ceiling (each booking costs one Resend send + one markReminderSent
+// = 2 subrequests), and cap how many sends are in flight at once — the runtime
+// allows only 6 simultaneous outbound connections, and an unbounded Promise.all
+// over every due booking stampedes that and the email provider's rate limit.
+// miniflare enforces neither, so the unbounded version passes tests and only
+// bites at scale.
+export const REMINDER_MAX_PER_RUN = 500;
+export const REMINDER_CONCURRENCY = 20;
+
 /**
- * Cron-based fallback: send 24h-ahead reminders for all eligible bookings.
- * Used when Queue is not configured.
+ * Cron-based 24h-ahead reminder sweep (08:00 UTC). In steady state the
+ * per-booking Queue consumer (processReminder) does the sending; this is the
+ * catch-all for stragglers, so it should normally process a small set.
  */
 export async function sendPendingReminders(db: D1Database, resendApiKey?: string): Promise<void> {
-  const bookings = await getBookingsDueForReminder(db);
-  await Promise.all(
-    bookings.map(async (b) => {
-      if (resendApiKey) {
-        try {
-          await sendBookingReminder(resendApiKey, {
-            customer_name:  b.customer_name,
-            customer_email: b.customer_email,
-            service_name:   b.service_name,
-            staff_name:     b.staff_name,
-            shop_name:      b.shop_name,
-            shop_slug:      b.shop_slug,
-            booking_date:   b.booking_date,
-            start_time:     b.start_time,
-            duration_min:   b.duration_min,
-            amount_pence:   b.amount_pence,
-            booking_id:     b.id,
-          });
-        } catch (err) {
-          // Non-fatal, but marked sent below — no retry for this booking.
-          reportError("reminder.cron_email_send", err, { bookingId: b.id });
+  const bookings = await getBookingsDueForReminder(db, REMINDER_MAX_PER_RUN);
+
+  if (bookings.length >= REMINDER_MAX_PER_RUN) {
+    // A full page means the Queue path is not keeping up (or a burst landed).
+    // The overflow is sent on the next run; surface it loudly rather than
+    // silently capping — at this volume reminders belong on the queue.
+    reportError(
+      "reminder.cron_page_full",
+      new Error(`reminder cron hit its per-run cap of ${REMINDER_MAX_PER_RUN}`),
+      { cap: REMINDER_MAX_PER_RUN }
+    );
+  }
+
+  for (let i = 0; i < bookings.length; i += REMINDER_CONCURRENCY) {
+    const wave = bookings.slice(i, i + REMINDER_CONCURRENCY);
+    await Promise.all(
+      wave.map(async (b) => {
+        if (resendApiKey) {
+          try {
+            await sendBookingReminder(resendApiKey, {
+              customer_name:  b.customer_name,
+              customer_email: b.customer_email,
+              service_name:   b.service_name,
+              staff_name:     b.staff_name,
+              shop_name:      b.shop_name,
+              shop_slug:      b.shop_slug,
+              booking_date:   b.booking_date,
+              start_time:     b.start_time,
+              duration_min:   b.duration_min,
+              amount_pence:   b.amount_pence,
+              booking_id:     b.id,
+            });
+          } catch (err) {
+            // Non-fatal, but marked sent below — no retry for this booking.
+            reportError("reminder.cron_email_send", err, { bookingId: b.id });
+          }
+        } else {
+          console.log(`[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`);
         }
-      } else {
-        console.log(`[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`);
-      }
-      await markReminderSent(db, b.id);
-    })
-  );
+        await markReminderSent(db, b.id);
+      })
+    );
+  }
 }

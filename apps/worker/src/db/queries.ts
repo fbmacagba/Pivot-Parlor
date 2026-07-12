@@ -1065,7 +1065,12 @@ export async function getPlatformRevenueByMonth(db: D1Database, year: number, mo
 
 // ─── Reminder helpers ─────────────────────────────────────────────────────────
 
-export async function getBookingsDueForReminder(db: D1Database) {
+// `limit` bounds one cron page so the fan-out that follows cannot approach the
+// Workers subrequest ceiling. In steady state the per-booking Queue consumer
+// (processReminder) sends reminders, so this catch-all should return a small
+// straggler set; a full page signals the queue is not keeping up (the caller
+// logs it). Reminders past the page are picked up on a later run.
+export async function getBookingsDueForReminder(db: D1Database, limit: number) {
   const { results } = await db
     .prepare(
       `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
@@ -1079,8 +1084,10 @@ export async function getBookingsDueForReminder(db: D1Database) {
        JOIN shops sh ON sh.id = b.shop_id
        WHERE b.status IN ('pending', 'confirmed')
          AND b.reminder_sent = 0
-         AND b.booking_date = date('now', '+1 day')`
+         AND b.booking_date = date('now', '+1 day')
+       LIMIT ?`
     )
+    .bind(limit)
     .all<{
       id: string;
       customer_name: string;
