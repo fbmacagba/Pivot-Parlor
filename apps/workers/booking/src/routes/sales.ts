@@ -19,7 +19,8 @@ import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { todayUtcYmd } from "../lib/time.js";
 import { d1Rows } from "../lib/d1-helpers.js";
-import { createCheckoutSession } from "../lib/stripe.js";
+import { createCheckoutSession, createRefund } from "../lib/stripe.js";
+import { calculateCommissionPence } from "@repo/utils";
 import {
   SaleInputError,
   resolveSaleLines,
@@ -274,12 +275,304 @@ r.get("/:shopId/sales/:saleId", async (c) => {
   const items = await db
     .prepare(
       `SELECT id, item_type, service_id, product_id, variant_id, name, quantity,
-              unit_price_pence, line_total_pence, staff_id
+              returned_quantity, unit_price_pence, line_total_pence, staff_id
        FROM sale_items WHERE sale_id = ? ORDER BY created_at`
     )
     .bind(saleId)
     .all();
-  return c.json({ success: true, data: { ...sale, items: d1Rows(items) } });
+  const returns = await db
+    .prepare(
+      `SELECT id, refund_pence, commission_reversal_pence, tender_type, status, reason, created_at, completed_at
+       FROM sale_returns WHERE sale_id = ? ORDER BY created_at DESC`
+    )
+    .bind(saleId)
+    .all();
+  return c.json({ success: true, data: { ...sale, items: d1Rows(items), returns: d1Rows(returns) } });
+});
+
+// ─── POST /:shopId/sales/:saleId/refund — per-line returns (WS-3 Phase 2) ─────
+//
+// Admin/developer only. Refunds specific quantities of specific lines; the
+// refund amount is the discounted line value (sale-level discount allocated
+// pro-rata, same split as computeCommission) and tips are never refunded here.
+// Product lines restock by default ('return' movements); back-bar consumption
+// is NOT restored — those products were used on the client.
+//
+// Tenders: cash/card_external are record-only (the shop hands money back
+// itself; books settle immediately). stripe calls POST /v1/refunds with
+// refund_application_fee + reverse_transfer so the platform commission comes
+// back proportionally; charge.refunded completes the return (WS-2 honesty:
+// nothing is marked settled before Stripe confirms).
+
+r.post("/:shopId/sales/:saleId/refund", async (c) => {
+  const shopId = c.req.param("shopId");
+  const saleId = c.req.param("saleId");
+  const db = c.env.DB;
+  const user = getUser(c);
+  if (user.role !== "admin" && user.role !== "developer") {
+    return c.json({ success: false, error: "Admin role required" }, 403);
+  }
+
+  let body: {
+    lines?: Array<{ sale_item_id?: string; quantity?: number; restock?: boolean }>;
+    reason?: string;
+  };
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
+  if (!Array.isArray(body.lines) || body.lines.length === 0) {
+    return c.json({ success: false, error: "lines is required" }, 400);
+  }
+
+  const sale = await db
+    .prepare(
+      `SELECT id, shop_id, subtotal_pence, discount_pence, refunded_pence, tender_type, status,
+              stripe_payment_intent_id, business_day_id
+       FROM sales WHERE id = ? AND shop_id = ? LIMIT 1`
+    )
+    .bind(saleId, shopId)
+    .first<{
+      id: string; shop_id: string; subtotal_pence: number; discount_pence: number;
+      refunded_pence: number; tender_type: string; status: string;
+      stripe_payment_intent_id: string | null; business_day_id: string | null;
+    }>();
+  if (!sale) return c.json({ success: false, error: "Sale not found" }, 404);
+  if (sale.status !== "completed") {
+    return c.json({ success: false, error: "Only completed sales can be refunded (void pending sales instead)" }, 400);
+  }
+  if (sale.tender_type === "stripe" && !sale.stripe_payment_intent_id) {
+    return c.json({ success: false, error: "This Stripe sale has no settled payment to refund" }, 400);
+  }
+
+  const itemRows = await db
+    .prepare(
+      `SELECT id, item_type, product_id, variant_id, quantity, returned_quantity,
+              unit_price_pence, line_total_pence, staff_id
+       FROM sale_items WHERE sale_id = ?`
+    )
+    .bind(saleId)
+    .all<{
+      id: string; item_type: string; product_id: string | null; variant_id: string | null;
+      quantity: number; returned_quantity: number; unit_price_pence: number;
+      line_total_pence: number; staff_id: string | null;
+    }>();
+  const itemById = new Map((itemRows.results ?? []).map((i) => [i.id, i]));
+
+  // The ledger row snapshots the rates in force when the sale was made —
+  // reverse commission at THOSE rates, not today's.
+  const ledgerRow = await db
+    .prepare(
+      `SELECT commission_rate, retail_commission_rate, commission_bearer
+       FROM bw_commission_ledger WHERE sale_id = ? AND commission_amount_pence >= 0 LIMIT 1`
+    )
+    .bind(saleId)
+    .first<{ commission_rate: number; retail_commission_rate: number; commission_bearer: string }>();
+  const commissionRate = Number(ledgerRow?.commission_rate ?? 0.1);
+  const retailCommissionRate = Number(ledgerRow?.retail_commission_rate ?? commissionRate);
+  const commissionBearer = ledgerRow?.commission_bearer ?? "shop";
+
+  // Validate + price the requested lines.
+  const seen = new Set<string>();
+  const priced: Array<{
+    item: (typeof itemRows.results)[number]; qty: number; restock: boolean; refundPence: number;
+  }> = [];
+  let refundServicesPence = 0;
+  let refundRetailPence = 0;
+  for (const line of body.lines) {
+    const item = line.sale_item_id ? itemById.get(line.sale_item_id) : undefined;
+    if (!item) return c.json({ success: false, error: "Unknown sale item" }, 400);
+    if (seen.has(item.id)) return c.json({ success: false, error: "Duplicate line for the same item" }, 400);
+    seen.add(item.id);
+    const qty = line.quantity ?? 0;
+    if (!Number.isInteger(qty) || qty < 1 || qty > item.quantity - item.returned_quantity) {
+      return c.json(
+        { success: false, error: `Invalid quantity — ${item.quantity - item.returned_quantity} returnable on that line` },
+        400
+      );
+    }
+    const discountShare =
+      sale.subtotal_pence > 0
+        ? Math.round((sale.discount_pence * item.line_total_pence) / sale.subtotal_pence)
+        : 0;
+    const refundPence = Math.round(((item.line_total_pence - discountShare) * qty) / item.quantity);
+    if (item.item_type === "service") refundServicesPence += refundPence;
+    else refundRetailPence += refundPence;
+    priced.push({
+      item,
+      qty,
+      restock: item.item_type === "product" && item.product_id !== null && line.restock !== false,
+      refundPence,
+    });
+  }
+
+  let refundPence = refundServicesPence + refundRetailPence;
+  const refundable = sale.subtotal_pence - sale.discount_pence - sale.refunded_pence;
+  refundPence = Math.min(refundPence, Math.max(0, refundable));
+  if (refundPence <= 0) {
+    return c.json({ success: false, error: "Nothing left to refund on this sale" }, 400);
+  }
+  const commissionReversalPence =
+    calculateCommissionPence(refundServicesPence, commissionRate).commission_pence +
+    calculateCommissionPence(refundRetailPence, retailCommissionRate).commission_pence;
+  // The customer paid the commission on top when the shop passes it through —
+  // give their share back too.
+  const customerRefundPence =
+    refundPence + (commissionBearer === "customer" ? commissionReversalPence : 0);
+  const fullyRefunded = sale.refunded_pence + refundPence >= sale.subtotal_pence - sale.discount_pence;
+
+  // Atomic claim on the returnable quantities: a concurrent refund of the
+  // same line loses (its guarded UPDATE matches 0 rows) and is compensated.
+  const claims = await db.batch(
+    priced.map(({ item, qty }) =>
+      db
+        .prepare(
+          "UPDATE sale_items SET returned_quantity = returned_quantity + ? WHERE id = ? AND quantity - returned_quantity >= ?"
+        )
+        .bind(qty, item.id, qty)
+    )
+  );
+  const lost = claims.some((r) => (r.meta?.changes ?? 0) !== 1);
+  if (lost) {
+    await db.batch(
+      priced
+        .filter((_, i) => (claims[i]?.meta?.changes ?? 0) === 1)
+        .map(({ item, qty }) =>
+          db.prepare("UPDATE sale_items SET returned_quantity = returned_quantity - ? WHERE id = ?").bind(qty, item.id)
+        )
+    );
+    return c.json({ success: false, error: "Another refund touched this sale — reload and try again" }, 409);
+  }
+
+  const returnId = crypto.randomUUID();
+  const isStripe = sale.tender_type === "stripe";
+  let stripeRefundId: string | null = null;
+
+  if (isStripe) {
+    try {
+      const refund = await createRefund({
+        secret: c.env.STRIPE_SECRET_KEY,
+        paymentIntentId: sale.stripe_payment_intent_id!,
+        amountPence: customerRefundPence,
+        metadata: { saleId, returnId, shopId, type: "sale_refund" },
+        idempotencyKey: `refund:${returnId}`,
+      });
+      stripeRefundId = refund.id;
+    } catch (e) {
+      // Give the claimed quantities back — nothing was refunded.
+      reportError("sale.refund_stripe", e, { shopId, saleId, returnId });
+      await db.batch(
+        priced.map(({ item, qty }) =>
+          db.prepare("UPDATE sale_items SET returned_quantity = returned_quantity - ? WHERE id = ?").bind(qty, item.id)
+        )
+      );
+      return c.json({ success: false, error: e instanceof Error ? e.message : "Stripe refund failed" }, 502);
+    }
+  }
+
+  // Persist the return. Record-only tenders settle immediately (the shop
+  // hands the cash back); Stripe stays 'pending' until charge.refunded.
+  const stmts = [
+    db
+      .prepare(
+        `INSERT INTO sale_returns (id, shop_id, sale_id, refund_pence, commission_reversal_pence,
+           tender_type, status, stripe_refund_id, reason, created_by, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        returnId,
+        shopId,
+        saleId,
+        refundPence,
+        commissionReversalPence,
+        sale.tender_type,
+        isStripe ? "pending" : "completed",
+        stripeRefundId,
+        typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 500) : null,
+        user.sub,
+        isStripe ? null : new Date().toISOString()
+      ),
+  ];
+  for (const { item, qty, restock, refundPence: linePence } of priced) {
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO sale_return_items (id, return_id, shop_id, sale_item_id, quantity, refund_pence, restocked)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(crypto.randomUUID(), returnId, shopId, item.id, qty, linePence, restock ? 1 : 0)
+    );
+    if (restock && item.product_id) {
+      stmts.push(
+        ...stockMovementStatements(db, {
+          shopId,
+          productId: item.product_id,
+          variantId: item.variant_id,
+          type: "return",
+          quantityDelta: qty,
+          unitCostPence: null,
+          referenceType: "sale_return",
+          referenceId: returnId,
+          staffId: item.staff_id,
+          note: "Customer return",
+        })
+      );
+    }
+  }
+  // Compensating ledger row: negative amounts at the sale's snapshot rates.
+  // 'pending' matches the sale flow — record-only commission is owed (netted
+  // off), Stripe flips to 'transferred' when charge.refunded confirms the fee
+  // actually came back.
+  stmts.push(
+    db
+      .prepare(
+        `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, sale_id,
+           services_amount_pence, retail_amount_pence, commission_rate, retail_commission_rate,
+           commission_amount_pence, commission_bearer, status)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+      )
+      .bind(
+        crypto.randomUUID(),
+        shopId,
+        sale.business_day_id,
+        saleId,
+        -refundServicesPence,
+        -refundRetailPence,
+        commissionRate,
+        retailCommissionRate,
+        -commissionReversalPence,
+        commissionBearer
+      )
+  );
+  stmts.push(
+    db
+      .prepare(
+        `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
+         VALUES (?, NULL, ?, ?, 'refund', ?, ?, ?)`
+      )
+      .bind(crypto.randomUUID(), saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed", stripeRefundId)
+  );
+  stmts.push(
+    db
+      .prepare(
+        `UPDATE sales SET refunded_pence = refunded_pence + ?${!isStripe && fullyRefunded ? ", status = 'refunded'" : ""} WHERE id = ?`
+      )
+      .bind(refundPence, saleId)
+  );
+  await db.batch(stmts);
+
+  return c.json({
+    success: true,
+    data: {
+      id: returnId,
+      refund_pence: refundPence,
+      customer_refund_pence: customerRefundPence,
+      commission_reversal_pence: commissionReversalPence,
+      status: isStripe ? "pending" : "completed",
+      fully_refunded: fullyRefunded,
+    },
+  });
 });
 
 r.post("/:shopId/sales/:saleId/void", async (c) => {

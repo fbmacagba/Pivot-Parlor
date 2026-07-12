@@ -57,6 +57,17 @@ export default defineConfig({
           if (path === "/v1/account_links" && request.method === "POST") {
             return Response.json({ url: "https://connect.stripe.com/setup/e/test" });
           }
+          if (path === "/v1/refunds" && request.method === "POST") {
+            // Same echo trick: the Idempotency-Key (refund:<returnId>) lands in
+            // the refund id so tests assert it from persisted rows. A
+            // payment_intent containing "fail" simulates a Stripe outage.
+            return request.text().then((form) => {
+              if (form.includes("fail")) {
+                return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+              }
+              return Response.json({ id: `re_idem_${idem}`, status: "pending" });
+            });
+          }
           if (path === "/v1/checkout/sessions" && request.method === "POST") {
             // Same echo trick as payment_intents: the Idempotency-Key lands in
             // the session id so tests assert it from persisted rows.
