@@ -55,10 +55,11 @@ binding = "BOOKING"
 service = "pivot-parlor-booking"
 
 # Cron triggers:
+# 03:00 UTC — LEG-6 retention sweep (WS-8, bounded + idempotent)
 # 08:00 UTC — send 24h-ahead reminders
 # 20:00 UTC — EOD developer alert (booking count)
 [triggers]
-crons = ["0 8 * * *", "0 20 * * *"]
+crons = ["0 3 * * *", "0 8 * * *", "0 20 * * *"]
 
 [dev]
 port = 8787
@@ -124,7 +125,7 @@ binding = "BOOKING"
 service = "pivot-parlor-booking-staging"
 
 [env.staging.triggers]
-crons = ["0 8 * * *", "0 20 * * *"]
+crons = ["0 3 * * *", "0 8 * * *", "0 20 * * *"]
 
 [env.staging.observability]
 enabled = true
