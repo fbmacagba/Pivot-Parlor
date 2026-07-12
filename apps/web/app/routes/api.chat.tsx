@@ -137,8 +137,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return Response.json({ error: "No messages provided." }, { status: 400 });
   }
 
-  // Truncate conversation history to last 10 messages to prevent prompt injection via long history
-  const safeMessages = messages.slice(-10);
+  // The client only ever holds user/assistant turns — anything else (e.g. an
+  // injected "system" row) is dropped, and each message is length-capped so a
+  // hostile client cannot inflate prompt tokens. Newest 10 turns only.
+  const safeMessages = messages
+    .filter(
+      (m): m is { role: string; content: string } =>
+        !!m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string"
+    )
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }))
+    .slice(-10);
+  if (!safeMessages.length) {
+    return Response.json({ error: "No messages provided." }, { status: 400 });
+  }
 
   try {
     const reply = await callOpenRouter(env.OPENROUTER_API_KEY, PRIMARY_MODEL, safeMessages);
