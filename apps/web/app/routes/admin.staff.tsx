@@ -206,7 +206,7 @@ function EditStaffModal({
                 </div>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm text-white">{svc.name}</span>
-                  <span className="text-xs text-white/40 ml-2">{svc.duration_min}min · {formatPence(svc.price_pence)}</span>
+                  <span className="text-xs text-white/60 ml-2">{svc.duration_min}min · {formatPence(svc.price_pence)}</span>
                 </div>
               </label>
             ))}
@@ -318,7 +318,7 @@ function StaffCard({
           <div>
             <p className="font-semibold text-white">{member.display_name}</p>
             {member.user_email && (
-              <p className="text-xs text-white/40 mt-0.5">{member.user_email}</p>
+              <p className="text-xs text-white/60 mt-0.5">{member.user_email}</p>
             )}
           </div>
         </div>
@@ -377,12 +377,12 @@ function StaffCard({
             </span>
           ))}
           {assignedCount > 3 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-white/40">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-white/60">
               +{assignedCount - 3} more
             </span>
           )}
           {assignedCount === 0 && (
-            <span className="text-xs text-white/40 italic">No services assigned</span>
+            <span className="text-xs text-white/60 italic">No services assigned</span>
           )}
         </div>
       </div>
@@ -410,7 +410,7 @@ export default function AdminStaff() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Staff</h1>
-          <p className="mt-0.5 text-sm text-white/40">
+          <p className="mt-0.5 text-sm text-white/60">
             {staff.length} active member{staff.length !== 1 ? "s" : ""}
           </p>
         </div>
@@ -457,7 +457,7 @@ export default function AdminStaff() {
             </svg>
           </div>
           <p className="text-sm font-medium">No staff members yet</p>
-          <p className="text-xs mt-1 text-white/40">Add your first team member above</p>
+          <p className="text-xs mt-1 text-white/60">Add your first team member above</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

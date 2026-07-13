@@ -70,7 +70,7 @@ function QRCode({ url }: { url: string }) {
   return (
     <div className="flex flex-col items-center gap-3">
       <img src={qrUrl} alt="Walk-in QR code" className="w-40 h-40 rounded-xl border border-white/10" />
-      <p className="text-xs text-white/40 text-center break-all max-w-[180px]">{url}</p>
+      <p className="text-xs text-white/60 text-center break-all max-w-[180px]">{url}</p>
     </div>
   );
 }
@@ -127,7 +127,7 @@ export default function AdminQueue() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Walk-in Queue</h1>
-          <p className="mt-0.5 text-sm text-white/40">
+          <p className="mt-0.5 text-sm text-white/60">
             {waiting.length} waiting · {serving.length} being served · refreshes every 30s
           </p>
         </div>
@@ -190,7 +190,7 @@ export default function AdminQueue() {
 
       {/* Waiting queue */}
       <div>
-        <h2 className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-3">
+        <h2 className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-3">
           Waiting {waiting.length > 0 ? `(${waiting.length})` : ""}
         </h2>
         {waiting.length === 0 ? (
@@ -212,7 +212,7 @@ export default function AdminQueue() {
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-white">{entry.name}</p>
-                  <p className="text-xs text-white/40">
+                  <p className="text-xs text-white/60">
                     {entry.service ? `${entry.service} · ` : ""}{timeAgo(entry.created_at)}
                     {entry.phone ? ` · ${entry.phone}` : ""}
                   </p>

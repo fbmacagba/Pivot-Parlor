@@ -178,7 +178,7 @@ export default function StaffBookingsAvailability() {
           {/* Weekly schedule (read-only) */}
           <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
             <h2 className="font-heading text-base font-semibold text-white mb-1">Weekly schedule</h2>
-            <p className="text-xs text-white/40 mb-4">Set by your manager. Contact them to make changes.</p>
+            <p className="text-xs text-white/60 mb-4">Set by your manager. Contact them to make changes.</p>
             <div className="space-y-2">
               {DAY_LABELS.map((label, d) => {
                 const row = schedule.find(s => s.day_of_week === d);
@@ -210,7 +210,7 @@ export default function StaffBookingsAvailability() {
                   rows={3}
                   value={reason}
                   onChange={e => setReason(e.target.value)}
-                  className="flex w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
+                  className="flex w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
                   placeholder="Optional reason…"
                 />
               </div>
@@ -238,7 +238,7 @@ export default function StaffBookingsAvailability() {
                 <thead>
                   <tr className="border-b border-white/10">
                     {["From","To","Reason","Status"].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-white/40 uppercase tracking-wider">{h}</th>
+                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider">{h}</th>
                     ))}
                   </tr>
                 </thead>

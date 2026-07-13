@@ -281,7 +281,7 @@ export default function AdminProducts() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Products</h1>
-          <p className="mt-0.5 text-sm text-white/40">
+          <p className="mt-0.5 text-sm text-white/60">
             {active.length} active
             {inactive.length > 0 && ` · ${inactive.length} inactive`}
             {lowStock.length > 0 && ` · ${lowStock.length} low on stock`}
@@ -461,7 +461,7 @@ export default function AdminProducts() {
         <button
           type="button"
           onClick={() => setShowInactive((v) => !v)}
-          className="mb-4 text-xs text-white/40 hover:text-gold transition-colors"
+          className="mb-4 text-xs text-white/60 hover:text-gold transition-colors"
         >
           {showInactive ? "Hide inactive" : `Show ${inactive.length} inactive`}
         </button>
@@ -469,7 +469,7 @@ export default function AdminProducts() {
 
       {/* Product list */}
       {displayed.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/20 p-12 text-center text-white/40">
+        <div className="rounded-xl border border-dashed border-white/20 p-12 text-center text-white/60">
           <p className="text-lg">No products yet.</p>
           <p className="mt-1 text-sm">Add retail or back-bar products to track stock and sell at the counter.</p>
         </div>
@@ -528,7 +528,7 @@ function ProductRow({
           {product.name}
           {inactive && <span className="ml-2 text-xs text-white/50">(inactive)</span>}
         </p>
-        <p className="mt-0.5 truncate text-xs text-white/40">
+        <p className="mt-0.5 truncate text-xs text-white/60">
           {[product.brand, product.sku, categoryName].filter(Boolean).join(" · ")}
         </p>
       </div>
@@ -543,7 +543,7 @@ function ProductRow({
         ) : (
           <p className="text-sm text-white/50">untracked</p>
         )}
-        <p className="text-xs text-white/40">cost {formatPence(product.cost_price_pence)}</p>
+        <p className="text-xs text-white/60">cost {formatPence(product.cost_price_pence)}</p>
       </div>
 
       {/* Price */}

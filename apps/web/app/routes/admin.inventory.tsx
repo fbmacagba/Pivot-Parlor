@@ -278,7 +278,7 @@ export default function AdminInventory() {
     <div className="space-y-10">
       <div>
         <h1 className="font-heading text-2xl font-bold text-white">Inventory</h1>
-        <p className="mt-0.5 text-sm text-white/40">
+        <p className="mt-0.5 text-sm text-white/60">
           Purchasing, stock takes, back-bar usage and retail performance.
         </p>
       </div>
@@ -372,7 +372,7 @@ function ReportSection({ report }: { report: Report }) {
 function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
-      <p className="text-xs text-white/40">{label}</p>
+      <p className="text-xs text-white/60">{label}</p>
       <p className={`mt-1 text-lg font-bold ${accent ? "text-gold" : "text-white"}`}>{value}</p>
     </div>
   );
@@ -494,7 +494,7 @@ function PurchaseOrdersSection({
       </div>
 
       {purchaseOrders.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/20 p-8 text-center text-sm text-white/40">
+        <div className="rounded-xl border border-dashed border-white/20 p-8 text-center text-sm text-white/60">
           No purchase orders yet. Create one to restock from a supplier.
         </div>
       ) : (
@@ -506,7 +506,7 @@ function PurchaseOrdersSection({
                   {po.supplier_name ?? "No supplier"}
                   <span className="ml-2 text-xs text-white/50">{new Date(po.created_at).toLocaleDateString("en-GB")}</span>
                 </p>
-                <p className="mt-0.5 text-xs text-white/40">
+                <p className="mt-0.5 text-xs text-white/60">
                   {po.total_received_qty}/{po.total_qty} received · {formatPence(po.total_pence)}
                   {po.notes && ` · ${po.notes}`}
                 </p>
@@ -572,7 +572,7 @@ function ReceiveDialog({
         <p className="text-sm font-semibold text-emerald-200">
           Receive delivery — {po.supplier_name ?? "no supplier"}
         </p>
-        <Link to={`/admin/inventory${shopQuery}`} className="text-xs text-white/40 hover:text-white">Close</Link>
+        <Link to={`/admin/inventory${shopQuery}`} className="text-xs text-white/60 hover:text-white">Close</Link>
       </div>
       <Form method="post" className="space-y-3">
         <input type="hidden" name="intent" value="po-receive" />
@@ -651,7 +651,7 @@ function StockTakeSection({
         <div className="mb-4 rounded-xl border border-gold/30 bg-gold/5 p-4">
           <p className="mb-3 text-sm font-semibold text-gold">
             Stock take in progress
-            <span className="ml-2 text-xs font-normal text-white/40">
+            <span className="ml-2 text-xs font-normal text-white/60">
               started {new Date(openStockTake.created_at).toLocaleString("en-GB")} · {openStockTake.items.length} counted
             </span>
           </p>
@@ -714,7 +714,7 @@ function StockTakeSection({
       )}
 
       {stockTakes.filter((s) => s.status !== "open").length === 0 && !openStockTake ? (
-        <div className="rounded-xl border border-dashed border-white/20 p-8 text-center text-sm text-white/40">
+        <div className="rounded-xl border border-dashed border-white/20 p-8 text-center text-sm text-white/60">
           No stock takes yet. Start one to count shelves and reconcile the system quantities.
         </div>
       ) : (
@@ -726,7 +726,7 @@ function StockTakeSection({
                 <span className="ml-2 text-xs text-white/50">{st.item_count} items counted</span>
               </span>
               {st.status === "completed" && (
-                <span className={`text-xs ${st.variance_qty === 0 ? "text-white/40" : st.variance_qty > 0 ? "text-emerald-300" : "text-amber-300"}`}>
+                <span className={`text-xs ${st.variance_qty === 0 ? "text-white/60" : st.variance_qty > 0 ? "text-emerald-300" : "text-amber-300"}`}>
                   variance {st.variance_qty > 0 ? `+${st.variance_qty}` : st.variance_qty}
                 </span>
               )}
@@ -784,7 +784,7 @@ function BackBarSection({
       <h2 className="mb-1 flex items-center gap-2 font-heading text-lg font-semibold text-white">
         <FlaskConical className="h-4 w-4 text-gold" /> Back-bar recipes
       </h2>
-      <p className="mb-3 text-sm text-white/40">
+      <p className="mb-3 text-sm text-white/60">
         Products used each time a service is performed — deducted from stock automatically when the
         service is sold at checkout or the till. Use whole units (e.g. track colour in 10ml tubes).
       </p>

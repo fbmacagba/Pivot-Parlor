@@ -15,7 +15,7 @@ const statusStyles: Record<TimelineBooking["status"], string> = {
   confirmed: "bg-blue-500/20 text-blue-400 border-blue-500/30",
   completed: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
   cancelled: "bg-red-500/20 text-red-400 border-red-500/30",
-  no_show: "bg-white/10 text-white/40 border-white/10",
+  no_show: "bg-white/10 text-white/60 border-white/10",
 };
 
 interface BookingTimelineProps {
@@ -26,7 +26,7 @@ export function BookingTimeline({ bookings }: BookingTimelineProps) {
   if (bookings.length === 0) {
     return (
       <div className="flex h-32 items-center justify-center rounded-xl border border-white/10 bg-dark-100">
-        <p className="text-sm text-white/40">No bookings today</p>
+        <p className="text-sm text-white/60">No bookings today</p>
       </div>
     );
   }
@@ -46,7 +46,7 @@ export function BookingTimeline({ bookings }: BookingTimelineProps) {
           <div className="flex-1 min-w-0">
             <p className="font-medium text-white truncate">{b.customerName}</p>
             <p className="text-sm text-white/60">{b.service}</p>
-            <p className="text-xs text-white/40">{b.staffName}</p>
+            <p className="text-xs text-white/60">{b.staffName}</p>
           </div>
           <span
             className={clsx(

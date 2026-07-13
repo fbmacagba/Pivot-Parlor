@@ -101,7 +101,7 @@ export default function DevOverview() {
                 {["Name", "Shop", "Type", "Email", "Phone", "Submitted"].map((h) => (
                   <th
                     key={h}
-                    className="px-4 py-3 text-left text-xs font-semibold text-white/40 uppercase tracking-wider"
+                    className="px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider"
                   >
                     {h}
                   </th>
@@ -111,7 +111,7 @@ export default function DevOverview() {
             <tbody className="divide-y divide-white/5">
               {recentEnquiries.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-white/40">
+                  <td colSpan={6} className="px-4 py-8 text-center text-white/60">
                     No enquiries yet.{" "}
                     <Link to="/contact" className="text-gold hover:underline">
                       Contact form
@@ -127,7 +127,7 @@ export default function DevOverview() {
                     <td className="px-4 py-3 text-white/60 capitalize">{e.shop_type.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3 text-white/60">{e.email}</td>
                     <td className="px-4 py-3 text-white/50 text-xs">{e.phone || "—"}</td>
-                    <td className="px-4 py-3 text-white/40 text-xs whitespace-nowrap">
+                    <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
                       {new Date(e.created_at).toLocaleString()}
                     </td>
                   </tr>

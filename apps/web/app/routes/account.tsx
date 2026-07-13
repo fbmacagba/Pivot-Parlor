@@ -43,7 +43,7 @@ export default function AccountLayout() {
         <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:gap-4">
           {isDeveloper ? (
             <label className="hidden items-center gap-2 sm:flex">
-              <span className="shrink-0 text-xs text-white/45">Switch View</span>
+              <span className="shrink-0 text-xs text-white/60">Switch View</span>
               <select
                 className="max-w-[11rem] rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/40"
                 value={developerViewSelectValue(pathname)}

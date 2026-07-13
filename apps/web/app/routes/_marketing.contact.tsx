@@ -138,7 +138,7 @@ export default function Contact() {
               <select
                 name="shop_type"
                 required
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold"
+                className="flex h-10 w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold"
               >
                 <option value="" className="bg-dark">Select type…</option>
                 <option value="beauty_parlor" className="bg-dark">Beauty parlour</option>
@@ -159,7 +159,7 @@ export default function Contact() {
                 rows={4}
                 required
                 placeholder="Tell us about your shop and what you need…"
-                className="flex w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold resize-none"
+                className="flex w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold resize-none"
               />
             </div>
 
@@ -174,7 +174,7 @@ export default function Contact() {
             <Button type="submit" disabled={submitting} className="w-full" size="lg">
               {submitting ? "Sending…" : "Send enquiry →"}
             </Button>
-            <p className="text-center text-xs text-white/40">
+            <p className="text-center text-xs text-white/60">
               £100 one-time setup · No monthly fees · Live in 24 hours
             </p>
           </Form>

@@ -38,14 +38,14 @@ export default function Homepage() {
                 <a href="#how-it-works">See how it works</a>
               </Button>
             </div>
-            <p className="mt-3 text-xs text-white/40">
+            <p className="mt-3 text-xs text-white/60">
               £100 one-time setup · No monthly fees · Live in 24 hours
             </p>
           </div>
 
           {/* Booking UI mockup */}
           <div className="w-full rounded-2xl border border-white/10 bg-dark-100/90 p-6 shadow-xl shadow-black/20 lg:justify-self-end">
-            <p className="mb-5 text-xs font-medium text-white/45">Sample booking</p>
+            <p className="mb-5 text-xs font-medium text-white/60">Sample booking</p>
             <div className="mb-4 h-8 w-32 rounded-md bg-gold/20" />
             <div className="mb-6 space-y-2.5">
               <div className="h-4 w-full rounded bg-white/10" />
@@ -202,7 +202,7 @@ export default function Homepage() {
               <Button asChild size="lg">
                 <Link to="/contact">Get started →</Link>
               </Button>
-              <p className="mt-4 text-xs text-white/40">
+              <p className="mt-4 text-xs text-white/60">
                 £100 setup · No monthly fees · Live in 24 hours
               </p>
             </div>

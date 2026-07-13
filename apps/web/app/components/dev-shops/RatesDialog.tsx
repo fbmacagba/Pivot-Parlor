@@ -62,7 +62,7 @@ export function RatesDialog({
                 required
               />
             </div>
-            <p className="text-xs text-white/40">
+            <p className="text-xs text-white/60">
               Applied to new sales only; the ledger keeps the rate each sale was made at.
               Tips are never commissioned.
             </p>

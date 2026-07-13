@@ -103,7 +103,7 @@ export function PosScreen({
     <div>
       <div className="mb-6">
         <h1 className="font-heading text-2xl font-bold text-white">Point of Sale</h1>
-        <p className="mt-0.5 text-sm text-white/40">
+        <p className="mt-0.5 text-sm text-white/60">
           Ring up services and products; take cash, your own card machine, or a Stripe QR payment.
         </p>
       </div>
@@ -163,13 +163,13 @@ export function PosScreen({
                     className="rounded-xl border border-white/10 bg-dark-100 p-3 text-left transition-colors hover:border-gold/50"
                   >
                     <p className="truncate text-sm font-medium text-white">{p.name}</p>
-                    <p className="mt-0.5 text-xs text-white/40">
+                    <p className="mt-0.5 text-xs text-white/60">
                       {[p.brand, p.sku].filter(Boolean).join(" · ")}
                     </p>
                     <p className="mt-0.5 text-xs">
                       <span className="text-gold">{formatPence(p.retail_price_pence)}</span>
                       {p.track_stock === 1 && (
-                        <span className={`ml-2 ${p.total_quantity <= 0 ? "text-red-400" : "text-white/40"}`}>
+                        <span className={`ml-2 ${p.total_quantity <= 0 ? "text-red-400" : "text-white/60"}`}>
                           {p.total_quantity} in stock
                         </span>
                       )}
@@ -177,10 +177,10 @@ export function PosScreen({
                   </button>
                 ))}
               {tab === "services" && services.length === 0 && (
-                <p className="text-sm text-white/40">No services yet.</p>
+                <p className="text-sm text-white/60">No services yet.</p>
               )}
               {tab === "products" && products.length === 0 && (
-                <p className="text-sm text-white/40">No retail products yet — add them under Products.</p>
+                <p className="text-sm text-white/60">No retail products yet — add them under Products.</p>
               )}
             </div>
           </div>
@@ -194,7 +194,7 @@ export function PosScreen({
 
             <p className="text-xs font-semibold uppercase tracking-widest text-white/50">Cart</p>
             {cart.length === 0 ? (
-              <p className="text-sm text-white/40">Tap a service or product to add it.</p>
+              <p className="text-sm text-white/60">Tap a service or product to add it.</p>
             ) : (
               <ul className="space-y-2">
                 {cart.map((l) => (

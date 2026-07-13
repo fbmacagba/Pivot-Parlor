@@ -55,7 +55,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> =
       dot: "bg-emerald-400",
     },
     cancelled: { bg: "bg-red-500/10", text: "text-red-400", dot: "bg-red-400" },
-    no_show: { bg: "bg-white/5", text: "text-white/40", dot: "bg-white/30" },
+    no_show: { bg: "bg-white/5", text: "text-white/60", dot: "bg-white/30" },
   };
 
 function formatTime(iso: string) {
@@ -163,7 +163,7 @@ export default function AdminOverview() {
           <h1 className="font-heading text-2xl font-bold text-white">
             Overview
           </h1>
-          <p className="mt-0.5 text-sm text-white/40">
+          <p className="mt-0.5 text-sm text-white/60">
             {new Date().toLocaleDateString("en-GB", {
               weekday: "long",
               day: "numeric",
@@ -210,7 +210,7 @@ export default function AdminOverview() {
           <h2 className="font-heading text-lg font-semibold text-white">
             Today&apos;s schedule
           </h2>
-          <span className="text-xs text-white/40">
+          <span className="text-xs text-white/60">
             {completed.length}/{todayBookings.length} completed
           </span>
         </div>
@@ -333,7 +333,7 @@ export default function AdminOverview() {
               className="rounded-xl border border-white/8 bg-dark-100 p-4 transition-colors hover:border-gold/25 hover:bg-dark-100"
             >
               <p className="text-sm font-semibold text-white">{l.label}</p>
-              <p className="mt-0.5 text-xs text-white/40">{l.desc}</p>
+              <p className="mt-0.5 text-xs text-white/60">{l.desc}</p>
             </Link>
           ))}
         </div>

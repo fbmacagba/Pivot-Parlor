@@ -93,14 +93,14 @@ function UpcomingBookingCard({
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white truncate">{booking.service_name}</p>
           <p className="text-xs text-white/50 mt-0.5">{booking.shop_name} · with {booking.staff_name}</p>
-          <p className="text-xs text-white/40 mt-1 flex items-center gap-1">
+          <p className="text-xs text-white/60 mt-1 flex items-center gap-1">
             <Clock className="h-3 w-3" />
             {formatBookingWhen(booking)}
           </p>
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm font-bold text-gold">{formatPence(booking.amount_pence)}</p>
-          <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[booking.status] ?? "bg-white/5 text-white/40"}`}>
+          <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[booking.status] ?? "bg-white/5 text-white/60"}`}>
             {booking.status.replace("_", " ")}
           </span>
         </div>
@@ -127,7 +127,7 @@ function UpcomingBookingCard({
           )}
         </div>
         {!cancelAllowed && (
-          <p className="text-xs text-white/45">
+          <p className="text-xs text-white/60">
             This appointment starts within two hours, so it can’t be cancelled here. You can still check the booking page for another free slot if you need a different time.
           </p>
         )}
@@ -242,19 +242,19 @@ function ProfileCard({ me }: { me: Me }) {
       {editing ? (
         <div className="space-y-3">
           <div>
-            <label className="block text-xs text-white/40 mb-1">Name</label>
+            <label className="block text-xs text-white/60 mb-1">Name</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)}
               className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold" />
           </div>
           <div>
-            <label className="block text-xs text-white/40 mb-1">Phone (optional)</label>
+            <label className="block text-xs text-white/60 mb-1">Phone (optional)</label>
             <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
               placeholder="+44 7700 900000"
               className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold" />
           </div>
           <div>
-            <label className="block text-xs text-white/40 mb-1">Email</label>
-            <p className="text-sm text-white/50">{me.email} <span className="text-white/40">(cannot change)</span></p>
+            <label className="block text-xs text-white/60 mb-1">Email</label>
+            <p className="text-sm text-white/50">{me.email} <span className="text-white/60">(cannot change)</span></p>
           </div>
           {err && <p className="text-xs text-red-400">{err}</p>}
           <div className="flex gap-2 pt-1">
@@ -271,16 +271,16 @@ function ProfileCard({ me }: { me: Me }) {
       ) : (
         <dl className="space-y-2 text-sm">
           <div className="flex gap-3">
-            <dt className="w-16 shrink-0 text-white/40">Name</dt>
+            <dt className="w-16 shrink-0 text-white/60">Name</dt>
             <dd className="text-white">{me.name?.trim() || "—"}</dd>
           </div>
           <div className="flex gap-3">
-            <dt className="w-16 shrink-0 text-white/40">Email</dt>
+            <dt className="w-16 shrink-0 text-white/60">Email</dt>
             <dd className="text-white">{me.email}</dd>
           </div>
           {me.phone && (
             <div className="flex gap-3">
-              <dt className="w-16 shrink-0 text-white/40">Phone</dt>
+              <dt className="w-16 shrink-0 text-white/60">Phone</dt>
               <dd className="text-white">{me.phone}</dd>
             </div>
           )}
@@ -347,7 +347,7 @@ export default function AccountIndex() {
         <h1 className="font-heading text-2xl font-bold text-white">
           Hey, <span className="text-gold">{displayName}</span>
         </h1>
-        <p className="mt-1 text-sm text-white/40">Signed in as {me.email}</p>
+        <p className="mt-1 text-sm text-white/60">Signed in as {me.email}</p>
       </div>
 
       {/* Profile card */}
@@ -379,7 +379,7 @@ export default function AccountIndex() {
           </div>
         ) : upcoming.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
-            <p className="text-white/40 text-sm">You have no bookings to show.</p>
+            <p className="text-white/60 text-sm">You have no bookings to show.</p>
             <a href="/" className="mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:text-gold/80">
               Browse shops <ArrowRight className="h-3.5 w-3.5" />
             </a>
@@ -404,10 +404,10 @@ export default function AccountIndex() {
               <div key={b.id} className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-70">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-white truncate">{b.service_name}</p>
-                  <p className="text-xs text-white/40">{b.shop_name} · {formatBookingWhen(b)}</p>
+                  <p className="text-xs text-white/60">{b.shop_name} · {formatBookingWhen(b)}</p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[b.status] ?? "bg-white/5 text-white/40"}`}>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[b.status] ?? "bg-white/5 text-white/60"}`}>
                     {b.status.replace("_"," ")}
                   </span>
                   {/* Rebook link — takes them to the shop booking page */}

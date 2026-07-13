@@ -71,7 +71,7 @@ export default function DevShopGenerationStatus() {
 
       <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-lg font-semibold text-white">Site generation status</h2>
-        <p className="mt-1 font-mono text-xs text-white/40">Job {jobId}</p>
+        <p className="mt-1 font-mono text-xs text-white/60">Job {jobId}</p>
 
         {error ? (
           <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">

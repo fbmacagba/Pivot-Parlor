@@ -52,7 +52,7 @@ export default function Pricing() {
             <Button asChild size="xl">
               <Link to="/contact">Get started →</Link>
             </Button>
-            <p className="mt-3 text-xs text-white/40">£100 setup · No monthly fees · Live in 24 hours</p>
+            <p className="mt-3 text-xs text-white/60">£100 setup · No monthly fees · Live in 24 hours</p>
           </div>
         </div>
 

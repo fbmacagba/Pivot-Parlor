@@ -306,7 +306,7 @@ export default function AdminSettings() {
               <p className="mt-2 text-sm text-white/80">{address.trim()}</p>
             </div>
           ) : (
-            <p className="text-sm text-white/45">Add an address to see it previewed here.</p>
+            <p className="text-sm text-white/60">Add an address to see it previewed here.</p>
           )}
         </div>
         <Button type="button" size="sm" onClick={saveContact} disabled={fetcher.state !== "idle"}>
@@ -448,13 +448,13 @@ export default function AdminSettings() {
       {/* Notification preferences */}
       <section className="space-y-5 rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-lg font-semibold text-white">Email notifications</h2>
-        <p className="text-sm text-white/40 -mt-2">Control which automated emails are sent to customers.</p>
+        <p className="text-sm text-white/60 -mt-2">Control which automated emails are sent to customers.</p>
 
         {/* Confirmation email */}
         <div className="flex items-center justify-between gap-4 py-1">
           <div>
             <p className="text-sm font-medium text-white">Booking confirmation</p>
-            <p className="text-xs text-white/40 mt-0.5">Sent immediately when a booking is made</p>
+            <p className="text-xs text-white/60 mt-0.5">Sent immediately when a booking is made</p>
           </div>
           <Toggle
             value={confirmEmail}
@@ -467,7 +467,7 @@ export default function AdminSettings() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-medium text-white">Booking reminder</p>
-              <p className="text-xs text-white/40 mt-0.5">Sent before the appointment</p>
+              <p className="text-xs text-white/60 mt-0.5">Sent before the appointment</p>
             </div>
             <Toggle
               value={reminderEmail}
@@ -499,7 +499,7 @@ export default function AdminSettings() {
         <div className="flex items-center justify-between gap-4 border-t border-white/10 pt-4">
           <div>
             <p className="text-sm font-medium text-white">Review request</p>
-            <p className="text-xs text-white/40 mt-0.5">Sent when a booking is marked completed</p>
+            <p className="text-xs text-white/60 mt-0.5">Sent when a booking is marked completed</p>
           </div>
           <Toggle
             value={reviewEmail}
@@ -511,7 +511,7 @@ export default function AdminSettings() {
       {/* Booking deposits */}
       <section className="space-y-5 rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-lg font-semibold text-white">Booking deposits</h2>
-        <p className="text-sm text-white/40 -mt-2">
+        <p className="text-sm text-white/60 -mt-2">
           Take a card deposit when customers book online. Requires Stripe payments to be set up
           (Settings → Payments). The remaining balance is settled at the appointment.
         </p>
@@ -519,7 +519,7 @@ export default function AdminSettings() {
         <div className="flex items-center justify-between gap-4 py-1">
           <div>
             <p className="text-sm font-medium text-white">Require a deposit at online booking</p>
-            <p className="text-xs text-white/40 mt-0.5">
+            <p className="text-xs text-white/60 mt-0.5">
               The slot is only confirmed once the deposit is paid; abandoned payments free the slot
               after 30 minutes
             </p>
@@ -552,7 +552,7 @@ export default function AdminSettings() {
                 onChange={(e) => setDepositMin(e.target.value)}
                 placeholder="5.00"
               />
-              <p className="mt-1 text-xs text-white/40">
+              <p className="mt-1 text-xs text-white/60">
                 Never more than the service price — a high minimum becomes full prepayment.
               </p>
             </div>

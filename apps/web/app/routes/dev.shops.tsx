@@ -755,7 +755,7 @@ export default function DevShops() {
               {["#", "Name", "Owner", "Type", "AI Model", "Status", "Actions"].map((h) => (
                 <th
                   key={h}
-                  className="px-4 py-3 text-left text-xs font-semibold text-white/40 uppercase tracking-wider"
+                  className="px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider"
                 >
                   {h}
                 </th>
@@ -765,13 +765,13 @@ export default function DevShops() {
           <tbody className="divide-y divide-white/5">
             {shops.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-white/40">
+                <td colSpan={7} className="px-4 py-8 text-center text-white/60">
                   No shops yet. Create your first shop above.
                 </td>
               </tr>
             ) : filteredShops.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-white/40">
+                <td colSpan={7} className="px-4 py-8 text-center text-white/60">
                   No shops match your search.
                 </td>
               </tr>
@@ -1169,9 +1169,9 @@ export default function DevShops() {
                               <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
                                 <div className="mb-2 flex items-center justify-between">
                                   <h3 className="text-sm font-semibold text-white">Colour palette</h3>
-                                  <span className="text-xs text-white/40">{selectedPalette ? selectedPalette.name : "Auto (AI picks)"}</span>
+                                  <span className="text-xs text-white/60">{selectedPalette ? selectedPalette.name : "Auto (AI picks)"}</span>
                                 </div>
-                                <p className="mb-3 text-xs text-white/45">
+                                <p className="mb-3 text-xs text-white/60">
                                   Applied to the site when you generate the website.
                                 </p>
                                 <div

@@ -169,7 +169,7 @@ export default function BookingWizard() {
             <div className="space-y-4">
               <h2 className="font-heading text-2xl font-bold text-white">Select a service</h2>
               {services.length === 0 ? (
-                <p className="text-white/40">No services available.</p>
+                <p className="text-white/60">No services available.</p>
               ) : (
                 services.map((s) => (
                   <button
@@ -246,7 +246,7 @@ export default function BookingWizard() {
               />
 
               {slotsFetcher.state === "loading" && (
-                <p className="text-sm text-white/40">Loading available slots…</p>
+                <p className="text-sm text-white/60">Loading available slots…</p>
               )}
 
               {availableSlots.length > 0 && (
@@ -258,7 +258,7 @@ export default function BookingWizard() {
                         key={slot.start_time}
                         onClick={() => setSelection((p) => ({ ...p, slot: slot.start_time }))}
                         className={`rounded-lg border py-2 text-sm transition-colors ${
-                          selection.slot === slot.start_time ? "border-gold bg-gold/20 text-gold" : "border-white/20 text-white/70 hover:border-gold/40"
+                          selection.slot === slot.start_time ? "border-gold bg-gold/20 text-gold" : "border-white/40 text-white/70 hover:border-gold/40"
                         }`}
                       >
                         {formatSlotTime(slot.start_time, shopTimezone)}
@@ -269,7 +269,7 @@ export default function BookingWizard() {
               )}
 
               {selection.date && slotsFetcher.state !== "loading" && availableSlots.length === 0 && (
-                <p className="text-sm text-white/40">No slots available for this date.</p>
+                <p className="text-sm text-white/60">No slots available for this date.</p>
               )}
 
               <div className="flex gap-3">
@@ -291,7 +291,7 @@ export default function BookingWizard() {
                   rows={3}
                   value={selection.notes}
                   onChange={(e) => setSelection((p) => ({ ...p, notes: e.target.value }))}
-                  className="flex w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
+                  className="flex w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
                 />
               </div>
               <div className="flex gap-3">
