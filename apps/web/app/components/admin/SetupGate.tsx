@@ -108,7 +108,7 @@ function StepRow({
         <p className={`text-sm font-semibold ${done ? "text-white/50 line-through" : "text-white"}`}>
           {label}
         </p>
-        <p className="text-xs text-white/40 mt-0.5">{desc}</p>
+        <p className="text-xs text-white/60 mt-0.5">{desc}</p>
       </div>
 
       {/* Action */}
@@ -124,7 +124,7 @@ function StepRow({
         </Link>
       )}
       {!done && !active && (
-        <span className="shrink-0 text-xs text-white/40 font-medium">Locked</span>
+        <span className="shrink-0 text-xs text-white/60 font-medium">Locked</span>
       )}
       {done && (
         <span className="shrink-0 text-xs font-semibold text-emerald-400">Done</span>
@@ -145,7 +145,7 @@ export function SetupGate({ status }: { status: SetupStatus }) {
       {/* Header */}
       <div>
         <h1 className="font-heading text-2xl font-bold text-white">Welcome to Pivot Parlor</h1>
-        <p className="mt-1 text-sm text-white/40">
+        <p className="mt-1 text-sm text-white/60">
           Complete these steps to go live and start taking bookings.
         </p>
       </div>
@@ -185,7 +185,7 @@ export function SetupGate({ status }: { status: SetupStatus }) {
       </div>
 
       {/* Help text */}
-      <p className="text-xs text-white/40 text-center">
+      <p className="text-xs text-white/60 text-center">
         Need help? Contact{" "}
         <a href="mailto:support@pivotparlor.com" className="text-gold/60 hover:text-gold underline">
           support@pivotparlor.com

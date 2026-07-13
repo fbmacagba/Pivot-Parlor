@@ -144,7 +144,7 @@ export default function InviteAccept() {
                 <span className="text-white font-medium">{invite.shop.name}</span>.
               </p>
             )}
-            <p className="text-sm text-white/40">
+            <p className="text-sm text-white/60">
               Signing in as{" "}
               <span className="text-white/70 font-medium">{invite.email}</span>
             </p>
@@ -173,7 +173,7 @@ export default function InviteAccept() {
                 required
                 autoComplete="name"
                 placeholder="Jane Smith"
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
+                className="flex h-10 w-full rounded-lg border border-white/40 bg-white/5 px-3 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
@@ -192,7 +192,7 @@ export default function InviteAccept() {
                 minLength={8}
                 autoComplete="new-password"
                 placeholder="At least 8 characters"
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
+                className="flex h-10 w-full rounded-lg border border-white/40 bg-white/5 px-3 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
@@ -210,7 +210,7 @@ export default function InviteAccept() {
                 required
                 autoComplete="new-password"
                 placeholder="Repeat password"
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
+                className="flex h-10 w-full rounded-lg border border-white/40 bg-white/5 px-3 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 

@@ -233,7 +233,7 @@ export default function AdminServices() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Services</h1>
-          <p className="mt-0.5 text-sm text-white/40">
+          <p className="mt-0.5 text-sm text-white/60">
             {active.length} active
             {inactive.length > 0 && ` · ${inactive.length} inactive`}
           </p>
@@ -302,7 +302,7 @@ export default function AdminServices() {
         <button
           type="button"
           onClick={() => setShowInactive((v) => !v)}
-          className="mb-4 text-xs text-white/40 hover:text-gold transition-colors"
+          className="mb-4 text-xs text-white/60 hover:text-gold transition-colors"
         >
           {showInactive ? "Hide inactive" : `Show ${inactive.length} inactive`}
         </button>
@@ -310,7 +310,7 @@ export default function AdminServices() {
 
       {/* Service list */}
       {Object.keys(grouped).length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/20 p-12 text-center text-white/40">
+        <div className="rounded-xl border border-dashed border-white/20 p-12 text-center text-white/60">
           <p className="text-lg">No services yet.</p>
           <p className="mt-1 text-sm">Add your first service above.</p>
         </div>
@@ -372,7 +372,7 @@ function ServiceRow({
           )}
         </p>
         {service.category && (
-          <p className="mt-0.5 truncate text-xs text-white/40">{service.category}</p>
+          <p className="mt-0.5 truncate text-xs text-white/60">{service.category}</p>
         )}
       </div>
 
@@ -381,7 +381,7 @@ function ServiceRow({
         <p className="text-sm font-semibold text-gold">
           {formatPence(service.price_pence)}
         </p>
-        <p className="text-xs text-white/40">
+        <p className="text-xs text-white/60">
           {formatDuration(service.durationMinutes)}
         </p>
       </div>

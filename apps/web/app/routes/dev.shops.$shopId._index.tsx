@@ -105,21 +105,21 @@ export default function DevShopDetailIndex() {
                 <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                   <dl className="space-y-2">
                     <div className="flex gap-2">
-                      <dt className="w-28 shrink-0 text-white/45">Owner name</dt>
+                      <dt className="w-28 shrink-0 text-white/60">Owner name</dt>
                       <dd className="text-white">{ownerDetails.owner_name?.trim() || "—"}</dd>
                     </div>
                     <div className="flex gap-2">
-                      <dt className="w-28 shrink-0 text-white/45">Owner email</dt>
+                      <dt className="w-28 shrink-0 text-white/60">Owner email</dt>
                       <dd className="break-all text-white">{ownerDetails.owner_email?.trim() || "—"}</dd>
                     </div>
                     <div className="flex gap-2">
-                      <dt className="w-28 shrink-0 text-white/45">Shop phone</dt>
+                      <dt className="w-28 shrink-0 text-white/60">Shop phone</dt>
                       <dd className="text-white">{ownerDetails.phone?.trim() || "—"}</dd>
                     </div>
                   </dl>
                 </div>
                 <div>
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/45">
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/60">
                     Platform users
                   </h3>
                   {ownerDetails.platform_users.length === 0 ? (
@@ -168,19 +168,19 @@ export default function DevShopDetailIndex() {
         </p>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/40">Template</dt>
+            <dt className="w-36 shrink-0 text-white/60">Template</dt>
             <dd className="text-white">{generationPrefs.template}</dd>
           </div>
           <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/40">Primary</dt>
+            <dt className="w-36 shrink-0 text-white/60">Primary</dt>
             <dd className="text-white">{generationPrefs.color_primary ?? "—"}</dd>
           </div>
           <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/40">Accent</dt>
+            <dt className="w-36 shrink-0 text-white/60">Accent</dt>
             <dd className="text-white">{generationPrefs.color_accent ?? "—"}</dd>
           </div>
           <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/40 align-top">Design notes</dt>
+            <dt className="w-36 shrink-0 text-white/60 align-top">Design notes</dt>
             <dd className="whitespace-pre-wrap text-white/80">
               {generationPrefs.design_notes?.trim() ? generationPrefs.design_notes : "—"}
             </dd>
@@ -214,7 +214,7 @@ export default function DevShopDetailIndex() {
 
       <section className="rounded-xl border border-red-500/30 bg-red-500/5 p-6">
         <h2 className="font-heading text-lg font-semibold text-red-200/90">Danger zone</h2>
-        <p className="mt-1 text-sm text-white/45">
+        <p className="mt-1 text-sm text-white/60">
           Permanently delete this shop and related records. This cannot be undone.
         </p>
         <Button
@@ -273,7 +273,7 @@ export default function DevShopDetailIndex() {
         </Dialog>
       </section>
 
-      <p className="text-sm text-white/40">
+      <p className="text-sm text-white/60">
         <Link to="/dev/shops" className="text-gold hover:underline">
           Back to shops list
         </Link>

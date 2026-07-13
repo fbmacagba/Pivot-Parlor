@@ -27,14 +27,14 @@ export function Footer() {
                 <LinkedInIcon /> DM us on LinkedIn
               </a>
             </div>
-            <p className="mt-4 text-xs text-white/40">
+            <p className="mt-4 text-xs text-white/60">
               dev@pivotparlor.com · Moselle Avenue, London, UK, N22 6ET
             </p>
           </div>
 
           {/* Navigation */}
           <div>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-white/40">
+            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-white/60">
               Navigation
             </p>
             <ul className="space-y-2.5 text-sm text-white/60">
@@ -55,7 +55,7 @@ export function Footer() {
 
           {/* Legal */}
           <div>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-white/40">
+            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-white/60">
               Legal
             </p>
             <ul className="space-y-2.5 text-sm text-white/60">

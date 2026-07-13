@@ -105,7 +105,7 @@ export function Sidebar({ role, shopName, userName, showDeveloperViewSwitcher = 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         {role === "developer" || showDeveloperViewSwitcher ? (
           <div className="mb-4 px-2">
-            <label htmlFor="pp-dev-switch-view" className="mb-1.5 block text-xs font-medium text-white/45">
+            <label htmlFor="pp-dev-switch-view" className="mb-1.5 block text-xs font-medium text-white/60">
               Switch View
             </label>
             <select
@@ -160,7 +160,7 @@ export function Sidebar({ role, shopName, userName, showDeveloperViewSwitcher = 
       {/* User + logout */}
       <div className="border-t border-white/10 p-3">
         {userName && (
-          <p className="mb-2 px-2 text-xs text-white/40 truncate">{userName}</p>
+          <p className="mb-2 px-2 text-xs text-white/60 truncate">{userName}</p>
         )}
         <form action="/logout" method="post">
           <button

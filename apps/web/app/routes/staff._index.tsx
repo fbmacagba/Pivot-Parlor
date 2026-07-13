@@ -94,7 +94,7 @@ export default function StaffToday() {
           <h1 className="font-heading text-2xl font-bold text-white">
             {greeting}
           </h1>
-          <p className="mt-0.5 text-sm text-white/40">
+          <p className="mt-0.5 text-sm text-white/60">
             {new Date().toLocaleDateString("en-GB", {
               weekday: "long",
               day: "numeric",
@@ -133,7 +133,7 @@ export default function StaffToday() {
                 {next.service_name}
               </p>
               {next.notes && (
-                <p className="text-xs text-white/40 mt-1 italic">
+                <p className="text-xs text-white/60 mt-1 italic">
                   {next.notes}
                 </p>
               )}
@@ -165,7 +165,7 @@ export default function StaffToday() {
         <div>
           <h2 className="font-heading text-base font-semibold text-white mb-3">
             Today&apos;s schedule
-            <span className="ml-2 text-xs font-normal text-white/40">
+            <span className="ml-2 text-xs font-normal text-white/60">
               {upcoming.length} remaining · {completed.length} done
             </span>
           </h2>

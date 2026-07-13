@@ -134,7 +134,7 @@ export function OnboardShopDialog({
             <div>
               <label className="block text-sm font-medium text-white/80 mb-1.5">
                 Slug
-                <span className="ml-1.5 text-xs text-white/40">(auto-generated, editable)</span>
+                <span className="ml-1.5 text-xs text-white/60">(auto-generated, editable)</span>
               </label>
               <input
                 name="slug"

@@ -189,21 +189,21 @@ export default function LoginPage() {
           <div className="space-y-3">
             <a
               href={`${socialBase}/auth/google${redirectQuery}`}
-              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/20 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
+              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/40 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               <GoogleIcon />
               Continue with Google
             </a>
             <a
               href={`${socialBase}/auth/facebook${redirectQuery}`}
-              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/20 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
+              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/40 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               <FacebookIcon />
               Continue with Facebook
             </a>
             <a
               href={`${socialBase}/auth/linkedin${redirectQuery}`}
-              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/20 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
+              className="flex h-10 w-full items-center justify-center gap-2.5 rounded-lg border border-white/40 bg-white/5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               <LinkedInIcon />
               Continue with LinkedIn
@@ -213,7 +213,7 @@ export default function LoginPage() {
           {/* Divider */}
           <div className="my-6 flex items-center gap-3">
             <div className="h-px flex-1 bg-white/10" />
-            <span className="text-xs text-white/40">or continue with email</span>
+            <span className="text-xs text-white/60">or continue with email</span>
             <div className="h-px flex-1 bg-white/10" />
           </div>
 
@@ -237,7 +237,7 @@ export default function LoginPage() {
                 type="email"
                 required
                 autoComplete="email"
-                className="block h-10 w-full rounded-lg border border-white/20 bg-black/20 px-3 text-sm text-white placeholder:text-white/40 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold"
+                className="block h-10 w-full rounded-lg border border-white/40 bg-black/20 px-3 text-sm text-white placeholder:text-white/60 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 
@@ -251,7 +251,7 @@ export default function LoginPage() {
                 type="password"
                 required
                 autoComplete="current-password"
-                className="block h-10 w-full rounded-lg border border-white/20 bg-black/20 px-3 text-sm text-white placeholder:text-white/40 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold"
+                className="block h-10 w-full rounded-lg border border-white/40 bg-black/20 px-3 text-sm text-white placeholder:text-white/60 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold"
               />
             </div>
 

@@ -214,7 +214,7 @@ export default function DevAIDeploy() {
           {/* Model selector — top 10 providers via OpenRouter, live pricing */}
           <div>
             <label className="block text-sm font-medium text-white/80 mb-1.5">
-              LLM Model <span className="text-white/40">(top 10 providers via OpenRouter)</span>
+              LLM Model <span className="text-white/60">(top 10 providers via OpenRouter)</span>
             </label>
             <select
               value={modelId}
@@ -266,7 +266,7 @@ export default function DevAIDeploy() {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label className="block text-sm font-medium text-white/80">Colour palette</label>
-              <span className="text-xs text-white/40">
+              <span className="text-xs text-white/60">
                 {selectedPalette ? selectedPalette.name : "Auto (AI picks)"}
               </span>
             </div>
@@ -406,17 +406,17 @@ function BrandPreview({
   return (
     <div className="rounded-xl border border-white/10 bg-dark-100 p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-white/40 uppercase tracking-wider">Preview</p>
+        <p className="text-xs font-semibold text-white/60 uppercase tracking-wider">Preview</p>
         <Badge variant="outline">{modelLabel}</Badge>
       </div>
       <div className="flex gap-3">
         <div className="flex flex-col items-center gap-1">
           <div className="h-10 w-10 rounded-full border border-white/10" style={{ background: theme.primaryColor }} />
-          <p className="text-xs text-white/40">Primary</p>
+          <p className="text-xs text-white/60">Primary</p>
         </div>
         <div className="flex flex-col items-center gap-1">
           <div className="h-10 w-10 rounded-full border border-white/10" style={{ background: theme.accentColor }} />
-          <p className="text-xs text-white/40">Accent</p>
+          <p className="text-xs text-white/60">Accent</p>
         </div>
       </div>
       <p className="font-heading text-lg font-bold text-white" style={{ fontFamily: `"${theme.fontHeading}", serif` }}>

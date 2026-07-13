@@ -133,7 +133,7 @@ const STATUS_PILL: Record<string, string> = {
   completed: "bg-emerald-500/10 text-emerald-300",
   refunded: "bg-purple-500/10 text-purple-300",
   disputed: "bg-red-500/10 text-red-300",
-  voided: "bg-white/10 text-white/40",
+  voided: "bg-white/10 text-white/60",
 };
 
 export default function AdminSales() {
@@ -152,7 +152,7 @@ export default function AdminSales() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Sales</h1>
-          <p className="mt-0.5 text-sm text-white/40">Till history and refunds.</p>
+          <p className="mt-0.5 text-sm text-white/60">Till history and refunds.</p>
         </div>
         <Form method="get" className="flex items-end gap-2">
           {shopId && <input type="hidden" name="shopId" value={shopId} />}
@@ -189,7 +189,7 @@ export default function AdminSales() {
       {detail && <RefundPanel shopId={shopId} detail={detail} baseQuery={baseQuery} isSubmitting={isSubmitting} />}
 
       {sales.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/20 p-10 text-center text-sm text-white/40">
+        <div className="rounded-xl border border-dashed border-white/20 p-10 text-center text-sm text-white/60">
           No sales on {date}.
         </div>
       ) : (
@@ -249,16 +249,16 @@ function RefundPanel({
       <div className="mb-4 flex items-center justify-between">
         <p className="text-sm font-semibold text-gold">
           Refund sale · {formatPence(detail.total_pence)} {detail.tender_type.replace("_", " ")}
-          <span className="ml-2 text-xs font-normal text-white/40">
+          <span className="ml-2 text-xs font-normal text-white/60">
             {detail.refunded_pence > 0 && `${formatPence(detail.refunded_pence)} already refunded · `}
             {formatPence(Math.max(0, refundable))} refundable
           </span>
         </p>
-        <Link to={`/admin/sales${baseQuery}`} className="text-xs text-white/40 hover:text-white">Close</Link>
+        <Link to={`/admin/sales${baseQuery}`} className="text-xs text-white/60 hover:text-white">Close</Link>
       </div>
 
       {detail.returns.length > 0 && (
-        <ul className="mb-4 space-y-1 text-xs text-white/45">
+        <ul className="mb-4 space-y-1 text-xs text-white/60">
           {detail.returns.map((r) => (
             <li key={r.id}>
               {new Date(r.created_at).toLocaleString("en-GB")} — {formatPence(r.refund_pence)} ({r.status})
@@ -269,7 +269,7 @@ function RefundPanel({
       )}
 
       {refundable <= 0 ? (
-        <p className="text-sm text-white/45">This sale is fully refunded.</p>
+        <p className="text-sm text-white/60">This sale is fully refunded.</p>
       ) : (
         <Form method="post" className="space-y-3">
           {shopId && <input type="hidden" name="shopId" value={shopId} />}
@@ -317,7 +317,7 @@ function RefundPanel({
             })}
           </div>
           <Input label="Reason" name="reason" placeholder="e.g. product returned unopened" />
-          <p className="text-xs text-white/40">
+          <p className="text-xs text-white/60">
             Tips are not refunded here. Back-bar products used during a service are not restocked.
             {detail.tender_type !== "stripe" && " You hand the money back at the till — this records it."}
           </p>

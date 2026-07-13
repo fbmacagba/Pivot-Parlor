@@ -102,7 +102,7 @@ export function ShareShopCard({ shopUrl, shopName }: ShareShopCardProps) {
               aria-label={`QR code linking to ${shopName}`}
             />
           </div>
-          <p className="max-w-xs text-center text-xs text-white/40">
+          <p className="max-w-xs text-center text-xs text-white/60">
             Point a phone camera at the code to open {shopName}. Turn up your
             screen brightness if it does not scan first time.
           </p>

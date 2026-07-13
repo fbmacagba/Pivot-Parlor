@@ -89,19 +89,19 @@ export default function WalkIn() {
               <label className="block text-sm font-medium text-white/80 mb-1.5">Your name <span className="text-gold">*</span></label>
               <input type="text" value={name} onChange={e => setName(e.target.value)}
                 placeholder="Jane Smith"
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold" />
+                className="w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold" />
             </div>
             <div>
               <label className="block text-sm font-medium text-white/80 mb-1.5">Phone (optional)</label>
               <input type="tel" value={phone} onChange={e => setPhone(e.target.value)}
                 placeholder="+44 7700 900000"
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold" />
+                className="w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold" />
             </div>
             <div>
               <label className="block text-sm font-medium text-white/80 mb-1.5">Service (optional)</label>
               <input type="text" value={service} onChange={e => setService(e.target.value)}
                 placeholder="e.g. Haircut, Beard trim…"
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold" />
+                className="w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold" />
             </div>
             {error && <p className="text-sm text-red-400">{error}</p>}
             <button onClick={joinQueue} disabled={submitting}
@@ -120,15 +120,15 @@ export default function WalkIn() {
             </div>
             <div className="px-6 py-5 space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-white/40">Name</span>
+                <span className="text-white/60">Name</span>
                 <span className="text-white font-medium">{entry.name}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-white/40">People ahead</span>
+                <span className="text-white/60">People ahead</span>
                 <span className="text-white font-medium">{entry.ahead}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-white/40">Est. wait</span>
+                <span className="text-white/60">Est. wait</span>
                 <span className="text-white font-medium">
                   {entry.est_wait_minutes === 0 ? "You're next!" : `~${entry.est_wait_minutes} min`}
                 </span>

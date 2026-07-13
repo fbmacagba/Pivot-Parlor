@@ -190,8 +190,8 @@ export default function DevEnquiries() {
                   key={h}
                   className={
                     h === "Actions"
-                      ? "px-4 py-3 text-left text-xs font-semibold text-white/40 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]"
-                      : "px-4 py-3 text-left text-xs font-semibold text-white/40 uppercase tracking-wider"
+                      ? "px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]"
+                      : "px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider"
                   }
                 >
                   {h}
@@ -202,7 +202,7 @@ export default function DevEnquiries() {
           <tbody className="divide-y divide-white/5">
             {enquiries.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-white/40">
+                <td colSpan={8} className="px-4 py-8 text-center text-white/60">
                   No enquiries yet.
                 </td>
               </tr>
@@ -230,7 +230,7 @@ export default function DevEnquiries() {
                         </button>
                       ) : "—"}
                     </td>
-                    <td className="px-4 py-3 text-white/40 text-xs whitespace-nowrap">
+                    <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
                       {new Date(e.created_at).toLocaleString()}
                     </td>
                     {/* Always render Actions cell — onboarded_at only toggles button vs disabled state */}
@@ -305,7 +305,7 @@ export default function DevEnquiries() {
                 onChange={(ev) => setFormSlug(ev.target.value)}
                 placeholder="auto from shop name"
               />
-              <p className="text-xs text-white/40">
+              <p className="text-xs text-white/60">
                 A unique number suffix is added automatically (e.g. <span className="text-white/60">my-shop-012</span>
                 ).
               </p>
@@ -383,21 +383,21 @@ export default function DevEnquiries() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
-                  <p className="text-xs text-white/40 mb-0.5">Shop</p>
+                  <p className="text-xs text-white/60 mb-0.5">Shop</p>
                   <p className="text-white">{messageEnquiry.shop_name}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-white/40 mb-0.5">Email</p>
+                  <p className="text-xs text-white/60 mb-0.5">Email</p>
                   <a href={`mailto:${messageEnquiry.email}`} className="text-gold hover:underline">{messageEnquiry.email}</a>
                 </div>
                 {messageEnquiry.phone && (
                   <div>
-                    <p className="text-xs text-white/40 mb-0.5">Phone</p>
+                    <p className="text-xs text-white/60 mb-0.5">Phone</p>
                     <a href={`tel:${messageEnquiry.phone}`} className="text-white/70 hover:text-white">{messageEnquiry.phone}</a>
                   </div>
                 )}
                 <div>
-                  <p className="text-xs text-white/40 mb-0.5">Received</p>
+                  <p className="text-xs text-white/60 mb-0.5">Received</p>
                   <p className="text-white/60">{new Date(messageEnquiry.created_at).toLocaleString()}</p>
                 </div>
               </div>

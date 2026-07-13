@@ -197,9 +197,9 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
           </div>
 
           {!selectedDate ? (
-            <div className="px-5 py-10 text-center text-white/40 text-sm">Click a day to see bookings</div>
+            <div className="px-5 py-10 text-center text-white/60 text-sm">Click a day to see bookings</div>
           ) : selectedBookings.length === 0 ? (
-            <div className="px-5 py-10 text-center text-white/40 text-sm">No bookings on this day</div>
+            <div className="px-5 py-10 text-center text-white/60 text-sm">No bookings on this day</div>
           ) : (
             <div className="divide-y divide-white/5 max-h-[480px] overflow-y-auto">
               {selectedBookings.map((booking) => (
@@ -215,7 +215,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[booking.status]}`} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{booking.customer_name}</p>
-                    <p className="text-xs text-white/40 truncate">{booking.service_name}</p>
+                    <p className="text-xs text-white/60 truncate">{booking.service_name}</p>
                     <p className="text-xs text-white/50 truncate">{booking.staff_name}</p>
                   </div>
                   <div className="shrink-0 text-right">

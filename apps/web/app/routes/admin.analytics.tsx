@@ -64,7 +64,7 @@ function formatMonth(ym: string) {
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
-      <p className="text-xs text-white/40 font-medium">{label}</p>
+      <p className="text-xs text-white/60 font-medium">{label}</p>
       <p className="text-2xl font-bold text-white mt-1">{value}</p>
       {sub && <p className="text-xs text-white/50 mt-0.5">{sub}</p>}
     </div>
@@ -162,7 +162,7 @@ export default function AdminAnalytics() {
       {/* Header */}
       <div>
         <h1 className="font-heading text-2xl font-bold text-white">Analytics</h1>
-        <p className="mt-0.5 text-sm text-white/40">
+        <p className="mt-0.5 text-sm text-white/60">
           Last 12 months · {data.period.from} to {data.period.to}
         </p>
       </div>
@@ -178,7 +178,7 @@ export default function AdminAnalytics() {
       {/* Monthly trend */}
       <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-base font-semibold text-white mb-1">Monthly bookings</h2>
-        <p className="text-xs text-white/40 mb-5">Completed bookings over the last 12 months</p>
+        <p className="text-xs text-white/60 mb-5">Completed bookings over the last 12 months</p>
         <BarChart
           data={allMonths}
           labelKey="month"
@@ -191,7 +191,7 @@ export default function AdminAnalytics() {
       {/* Revenue trend */}
       <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-base font-semibold text-white mb-1">Monthly revenue</h2>
-        <p className="text-xs text-white/40 mb-5">Gross revenue (£) over the last 12 months</p>
+        <p className="text-xs text-white/60 mb-5">Gross revenue (£) over the last 12 months</p>
         <BarChart
           data={allMonths}
           labelKey="month"
@@ -207,7 +207,7 @@ export default function AdminAnalytics() {
         {/* Peak hours */}
         <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-1">Peak hours</h2>
-          <p className="text-xs text-white/40 mb-5">When customers book most (all time)</p>
+          <p className="text-xs text-white/60 mb-5">When customers book most (all time)</p>
           <BarChart
             data={allHours}
             labelKey="hour"
@@ -223,7 +223,7 @@ export default function AdminAnalytics() {
         {/* Peak days */}
         <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-1">Peak days</h2>
-          <p className="text-xs text-white/40 mb-5">Busiest days of the week (all time)</p>
+          <p className="text-xs text-white/60 mb-5">Busiest days of the week (all time)</p>
           <BarChart
             data={allDays}
             labelKey="dow"
@@ -247,7 +247,7 @@ export default function AdminAnalytics() {
                 <div key={s.status}>
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-white/60 capitalize">{s.status.replace("_"," ")}</span>
-                    <span className="text-white/40">{s.count} ({pct}%)</span>
+                    <span className="text-white/60">{s.count} ({pct}%)</span>
                   </div>
                   <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                     <div
@@ -270,10 +270,10 @@ export default function AdminAnalytics() {
             <div className="space-y-3">
               {top_services.map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs text-white/40 w-4 shrink-0">{i+1}</span>
+                  <span className="text-xs text-white/60 w-4 shrink-0">{i+1}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white truncate">{s.service_name}</p>
-                    <p className="text-xs text-white/40">{s.booking_count} bookings</p>
+                    <p className="text-xs text-white/60">{s.booking_count} bookings</p>
                   </div>
                   <span className="text-sm font-semibold text-gold shrink-0">£{Math.round(s.gross_pence / 100)}</span>
                 </div>
@@ -291,13 +291,13 @@ export default function AdminAnalytics() {
             <div className="space-y-3">
               {top_staff.map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs text-white/40 w-4 shrink-0">{i+1}</span>
+                  <span className="text-xs text-white/60 w-4 shrink-0">{i+1}</span>
                   <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-xs font-bold text-gold shrink-0">
                     {s.display_name.charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white truncate">{s.display_name}</p>
-                    <p className="text-xs text-white/40">{s.booking_count} bookings</p>
+                    <p className="text-xs text-white/60">{s.booking_count} bookings</p>
                   </div>
                   <span className="text-sm font-semibold text-gold shrink-0">£{Math.round(s.gross_pence / 100)}</span>
                 </div>

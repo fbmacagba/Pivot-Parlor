@@ -25,7 +25,7 @@ export function RegenStepRow({
 
   const labelClass =
     state === "pending"
-      ? "text-white/45"
+      ? "text-white/60"
       : state === "active"
         ? "text-white"
         : state === "failed"
