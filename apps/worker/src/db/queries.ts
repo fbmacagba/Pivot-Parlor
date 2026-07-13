@@ -1293,11 +1293,13 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
-              sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone
+              sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone,
+              ss.address AS shop_address
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
        JOIN shops sh ON sh.id = b.shop_id
+       LEFT JOIN shop_settings ss ON ss.shop_id = b.shop_id
        WHERE b.status IN ('pending', 'confirmed')
          AND b.reminder_sent = 0
          AND b.booking_date = date('now', '+1 day')
@@ -1319,6 +1321,7 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
       shop_name: string;
       shop_slug: string;
       shop_timezone: string | null;
+      shop_address: string | null;
     }>();
   return results;
 }

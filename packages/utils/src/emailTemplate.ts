@@ -90,6 +90,8 @@ export interface EmailDetailRow {
   value: string;
   /** Render the value in large gold (money totals). */
   accent?: boolean;
+  /** Render the value as a link (e.g. an address opening Google Maps). */
+  href?: string;
 }
 
 /**
@@ -104,15 +106,27 @@ export function emailDetailRows(rows: EmailDetailRow[]): string {
       const valueStyle = row.accent
         ? `font-size:17px;font-weight:700;color:${COLORS.goldBright};`
         : `font-size:15px;font-weight:600;color:${COLORS.text};`;
+      const value = row.href
+        ? `<a href="${row.href}" style="color:${COLORS.goldBright};text-decoration:underline;">${row.value}</a>`
+        : row.value;
       return `<tr>
-    <td style="padding:12px 16px 12px 0;font-size:13px;color:${COLORS.muted};white-space:nowrap;${borderTop}font-family:${FONT_STACK};">${row.label}</td>
-    <td align="right" style="padding:12px 0;${valueStyle}${borderTop}font-family:${FONT_STACK};">${row.value}</td>
+    <td style="padding:12px 16px 12px 0;font-size:13px;color:${COLORS.muted};white-space:nowrap;${borderTop}font-family:${FONT_STACK};vertical-align:top;">${row.label}</td>
+    <td align="right" style="padding:12px 0;${valueStyle}${borderTop}font-family:${FONT_STACK};">${value}</td>
   </tr>`;
     })
     .join("\n");
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 ${trs}
 </table>`;
+}
+
+/**
+ * Google Maps link for a free-form address. The `query` form opens the live
+ * map (the Maps app on mobile) pinned to the best match; including the shop
+ * name improves place matching.
+ */
+export function googleMapsUrl(query: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
 /** Muted note paragraph (cancellation policy, expiry notes, etc.). */

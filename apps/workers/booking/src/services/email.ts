@@ -15,6 +15,7 @@ import {
   emailHighlight,
   emailDetailRows,
   emailNote,
+  googleMapsUrl,
 } from "@repo/utils";
 
 const RESEND_API = "https://api.resend.com/emails";
@@ -35,6 +36,8 @@ export interface BookingEmailData {
   duration_min: number;
   amount_pence: number; // integer pence (WS-4)
   booking_id: string;
+  /** Physical address (shop_settings.address); links to Google Maps when set. */
+  shop_address?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -63,6 +66,7 @@ async function sendEmail(
 // ─── Email templates ──────────────────────────────────────────────────────────
 
 function confirmationHtml(d: BookingEmailData): string {
+  const address = d.shop_address?.trim();
   return emailBaseLayout(
     emailHeader(
       "✅ Booking confirmed",
@@ -77,6 +81,17 @@ function confirmationHtml(d: BookingEmailData): string {
             { label: "Service", value: d.service_name },
             { label: "With", value: d.staff_name },
             { label: "Location", value: d.shop_name },
+            // Clickable address: opens the live map (the Maps app on phones)
+            // pinned to the shop.
+            ...(address
+              ? [
+                  {
+                    label: "Address",
+                    value: address,
+                    href: googleMapsUrl(`${d.shop_name}, ${address}`),
+                  },
+                ]
+              : []),
             {
               label: "Total",
               value: formatPence(d.amount_pence),
