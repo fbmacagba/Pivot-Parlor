@@ -4,21 +4,17 @@ export function ShopLegalDocument({
   title,
   shopName,
   address,
+  lastUpdated,
   children,
 }: {
   title: string;
   shopName: string;
   /** Business address from shop settings — shown in the policy when available */
   address?: string | null;
+  /** Content-change date shown as "Last updated" (see lib/legalDates — never render-time) */
+  lastUpdated: string;
   children: ReactNode;
 }) {
-  const today = new Date();
-  const lastUpdated = today.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-
   return (
     <main className="px-4 py-16 md:px-6 md:py-24">
       <article className="mx-auto max-w-3xl">
