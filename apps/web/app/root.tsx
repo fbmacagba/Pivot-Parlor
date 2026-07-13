@@ -1,9 +1,16 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "@remix-run/react";
+import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+} from "@remix-run/react";
 import tailwindStylesheet from "~/tailwind.css?url";
 // Self-hosted fonts (WS-6 item 5 / LEG-5): the whole curated set registers its
 // @font-face rules here — no Google Fonts requests anywhere in the app.
 import "~/fonts";
 import { PlatformCookieBanner } from "~/components/PlatformCookieBanner";
+import { InstallAppPrompt } from "~/components/InstallAppPrompt";
 import { ErrorScreen } from "~/components/ErrorScreen";
 
 export const links = () => [
@@ -19,7 +26,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head suppressHydrationWarning>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* viewport-fit=cover lets the app paint edge to edge on notched
+            devices when installed; safe-area padding in tailwind.css keeps
+            content clear of the home indicator. */}
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+        <meta name="theme-color" content="#0D0D0D" />
+        {/* Installed-app chrome: standalone full screen with a black status
+            bar on iOS, matching the dark theme. */}
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+        <meta name="apple-mobile-web-app-title" content="Pivot Parlor" />
         <Meta />
         <Links />
       </head>
@@ -31,6 +51,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <ScrollRestoration />
         <Scripts />
         <PlatformCookieBanner />
+        <InstallAppPrompt />
       </body>
     </html>
   );
