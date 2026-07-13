@@ -2,6 +2,7 @@ import { useRouteLoaderData } from "@remix-run/react";
 import type { MetaFunction } from "@remix-run/cloudflare";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { ShopLegalDocument } from "~/components/ShopLegalDocument";
+import { SHOP_LEGAL_LAST_UPDATED } from "~/lib/legalDates";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
 import type { loader as shopLoader } from "./$shopSlug";
 import type { ShopSiteData } from "./$shopSlug";
@@ -26,7 +27,7 @@ export default function ShopTermsOfService() {
 
   return (
     <CommercialShopChrome site={siteChrome} settings={data.settings ?? {}} shopSlug={slug}>
-      <ShopLegalDocument title="Terms of Service" shopName={shopName} address={address}>
+      <ShopLegalDocument title="Terms of Service" shopName={shopName} address={address} lastUpdated={SHOP_LEGAL_LAST_UPDATED.terms}>
 
         {/* 1. About us */}
         <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">1. About Us</h2>
