@@ -6,6 +6,7 @@ import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { BookingsCalendar } from "~/components/admin/BookingsCalendar";
+import { useModalA11y } from "~/lib/useModalA11y";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
 
@@ -81,7 +82,7 @@ const STATUS_META: Record<BookingStatus, { label: string; bg: string; text: stri
   confirmed: { label: "Confirmed", bg: "bg-emerald-500/10", text: "text-emerald-400", dot: "bg-emerald-400" },
   completed: { label: "Completed", bg: "bg-blue-500/10",    text: "text-blue-400",    dot: "bg-blue-400"   },
   cancelled: { label: "Cancelled", bg: "bg-red-500/10",     text: "text-red-400",     dot: "bg-red-400"    },
-  no_show:   { label: "No Show",   bg: "bg-white/5",        text: "text-white/40",    dot: "bg-white/30"   },
+  no_show:   { label: "No Show",   bg: "bg-white/5",        text: "text-white/60",    dot: "bg-white/30"   },
 };
 
 function formatTime(iso: string) {
@@ -124,7 +125,7 @@ function SummaryCard({ label, value, icon }: { label: string; value: string | nu
     <div className="rounded-xl border border-white/10 bg-dark-100 p-5 flex items-center gap-4">
       <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center text-gold">{icon}</div>
       <div>
-        <p className="text-xs text-white/40 font-medium">{label}</p>
+        <p className="text-xs text-white/60 font-medium">{label}</p>
         <p className="text-xl font-bold text-white mt-0.5">{value}</p>
       </div>
     </div>
@@ -132,16 +133,27 @@ function SummaryCard({ label, value, icon }: { label: string; value: string | nu
 }
 
 function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => void }) {
+  // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
+  // Kept in-place (not a Radix portal) so the fetcher-driven StatusSelect
+  // inside keeps submitting normally.
+  const dialogRef = useModalA11y<HTMLDivElement>({ active: true, onClose });
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" onClick={onClose} />
-      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-dark border-l border-white/10 z-50 flex flex-col shadow-2xl">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="booking-drawer-title"
+        tabIndex={-1}
+        className="fixed inset-y-0 right-0 w-full max-w-md bg-dark border-l border-white/10 z-50 flex flex-col shadow-2xl"
+      >
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
           <div>
-            <h2 className="font-heading font-semibold text-white">Booking Detail</h2>
+            <h2 id="booking-drawer-title" className="font-heading font-semibold text-white">Booking Detail</h2>
             <p className="text-xs text-white/50 mt-0.5">#{booking.id.slice(0, 8).toUpperCase()}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/50 transition-colors">
+          <button onClick={onClose} aria-label="Close" className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -153,8 +165,8 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
             <StatusSelect bookingId={booking.id} current={booking.status} />
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 grid grid-cols-2 gap-4">
-            <div><p className="text-xs text-white/40 mb-1">Date</p><p className="text-sm font-semibold text-white">{formatDate(booking.booking_date)}</p></div>
-            <div><p className="text-xs text-white/40 mb-1">Time</p><p className="text-sm font-semibold text-white">{formatTime(booking.start_time)} · {booking.duration_min}min</p></div>
+            <div><p className="text-xs text-white/60 mb-1">Date</p><p className="text-sm font-semibold text-white">{formatDate(booking.booking_date)}</p></div>
+            <div><p className="text-xs text-white/60 mb-1">Time</p><p className="text-sm font-semibold text-white">{formatTime(booking.start_time)} · {booking.duration_min}min</p></div>
           </div>
           <div>
             <p className="text-xs font-semibold text-white/50 uppercase tracking-wide mb-3">Customer</p>
@@ -180,7 +192,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
               {[["Service", booking.service_name], ["Staff", booking.staff_name], ["Duration", `${booking.duration_min} min`]].map(([l, v]) => (
                 <div key={l} className="flex justify-between">
-                  <span className="text-sm text-white/40">{l}</span>
+                  <span className="text-sm text-white/60">{l}</span>
                   <span className="text-sm font-medium text-white">{v}</span>
                 </div>
               ))}
@@ -189,9 +201,9 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
           <div>
             <p className="text-xs font-semibold text-white/50 uppercase tracking-wide mb-3">Payment</p>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-              <div className="flex justify-between"><span className="text-sm text-white/40">Total</span><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
+              <div className="flex justify-between"><span className="text-sm text-white/60">Total</span><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
               <div className="flex justify-between"><span className="text-sm text-white/40">Commission</span><span className="text-sm text-white/60">{formatPence(booking.commission_pence)}</span></div>
-              <div className="border-t border-white/10 pt-2 flex justify-between"><span className="text-sm text-white/40">Net to shop</span><span className="text-sm font-semibold text-white">{formatPence(booking.amount_pence - booking.commission_pence)}</span></div>
+              <div className="border-t border-white/10 pt-2 flex justify-between"><span className="text-sm text-white/60">Net to shop</span><span className="text-sm font-semibold text-white">{formatPence(booking.amount_pence - booking.commission_pence)}</span></div>
             </div>
           </div>
           {booking.notes && (
@@ -200,7 +212,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
               <p className="text-sm text-white/60 rounded-xl border border-white/10 bg-white/5 p-4">{booking.notes}</p>
             </div>
           )}
-          <p className="text-xs text-white/40">Created {new Date(booking.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
+          <p className="text-xs text-white/60">Created {new Date(booking.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
         </div>
       </div>
     </>
@@ -228,9 +240,9 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
       {grouped.map(([date, dayBookings]) => (
         <div key={date}>
           <div className="flex items-center gap-3 mb-3">
-            <span className="text-xs font-semibold text-white/40 uppercase tracking-wide">{formatDate(date)}</span>
+            <span className="text-xs font-semibold text-white/60 uppercase tracking-wide">{formatDate(date)}</span>
             <div className="flex-1 h-px bg-white/10" />
-            <span className="text-xs text-white/40">{dayBookings.length}</span>
+            <span className="text-xs text-white/60">{dayBookings.length}</span>
           </div>
           <div className="rounded-xl border border-white/10 bg-dark-100 overflow-hidden divide-y divide-white/5">
             {dayBookings.slice().sort((a, b) => a.start_time.localeCompare(b.start_time)).map((booking) => (
@@ -240,7 +252,7 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
                 <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center text-sm font-semibold text-gold shrink-0">{booking.customer_name.charAt(0)}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-white truncate">{booking.customer_name}</p>
-                  <p className="text-xs text-white/40 truncate">{booking.service_name} · {booking.staff_name}</p>
+                  <p className="text-xs text-white/60 truncate">{booking.service_name} · {booking.staff_name}</p>
                 </div>
                 <span className="text-xs text-white/50 shrink-0 hidden sm:block">{booking.duration_min}min</span>
                 <div className="shrink-0"><StatusBadge status={booking.status} /></div>
@@ -280,12 +292,12 @@ export default function AdminBookings() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Bookings</h1>
-          <p className="mt-0.5 text-sm text-white/40">{stats.total} total · {stats.todayCount} today · {stats.pendingCount} pending</p>
+          <p className="mt-0.5 text-sm text-white/60">{stats.total} total · {stats.todayCount} today · {stats.pendingCount} pending</p>
         </div>
         <div className="flex items-center bg-white/5 border border-white/10 rounded-xl p-1 gap-0.5">
           {(["list", "calendar"] as const).map((v) => (
             <button key={v} onClick={() => setView(v)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all capitalize ${view === v ? "bg-white/10 text-white" : "text-white/40 hover:text-white/70"}`}>
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all capitalize ${view === v ? "bg-white/10 text-white" : "text-white/60 hover:text-white/70"}`}>
               {v === "list"
                 ? <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
                 : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
@@ -316,7 +328,7 @@ export default function AdminBookings() {
           <input type="date" value={dateTo} onChange={(e) => updateFilter("to", e.target.value)}
             className="text-sm border border-white/20 rounded-xl px-3 py-2.5 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-gold" />
           {(statusFilter || dateFrom || dateTo) && (
-            <button onClick={() => setSearchParams({}, { replace: true })} className="text-sm text-white/40 hover:text-white px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">Clear</button>
+            <button onClick={() => setSearchParams({}, { replace: true })} className="text-sm text-white/60 hover:text-white px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">Clear</button>
           )}
         </div>
       )}

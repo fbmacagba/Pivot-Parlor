@@ -1,5 +1,6 @@
 // apps/web/app/components/ReviewModal.tsx
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
+import { useModalA11y } from "~/lib/useModalA11y";
 
 interface ReviewModalProps {
   shopId: string;
@@ -44,13 +45,8 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
   const [state, setState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
-  useEffect(() => {
-    function onEscape(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onEscape);
-    return () => window.removeEventListener("keydown", onEscape);
-  }, [onClose]);
+  // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
+  const dialogRef = useModalA11y<HTMLDivElement>({ active: true, onClose });
 
   async function submit() {
     if (!name.trim()) {
@@ -104,9 +100,11 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
 
       {/* Modal */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        tabIndex={-1}
         className="fixed inset-x-4 top-1/2 z-[51] mx-auto max-h-[90vh] max-w-md -translate-y-1/2 overflow-hidden overflow-y-auto rounded-2xl border border-white/10 bg-dark-100 shadow-2xl focus:outline-none"
       >
         {/* Header */}
@@ -115,7 +113,7 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
             <h2 id={titleId} className="text-base font-semibold text-white">
               Leave a review
             </h2>
-            <p className="mt-0.5 text-xs text-white/40">{shopName}</p>
+            <p className="mt-0.5 text-xs text-white/60">{shopName}</p>
           </div>
           <button
             type="button"
@@ -159,7 +157,7 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Jane Smith"
                 autoComplete="name"
-                className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder-white/30 focus:ring-2 focus:ring-gold/70"
+                className="w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-gold/70"
               />
             </div>
 
@@ -168,7 +166,7 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
               <span className="mb-2 block text-sm font-medium text-white/80">Rating</span>
               <StarPicker value={rating} onChange={setRating} />
               {rating > 0 && (
-                <p className="mt-1 text-xs text-white/40">
+                <p className="mt-1 text-xs text-white/60">
                   {["", "Poor", "Fair", "Good", "Great", "Excellent"][rating]}
                 </p>
               )}
@@ -185,7 +183,7 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
                 onChange={(e) => setBody(e.target.value)}
                 rows={4}
                 placeholder="Tell others about your experience..."
-                className="w-full resize-none rounded-lg border border-white/20 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder-white/30 focus:ring-2 focus:ring-gold/70"
+                className="w-full resize-none rounded-lg border border-white/40 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/60 focus:ring-2 focus:ring-gold/70"
               />
             </div>
 

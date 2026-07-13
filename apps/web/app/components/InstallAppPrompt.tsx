@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Download, Share, SquarePlus, X } from "lucide-react";
 import { useShopMatch } from "~/lib/shop-match";
+import { useModalA11y } from "~/lib/useModalA11y";
 
 /**
  * Centered "install the app" invitation, shown once per device until
@@ -92,6 +93,12 @@ export function InstallAppPrompt() {
     }
   }
 
+  // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
+  const dialogRef = useModalA11y<HTMLDivElement>({
+    active: mode !== "hidden",
+    onClose: dismiss,
+  });
+
   if (mode === "hidden") return null;
 
   return (
@@ -101,9 +108,11 @@ export function InstallAppPrompt() {
       role="presentation"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="pp-install-title"
+        tabIndex={-1}
         className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#141414] p-6 text-center shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >

@@ -105,7 +105,10 @@ export function PlatformCookieBanner() {
   return (
     <div
       role="dialog"
-      aria-modal="true"
+      // Not aria-modal: this is a non-blocking bottom banner and the page
+      // behind it stays interactive. Claiming aria-modal here is a false
+      // promise (no focus trap), so we only expose the dialog role + label
+      // (matching ShopSiteCookieConsent).
       aria-label="Cookie consent"
       className="fixed bottom-0 inset-x-0 z-50 border-t border-white/10 bg-[#0a0a0a]/95 backdrop-blur-md shadow-2xl"
     >
