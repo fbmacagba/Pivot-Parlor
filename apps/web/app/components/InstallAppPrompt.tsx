@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Download, Share, SquarePlus, X } from "lucide-react";
+import { useShopMatch } from "~/lib/shop-match";
 
 /**
  * Centered "install the app" invitation, shown once per device until
@@ -41,6 +42,9 @@ function isIosSafari(): boolean {
 }
 
 export function InstallAppPrompt() {
+  // On a shop site the install captures the SHOP's app (per-shop manifest),
+  // so the invitation carries the shop's name, not the platform's.
+  const shop = useShopMatch();
   const [mode, setMode] = useState<"hidden" | "native" | "ios">("hidden");
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
     null,
@@ -120,10 +124,12 @@ export function InstallAppPrompt() {
           id="pp-install-title"
           className="mt-4 font-heading text-xl font-bold text-white"
         >
-          Get the Pivot Parlor app
+          Get the {shop?.name ?? "Pivot Parlor"} app
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-white/60">
-          Add it to your home screen for a faster, full-screen experience.
+          {shop
+            ? `Add ${shop.name} to your home screen and book in one tap.`
+            : "Add it to your home screen for a faster, full-screen experience."}
         </p>
 
         {mode === "native" ? (
