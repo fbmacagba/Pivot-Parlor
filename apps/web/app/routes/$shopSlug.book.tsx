@@ -343,6 +343,16 @@ export default function BookingWizard() {
                       : "Confirm booking →"}
                 </Button>
               </div>
+              <p className="text-center text-xs text-white/50">
+                We use these details only to manage your booking. See our{" "}
+                <a
+                  href={`/${slug}/privacy`}
+                  className="underline hover:text-white/80"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </p>
             </Form>
           )}
         </div>
