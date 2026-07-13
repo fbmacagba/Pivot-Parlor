@@ -718,7 +718,7 @@ export function CommercialShopChrome({
           className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
           style={{ height: 480, maxHeight: "min(480px, calc(100vh - 7.5rem))" }}
           role="dialog"
-          aria-label="Chat with the shop"
+          aria-label={`Chat with ${site.shop_name}'s AI assistant`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -745,7 +745,7 @@ export function CommercialShopChrome({
                   {site.shop_name}
                 </p>
                 <p className="text-xs text-[color:var(--st-ink-55)]">
-                  Ask us anything
+                  AI assistant · Ask us anything
                 </p>
               </div>
             </div>
@@ -770,8 +770,8 @@ export function CommercialShopChrome({
                 {/* Greeting bubble */}
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-[color:var(--st-bubble)] px-3 py-2 text-sm text-[color:var(--st-ink-95)]">
-                    Hi! I&apos;m {site.shop_name}&apos;s assistant. What can I
-                    help you with?
+                    Hi! I&apos;m {site.shop_name}&apos;s AI assistant. What can
+                    I help you with?
                   </div>
                 </div>
 

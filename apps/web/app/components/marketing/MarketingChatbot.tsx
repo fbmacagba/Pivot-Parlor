@@ -12,7 +12,8 @@ type Message = {
 
 const WELCOME: Message = {
   role: "assistant",
-  content: "Hey! Do you own or run a beauty or barber shop? 👇",
+  content:
+    "Hi, I'm Pip, Pivot Parlor's AI assistant. Do you own or run a beauty or barber shop? 👇",
 };
 
 const CHIPS = ["Yes, I own a shop ✓", "Just browsing", "What's the cost?"];
@@ -195,7 +196,7 @@ export function MarketingChatbot() {
 
       {/* ── Chat window ── */}
       {open && (
-        <div role="dialog" aria-modal="true" aria-label="Chat with Pip"
+        <div role="dialog" data-pip-chat="" aria-label="Chat with Pip, Pivot Parlor's AI assistant"
           className="
             fixed z-50 flex flex-col overflow-hidden
             inset-0
@@ -221,11 +222,11 @@ export function MarketingChatbot() {
                 <PipIcon size={20} color={DARK} />
               </div>
               <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2"
-                style={{ background: "#31A24C", borderColor: DARK }} />
+                style={{ background: GOLD, borderColor: DARK }} />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white">Pip</p>
-              <p className="text-xs" style={{ color: GOLD }}>Pivot Parlor · Active now</p>
+              <p className="text-xs" style={{ color: GOLD }}>Pivot Parlor AI · Replies instantly</p>
             </div>
             <button type="button" onClick={() => setOpen(false)} aria-label="Close chat"
               className="flex h-9 w-9 items-center justify-center rounded-full outline-none transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark">
@@ -244,7 +245,7 @@ export function MarketingChatbot() {
             ].map(({ value, label }) => (
               <div key={label} className="flex flex-col items-center">
                 <span className="text-sm font-bold" style={{ color: GOLD }}>{value}</span>
-                <span className="text-[10px] mt-0.5 text-center" style={{ color: "rgba(255,255,255,0.40)" }}>{label}</span>
+                <span className="text-[10px] mt-0.5 text-center" style={{ color: "rgba(255,255,255,0.6)" }}>{label}</span>
               </div>
             ))}
           </div>
@@ -396,7 +397,7 @@ export function MarketingChatbot() {
 
           {/* Branding footer */}
           <p className="pb-2 pt-0.5 text-center text-xs shrink-0"
-            style={{ color: "rgba(255,255,255,0.18)" }}>
+            style={{ color: "rgba(255,255,255,0.6)" }}>
             Powered by Pivot Parlor AI
           </p>
         </div>
@@ -437,7 +438,7 @@ export function MarketingChatbot() {
           }
         }
         @media (max-width: 639px) {
-          [role="dialog"][aria-label="Chat with Pip"] {
+          [role="dialog"][data-pip-chat] {
             animation: pip-mobile-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) both !important;
           }
         }
