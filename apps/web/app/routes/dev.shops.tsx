@@ -800,7 +800,7 @@ export default function DevShops() {
                       <td className="px-4 py-3 text-white/50">{shop.shop_number}</td>
                       <td className="px-4 py-3">
                         <span className="font-medium text-white">{shop.name}</span>
-                        <span className="ml-2 text-xs text-white/30">/{shop.slug}</span>
+                        <span className="ml-2 text-xs text-white/50">/{shop.slug}</span>
                       </td>
                       <td className="px-4 py-3 text-white/60">{shop.owner_email}</td>
                       <td className="px-4 py-3 text-white/60 capitalize">
@@ -814,7 +814,7 @@ export default function DevShops() {
                             {shop.ai_model.replace(/-/g, " ")}
                           </Badge>
                         ) : (
-                          <span className="text-white/30">—</span>
+                          <span className="text-white/50">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3">{<StatusBadge shop={shop} />}</td>
@@ -1012,7 +1012,7 @@ export default function DevShops() {
                                       className="max-h-36 max-w-full object-contain"
                                     />
                                   ) : (
-                                    <span className="text-sm text-white/35">No logo yet</span>
+                                    <span className="text-sm text-white/50">No logo yet</span>
                                   )}
                                 </div>
                                 <div className="flex flex-wrap gap-2">
@@ -1100,7 +1100,7 @@ export default function DevShops() {
                                       className="h-full w-full object-cover"
                                     />
                                   ) : (
-                                    <span className="text-sm text-white/35">No hero yet</span>
+                                    <span className="text-sm text-white/50">No hero yet</span>
                                   )}
                                 </div>
                                 <div className="flex flex-wrap gap-2">

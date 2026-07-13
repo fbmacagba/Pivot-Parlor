@@ -23,7 +23,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (n: number) 
           className="rounded text-3xl outline-none transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark-100"
           aria-label={`${n} star${n !== 1 ? "s" : ""}`}
         >
-          <span className={(hovered || value) >= n ? "text-gold" : "text-white/20"}>
+          <span className={(hovered || value) >= n ? "text-gold" : "text-white/40"}>
             ★
           </span>
         </button>

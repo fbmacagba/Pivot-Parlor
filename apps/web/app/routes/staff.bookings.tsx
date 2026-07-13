@@ -147,7 +147,7 @@ export default function StaffBookingsAvailability() {
           </div>
 
           {bookings.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/30 text-sm">
+            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50 text-sm">
               No {filter} bookings.
             </div>
           ) : (
@@ -157,7 +157,7 @@ export default function StaffBookingsAvailability() {
                   className="flex items-center gap-4 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 hover:border-white/15 transition-colors">
                   <div className="w-16 shrink-0 text-center">
                     <p className="text-sm font-semibold text-white">{formatTime(b.start_time)}</p>
-                    <p className="text-xs text-white/35">{formatDate(b.booking_date)}</p>
+                    <p className="text-xs text-white/50">{formatDate(b.booking_date)}</p>
                   </div>
                   <div className="h-8 w-px bg-white/10 shrink-0" />
                   <div className="flex-1 min-w-0">
@@ -188,7 +188,7 @@ export default function StaffBookingsAvailability() {
                     <span className="w-24 font-medium text-white/80">{label}</span>
                     {isOn && row
                       ? <span className="text-white/70">{row.start_time} – {row.end_time}</span>
-                      : <span className="text-white/30">Off</span>
+                      : <span className="text-white/50">Off</span>
                     }
                   </div>
                 );

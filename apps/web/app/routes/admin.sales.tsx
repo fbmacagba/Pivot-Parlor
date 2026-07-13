@@ -196,11 +196,11 @@ export default function AdminSales() {
         <div className="space-y-2">
           {sales.map((sale) => (
             <div key={sale.id} className="flex items-center gap-4 rounded-xl border border-white/10 bg-dark-100 px-4 py-3">
-              <Receipt className="h-4 w-4 shrink-0 text-white/25" />
+              <Receipt className="h-4 w-4 shrink-0 text-white/40" />
               <div className="flex-1 min-w-0">
                 <p className="truncate text-sm text-white">
                   {sale.customer_name || (sale.booking_id ? "Appointment checkout" : "Counter sale")}
-                  <span className="ml-2 text-xs text-white/35">
+                  <span className="ml-2 text-xs text-white/50">
                     {new Date(sale.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
                     {" · "}{sale.tender_type.replace("_", " ")}
                   </span>
@@ -282,7 +282,7 @@ function RefundPanel({
                 <div key={item.id} className="flex items-center gap-3 text-sm">
                   <span className="flex-1 truncate text-white/70">
                     {item.name}
-                    <span className="ml-2 text-xs text-white/35">
+                    <span className="ml-2 text-xs text-white/50">
                       {formatPence(item.unit_price_pence)} × {item.quantity}
                       {item.returned_quantity > 0 && ` · ${item.returned_quantity} returned`}
                     </span>
@@ -310,7 +310,7 @@ function RefundPanel({
                       )}
                     </>
                   ) : (
-                    <span className="text-xs text-white/30">fully returned</span>
+                    <span className="text-xs text-white/50">fully returned</span>
                   )}
                 </div>
               );

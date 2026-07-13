@@ -49,7 +49,7 @@ const STATUS_PILL: Record<string, string> = {
   in_progress: "bg-blue-500/10 text-blue-400",
   completed:   "bg-emerald-500/10 text-emerald-400",
   cancelled:   "bg-red-500/10 text-red-400",
-  no_show:     "bg-white/5 text-white/30",
+  no_show:     "bg-white/5 text-white/50",
 };
 
 
@@ -254,7 +254,7 @@ function ProfileCard({ me }: { me: Me }) {
           </div>
           <div>
             <label className="block text-xs text-white/40 mb-1">Email</label>
-            <p className="text-sm text-white/50">{me.email} <span className="text-white/25">(cannot change)</span></p>
+            <p className="text-sm text-white/50">{me.email} <span className="text-white/40">(cannot change)</span></p>
           </div>
           {err && <p className="text-xs text-red-400">{err}</p>}
           <div className="flex gap-2 pt-1">
@@ -362,11 +362,11 @@ export default function AccountIndex() {
           <h2 className="font-heading text-base font-semibold text-white flex items-center gap-2">
             <Calendar className="h-4 w-4 text-gold" /> Upcoming bookings
           </h2>
-          {loading && <span className="text-xs text-white/30 animate-pulse">Loading…</span>}
+          {loading && <span className="text-xs text-white/50 animate-pulse">Loading…</span>}
         </div>
 
         {unverified ? (
-          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/35">
+          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/50">
             Verify your email above to see your bookings.
           </div>
         ) : error ? (
@@ -374,7 +374,7 @@ export default function AccountIndex() {
             Could not load bookings. Try refreshing the page.
           </div>
         ) : loading && data === null ? (
-          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/35">
+          <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/50">
             Loading your bookings…
           </div>
         ) : upcoming.length === 0 ? (

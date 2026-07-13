@@ -135,7 +135,7 @@ export default function AdminSchedule() {
     return (
       <div className="space-y-4">
         <h1 className="font-heading text-2xl font-bold text-white">Schedule</h1>
-        <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/30">
+        <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50">
           No staff members yet. Add staff first.
         </div>
       </div>
@@ -190,7 +190,7 @@ export default function AdminSchedule() {
                             onChange={e => setCell(member.id, d, { open: e.target.checked })}
                             className="h-3.5 w-3.5 rounded border-white/30 bg-white/5 text-gold focus:ring-gold"
                           />
-                          <span className={cell.open ? "text-white/80" : "text-white/30"}>
+                          <span className={cell.open ? "text-white/80" : "text-white/50"}>
                             {cell.open ? "Open" : "Off"}
                           </span>
                         </label>
@@ -203,7 +203,7 @@ export default function AdminSchedule() {
                             >
                               {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
                             </select>
-                            <span className="text-white/30 text-xs">–</span>
+                            <span className="text-white/50 text-xs">–</span>
                             <select
                               value={cell.end}
                               onChange={e => setCell(member.id, d, { end: e.target.value })}

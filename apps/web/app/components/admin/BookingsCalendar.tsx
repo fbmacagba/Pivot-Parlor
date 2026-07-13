@@ -111,7 +111,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
         {/* Day headers */}
         <div className="grid grid-cols-7 mb-1">
           {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-            <div key={d} className="text-center text-xs font-semibold text-white/30 py-2">{d}</div>
+            <div key={d} className="text-center text-xs font-semibold text-white/50 py-2">{d}</div>
           ))}
         </div>
 
@@ -154,7 +154,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
 
                 {hasBookings && (
                   <div className="mt-auto w-full">
-                    <span className="text-[10px] text-white/30">
+                    <span className="text-[10px] text-white/50">
                       {dayBookings.length} bkg{dayBookings.length !== 1 ? "s" : ""}
                     </span>
                     <div className="flex gap-0.5 mt-0.5 flex-wrap">
@@ -170,7 +170,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
         </div>
 
         {/* Legend */}
-        <div className="flex flex-wrap gap-4 mt-4 text-xs text-white/30">
+        <div className="flex flex-wrap gap-4 mt-4 text-xs text-white/50">
           {(Object.entries(STATUS_COLORS) as [BookingStatus, string][]).map(([status, color]) => (
             <div key={status} className="flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${color}`} />
@@ -190,16 +190,16 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
                 : "Select a day"}
             </h3>
             {selectedDate && (
-              <p className="text-white/30 text-xs mt-0.5">
+              <p className="text-white/50 text-xs mt-0.5">
                 {selectedBookings.length} booking{selectedBookings.length !== 1 ? "s" : ""}
               </p>
             )}
           </div>
 
           {!selectedDate ? (
-            <div className="px-5 py-10 text-center text-white/20 text-sm">Click a day to see bookings</div>
+            <div className="px-5 py-10 text-center text-white/40 text-sm">Click a day to see bookings</div>
           ) : selectedBookings.length === 0 ? (
-            <div className="px-5 py-10 text-center text-white/20 text-sm">No bookings on this day</div>
+            <div className="px-5 py-10 text-center text-white/40 text-sm">No bookings on this day</div>
           ) : (
             <div className="divide-y divide-white/5 max-h-[480px] overflow-y-auto">
               {selectedBookings.map((booking) => (
@@ -210,17 +210,17 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
                 >
                   <div className="w-12 shrink-0 pt-0.5">
                     <span className="text-xs font-semibold text-white block">{formatTime(booking.start_time)}</span>
-                    <span className="text-[10px] text-white/30">{booking.duration_min}m</span>
+                    <span className="text-[10px] text-white/50">{booking.duration_min}m</span>
                   </div>
                   <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[booking.status]}`} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-white truncate">{booking.customer_name}</p>
                     <p className="text-xs text-white/40 truncate">{booking.service_name}</p>
-                    <p className="text-xs text-white/30 truncate">{booking.staff_name}</p>
+                    <p className="text-xs text-white/50 truncate">{booking.staff_name}</p>
                   </div>
                   <div className="shrink-0 text-right">
                     <span className="text-xs font-semibold text-gold">{formatPence(booking.amount_pence)}</span>
-                    <svg className="w-3 h-3 text-white/20 ml-auto mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="w-3 h-3 text-white/40 ml-auto mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   </div>

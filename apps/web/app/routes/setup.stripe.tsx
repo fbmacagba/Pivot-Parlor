@@ -122,7 +122,7 @@ export default function SetupStripe() {
               </div>
             )}
 
-            <p className="text-center text-xs text-white/30">
+            <p className="text-center text-xs text-white/50">
               Secured by Stripe · Cancel anytime after payment
             </p>
           </div>
@@ -130,7 +130,7 @@ export default function SetupStripe() {
 
         {/* Back link */}
         <p className="text-center mt-6">
-          <a href="/admin" className="text-xs text-white/30 hover:text-white/60 transition-colors">
+          <a href="/admin" className="text-xs text-white/50 hover:text-white/60 transition-colors">
             ← Back to dashboard
           </a>
         </p>

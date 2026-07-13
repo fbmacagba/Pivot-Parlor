@@ -598,7 +598,7 @@ function SocialRow({
   return (
     <div className="space-y-2">
       <Input label={label} type="url" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder={placeholder} />
-      {hint && !hasUrl && <p className="text-xs text-white/30">{hint}</p>}
+      {hint && !hasUrl && <p className="text-xs text-white/50">{hint}</p>}
       {hasUrl ? (
         <div className="flex items-center gap-3">
           <span className="text-xs text-white/50">Show on site</span>

@@ -123,7 +123,7 @@ export default function AdminRevenue() {
                     </div>
                   </div>
                   {parseInt(day) % 5 === 0 && (
-                    <span className="text-[10px] text-white/30">{day}</span>
+                    <span className="text-[10px] text-white/50">{day}</span>
                   )}
                 </div>
               );
@@ -189,7 +189,7 @@ export default function AdminRevenue() {
       )}
 
       {!data && (
-        <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/30">
+        <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50">
           No revenue data for this period.
         </div>
       )}

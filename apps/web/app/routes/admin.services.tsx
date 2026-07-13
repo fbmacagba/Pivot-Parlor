@@ -318,7 +318,7 @@ export default function AdminServices() {
         <div className="space-y-6">
           {Object.entries(grouped).map(([category, svcs]) => (
             <div key={category}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/30">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/50">
                 {category}
               </h3>
               <div className="space-y-2">
@@ -368,7 +368,7 @@ function ServiceRow({
         <p className="truncate text-sm font-medium text-white">
           {service.name}
           {inactive && (
-            <span className="ml-2 text-xs text-white/30">(inactive)</span>
+            <span className="ml-2 text-xs text-white/50">(inactive)</span>
           )}
         </p>
         {service.category && (

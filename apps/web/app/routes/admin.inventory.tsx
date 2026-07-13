@@ -327,7 +327,7 @@ function ReportSection({ report }: { report: Report }) {
     <section>
       <h2 className="mb-3 flex items-center gap-2 font-heading text-lg font-semibold text-white">
         <Package className="h-4 w-4 text-gold" /> Retail performance
-        <span className="text-xs font-normal text-white/35">{report.from} → {report.to}</span>
+        <span className="text-xs font-normal text-white/50">{report.from} → {report.to}</span>
       </h2>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="Retail revenue" value={formatPence(report.retail.revenue_pence)} />
@@ -338,25 +338,25 @@ function ReportSection({ report }: { report: Report }) {
       {report.by_product.length > 0 && (
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/30">Top products</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/50">Top products</p>
             <ul className="space-y-1.5 text-sm">
               {report.by_product.slice(0, 5).map((row) => (
                 <li key={row.product_id ?? row.name} className="flex justify-between gap-3">
-                  <span className="truncate text-white/70">{row.name} <span className="text-white/30">×{row.units_sold}</span></span>
+                  <span className="truncate text-white/70">{row.name} <span className="text-white/50">×{row.units_sold}</span></span>
                   <span className="shrink-0 text-white">{formatPence(row.revenue_pence)}</span>
                 </li>
               ))}
             </ul>
           </div>
           <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/30">Retail by staff</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-white/50">Retail by staff</p>
             {report.by_staff.length === 0 ? (
-              <p className="text-sm text-white/35">No attributed retail sales in this period.</p>
+              <p className="text-sm text-white/50">No attributed retail sales in this period.</p>
             ) : (
               <ul className="space-y-1.5 text-sm">
                 {report.by_staff.slice(0, 5).map((row) => (
                   <li key={row.staff_id} className="flex justify-between gap-3">
-                    <span className="truncate text-white/70">{row.staff_name ?? "Unknown"} <span className="text-white/30">×{row.units_sold}</span></span>
+                    <span className="truncate text-white/70">{row.staff_name ?? "Unknown"} <span className="text-white/50">×{row.units_sold}</span></span>
                     <span className="shrink-0 text-white">{formatPence(row.revenue_pence)}</span>
                   </li>
                 ))}
@@ -443,7 +443,7 @@ function PurchaseOrdersSection({
               </label>
 
               <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-widest text-white/30">Lines</p>
+                <p className="text-xs font-semibold uppercase tracking-widest text-white/50">Lines</p>
                 {lines.map((line, i) => (
                   <div key={i} className="flex items-end gap-2">
                     <label className="flex-1 text-xs text-white/50">
@@ -504,7 +504,7 @@ function PurchaseOrdersSection({
               <div className="flex-1 min-w-0">
                 <p className="truncate text-sm font-medium text-white">
                   {po.supplier_name ?? "No supplier"}
-                  <span className="ml-2 text-xs text-white/30">{new Date(po.created_at).toLocaleDateString("en-GB")}</span>
+                  <span className="ml-2 text-xs text-white/50">{new Date(po.created_at).toLocaleDateString("en-GB")}</span>
                 </p>
                 <p className="mt-0.5 text-xs text-white/40">
                   {po.total_received_qty}/{po.total_qty} received · {formatPence(po.total_pence)}
@@ -586,7 +586,7 @@ function ReceiveDialog({
               <div key={item.id} className="flex items-center gap-3 text-sm">
                 <span className="flex-1 truncate text-white/70">
                   {item.product_name}{item.variant_name && ` — ${item.variant_name}`}
-                  <span className="ml-2 text-xs text-white/35">
+                  <span className="ml-2 text-xs text-white/50">
                     {item.received_qty}/{item.quantity} received · {formatPence(item.unit_cost_pence)} each
                   </span>
                 </span>
@@ -668,7 +668,7 @@ function StockTakeSection({
                   <div key={p.id} className="flex items-center gap-3 text-sm">
                     <span className="flex-1 truncate text-white/70">
                       {p.name}
-                      <span className="ml-2 text-xs text-white/35">
+                      <span className="ml-2 text-xs text-white/50">
                         system: {p.total_quantity}
                         {existing && ` · counted: ${existing.counted_qty}`}
                       </span>
@@ -723,7 +723,7 @@ function StockTakeSection({
             <div key={st.id} className="flex items-center gap-4 rounded-xl border border-white/10 bg-dark-100 px-4 py-3 text-sm">
               <span className="flex-1 text-white/70">
                 {new Date(st.created_at).toLocaleDateString("en-GB")}
-                <span className="ml-2 text-xs text-white/35">{st.item_count} items counted</span>
+                <span className="ml-2 text-xs text-white/50">{st.item_count} items counted</span>
               </span>
               {st.status === "completed" && (
                 <span className={`text-xs ${st.variance_qty === 0 ? "text-white/40" : st.variance_qty > 0 ? "text-emerald-300" : "text-amber-300"}`}>
@@ -805,7 +805,7 @@ function BackBarSection({
         {serviceId && loadedFor && (
           <div className="mt-4 space-y-2">
             {rows.length === 0 && (
-              <p className="text-sm text-white/35">No products linked to this service yet.</p>
+              <p className="text-sm text-white/50">No products linked to this service yet.</p>
             )}
             {rows.map((row, i) => (
               <div key={row.product_id} className="flex items-center gap-3 text-sm">

@@ -139,7 +139,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
         <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
           <div>
             <h2 className="font-heading font-semibold text-white">Booking Detail</h2>
-            <p className="text-xs text-white/30 mt-0.5">#{booking.id.slice(0, 8).toUpperCase()}</p>
+            <p className="text-xs text-white/50 mt-0.5">#{booking.id.slice(0, 8).toUpperCase()}</p>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -157,7 +157,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
             <div><p className="text-xs text-white/40 mb-1">Time</p><p className="text-sm font-semibold text-white">{formatTime(booking.start_time)} · {booking.duration_min}min</p></div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-white/30 uppercase tracking-wide mb-3">Customer</p>
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-wide mb-3">Customer</p>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center text-sm font-semibold text-gold">{booking.customer_name.charAt(0)}</div>
@@ -176,7 +176,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
             </div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-white/30 uppercase tracking-wide mb-3">Service</p>
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-wide mb-3">Service</p>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
               {[["Service", booking.service_name], ["Staff", booking.staff_name], ["Duration", `${booking.duration_min} min`]].map(([l, v]) => (
                 <div key={l} className="flex justify-between">
@@ -187,7 +187,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
             </div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-white/30 uppercase tracking-wide mb-3">Payment</p>
+            <p className="text-xs font-semibold text-white/50 uppercase tracking-wide mb-3">Payment</p>
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
               <div className="flex justify-between"><span className="text-sm text-white/40">Total</span><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
               <div className="flex justify-between"><span className="text-sm text-white/40">Commission</span><span className="text-sm text-white/60">{formatPence(booking.commission_pence)}</span></div>
@@ -196,11 +196,11 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
           </div>
           {booking.notes && (
             <div>
-              <p className="text-xs font-semibold text-white/30 uppercase tracking-wide mb-2">Notes</p>
+              <p className="text-xs font-semibold text-white/50 uppercase tracking-wide mb-2">Notes</p>
               <p className="text-sm text-white/60 rounded-xl border border-white/10 bg-white/5 p-4">{booking.notes}</p>
             </div>
           )}
-          <p className="text-xs text-white/20">Created {new Date(booking.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
+          <p className="text-xs text-white/40">Created {new Date(booking.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
         </div>
       </div>
     </>
@@ -216,7 +216,7 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
 
   if (bookings.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-white/10 p-16 text-center text-white/30">
+      <div className="rounded-xl border border-dashed border-white/10 p-16 text-center text-white/50">
         <svg className="w-10 h-10 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
         <p className="text-sm">No bookings found</p>
       </div>
@@ -230,7 +230,7 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
           <div className="flex items-center gap-3 mb-3">
             <span className="text-xs font-semibold text-white/40 uppercase tracking-wide">{formatDate(date)}</span>
             <div className="flex-1 h-px bg-white/10" />
-            <span className="text-xs text-white/20">{dayBookings.length}</span>
+            <span className="text-xs text-white/40">{dayBookings.length}</span>
           </div>
           <div className="rounded-xl border border-white/10 bg-dark-100 overflow-hidden divide-y divide-white/5">
             {dayBookings.slice().sort((a, b) => a.start_time.localeCompare(b.start_time)).map((booking) => (
@@ -242,10 +242,10 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
                   <p className="text-sm font-medium text-white truncate">{booking.customer_name}</p>
                   <p className="text-xs text-white/40 truncate">{booking.service_name} · {booking.staff_name}</p>
                 </div>
-                <span className="text-xs text-white/30 shrink-0 hidden sm:block">{booking.duration_min}min</span>
+                <span className="text-xs text-white/50 shrink-0 hidden sm:block">{booking.duration_min}min</span>
                 <div className="shrink-0"><StatusBadge status={booking.status} /></div>
                 <div className="w-16 text-right shrink-0"><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
-                <svg className="w-4 h-4 text-white/20 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                <svg className="w-4 h-4 text-white/40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
               </button>
             ))}
           </div>

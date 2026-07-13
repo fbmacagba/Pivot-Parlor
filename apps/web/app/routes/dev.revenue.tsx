@@ -90,7 +90,7 @@ export default function DevRevenue() {
           <tbody className="divide-y divide-white/5">
             {(data?.shops ?? []).length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-10 text-center text-white/30">No revenue data for this period.</td>
+                <td colSpan={5} className="px-4 py-10 text-center text-white/50">No revenue data for this period.</td>
               </tr>
             ) : (
               (data?.shops ?? []).map(r => (

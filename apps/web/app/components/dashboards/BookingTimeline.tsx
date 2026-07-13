@@ -40,7 +40,7 @@ export function BookingTimeline({ bookings }: BookingTimelineProps) {
         >
           <div className="text-right min-w-[4rem]">
             <p className="text-sm font-mono text-white/70">{b.startTime}</p>
-            <p className="text-xs text-white/30">{b.endTime}</p>
+            <p className="text-xs text-white/50">{b.endTime}</p>
           </div>
           <div className="h-full w-px bg-gold/20 self-stretch" />
           <div className="flex-1 min-w-0">

@@ -143,7 +143,7 @@ export function OnboardShopDialog({
                 placeholder="my-shop"
                 className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
               />
-              <p className="mt-1 text-xs text-white/30">
+              <p className="mt-1 text-xs text-white/50">
                 Final URL: pivotparlor.com/
                 <span className="text-white/50">{slug || "my-shop"}</span>-001
               </p>

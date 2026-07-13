@@ -74,7 +74,7 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-12 border-t border-white/10 pt-8 text-center text-xs text-white/30">
+        <div className="mt-12 border-t border-white/10 pt-8 text-center text-xs text-white/50">
           © {year} Pivot Parlor. All rights reserved.
         </div>
       </div>

@@ -224,7 +224,7 @@ export default function InviteAccept() {
         </div>
 
         {/* Expiry notice */}
-        <p className="text-center text-xs text-white/30">
+        <p className="text-center text-xs text-white/50">
           This invite expires on{" "}
           {new Date(invite.expires_at).toLocaleDateString("en-GB", {
             day: "numeric",

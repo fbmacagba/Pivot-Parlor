@@ -5,6 +5,12 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    /* The app is dark-themed: without this, native form controls (the date
+       input's calendar icon and popup, selects, scrollbars) render in light
+       mode - a black calendar icon on a near-black card was invisible.
+       Light-palette shop sites override this per-theme in
+       CommercialShopChrome via style.colorScheme. */
+    color-scheme: dark;
   }
 
   /* Installed (standalone) mode: paint edge to edge but keep content clear
