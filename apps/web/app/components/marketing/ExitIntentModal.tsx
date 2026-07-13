@@ -2,6 +2,7 @@ import { Link } from "@remix-run/react";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/Button";
+import { useModalA11y } from "~/lib/useModalA11y";
 
 const SESSION_KEY = "pp_exit_intent_shown";
 
@@ -29,6 +30,12 @@ export function ExitIntentModal() {
     return () => document.removeEventListener("mouseleave", handleMouseLeave);
   }, []);
 
+  // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
+  const dialogRef = useModalA11y<HTMLDivElement>({
+    active: visible,
+    onClose: () => setVisible(false),
+  });
+
   if (!visible) return null;
 
   return (
@@ -36,8 +43,16 @@ export function ExitIntentModal() {
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-sm"
         onClick={() => setVisible(false)}
+        aria-hidden="true"
       />
-      <div className="relative z-10 w-full max-w-md rounded-2xl border border-white/10 bg-dark-100 p-8 shadow-2xl text-center">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="exit-intent-title"
+        tabIndex={-1}
+        className="relative z-10 w-full max-w-md rounded-2xl border border-white/10 bg-dark-100 p-8 shadow-2xl text-center"
+      >
         <button
           onClick={() => setVisible(false)}
           className="absolute right-4 top-4 rounded-full p-1 text-white/40 hover:text-white"
@@ -46,7 +61,10 @@ export function ExitIntentModal() {
           <X className="h-4 w-4" />
         </button>
         <div className="mb-4 text-4xl">✂️</div>
-        <h2 className="font-heading text-2xl font-bold text-white">
+        <h2
+          id="exit-intent-title"
+          className="font-heading text-2xl font-bold text-white"
+        >
           Before you go...
         </h2>
         <p className="mt-2 text-white/70">
@@ -64,7 +82,7 @@ export function ExitIntentModal() {
           </Button>
           <button
             onClick={() => setVisible(false)}
-            className="text-sm text-white/40 hover:text-white/60"
+            className="text-sm text-white/60 hover:text-white/80"
           >
             Maybe later
           </button>

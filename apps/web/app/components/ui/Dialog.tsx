@@ -33,6 +33,10 @@ export function DialogContent({
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        // No dialog in this app renders a DialogDescription, so declare the
+        // absence explicitly rather than let Radix warn about a missing one.
+        // A consumer that adds a description can override this.
+        aria-describedby={undefined}
         className={clsx(
           "fixed left-[50%] top-[50%] z-50 translate-x-[-50%] translate-y-[-50%]",
           "w-full max-w-lg bg-dark-100 border border-white/10 rounded-2xl p-6 shadow-2xl",
@@ -62,17 +66,28 @@ export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLD
   return <div className={clsx("flex flex-col gap-1.5 mb-4", className)} {...props} />;
 }
 
-export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
+export function DialogTitle({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>) {
+  // DialogPrimitive.Title renders an <h2> and registers its id as the
+  // dialog's aria-labelledby, giving every consumer a real accessible name.
   return (
-    <h2
+    <DialogPrimitive.Title
       className={clsx("font-heading text-xl font-semibold text-white", className)}
       {...props}
     />
   );
 }
 
-export function DialogDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
+export function DialogDescription({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>) {
   return (
-    <p className={clsx("text-sm text-white/60", className)} {...props} />
+    <DialogPrimitive.Description
+      className={clsx("text-sm text-white/60", className)}
+      {...props}
+    />
   );
 }
