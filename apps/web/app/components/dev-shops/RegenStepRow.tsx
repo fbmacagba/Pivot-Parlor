@@ -20,7 +20,7 @@ export function RegenStepRow({
     ) : state === "failed" ? (
       <XCircle className="h-4 w-4 shrink-0 text-red-400" aria-hidden />
     ) : (
-      <Circle className="h-4 w-4 shrink-0 text-white/25" aria-hidden />
+      <Circle className="h-4 w-4 shrink-0 text-white/40" aria-hidden />
     );
 
   const labelClass =

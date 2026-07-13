@@ -382,7 +382,7 @@ function StaffCard({
             </span>
           )}
           {assignedCount === 0 && (
-            <span className="text-xs text-white/25 italic">No services assigned</span>
+            <span className="text-xs text-white/40 italic">No services assigned</span>
           )}
         </div>
       </div>
@@ -449,7 +449,7 @@ export default function AdminStaff() {
 
       {/* Staff grid */}
       {staff.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-white/30">
+        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-white/50">
           <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -457,7 +457,7 @@ export default function AdminStaff() {
             </svg>
           </div>
           <p className="text-sm font-medium">No staff members yet</p>
-          <p className="text-xs mt-1 text-white/20">Add your first team member above</p>
+          <p className="text-xs mt-1 text-white/40">Add your first team member above</p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

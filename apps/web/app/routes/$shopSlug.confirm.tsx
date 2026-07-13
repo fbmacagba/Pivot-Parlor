@@ -87,7 +87,7 @@ export default function BookingConfirm() {
               arrive once processing completes, or contact the shop quoting the reference below.
             </p>
           )}
-          {bookingId && <p className="mt-2 font-mono text-xs text-white/30">Ref: {bookingId}</p>}
+          {bookingId && <p className="mt-2 font-mono text-xs text-white/50">Ref: {bookingId}</p>}
         </div>
       </div>
     );
@@ -126,7 +126,7 @@ export default function BookingConfirm() {
           We&apos;ve sent a confirmation to your email. You&apos;ll receive a reminder before your appointment.
         </p>
         {bookingId && (
-          <p className="mt-2 font-mono text-xs text-white/30">Ref: {bookingId}</p>
+          <p className="mt-2 font-mono text-xs text-white/50">Ref: {bookingId}</p>
         )}
         <div className="mt-8 flex flex-col gap-3">
           <Button asChild size="lg">

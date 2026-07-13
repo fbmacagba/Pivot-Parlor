@@ -227,6 +227,10 @@ export function CommercialShopChrome({
 
   const rootStyle = {
     ...theme.vars,
+    // Native form controls (date/select popups, scrollbars) follow the
+    // palette's scheme instead of the html-level dark default, so light
+    // shop sites get light-chrome controls.
+    colorScheme: theme.scheme,
     "--pp-font-heading": fontHeadingStack,
     "--pp-font-body": fontBodyStack,
   } as CSSProperties;

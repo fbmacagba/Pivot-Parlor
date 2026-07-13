@@ -192,7 +192,7 @@ export function PosScreen({
             <input type="hidden" name="cart" value={cartPayload} />
             <input type="hidden" name="tender" value={tender} />
 
-            <p className="text-xs font-semibold uppercase tracking-widest text-white/30">Cart</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-white/50">Cart</p>
             {cart.length === 0 ? (
               <p className="text-sm text-white/40">Tap a service or product to add it.</p>
             ) : (

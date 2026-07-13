@@ -94,7 +94,7 @@ function StepRow({
     }`}>
       {/* Icon / tick */}
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
-        done ? "bg-emerald-500/15 text-emerald-400" : active ? "bg-gold/15 text-gold" : "bg-white/5 text-white/30"
+        done ? "bg-emerald-500/15 text-emerald-400" : active ? "bg-gold/15 text-gold" : "bg-white/5 text-white/50"
       }`}>
         {done ? (
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,7 +124,7 @@ function StepRow({
         </Link>
       )}
       {!done && !active && (
-        <span className="shrink-0 text-xs text-white/20 font-medium">Locked</span>
+        <span className="shrink-0 text-xs text-white/40 font-medium">Locked</span>
       )}
       {done && (
         <span className="shrink-0 text-xs font-semibold text-emerald-400">Done</span>
@@ -162,7 +162,7 @@ export function SetupGate({ status }: { status: SetupStatus }) {
             style={{ width: `${(completedCount / 4) * 100}%` }}
           />
         </div>
-        <p className="text-xs text-white/30 mt-2">
+        <p className="text-xs text-white/50 mt-2">
           {completedCount === 4
             ? "All steps complete — your shop is ready to go live."
             : `${4 - completedCount} step${4 - completedCount !== 1 ? "s" : ""} remaining`}
@@ -185,7 +185,7 @@ export function SetupGate({ status }: { status: SetupStatus }) {
       </div>
 
       {/* Help text */}
-      <p className="text-xs text-white/20 text-center">
+      <p className="text-xs text-white/40 text-center">
         Need help? Contact{" "}
         <a href="mailto:support@pivotparlor.com" className="text-gold/60 hover:text-gold underline">
           support@pivotparlor.com

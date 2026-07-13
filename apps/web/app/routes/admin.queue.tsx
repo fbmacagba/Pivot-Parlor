@@ -159,7 +159,7 @@ export default function AdminQueue() {
             <p className="text-sm text-white/50 mb-3">Customers scan this to join the queue from their phone.</p>
             <a href={walkinUrl} target="_blank" rel="noopener noreferrer"
               className="text-xs text-gold hover:underline break-all">{walkinUrl}</a>
-            <p className="text-xs text-white/30 mt-3">Print and display at your entrance or counter.</p>
+            <p className="text-xs text-white/50 mt-3">Print and display at your entrance or counter.</p>
           </div>
         </div>
       )}
@@ -194,7 +194,7 @@ export default function AdminQueue() {
           Waiting {waiting.length > 0 ? `(${waiting.length})` : ""}
         </h2>
         {waiting.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/30 text-sm">
+          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50 text-sm">
             Queue is empty. Show the QR code to customers to get started.
           </div>
         ) : (
@@ -203,7 +203,7 @@ export default function AdminQueue() {
               <div key={entry.id} className="flex items-center gap-4 px-5 py-4 hover:bg-white/[0.02] transition-colors">
                 {/* Position */}
                 <div className="w-8 shrink-0 text-center">
-                  <span className="text-lg font-bold text-white/30">{entry.position}</span>
+                  <span className="text-lg font-bold text-white/50">{entry.position}</span>
                 </div>
                 {/* Avatar */}
                 <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center font-semibold text-white/60 text-sm shrink-0">
@@ -226,11 +226,11 @@ export default function AdminQueue() {
                     </button>
                   )}
                   <button onClick={() => updateStatus(entry.id, "skipped")}
-                    className="px-2 py-1.5 rounded-lg text-white/30 hover:text-white/60 hover:bg-white/5 text-xs transition-colors">
+                    className="px-2 py-1.5 rounded-lg text-white/50 hover:text-white/60 hover:bg-white/5 text-xs transition-colors">
                     Skip
                   </button>
                   <button onClick={() => updateStatus(entry.id, "removed")}
-                    className="px-2 py-1.5 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-500/10 text-xs transition-colors">
+                    className="px-2 py-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-red-500/10 text-xs transition-colors">
                     Remove
                   </button>
                 </div>

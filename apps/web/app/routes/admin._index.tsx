@@ -216,7 +216,7 @@ export default function AdminOverview() {
         </div>
 
         {todayBookings.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/30">
+          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50">
             No bookings scheduled for today.
           </div>
         ) : (
@@ -236,7 +236,7 @@ export default function AdminOverview() {
                         <p className="text-sm font-semibold text-white">
                           {formatTime(b.start_time)}
                         </p>
-                        <p className="text-xs text-white/35">
+                        <p className="text-xs text-white/50">
                           {b.duration_min}m
                         </p>
                       </div>
@@ -271,7 +271,7 @@ export default function AdminOverview() {
             {/* Completed */}
             {completed.length > 0 && (
               <details className="group">
-                <summary className="flex cursor-pointer items-center gap-2 py-2 text-xs text-white/30 hover:text-white/50 list-none">
+                <summary className="flex cursor-pointer items-center gap-2 py-2 text-xs text-white/50 hover:text-white/50 list-none">
                   <CheckCircle className="h-3.5 w-3.5" />
                   {completed.length} completed booking
                   {completed.length !== 1 ? "s" : ""}
@@ -292,7 +292,7 @@ export default function AdminOverview() {
                         <p className="text-sm font-medium text-white/70 truncate">
                           {b.customer_name}
                         </p>
-                        <p className="text-xs text-white/35 truncate">
+                        <p className="text-xs text-white/50 truncate">
                           {b.service_name}
                         </p>
                       </div>

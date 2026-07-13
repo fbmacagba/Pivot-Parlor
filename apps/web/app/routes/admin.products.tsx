@@ -426,7 +426,7 @@ export default function AdminProducts() {
                 <input type="hidden" name="intent" value="reorder" />
                 <input type="hidden" name="productId" value={stockProduct.id} />
                 {shopId && <input type="hidden" name="shopId" value={shopId} />}
-                <p className="text-xs font-semibold uppercase tracking-widest text-white/30">
+                <p className="text-xs font-semibold uppercase tracking-widest text-white/50">
                   Low-stock alert
                 </p>
                 <div className="grid grid-cols-2 gap-3">
@@ -526,7 +526,7 @@ function ProductRow({
       <div className="flex-1 min-w-0">
         <p className="truncate text-sm font-medium text-white">
           {product.name}
-          {inactive && <span className="ml-2 text-xs text-white/30">(inactive)</span>}
+          {inactive && <span className="ml-2 text-xs text-white/50">(inactive)</span>}
         </p>
         <p className="mt-0.5 truncate text-xs text-white/40">
           {[product.brand, product.sku, categoryName].filter(Boolean).join(" · ")}
@@ -541,7 +541,7 @@ function ProductRow({
             {isLow && <AlertTriangle className="ml-1 inline h-3 w-3" />}
           </p>
         ) : (
-          <p className="text-sm text-white/30">untracked</p>
+          <p className="text-sm text-white/50">untracked</p>
         )}
         <p className="text-xs text-white/40">cost {formatPence(product.cost_price_pence)}</p>
       </div>

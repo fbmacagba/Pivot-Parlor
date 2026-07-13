@@ -66,7 +66,7 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
     <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
       <p className="text-xs text-white/40 font-medium">{label}</p>
       <p className="text-2xl font-bold text-white mt-1">{value}</p>
-      {sub && <p className="text-xs text-white/30 mt-0.5">{sub}</p>}
+      {sub && <p className="text-xs text-white/50 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -106,7 +106,7 @@ function BarChart({
               className={`w-full rounded-t ${color} opacity-80 hover:opacity-100 transition-opacity`}
               style={{ height: `${Math.max(pct, 2)}%` }}
             />
-            <span className="text-[9px] text-white/30 leading-none">{label}</span>
+            <span className="text-[9px] text-white/50 leading-none">{label}</span>
           </div>
         );
       })}
@@ -123,7 +123,7 @@ export default function AdminAnalytics() {
     return (
       <div className="space-y-4">
         <h1 className="font-heading text-2xl font-bold text-white">Analytics</h1>
-        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-white/30">
+        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-white/50">
           No data yet. Analytics will appear once bookings are made.
         </div>
       </div>
@@ -265,12 +265,12 @@ export default function AdminAnalytics() {
         <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Top services</h2>
           {top_services.length === 0 ? (
-            <p className="text-sm text-white/30">No data yet.</p>
+            <p className="text-sm text-white/50">No data yet.</p>
           ) : (
             <div className="space-y-3">
               {top_services.map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs text-white/25 w-4 shrink-0">{i+1}</span>
+                  <span className="text-xs text-white/40 w-4 shrink-0">{i+1}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white truncate">{s.service_name}</p>
                     <p className="text-xs text-white/40">{s.booking_count} bookings</p>
@@ -286,12 +286,12 @@ export default function AdminAnalytics() {
         <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Top staff</h2>
           {top_staff.length === 0 ? (
-            <p className="text-sm text-white/30">No data yet.</p>
+            <p className="text-sm text-white/50">No data yet.</p>
           ) : (
             <div className="space-y-3">
               {top_staff.map((s, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <span className="text-xs text-white/25 w-4 shrink-0">{i+1}</span>
+                  <span className="text-xs text-white/40 w-4 shrink-0">{i+1}</span>
                   <div className="w-7 h-7 rounded-full bg-gold/20 flex items-center justify-center text-xs font-bold text-gold shrink-0">
                     {s.display_name.charAt(0).toUpperCase()}
                   </div>

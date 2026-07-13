@@ -156,7 +156,7 @@ export default function StaffToday() {
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
-          <p className="text-white/30 text-sm">No more appointments today.</p>
+          <p className="text-white/50 text-sm">No more appointments today.</p>
         </div>
       )}
 
@@ -183,7 +183,7 @@ export default function StaffToday() {
                   <p className="text-sm font-semibold text-white">
                     {formatTime(b.start_time)}
                   </p>
-                  <p className="text-xs text-white/35">{b.duration_min}m</p>
+                  <p className="text-xs text-white/50">{b.duration_min}m</p>
                 </div>
                 <div className="h-8 w-px bg-white/10 shrink-0" />
                 <div className="flex-1 min-w-0">
@@ -214,7 +214,7 @@ export default function StaffToday() {
       {/* Completed (collapsible) */}
       {completed.length > 0 && (
         <details>
-          <summary className="flex cursor-pointer items-center gap-2 py-1 text-xs text-white/30 hover:text-white/50 list-none">
+          <summary className="flex cursor-pointer items-center gap-2 py-1 text-xs text-white/50 hover:text-white/50 list-none">
             <CheckCircle className="h-3.5 w-3.5" />
             {completed.length} completed
           </summary>
@@ -233,7 +233,7 @@ export default function StaffToday() {
                   <p className="text-sm text-white/60 truncate">
                     {b.customer_name}
                   </p>
-                  <p className="text-xs text-white/35 truncate">
+                  <p className="text-xs text-white/50 truncate">
                     {b.service_name}
                   </p>
                 </div>

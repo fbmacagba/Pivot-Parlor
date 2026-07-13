@@ -233,7 +233,7 @@ export default function DevAIDeploy() {
             {selectedModel && (
               <p className="mt-1.5 text-xs text-white/50">{selectedModel.description}</p>
             )}
-            <p className="mt-1 text-xs text-white/30">
+            <p className="mt-1 text-xs text-white/50">
               {models.some((m) => m.livePricing)
                 ? "Live pricing from the OpenRouter catalogue (refreshed hourly)."
                 : "OpenRouter catalogue unreachable — showing last-known pricing."}
@@ -256,7 +256,7 @@ export default function DevAIDeploy() {
                 <option value="medium" className="bg-dark">Medium — balanced</option>
                 <option value="high" className="bg-dark">High — deepest thinking, most tokens</option>
               </select>
-              <p className="mt-1 text-xs text-white/30">
+              <p className="mt-1 text-xs text-white/50">
                 Higher effort spends more output tokens on reasoning before writing.
               </p>
             </div>
@@ -371,7 +371,7 @@ export default function DevAIDeploy() {
               onApply={() => handleApply("A")}
             />
           ) : (
-            <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-white/20 text-sm text-white/30">
+            <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-white/20 text-sm text-white/50">
               Generate a theme to see a preview here — nothing changes on the shop site until you apply one
             </div>
           )}

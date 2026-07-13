@@ -265,7 +265,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-white/30">
+        <p className="mt-6 text-center text-xs text-white/50">
           Admin and staff accounts are created by your shop manager.
         </p>
       </div>
