@@ -220,6 +220,17 @@ export default function InviteAccept() {
             >
               Activate account →
             </button>
+            <p className="text-center text-xs text-white/50">
+              By activating your account you agree to our{" "}
+              <a href="/terms" className="underline hover:text-white/70">
+                Terms
+              </a>{" "}
+              and{" "}
+              <a href="/privacy" className="underline hover:text-white/70">
+                Privacy Policy
+              </a>
+              .
+            </p>
           </form>
         </div>
 

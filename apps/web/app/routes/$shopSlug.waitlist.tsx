@@ -1,4 +1,4 @@
-import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useNavigation, useParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
@@ -30,6 +30,7 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
 export default function Waitlist() {
   const data = useActionData<typeof action>();
   const nav = useNavigation();
+  const { shopSlug } = useParams();
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-dark px-4">
@@ -57,6 +58,17 @@ export default function Waitlist() {
             <Button type="submit" disabled={nav.state === "submitting"} className="w-full" size="lg">
               {nav.state === "submitting" ? "Joining…" : "Join waitlist →"}
             </Button>
+            <p className="text-center text-xs text-white/50">
+              We use these details only to add you to the waitlist and let you
+              know when a slot opens. See our{" "}
+              <a
+                href={`/${shopSlug}/privacy`}
+                className="underline hover:text-white/80"
+              >
+                Privacy Policy
+              </a>
+              .
+            </p>
           </Form>
         )}
       </div>

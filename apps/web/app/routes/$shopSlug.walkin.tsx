@@ -108,6 +108,17 @@ export default function WalkIn() {
               className="w-full py-3 rounded-xl bg-gold text-dark font-bold text-sm hover:bg-gold/90 transition-colors disabled:opacity-60">
               {submitting ? "Joining…" : "Join the queue →"}
             </button>
+            <p className="text-center text-xs text-white/50">
+              We use these details only to manage your place in the queue. See
+              our{" "}
+              <a
+                href={`/${shopSlug}/privacy`}
+                className="underline hover:text-white/80"
+              >
+                Privacy Policy
+              </a>
+              .
+            </p>
           </div>
         )}
 
