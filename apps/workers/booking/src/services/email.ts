@@ -88,7 +88,10 @@ function confirmationHtml(d: BookingEmailData): string {
                   {
                     label: "Address",
                     value: address,
-                    href: googleMapsUrl(`${d.shop_name}, ${address}`),
+                    // Address only: prefixing the shop name pins ONLY when
+                    // Google knows the business; a bare address always
+                    // geocodes to a marker.
+                    href: googleMapsUrl(address),
                   },
                 ]
               : []),

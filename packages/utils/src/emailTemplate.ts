@@ -122,8 +122,9 @@ ${trs}
 
 /**
  * Google Maps link for a free-form address. The `query` form opens the live
- * map (the Maps app on mobile) pinned to the best match; including the shop
- * name improves place matching.
+ * map (the Maps app on mobile) pinned to the geocoded address. Pass the bare
+ * address: prefixing a business name only resolves when Google Maps knows
+ * the business, and otherwise degrades to a pinless search view.
  */
 export function googleMapsUrl(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
