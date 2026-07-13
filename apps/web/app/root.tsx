@@ -12,16 +12,20 @@ import "~/fonts";
 import { PlatformCookieBanner } from "~/components/PlatformCookieBanner";
 import { InstallAppPrompt } from "~/components/InstallAppPrompt";
 import { ErrorScreen } from "~/components/ErrorScreen";
+import { useShopMatch } from "~/lib/shop-match";
 
 export const links = () => [
   { rel: "stylesheet", href: tailwindStylesheet },
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
   { rel: "icon", type: "image/x-icon", href: "/favicon.ico", sizes: "32x32" },
   { rel: "apple-touch-icon", href: "/apple-touch-icon.png", sizes: "180x180" },
-  { rel: "manifest", href: "/site.webmanifest" },
+  // The manifest link is rendered in Layout, not here: shop routes must link
+  // their own per-shop manifest so installs capture the SHOP as the app.
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  // On /:shopSlug routes the installed app is the shop, not the platform.
+  const shopMatch = useShopMatch();
   return (
     <html lang="en" suppressHydrationWarning>
       <head suppressHydrationWarning>
@@ -39,7 +43,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-        <meta name="apple-mobile-web-app-title" content="Pivot Parlor" />
+        <meta
+          name="apple-mobile-web-app-title"
+          content={shopMatch?.name ?? "Pivot Parlor"}
+        />
+        <link
+          rel="manifest"
+          href={
+            shopMatch
+              ? `/${shopMatch.slug}/manifest.webmanifest`
+              : "/site.webmanifest"
+          }
+        />
         <Meta />
         <Links />
       </head>
