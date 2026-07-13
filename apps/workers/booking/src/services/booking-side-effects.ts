@@ -33,10 +33,13 @@ export async function runBookingSideEffects(
 ): Promise<void> {
   try {
     const confirmPref = await env.DB.prepare(
-      "SELECT booking_confirmation_email FROM shop_settings WHERE shop_id = ? LIMIT 1",
+      "SELECT booking_confirmation_email, address FROM shop_settings WHERE shop_id = ? LIMIT 1",
     )
       .bind(args.shopId)
-      .first<{ booking_confirmation_email: number | null }>();
+      .first<{
+        booking_confirmation_email: number | null;
+        address: string | null;
+      }>();
     if (env.RESEND_API_KEY && confirmPref?.booking_confirmation_email !== 0) {
       await sendBookingConfirmation(env.RESEND_API_KEY, {
         customer_name: args.customerName,
@@ -51,6 +54,7 @@ export async function runBookingSideEffects(
         duration_min: args.durationMin,
         amount_pence: args.amountPence,
         booking_id: args.bookingId,
+        shop_address: confirmPref?.address ?? null,
       });
     }
   } catch (err) {

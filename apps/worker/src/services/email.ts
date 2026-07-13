@@ -14,6 +14,7 @@ import {
   emailDetailRows,
   emailNote,
   emailButton,
+  googleMapsUrl,
 } from "@repo/utils";
 
 const RESEND_API = "https://api.resend.com/emails";
@@ -34,6 +35,8 @@ export interface BookingEmailData {
   duration_min: number;
   amount_pence: number; // integer pence (WS-4)
   booking_id: string;
+  /** Physical address (shop_settings.address); links to Google Maps when set. */
+  shop_address?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,6 +67,7 @@ async function sendEmail(
 // booking creation and sends the confirmation.
 
 function reminderHtml(d: BookingEmailData): string {
+  const address = d.shop_address?.trim();
   return emailBaseLayout(
     emailHeader(
       "⏰ Reminder: appointment tomorrow",
@@ -78,6 +82,17 @@ function reminderHtml(d: BookingEmailData): string {
             { label: "Service", value: d.service_name },
             { label: "With", value: d.staff_name },
             { label: "Location", value: d.shop_name },
+            // Clickable address: opens the live map (the Maps app on phones)
+            // pinned to the shop.
+            ...(address
+              ? [
+                  {
+                    label: "Address",
+                    value: address,
+                    href: googleMapsUrl(`${d.shop_name}, ${address}`),
+                  },
+                ]
+              : []),
           ]) +
           emailNote(
             "We look forward to seeing you. If you need to cancel, please do so as soon as possible.",

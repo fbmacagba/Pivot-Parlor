@@ -26,11 +26,13 @@ export async function processReminder(
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
-              sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone
+              sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone,
+              ss.address AS shop_address
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id
        JOIN staff st ON st.id = b.staff_id
        JOIN shops sh ON sh.id = b.shop_id
+       LEFT JOIN shop_settings ss ON ss.shop_id = b.shop_id
        WHERE b.id = ? AND b.status IN ('pending', 'confirmed') AND b.reminder_sent = 0
        LIMIT 1`,
     )
@@ -50,6 +52,7 @@ export async function processReminder(
       shop_name: string;
       shop_slug: string;
       shop_timezone: string | null;
+      shop_address: string | null;
     }>();
 
   if (!booking) return; // already sent or cancelled
@@ -67,6 +70,7 @@ export async function processReminder(
         booking_date: booking.booking_date,
         start_time: booking.start_time,
         timezone: booking.shop_timezone ?? "Europe/London",
+        shop_address: booking.shop_address,
         duration_min: booking.duration_min,
         amount_pence: booking.amount_pence,
         booking_id: booking.id,
@@ -134,6 +138,7 @@ export async function sendPendingReminders(
               booking_date: b.booking_date,
               start_time: b.start_time,
               timezone: b.shop_timezone ?? "Europe/London",
+              shop_address: b.shop_address,
               duration_min: b.duration_min,
               amount_pence: b.amount_pence,
               booking_id: b.id,
