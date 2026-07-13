@@ -8,6 +8,25 @@
   "display": "standalone",
   "background_color": "#0D0D0D",
   "theme_color": "#0D0D0D",
+  "shortcuts": [
+    {
+      "name": "Sign in",
+      "url": "/login",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "My bookings",
+      "description": "See upcoming appointments and book again",
+      "url": "/account",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Share your shop",
+      "description": "Copy your booking link or show its QR code",
+      "url": "/admin",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/favicon.svg",
