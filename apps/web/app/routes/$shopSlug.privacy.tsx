@@ -139,25 +139,34 @@ export default function ShopPrivacyPolicy() {
         </p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
-            <strong>Pivot Parlor</strong> — our booking platform provider, which
-            hosts and processes booking data on our behalf as a data processor.
-            Pivot Parlor operates under Cloudflare infrastructure based in the
-            UK/EEA region.
+            <strong>Pivot Parlor</strong> - our booking platform provider, which
+            hosts and processes booking data on our behalf as a data processor,
+            using Cloudflare for infrastructure. Some data is processed outside
+            the UK (including in the United States) and replicated across global
+            locations, so UK-only or EEA-only residency is not guaranteed.
           </li>
           <li>
-            <strong>Payment processors</strong> — Stripe Inc., to process
-            payments securely. Stripe is certified to PCI DSS Level 1. We do not
-            store your full payment card details.
+            <strong>Payment processors</strong> - Stripe (Stripe Payments
+            Europe, Ltd and Stripe Payments UK, Ltd, with Stripe, LLC in the
+            United States), to process payments securely. Stripe is certified to
+            PCI DSS Level 1 and we do not store your full payment card details.
           </li>
           <li>
-            <strong>Email and communication providers</strong> — used to deliver
-            appointment confirmations and reminders to you.
+            <strong>Email and communication providers</strong> - Resend (Plus
+            Five Five, Inc., United States), used to deliver appointment
+            confirmations and reminders to you.
           </li>{" "}
           <li>
-            <strong>Law enforcement or regulators</strong> — where required to
+            <strong>Law enforcement or regulators</strong> - where required to
             do so by law or to protect our rights, property, or safety.
           </li>
         </ul>
+        <p>
+          Where personal data is transferred outside the UK, it is protected by
+          a lawful transfer mechanism such as the UK International Data Transfer
+          Addendum to the EU Standard Contractual Clauses or the UK Extension to
+          the EU-U.S. Data Privacy Framework.
+        </p>
 
         {/* 5. Data retention */}
         <h2 className="text-lg font-semibold text-[color:var(--st-ink-90)]">
