@@ -214,19 +214,19 @@ export function getUserById(db: D1Database, id: string) {
     .first<Omit<DBUser, "password_hash"> & { phone?: string | null }>();
 }
 
-export function createUser(
-  db: D1Database,
-  user: {
-    id: string;
-    name?: string | null;
-    email: string;
-    password_hash: string;
-    role: string;
-    shop_id?: string | null;
-    /** Only pass 1 when address ownership is proven (invite accept, operator-provisioned). */
-    email_verified?: number;
-  },
-) {
+interface NewUser {
+  id: string;
+  name?: string | null;
+  email: string;
+  password_hash: string;
+  role: string;
+  shop_id?: string | null;
+  /** Only pass 1 when address ownership is proven (invite accept, operator-provisioned). */
+  email_verified?: number;
+}
+
+/** Prepared INSERT for a new platform user — use in a db.batch() for atomicity. */
+export function createUserStmt(db: D1Database, user: NewUser) {
   return db
     .prepare(
       "INSERT INTO platform_users (id, name, email, password_hash, role, shop_id, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -239,8 +239,11 @@ export function createUser(
       user.role,
       user.shop_id ?? null,
       user.email_verified ?? 0,
-    )
-    .run();
+    );
+}
+
+export function createUser(db: D1Database, user: NewUser) {
+  return createUserStmt(db, user).run();
 }
 
 // ─── Shops ────────────────────────────────────────────────────────────────────
@@ -501,11 +504,37 @@ export function getInviteByToken(db: D1Database, token: string) {
     .first<DBInvite>();
 }
 
-export function markInviteUsed(db: D1Database, token: string) {
+/** Prepared UPDATE marking an invite consumed — use in a db.batch(). */
+export function markInviteUsedStmt(db: D1Database, token: string) {
   return db
     .prepare("UPDATE invites SET used_at = datetime('now') WHERE token = ?")
-    .bind(token)
-    .run();
+    .bind(token);
+}
+
+export function markInviteUsed(db: D1Database, token: string) {
+  return markInviteUsedStmt(db, token).run();
+}
+
+/**
+ * Prepared INSERT recording that a user accepted a legal document (Article 28
+ * posture, migration 043). Use in a db.batch() alongside createUserStmt so the
+ * account and its acceptance record are written all-or-nothing.
+ */
+export function recordLegalAcceptanceStmt(
+  db: D1Database,
+  a: {
+    id: string;
+    shop_id?: string | null;
+    user_id: string;
+    document: string;
+    version: string;
+  },
+) {
+  return db
+    .prepare(
+      "INSERT INTO legal_acceptances (id, shop_id, user_id, document, version) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(a.id, a.shop_id ?? null, a.user_id, a.document, a.version);
 }
 
 export function updateShopStripeSession(
@@ -548,11 +577,15 @@ export function setInviteActive(db: D1Database, inviteId: string) {
     .run();
 }
 
-export function activateShop(db: D1Database, shopId: string) {
+/** Prepared UPDATE activating a shop — use in a db.batch(). */
+export function activateShopStmt(db: D1Database, shopId: string) {
   return db
     .prepare("UPDATE shops SET status = 'active', is_active = 1 WHERE id = ?")
-    .bind(shopId)
-    .run();
+    .bind(shopId);
+}
+
+export function activateShop(db: D1Database, shopId: string) {
+  return activateShopStmt(db, shopId).run();
 }
 
 // ─── Shop Sites ────────────────────────────────────────────────────────────────

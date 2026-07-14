@@ -45,12 +45,13 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     const api = createApiClient(
       env.API_URL,
       null,
-      e2eInviteMock ? { "X-E2E-Test-Mock": "1" } : undefined
+      e2eInviteMock ? { "X-E2E-Test-Mock": "1" } : undefined,
     );
     const invite = await api.get<InviteData>(`/api/invites/${token}`);
     return json({ invite, token, error: null });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Invalid or expired invite";
+    const msg =
+      err instanceof Error ? err.message : "Invalid or expired invite";
     return json({ invite: null, token, error: msg });
   }
 }
@@ -65,17 +66,26 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const name = form.get("name")?.toString().trim() ?? "";
   const password = form.get("password")?.toString() ?? "";
   const confirm = form.get("confirm_password")?.toString() ?? "";
+  const acceptTerms = form.get("accept_terms") === "1";
 
   if (!name) return json({ error: "Full name is required" });
-  if (password.length < 8) return json({ error: "Password must be at least 8 characters" });
+  if (password.length < 8)
+    return json({ error: "Password must be at least 8 characters" });
   if (password !== confirm) return json({ error: "Passwords do not match" });
+  if (!acceptTerms) {
+    return json({
+      error:
+        "You must agree to the Terms of Service and Data Processing Agreement to continue.",
+    });
+  }
 
   try {
     const api = createApiClient(env.API_URL, null);
-    const result = await api.post<{ token: string; role: string; shop_id: string }>(
-      `/api/invites/${token}/accept`,
-      { name, password }
-    );
+    const result = await api.post<{
+      token: string;
+      role: string;
+      shop_id: string;
+    }>(`/api/invites/${token}/accept`, { name, password, accept_terms: true });
 
     const isProd = env.API_URL.includes("pivotparlor.com");
 
@@ -109,7 +119,8 @@ export default function InviteAccept() {
             Invite not valid
           </h1>
           <p className="text-white/60">
-            {loaderError ?? "This invite link is invalid, expired, or has already been used."}
+            {loaderError ??
+              "This invite link is invalid, expired, or has already been used."}
           </p>
           <a
             href="/"
@@ -121,6 +132,8 @@ export default function InviteAccept() {
       </div>
     );
   }
+
+  const isAdmin = invite.role === "admin";
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-dark px-4">
@@ -141,7 +154,10 @@ export default function InviteAccept() {
             {invite.shop && (
               <p className="text-sm text-white/60">
                 Set up your account to manage{" "}
-                <span className="text-white font-medium">{invite.shop.name}</span>.
+                <span className="text-white font-medium">
+                  {invite.shop.name}
+                </span>
+                .
               </p>
             )}
             <p className="text-sm text-white/60">
@@ -214,23 +230,61 @@ export default function InviteAccept() {
               />
             </div>
 
+            <label
+              htmlFor="accept_terms"
+              className="flex items-start gap-2.5 text-xs text-white/60"
+            >
+              <input
+                id="accept_terms"
+                name="accept_terms"
+                type="checkbox"
+                value="1"
+                required
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-white/40 bg-white/5 accent-gold focus:outline-none focus:ring-2 focus:ring-gold"
+              />
+              <span>
+                I have read and agree to the{" "}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gold underline hover:text-gold-light"
+                >
+                  Terms of Service
+                </a>
+                {isAdmin ? (
+                  <>
+                    {" "}
+                    and the{" "}
+                    <a
+                      href="/dpa"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-gold underline hover:text-gold-light"
+                    >
+                      Data Processing Agreement
+                    </a>
+                  </>
+                ) : null}
+                , and to our{" "}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gold underline hover:text-gold-light"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </span>
+            </label>
+
             <button
               type="submit"
               className="h-11 w-full rounded-lg bg-gold text-sm font-semibold text-dark transition-colors hover:bg-gold-light"
             >
               Activate account →
             </button>
-            <p className="text-center text-xs text-white/50">
-              By activating your account you agree to our{" "}
-              <a href="/terms" className="underline hover:text-white/70">
-                Terms
-              </a>{" "}
-              and{" "}
-              <a href="/privacy" className="underline hover:text-white/70">
-                Privacy Policy
-              </a>
-              .
-            </p>
           </form>
         </div>
 

@@ -1,7 +1,7 @@
 import { Link, useLocation } from "@remix-run/react";
 import { ArrowRight } from "lucide-react";
 
-const HIDDEN_PATHS = ["/contact", "/login", "/accept-invite"];
+const HIDDEN_PATHS = ["/contact", "/login"];
 
 export function FloatingCTA() {
   const { pathname } = useLocation();
