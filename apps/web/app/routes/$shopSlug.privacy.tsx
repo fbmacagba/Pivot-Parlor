@@ -88,8 +88,12 @@ export default function ShopPrivacyPolicy() {
         </ul>
         <p>
           We do not collect sensitive personal data (such as health or biometric
-          information) unless you voluntarily provide it in a message to us. We
-          do not knowingly collect data from children under 16.
+          information) unless you voluntarily provide it in a message to us.
+          This service is not directed at children. Bookings for anyone under 18
+          should be made or authorised by a parent or guardian, and we do not
+          knowingly collect personal data from children beyond what is needed to
+          fulfil an appointment. If you believe a child has provided data,
+          please contact us to have it removed.
         </p>
 
         {/* 3. How we use your data */}
