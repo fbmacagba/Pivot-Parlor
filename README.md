@@ -15,34 +15,36 @@ Pivot Parlor is a multi-tenant SaaS booking and business platform for independen
 Independent shops lose revenue to three industry-wide failures (full analysis in [docs/STRATEGY.md](docs/STRATEGY.md)):
 
 1. **Booking friction.** 71% of clients have abandoned a booking because it was too hard, and most platforms force the client to create an account before they can book.
-2. **No brand ownership.** Marketplace competitors (Fresha, Booksy, Treatwell) put the shop inside the *platform's* brand on a generic page — the shop never builds its own digital presence or owns the customer relationship.
+2. **No brand ownership.** Marketplace competitors (Fresha, Booksy, Treatwell) put the shop inside the _platform's_ brand on a generic page — the shop never builds its own digital presence or owns the customer relationship.
 3. **Opaque, punishing pricing.** Monthly fees, hidden marketplace commissions, per-message charges, client-side booking fees, and 12-month contracts erode trust and margin — while no-shows alone cost a median barbershop ~$5,800/year.
 
-Pivot Parlor was built to remove all three: a branded site the shop *owns*, zero-friction guest booking, and pricing that charges the shop only when it actually earns.
+Pivot Parlor was built to remove all three: a branded site the shop _owns_, zero-friction guest booking, and pricing that charges the shop only when it actually earns.
 
 ## What it does
 
 - **AI-generated branded shop sites** — each shop gets a public site at `pivotparlor.com/<shopSlug>` with AI-generated theme, copy, and imagery.
-- **Frictionless online booking** — customers book with name + contact details; no platform account needed.
-- **Shop management** — services, staff, schedules, bookings, walk-in queue, waitlist, revenue analytics.
+- **Frictionless online booking** — customers book with name + contact details; no platform account needed. Optional deposits are collected at booking via Stripe.
+- **Shop management** — services, staff, schedules, bookings, walk-in queue, waitlist, and revenue analytics.
+- **Point-of-sale & inventory** — in-store POS sales, retail products and stock levels, purchasing, stock-takes, back-bar consumption (bill of materials), and per-line returns with API-initiated Stripe refunds.
 - **Per-shop AI assistant** — every site has a booking chatbot grounded in that shop's live services, staff, hours, and promotions; it answers pricing questions from real data only and drives toward a booking.
 - **Payments** — Stripe Connect; the platform takes 10% commission on completed bookings.
+- **Legal & compliance** — per-shop and platform privacy, cookie, and terms pages, a UK GDPR Article 28 Data Processing Agreement at `/dpa`, and recorded acceptance of the terms at onboarding.
 - **Multi-tenant** — one platform, many shops, strict shop-scoped data isolation.
 - **Roles** — `developer` (platform operator), `admin` (shop owner), `staff`, `customer`.
 
 ## What makes it different
 
-Most competitors are *marketplaces* that rent shops a generic page and monetise through monthly fees and opaque commissions. Pivot Parlor inverts that:
+Most competitors are _marketplaces_ that rent shops a generic page and monetise through monthly fees and opaque commissions. Pivot Parlor inverts that:
 
-| | Typical marketplace platforms | Pivot Parlor |
-|---|---|---|
-| **Shop's web presence** | Generic page in the platform's brand | The shop's **own** AI-generated, fully branded site at `pivotparlor.com/<shop>` |
-| **Customer booking** | Client must create a platform account | Guest booking — name + contact only, no account, no app |
-| **Pricing model** | $15–250/mo + opaque marketplace commission + client-side fees; often a 12-month contract | £100 one-time setup + 10% on *completed* bookings only — no monthly fee, no client-side fees, no contract |
-| **When the shop pays** | Regardless of whether it earned | Only when a booking completes (shop earns £0 → pays £0) |
-| **Site creation** | Manual page setup | An AI pipeline generates theme, copy, imagery, and legal pages per shop |
-| **Customer relationship** | Owned by the marketplace | Owned by the shop |
-| **Infrastructure** | — | Runs entirely on the Cloudflare edge (Pages / Workers / D1 / KV / R2 / Queues) at near-zero marginal cost |
+|                           | Typical marketplace platforms                                                            | Pivot Parlor                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Shop's web presence**   | Generic page in the platform's brand                                                     | The shop's **own** AI-generated, fully branded site at `pivotparlor.com/<shop>`                           |
+| **Customer booking**      | Client must create a platform account                                                    | Guest booking — name + contact only, no account, no app                                                   |
+| **Pricing model**         | $15–250/mo + opaque marketplace commission + client-side fees; often a 12-month contract | £100 one-time setup + 10% on _completed_ bookings only — no monthly fee, no client-side fees, no contract |
+| **When the shop pays**    | Regardless of whether it earned                                                          | Only when a booking completes (shop earns £0 → pays £0)                                                   |
+| **Site creation**         | Manual page setup                                                                        | An AI pipeline generates theme, copy, imagery, and legal pages per shop                                   |
+| **Customer relationship** | Owned by the marketplace                                                                 | Owned by the shop                                                                                         |
+| **Infrastructure**        | —                                                                                        | Runs entirely on the Cloudflare edge (Pages / Workers / D1 / KV / R2 / Queues) at near-zero marginal cost |
 
 ## How it responds to financial queries
 
@@ -68,6 +70,7 @@ Browser
 - **Auth**: JWT (HS256, shared `JWT_SECRET`) in the `pp_session` HttpOnly cookie or `Authorization: Bearer` header. The Remix BFF verifies sessions by calling `GET /auth/me` on the Worker.
 - **API convention**: Worker responses are always `{ success: boolean, data?: T, error?: string }`.
 - **Tenanting**: every shop-scoped query must filter by `shop_id`; SQL is always parameterized via prepared statements.
+- **Money**: all monetary values are stored and transported as integer pence (`*_pence` columns and API fields); pounds appear only at the input (`parsePoundsToPence`) and display (`formatPence`) boundaries. No `REAL` money columns.
 
 ## Repository layout
 
@@ -115,11 +118,11 @@ cd apps/worker && npm run dev   # Worker API on port 8787
 
 Local configuration lives in `.env` (gitignored — never commit it). Keys used:
 
-| Key | Purpose |
-|-----|---------|
-| `JWT_SECRET` | JWT signing secret (must match the deployed Worker secret) |
-| `DEV_PASSWORD` | Local developer account password |
-| `E2E_BASE_URL` | Target for Playwright tests |
+| Key            | Purpose                                                    |
+| -------------- | ---------------------------------------------------------- |
+| `JWT_SECRET`   | JWT signing secret (must match the deployed Worker secret) |
+| `DEV_PASSWORD` | Local developer account password                           |
+| `E2E_BASE_URL` | Target for Playwright tests                                |
 
 Production secrets are managed with Wrangler, never in files:
 
@@ -175,9 +178,9 @@ cd apps/worker && npx wrangler deploy --env staging
 cd apps/web && npm run deploy
 ```
 
-A staging frontend can be deployed as a Pages preview branch (`wrangler pages deploy --branch=staging`) with `API_URL` pointed at the staging Worker; wiring that into CI is deferred until E2E runs in CI.
+End-to-end tests run in CI via [.github/workflows/e2e.yml](.github/workflows/e2e.yml): on every pull request it deploys the PR's worker and frontend to staging (running the staging D1 migrations first), then runs Playwright against the staging preview. A fast **smoke** tier (dev-login + public booking) runs on every PR; the **full** suite runs when the PR carries the `e2e` label or via manual dispatch.
 
-GitHub Actions workflows in [.github/workflows/](.github/workflows/) deploy `web` and `worker` on push. Background workers in `apps/workers/*` are deployed individually with `wrangler deploy` from each directory.
+GitHub Actions workflows in [.github/workflows/](.github/workflows/) deploy `web` and `worker` on push to `main`. Background workers in `apps/workers/*` are deployed individually with `wrangler deploy` from each directory.
 
 ## Known footguns
 
@@ -187,9 +190,9 @@ GitHub Actions workflows in [.github/workflows/](.github/workflows/) deploy `web
 
 ## Documentation
 
-| Document | Contents |
-|----------|----------|
-| [docs/PRD.md](docs/PRD.md) | Product requirements: users, features, roadmap, non-functional requirements |
-| [docs/STRATEGY.md](docs/STRATEGY.md) | Market analysis, competitive positioning, pricing, go-to-market |
-| [docs/DASHBOARD_SPEC.md](docs/DASHBOARD_SPEC.md) | Dashboard UX specification |
-| [CLAUDE.md](CLAUDE.md) | Conventions and gotchas for AI-assisted development |
+| Document                                         | Contents                                                                    |
+| ------------------------------------------------ | --------------------------------------------------------------------------- |
+| [docs/PRD.md](docs/PRD.md)                       | Product requirements: users, features, roadmap, non-functional requirements |
+| [docs/STRATEGY.md](docs/STRATEGY.md)             | Market analysis, competitive positioning, pricing, go-to-market             |
+| [docs/DASHBOARD_SPEC.md](docs/DASHBOARD_SPEC.md) | Dashboard UX specification                                                  |
+| [CLAUDE.md](CLAUDE.md)                           | Conventions and gotchas for AI-assisted development                         |
