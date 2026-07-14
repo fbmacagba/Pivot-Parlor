@@ -54,7 +54,16 @@ export default function Privacy() {
               <strong>data processor</strong>, handling that data only on the
               shop&rsquo;s documented instructions. If you are a booking
               customer wishing to exercise your data rights, please contact the
-              shop directly and see that shop&rsquo;s own privacy policy.
+              shop directly and see that shop&rsquo;s own privacy policy. The
+              terms on which we process booking data as a processor are set out
+              in our{" "}
+              <Link
+                to="/dpa"
+                className="underline text-white/60 hover:text-white/90"
+              >
+                Data Processing Agreement
+              </Link>
+              .
             </p>
             <p className="mt-3">
               We are committed to protecting personal data in accordance with
@@ -153,28 +162,63 @@ export default function Privacy() {
             </p>
             <ul className="mt-3 list-disc space-y-2 pl-5">
               <li>
-                <strong>Cloudflare, Inc.</strong> — our infrastructure provider,
-                which hosts our platform data on UK/EEA-region servers.
-                Cloudflare processes data on our behalf under a Data Processing
-                Agreement.
+                <strong>Cloudflare, Inc.</strong> - our infrastructure and
+                hosting provider (application hosting, storage, and security),
+                acting as our processor under its Data Processing Agreement.
+                Some data is replicated across Cloudflare&rsquo;s global
+                locations, so UK-only or EEA-only residency is not guaranteed.
               </li>
               <li>
-                <strong>Stripe, Inc.</strong> — to process payments securely.
-                Stripe is PCI DSS Level 1 certified. We do not store full card
-                details on our systems.
+                <strong>Stripe</strong> - to process payments securely, via
+                Stripe Payments Europe, Ltd and Stripe Payments UK, Ltd, with
+                Stripe, LLC in the United States. Stripe acts as our processor
+                for payment facilitation and as an independent controller for
+                fraud prevention and legal or regulatory compliance. Stripe is
+                PCI DSS Level 1 certified and we do not store full card details.
+                See{" "}
+                <a
+                  href="https://stripe.com/gb/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-white/60 hover:text-white/90"
+                >
+                  Stripe&rsquo;s Privacy Policy
+                </a>
+                .
               </li>
               <li>
-                <strong>Email and communication providers</strong> — used to
-                deliver appointment confirmations and platform notifications.
-              </li>{" "}
+                <strong>Resend (Plus Five Five, Inc.)</strong> - to deliver
+                transactional emails such as booking confirmations and
+                reminders, acting as our processor. Resend processes email data
+                in the United States.
+              </li>
               <li>
-                <strong>Law enforcement or regulators</strong> — where required
+                <strong>Law enforcement or regulators</strong> - where required
                 by law, or to protect our rights, property, or safety.
               </li>
             </ul>
             <p className="mt-3">
-              All third-party processors are required to handle your data
-              securely and only for the purposes we specify.
+              <strong>International transfers.</strong> Some of these providers
+              process personal data outside the UK, including in the United
+              States. Where that happens we rely on a lawful transfer mechanism
+              under UK data protection law, principally the UK International
+              Data Transfer Addendum to the EU Standard Contractual Clauses and,
+              where applicable, the UK Extension to the EU-U.S. Data Privacy
+              Framework. How we process shop customers&rsquo; booking data as a
+              processor is set out in our{" "}
+              <Link
+                to="/dpa"
+                className="underline text-white/60 hover:text-white/90"
+              >
+                Data Processing Agreement
+              </Link>
+              .
+            </p>
+            <p className="mt-3">
+              Where a provider acts as our processor it must handle your data
+              securely and only for the purposes we specify; where a provider
+              acts as an independent controller, it does so under its own
+              privacy policy.
             </p>
           </section>
 
