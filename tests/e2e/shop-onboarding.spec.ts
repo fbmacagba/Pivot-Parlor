@@ -47,7 +47,9 @@ test.describe.serial("Shop onboarding", () => {
     // Form fields should be present
     await expect(page.getByLabel("Shop name")).toBeVisible();
     await expect(page.getByLabel(/owner email/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /create shop/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /create shop/i }),
+    ).toBeVisible();
   });
 
   // ── 3. Form submits and returns an invite link ───────────────────────────────
@@ -95,13 +97,15 @@ test.describe.serial("Shop onboarding", () => {
     if (match) inviteUrl = match[1];
 
     // Copy button should also be present
-    await expect(page.getByRole("button", { name: /copy link/i })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /copy link/i }),
+    ).toBeVisible();
   });
 
   // ── 4. Invite link loads the set-password form ───────────────────────────────
   test("Invite link loads the set-password form", async ({ page }) => {
     expect(inviteUrl, "invite URL must be captured from previous test").toMatch(
-      /^\/invite\/[a-f0-9]{64}$/
+      /^\/invite\/[a-f0-9]{64}$/,
     );
 
     await page.goto(inviteUrl);
@@ -113,14 +117,16 @@ test.describe.serial("Shop onboarding", () => {
     await expect(page.getByLabel(/^Password$/)).toBeVisible();
     await expect(page.getByLabel(/confirm password/i)).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /activate account/i })
+      page.getByRole("button", { name: /activate account/i }),
     ).toBeVisible();
   });
 
   // ── 5. Full invite acceptance — submit form, redirect to template select ────
-  test("Full invite acceptance redirects to template selection", async ({ page }) => {
+  test("Full invite acceptance redirects to template selection", async ({
+    page,
+  }) => {
     expect(inviteUrl, "invite URL must be captured from previous test").toMatch(
-      /^\/invite\/[a-f0-9]{64}$/
+      /^\/invite\/[a-f0-9]{64}$/,
     );
 
     await page.goto(inviteUrl);
@@ -129,6 +135,9 @@ test.describe.serial("Shop onboarding", () => {
     await page.getByLabel("Full name").fill("E2E Admin User");
     await page.getByLabel(/^Password$/).fill("SecurePass123!");
     await page.getByLabel(/confirm password/i).fill("SecurePass123!");
+
+    // Onboarding now requires accepting the Terms + DPA (Article 28 posture).
+    await page.getByRole("checkbox").check();
 
     await page.getByRole("button", { name: /activate account/i }).click();
     await page.waitForLoadState("networkidle");

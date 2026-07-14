@@ -150,6 +150,22 @@ CREATE TABLE IF NOT EXISTS invites (
 CREATE INDEX IF NOT EXISTS idx_invites_token   ON invites(token);
 CREATE INDEX IF NOT EXISTS idx_invites_shop_id ON invites(shop_id);
 
+-- ─── Legal acceptances (Article 28 posture, migration 043) ────────────────────
+-- Auditable record of who accepted the Terms of Service (incorporating the Data
+-- Processing Agreement) at onboarding. document = 'terms_dpa' for a shop admin
+-- (the controller entering the DPA) or 'terms' for staff/developer.
+CREATE TABLE IF NOT EXISTS legal_acceptances (
+  id          TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  shop_id     TEXT REFERENCES shops(id) ON DELETE CASCADE,
+  user_id     TEXT NOT NULL REFERENCES platform_users(id) ON DELETE CASCADE,
+  document    TEXT NOT NULL,
+  version     TEXT NOT NULL,
+  accepted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_legal_acceptances_shop ON legal_acceptances(shop_id);
+CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user ON legal_acceptances(user_id);
+
 -- ─── Inventory: catalogue + stock (WS-3 Phase 0, migration 034) ───────────────
 -- Money is INTEGER pence; tax_rate_bps is basis points. stock_levels holds the
 -- current quantity; every change is recorded as a stock_movements row.

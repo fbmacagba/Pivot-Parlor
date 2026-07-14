@@ -28,7 +28,6 @@ const PLATFORM_ROUTE_PREFIXES = [
   "/login",
   "/logout",
   "/invite",
-  "/accept-invite",
   "/api",
   "/about",
   "/features",
