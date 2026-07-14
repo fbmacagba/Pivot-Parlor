@@ -115,8 +115,12 @@ export default function Privacy() {
             </ul>
             <p className="mt-3">
               We do not collect sensitive personal data unless you voluntarily
-              provide it. We do not knowingly collect data from children under
-              16.
+              provide it. Our platform is not directed at children. Bookings for
+              anyone under 18 should be made or authorised by a parent or
+              guardian, and we do not knowingly collect personal data from
+              children beyond what is needed to fulfil an appointment. If you
+              believe a child has provided us with data, contact us at{" "}
+              <strong>dev@pivotparlor.com</strong> to have it removed.
             </p>
           </section>
 
