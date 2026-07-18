@@ -1150,12 +1150,19 @@ export async function getBookingsByShop(
     : 0;
   vals.push(limit, offset);
 
+  // Deposit fields (bw_* tables are owned by the booking worker, same D1) so
+  // the admin UI can tell a deposit-paid booking apart and offer refund/keep
+  // on cancellation. Alias bs/dt: st is taken by staff.
   const sql = `
     SELECT b.*, sv.name AS service_name, sv.duration_min,
-           st.display_name AS staff_name
+           st.display_name AS staff_name,
+           bs.deposit_amount_pence, bs.deposit_paid_at,
+           dt.status AS deposit_tx_status
     FROM bookings b
     JOIN services sv ON sv.id = b.service_id
     JOIN staff st ON st.id = b.staff_id
+    LEFT JOIN bw_booking_state bs ON bs.booking_id = b.id
+    LEFT JOIN bw_transactions dt ON dt.booking_id = b.id AND dt.type = 'deposit'
     WHERE ${conds.join(" AND ")}
     ORDER BY b.booking_date, b.start_time
     LIMIT ? OFFSET ?
@@ -1169,9 +1176,36 @@ export async function getBookingsByShop(
         service_name: string;
         duration_min: number;
         staff_name: string;
+        deposit_amount_pence: number | null;
+        deposit_paid_at: string | null;
+        deposit_tx_status: string | null;
       }
     >();
   return results;
+}
+
+/**
+ * Deposit state for a booking (bw_* rows are written by the booking worker;
+ * both workers share one D1). null when the booking has no state row — the
+ * common case for plain free bookings — so cancellation forks are data-driven.
+ */
+export function getBookingDepositState(db: D1Database, bookingId: string, shopId: string) {
+  return db
+    .prepare(
+      `SELECT st.deposit_paid_at, st.stripe_payment_intent_id, st.deposit_amount_pence,
+              t.status AS deposit_tx_status, t.sale_id AS deposit_tx_sale_id
+       FROM bw_booking_state st
+       LEFT JOIN bw_transactions t ON t.booking_id = st.booking_id AND t.type = 'deposit'
+       WHERE st.booking_id = ? AND st.shop_id = ? LIMIT 1`,
+    )
+    .bind(bookingId, shopId)
+    .first<{
+      deposit_paid_at: string | null;
+      stripe_payment_intent_id: string | null;
+      deposit_amount_pence: number | null;
+      deposit_tx_status: string | null;
+      deposit_tx_sale_id: string | null;
+    }>();
 }
 
 export function getBookingById(db: D1Database, id: string) {

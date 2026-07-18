@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useLoaderData, useFetcher, useSearchParams } from "@remix-run/react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
@@ -26,6 +26,21 @@ export interface Booking {
   commission_pence: number;
   notes: string | null;
   created_at: string;
+  // Deposit state (customer-facing deposits, migration 041); null for
+  // bookings with no deposit.
+  deposit_amount_pence: number | null;
+  deposit_paid_at: string | null;
+  deposit_tx_status: string | null;
+}
+
+/** A captured customer deposit that has not been refunded or credited to a
+ *  sale: cancelling this booking must ask refund-or-keep. */
+function hasCapturedDeposit(b: Booking): boolean {
+  return (
+    Boolean(b.deposit_paid_at) &&
+    b.deposit_tx_status === "captured" &&
+    (b.deposit_amount_pence ?? 0) > 0
+  );
 }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -73,8 +88,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const form = await request.formData();
   const bookingId = form.get("bookingId") as string;
   const newStatus = form.get("status") as BookingStatus;
-  await api.put(`/api/shops/${shopId}/bookings/${bookingId}/status`, { status: newStatus });
-  return json({ ok: true });
+  const refundDeposit = form.get("refund_deposit");
+  try {
+    await api.put(`/api/shops/${shopId}/bookings/${bookingId}/status`, {
+      status: newStatus,
+      // Only sent for deposit-aware cancellations (the confirm dialog / the
+      // refund button); plain status changes keep the original body shape.
+      ...(refundDeposit !== null ? { refund_deposit: refundDeposit === "1" } : {}),
+    });
+    return json({ ok: true });
+  } catch (e: unknown) {
+    // Surfaces worker errors (e.g. "Deposit refund failed. The booking was
+    // not cancelled.") instead of crashing to the error boundary.
+    const message = e instanceof Error ? e.message : "Something went wrong";
+    return json({ ok: false, error: message }, { status: 502 });
+  }
 }
 
 const STATUS_META: Record<BookingStatus, { label: string; bg: string; text: string; dot: string }> = {
@@ -104,19 +132,120 @@ function StatusBadge({ status }: { status: BookingStatus }) {
   );
 }
 
-function StatusSelect({ bookingId, current }: { bookingId: string; current: BookingStatus }) {
+function StatusSelect({
+  booking,
+  onRequestCancelWithDeposit,
+}: {
+  booking: Booking;
+  onRequestCancelWithDeposit: () => void;
+}) {
   const fetcher = useFetcher();
   const optimistic = fetcher.formData?.get("status") as BookingStatus | undefined;
   return (
     <fetcher.Form method="post">
-      <input type="hidden" name="bookingId" value={bookingId} />
-      <select name="status" value={optimistic ?? current} onChange={(e) => fetcher.submit(e.currentTarget.form)}
+      <input type="hidden" name="bookingId" value={booking.id} />
+      <select
+        name="status"
+        value={optimistic ?? booking.status}
+        onChange={(e) => {
+          // A captured deposit makes cancellation a money decision: hand off
+          // to the refund-or-keep dialog instead of submitting. The select is
+          // controlled, so it snaps back to the current status meanwhile.
+          if (e.currentTarget.value === "cancelled" && hasCapturedDeposit(booking)) {
+            onRequestCancelWithDeposit();
+            return;
+          }
+          fetcher.submit(e.currentTarget.form);
+        }}
         className="text-xs border border-white/20 rounded-lg px-2 py-1.5 bg-white/5 text-white/80 focus:outline-none focus:ring-2 focus:ring-gold cursor-pointer">
         {(Object.keys(STATUS_META) as BookingStatus[]).map((s) => (
           <option key={s} value={s} className="bg-dark">{STATUS_META[s].label}</option>
         ))}
       </select>
     </fetcher.Form>
+  );
+}
+
+function CancelDepositDialog({
+  booking,
+  onClose,
+}: {
+  booking: Booking;
+  onClose: () => void;
+}) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const busy = fetcher.state !== "idle";
+  // A refund in flight must not be dismissible (backdrop/Escape) or the
+  // outcome is lost on the admin.
+  const guardedClose = () => {
+    if (!busy) onClose();
+  };
+  const dialogRef = useModalA11y<HTMLDivElement>({ active: true, onClose: guardedClose, lockScroll: false });
+
+  function submit(refund: boolean) {
+    const fd = new FormData();
+    fd.set("bookingId", booking.id);
+    fd.set("status", "cancelled");
+    fd.set("refund_deposit", refund ? "1" : "0");
+    fetcher.submit(fd, { method: "post" });
+  }
+
+  // Close once the cancellation lands; stay open to show a refund error.
+  const done = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
+  useEffect(() => {
+    if (done) onClose();
+  }, [done, onClose]);
+  if (done) return null;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/60 z-[60]" onClick={guardedClose} aria-hidden="true" />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cancel-deposit-title"
+        tabIndex={-1}
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-white/10 bg-dark-100 p-6 shadow-2xl"
+      >
+        <h3 id="cancel-deposit-title" className="font-heading text-lg font-semibold text-white">
+          Cancel this booking?
+        </h3>
+        <p className="mt-2 text-sm text-white/60">
+          The customer paid a {formatPence(booking.deposit_amount_pence ?? 0)} deposit. Refunding
+          returns it in full, including our commission. Keeping it means standard commission
+          applies to the amount kept.
+        </p>
+        {fetcher.data && !fetcher.data.ok && fetcher.data.error && (
+          <p role="alert" className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
+            {fetcher.data.error}
+          </p>
+        )}
+        <div className="mt-5 flex flex-col gap-2">
+          <button
+            onClick={() => submit(true)}
+            disabled={busy}
+            className="rounded-lg bg-gold px-4 py-2.5 text-sm font-semibold text-dark hover:bg-gold-light disabled:opacity-50 transition-colors"
+          >
+            {busy ? "Working…" : "Cancel and refund deposit"}
+          </button>
+          <button
+            onClick={() => submit(false)}
+            disabled={busy}
+            className="rounded-lg border border-white/20 px-4 py-2.5 text-sm font-medium text-white/80 hover:bg-white/5 disabled:opacity-50 transition-colors"
+          >
+            Cancel and keep deposit
+          </button>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="rounded-lg px-4 py-2.5 text-sm text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-50 transition-colors"
+          >
+            Go back
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -133,10 +262,18 @@ function SummaryCard({ label, value, icon }: { label: string; value: string | nu
 }
 
 function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => void }) {
+  const [confirmCancel, setConfirmCancel] = useState(false);
   // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
   // Kept in-place (not a Radix portal) so the fetcher-driven StatusSelect
-  // inside keeps submitting normally.
-  const dialogRef = useModalA11y<HTMLDivElement>({ active: true, onClose });
+  // inside keeps submitting normally. While the nested cancel dialog is open,
+  // Escape bubbles from its trap to this one — guard so one press closes only
+  // the dialog, not the whole drawer.
+  const dialogRef = useModalA11y<HTMLDivElement>({
+    active: true,
+    onClose: () => {
+      if (!confirmCancel) onClose();
+    },
+  });
   return (
     <>
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40" onClick={onClose} aria-hidden="true" />
@@ -162,7 +299,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           <div className="flex items-center justify-between">
             <StatusBadge status={booking.status} />
-            <StatusSelect bookingId={booking.id} current={booking.status} />
+            <StatusSelect booking={booking} onRequestCancelWithDeposit={() => setConfirmCancel(true)} />
           </div>
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 grid grid-cols-2 gap-4">
             <div><p className="text-xs text-white/60 mb-1">Date</p><p className="text-sm font-semibold text-white">{formatDate(booking.booking_date)}</p></div>
@@ -203,7 +340,22 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
               <div className="flex justify-between"><span className="text-sm text-white/60">Total</span><span className="text-sm font-semibold text-gold">{formatPence(booking.amount_pence)}</span></div>
               <div className="flex justify-between"><span className="text-sm text-white/40">Commission</span><span className="text-sm text-white/60">{formatPence(booking.commission_pence)}</span></div>
+              {booking.deposit_paid_at &&
+                (booking.deposit_tx_status === "refunded" ? (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-white/60">Deposit</span>
+                    <span className="text-sm text-white/80">Refunded</span>
+                  </div>
+                ) : (booking.deposit_amount_pence ?? 0) > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-white/60">Deposit paid</span>
+                    <span className="text-sm text-white/80">{formatPence(booking.deposit_amount_pence ?? 0)}</span>
+                  </div>
+                ) : null)}
               <div className="border-t border-white/10 pt-2 flex justify-between"><span className="text-sm text-white/60">Net to shop</span><span className="text-sm font-semibold text-white">{formatPence(booking.amount_pence - booking.commission_pence)}</span></div>
+              {booking.status === "cancelled" && hasCapturedDeposit(booking) && (
+                <RefundDepositButton bookingId={booking.id} amountPence={booking.deposit_amount_pence ?? 0} />
+              )}
             </div>
           </div>
           {booking.notes && (
@@ -215,7 +367,40 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
           <p className="text-xs text-white/60">Created {new Date(booking.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
         </div>
       </div>
+      {confirmCancel && (
+        <CancelDepositDialog booking={booking} onClose={() => setConfirmCancel(false)} />
+      )}
     </>
+  );
+}
+
+/** Recovery path: a booking cancelled by the deposit-blind customer
+ *  self-cancel keeps its captured deposit; this refunds it after the fact. */
+function RefundDepositButton({ bookingId, amountPence }: { bookingId: string; amountPence: number }) {
+  const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const busy = fetcher.state !== "idle";
+  const done = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
+  if (done) {
+    return <p className="pt-2 text-xs text-emerald-400">Deposit refund started.</p>;
+  }
+  return (
+    <div className="pt-2">
+      <fetcher.Form method="post">
+        <input type="hidden" name="bookingId" value={bookingId} />
+        <input type="hidden" name="status" value="cancelled" />
+        <input type="hidden" name="refund_deposit" value="1" />
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full rounded-lg border border-gold/40 px-4 py-2 text-sm font-medium text-gold hover:bg-gold/10 disabled:opacity-50 transition-colors"
+        >
+          {busy ? "Refunding…" : `Refund ${formatPence(amountPence)} deposit`}
+        </button>
+      </fetcher.Form>
+      {fetcher.data && !fetcher.data.ok && fetcher.data.error && (
+        <p role="alert" className="mt-2 text-xs text-red-400">{fetcher.data.error}</p>
+      )}
+    </div>
   );
 }
 
