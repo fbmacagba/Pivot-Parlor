@@ -64,6 +64,22 @@ describe("POST /api/waitlist validation", () => {
     expect(res.status).toBe(404);
   });
 
+  it("accepts shop_slug as well as shop_id (the public waitlist form sends shop_slug)", async () => {
+    const shop = await seedShop("Waitlist Slug");
+    const slug = await slugOf(shop);
+
+    const res = await dispatch("POST", "/api/waitlist", {
+      headers: { "CF-Connecting-IP": "203.0.113.24" },
+      body: { shop_slug: slug, customer_name: "A", customer_email: "a@test.local" },
+    });
+    expect(res.status).toBe(201);
+
+    const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM waitlist WHERE shop_id = ?")
+      .bind(shop)
+      .first<{ n: number }>();
+    expect(count?.n).toBe(1);
+  });
+
   it("rejects a service that belongs to another shop", async () => {
     const shopA = await seedShop("Waitlist A");
     const shopB = await seedShop("Waitlist B");
