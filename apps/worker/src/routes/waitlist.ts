@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
-import { getWaitlistByShop, createWaitlistEntry, getShopById } from "../db/queries.js";
+import { getWaitlistByShop, createWaitlistEntry, getShopById, getShopBySlug } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
@@ -17,6 +17,7 @@ waitlist.post(
     const body = await c.req
       .json<{
         shop_id?: string;
+        shop_slug?: string;
         service_id?: string;
         staff_id?: string;
         customer_name?: string;
@@ -31,9 +32,10 @@ waitlist.post(
     const phone = typeof body.customer_phone === "string" ? body.customer_phone.trim() : "";
     const preferredDate = typeof body.preferred_date === "string" ? body.preferred_date.trim() : "";
 
-    if (!body.shop_id || !name || !email) {
+    const shopIdentifier = body.shop_id || body.shop_slug;
+    if (!shopIdentifier || !name || !email) {
       return c.json(
-        { success: false, error: "shop_id, customer_name and customer_email are required" },
+        { success: false, error: "shop_id (or shop_slug), customer_name and customer_email are required" },
         400
       );
     }
@@ -48,7 +50,8 @@ waitlist.post(
 
     // The shop must exist and be live, and any service/staff must belong to it —
     // otherwise the public form can be used to write cross-tenant garbage.
-    const shop = await getShopById(c.env.DB, body.shop_id);
+    const shop =
+      (await getShopBySlug(c.env.DB, shopIdentifier)) ?? (await getShopById(c.env.DB, shopIdentifier));
     if (!shop || !shop.is_active) {
       return c.json({ success: false, error: "Shop not found" }, 404);
     }
