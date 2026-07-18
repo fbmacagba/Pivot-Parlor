@@ -102,6 +102,35 @@ describe("createFocusTrap", () => {
     release();
   });
 
+  it("with trapTabs false, lets Tab pass through untouched", () => {
+    const modal = mountModal();
+    const release = createFocusTrap(modal, { trapTabs: false });
+    (document.getElementById("last") as HTMLElement).focus();
+
+    const e = tab(modal);
+
+    // Non-modal panel (chat window): Tab must not be intercepted or wrapped.
+    expect(e.defaultPrevented).toBe(false);
+    expect(document.activeElement?.id).toBe("last");
+    release();
+  });
+
+  it("with trapTabs false, still invokes onEscape", () => {
+    const modal = mountModal();
+    let closed = 0;
+    const release = createFocusTrap(modal, {
+      onEscape: () => (closed += 1),
+      trapTabs: false,
+    });
+
+    modal.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+
+    expect(closed).toBe(1);
+    release();
+  });
+
   it("stops trapping after release", () => {
     const modal = mountModal();
     const release = createFocusTrap(modal);

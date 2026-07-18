@@ -31,17 +31,22 @@ export function getFocusable(container: HTMLElement): HTMLElement[] {
  * Returns a cleanup function that removes the listener. The caller is
  * responsible for moving focus into the container and restoring it on close
  * (the hook does both).
+ *
+ * `trapTabs: false` keeps the Escape handling but lets Tab pass through — for
+ * non-modal panels (chat windows) that close on Escape without imprisoning
+ * keyboard users.
  */
 export function createFocusTrap(
   container: HTMLElement,
-  opts: { onEscape?: () => void } = {},
+  opts: { onEscape?: () => void; trapTabs?: boolean } = {},
 ): () => void {
+  const trapTabs = opts.trapTabs !== false;
   function onKeyDown(e: KeyboardEvent) {
     if (e.key === "Escape") {
       opts.onEscape?.();
       return;
     }
-    if (e.key !== "Tab") return;
+    if (!trapTabs || e.key !== "Tab") return;
 
     const focusable = getFocusable(container);
     if (focusable.length === 0) {

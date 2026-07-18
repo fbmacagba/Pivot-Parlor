@@ -14,6 +14,7 @@ import {
 } from "@repo/utils";
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
+import { useModalA11y } from "~/lib/useModalA11y";
 
 const CHATBOT_CHAT_URL =
   "https://pivot-parlor-chatbot.bmorris0565.workers.dev/chat";
@@ -158,6 +159,13 @@ export function CommercialShopChrome({
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const closeNav = () => setNavOpen(false);
 
+  // Mobile menu is a fullscreen modal: trap Tab, close on Escape, lock
+  // scroll, restore focus to the burger button on close.
+  const navDialogRef = useModalA11y<HTMLDivElement>({
+    active: navOpen,
+    onClose: closeNav,
+  });
+
   const shopId = site.shop_id?.trim() ?? "";
 
   // Separate treatments from products for the welcome chips
@@ -261,6 +269,15 @@ export function CommercialShopChrome({
     setChatStarted(false);
     setChatSending(false);
   };
+
+  // Chat panel is a non-modal floating window: Escape closes and focus
+  // returns to the launcher, but Tab is not trapped and scroll stays free.
+  const chatDialogRef = useModalA11y<HTMLDivElement>({
+    active: chatOpen,
+    onClose: handleClose,
+    lockScroll: false,
+    trapTabs: false,
+  });
 
   const bookingEnabled = settings.booking_enabled !== false;
 
@@ -442,7 +459,13 @@ export function CommercialShopChrome({
           this inset-0 overlay to the header's own box (background only painted
           behind the top strip; the links rendered over the page). */}
       {navOpen ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-[color:var(--st-bg)] md:hidden">
+        <div
+          ref={navDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu"
+          className="fixed inset-0 z-50 flex flex-col bg-[color:var(--st-bg)] md:hidden"
+        >
           <div className="flex items-center justify-between border-b border-[color:var(--st-line-10)] px-4 py-3">
             <span className="pp-heading truncate text-lg">
               {site.shop_name}
@@ -715,6 +738,7 @@ export function CommercialShopChrome({
 
       {chatOpen ? (
         <div
+          ref={chatDialogRef}
           className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
           style={{ height: 480, maxHeight: "min(480px, calc(100vh - 7.5rem))" }}
           role="dialog"

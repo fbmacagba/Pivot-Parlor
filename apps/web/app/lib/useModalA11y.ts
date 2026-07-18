@@ -17,6 +17,7 @@ export function useModalA11y<T extends HTMLElement = HTMLDivElement>({
   active,
   onClose,
   lockScroll = true,
+  trapTabs = true,
 }: {
   /** Whether the dialog is currently open. */
   active: boolean;
@@ -24,6 +25,11 @@ export function useModalA11y<T extends HTMLElement = HTMLDivElement>({
   onClose?: () => void;
   /** Lock background scroll while open (default true). */
   lockScroll?: boolean;
+  /**
+   * Trap Tab inside the container (default true). Pass false for non-modal
+   * panels (chat windows) that want focus-in, Escape and focus-restore only.
+   */
+  trapTabs?: boolean;
 }) {
   const ref = useRef<T>(null);
   // Keep the latest onClose without making it an effect dependency, so a
@@ -54,6 +60,7 @@ export function useModalA11y<T extends HTMLElement = HTMLDivElement>({
 
     const releaseTrap = createFocusTrap(container, {
       onEscape: () => onCloseRef.current?.(),
+      trapTabs,
     });
 
     let previousOverflow: string | null = null;
@@ -72,7 +79,7 @@ export function useModalA11y<T extends HTMLElement = HTMLDivElement>({
         previouslyFocused.focus();
       }
     };
-  }, [active, lockScroll]);
+  }, [active, lockScroll, trapTabs]);
 
   return ref;
 }

@@ -130,6 +130,7 @@ export default function ShopLanding() {
         <ReviewModal
           shopId={shop.id}
           shopName={shop.name}
+          shopSlug={shop.slug}
           bookingId={reviewBookingId}
           onClose={() => setReviewOpen(false)}
         />
