@@ -1,12 +1,20 @@
-import { Form, useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
+import { Form, useFetcher, useLoaderData, useNavigation, useRouteLoaderData } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { useState } from "react";
 import { createApiClient } from "~/lib/api";
-import { Button } from "~/components/ui/Button";
-import { Input } from "~/components/ui/Input";
+import { CommercialShopChrome } from "~/components/CommercialShopChrome";
+import { siteDataForChrome } from "~/lib/shopCommercialChrome";
+import {
+  ThemedButton,
+  ThemedInput,
+  ThemedTextarea,
+  lightDark,
+  platformFallbackVars,
+} from "~/components/ThemedBookingControls";
 import type { Service } from "@repo/types";
 import { formatPence } from "@repo/utils";
+import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 interface Staff { id: string; display_name: string; bio?: string }
 interface Slot { staff_id: string; start_time: string; end_time: string; is_available: boolean }
@@ -117,7 +125,35 @@ function depositDuePence(pricePence: number, cfg: { percent: number; min_pence: 
   return Math.min(pricePence, Math.max(Math.round((pricePence * cfg.percent) / 100), cfg.min_pence));
 }
 
-export default function BookingWizard() {
+/**
+ * The wizard renders inside the shop's AI-generated theme when the shop has a
+ * live site (same chrome as terms/privacy/cookies: palette vars, curated
+ * fonts, colorScheme, header/footer). Shops with no generated site keep the
+ * platform-branded look, reproduced token-for-token by platformFallbackVars.
+ */
+export default function BookingRoute() {
+  const layoutData = useRouteLoaderData<typeof shopLoader>("routes/$shopSlug");
+  const site = (layoutData?.site ?? null) as ShopSiteData | null;
+
+  if (layoutData?.shop && site) {
+    return (
+      <CommercialShopChrome
+        site={siteDataForChrome(layoutData.shop.name, site, layoutData.shop.id)}
+        settings={layoutData.settings ?? {}}
+        shopSlug={layoutData.slug}
+      >
+        <BookingWizard />
+      </CommercialShopChrome>
+    );
+  }
+  return (
+    <div className="pp-commercial" style={platformFallbackVars}>
+      <BookingWizard />
+    </div>
+  );
+}
+
+function BookingWizard() {
   const { slug, services, staff, slots, shopTimezone, deposit, paymentCancelled } =
     useLoaderData<typeof loader>();
   const nav = useNavigation();
@@ -143,47 +179,50 @@ export default function BookingWizard() {
   ].sort((a, b) => a.start_time.localeCompare(b.start_time));
 
   return (
-    <div className="min-h-screen bg-dark px-4 py-12 sm:px-6">
+    <div className="min-h-screen bg-[color:var(--st-bg)] px-4 py-12 text-[color:var(--st-ink)] sm:px-6">
       <div className="mx-auto max-w-2xl">
         {paymentCancelled && (
-          <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <div
+            className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+            style={lightDark("#92400e", "#fde68a")}
+          >
             Payment cancelled — your slot has been released. Pick a time below to book again.
           </div>
         )}
         {/* Progress bar */}
         <div className="mb-8">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-white/50">Step {step + 1} of {STEPS.length}</p>
-            <p className="text-sm font-medium text-white">{STEPS[step]}</p>
+            <p className="text-sm text-[color:var(--st-ink-50)]">Step {step + 1} of {STEPS.length}</p>
+            <p className="text-sm font-medium text-[color:var(--st-ink)]">{STEPS[step]}</p>
           </div>
-          <div className="h-1 w-full rounded-full bg-white/10">
+          <div className="h-1 w-full rounded-full bg-[color:var(--st-chip)]">
             <div
-              className="h-1 rounded-full bg-gold transition-all"
+              className="h-1 rounded-full bg-[color:var(--color-accent)] transition-all"
               style={{ width: `${((step + 1) / STEPS.length) * 100}%` }}
             />
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-dark-100 p-8">
+        <div className="rounded-2xl border border-[color:var(--st-line-10)] bg-[color:var(--st-card)] p-8">
           {step === 0 && (
             <div className="space-y-4">
-              <h2 className="font-heading text-2xl font-bold text-white">Select a service</h2>
+              <h2 className="font-heading text-2xl font-bold text-[color:var(--st-ink)]">Select a service</h2>
               {services.length === 0 ? (
-                <p className="text-white/60">No services available.</p>
+                <p className="text-[color:var(--st-ink-60)]">No services available.</p>
               ) : (
                 services.map((s) => (
                   <button
                     key={s.id}
                     onClick={() => { setSelection((p) => ({ ...p, service: s })); setStep(1); }}
                     className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                      selection.service?.id === s.id ? "border-gold bg-gold/10" : "border-white/10 bg-dark hover:border-gold/40"
+                      selection.service?.id === s.id ? "border-[color:var(--color-accent)] bg-[color:var(--st-accent-10)]" : "border-[color:var(--st-line-10)] bg-[color:var(--st-bg)] hover:border-[color:var(--st-accent-40)]"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <p className="font-medium text-white">{s.name}</p>
-                      <p className="text-gold font-semibold">{formatPence(s.price_pence)}</p>
+                      <p className="font-medium text-[color:var(--st-ink)]">{s.name}</p>
+                      <p className="text-[color:var(--st-accent-text)] font-semibold">{formatPence(s.price_pence)}</p>
                     </div>
-                    <p className="mt-0.5 text-sm text-white/50">{s.durationMinutes} min</p>
+                    <p className="mt-0.5 text-sm text-[color:var(--st-ink-50)]">{s.durationMinutes} min</p>
                   </button>
                 ))
               )}
@@ -192,30 +231,30 @@ export default function BookingWizard() {
 
           {step === 1 && (
             <div className="space-y-4">
-              <h2 className="font-heading text-2xl font-bold text-white">Select staff</h2>
+              <h2 className="font-heading text-2xl font-bold text-[color:var(--st-ink)]">Select staff</h2>
               <button
                 onClick={() => { setSelection((p) => ({ ...p, staffId: "any" })); setStep(2); }}
                 className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                  selection.staffId === "any" ? "border-gold bg-gold/10" : "border-white/10 bg-dark hover:border-gold/40"
+                  selection.staffId === "any" ? "border-[color:var(--color-accent)] bg-[color:var(--st-accent-10)]" : "border-[color:var(--st-line-10)] bg-[color:var(--st-bg)] hover:border-[color:var(--st-accent-40)]"
                 }`}
               >
-                <p className="font-medium text-white">Any available</p>
-                <p className="text-sm text-white/50">We&apos;ll assign the best available staff member</p>
+                <p className="font-medium text-[color:var(--st-ink)]">Any available</p>
+                <p className="text-sm text-[color:var(--st-ink-50)]">We&apos;ll assign the best available staff member</p>
               </button>
               {staff.map((s) => (
                 <button
                   key={s.id}
                   onClick={() => { setSelection((p) => ({ ...p, staffId: s.id })); setStep(2); }}
                   className={`flex w-full items-center gap-4 rounded-xl border p-4 text-left transition-colors ${
-                    selection.staffId === s.id ? "border-gold bg-gold/10" : "border-white/10 bg-dark hover:border-gold/40"
+                    selection.staffId === s.id ? "border-[color:var(--color-accent)] bg-[color:var(--st-accent-10)]" : "border-[color:var(--st-line-10)] bg-[color:var(--st-bg)] hover:border-[color:var(--st-accent-40)]"
                   }`}
                 >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gold/20 font-heading font-bold text-gold">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color:var(--st-accent-20)] font-heading font-bold text-[color:var(--st-accent-text)]">
                     {s.display_name.charAt(0)}
                   </div>
                   <div>
-                    <p className="font-medium text-white">{s.display_name}</p>
-                    {s.bio && <p className="text-sm text-white/50">{s.bio}</p>}
+                    <p className="font-medium text-[color:var(--st-ink)]">{s.display_name}</p>
+                    {s.bio && <p className="text-sm text-[color:var(--st-ink-50)]">{s.bio}</p>}
                   </div>
                 </button>
               ))}
@@ -224,8 +263,8 @@ export default function BookingWizard() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <h2 className="font-heading text-2xl font-bold text-white">Pick date & time</h2>
-              <Input
+              <h2 className="font-heading text-2xl font-bold text-[color:var(--st-ink)]">Pick date & time</h2>
+              <ThemedInput
                 label="Date"
                 type="date"
                 value={selection.date}
@@ -246,19 +285,19 @@ export default function BookingWizard() {
               />
 
               {slotsFetcher.state === "loading" && (
-                <p className="text-sm text-white/60">Loading available slots…</p>
+                <p className="text-sm text-[color:var(--st-ink-60)]">Loading available slots…</p>
               )}
 
               {availableSlots.length > 0 && (
                 <div>
-                  <p className="text-sm font-medium text-white/80 mb-2">Available slots</p>
+                  <p className="text-sm font-medium text-[color:var(--st-ink-80)] mb-2">Available slots</p>
                   <div className="grid grid-cols-3 gap-2">
                     {availableSlots.map((slot) => (
                       <button
                         key={slot.start_time}
                         onClick={() => setSelection((p) => ({ ...p, slot: slot.start_time }))}
                         className={`rounded-lg border py-2 text-sm transition-colors ${
-                          selection.slot === slot.start_time ? "border-gold bg-gold/20 text-gold" : "border-white/40 text-white/70 hover:border-gold/40"
+                          selection.slot === slot.start_time ? "border-[color:var(--color-accent)] bg-[color:var(--st-accent-20)] text-[color:var(--st-accent-text)]" : "border-[color:var(--st-line-40)] text-[color:var(--st-ink-70)] hover:border-[color:var(--st-accent-40)]"
                         }`}
                       >
                         {formatSlotTime(slot.start_time, shopTimezone)}
@@ -269,34 +308,31 @@ export default function BookingWizard() {
               )}
 
               {selection.date && slotsFetcher.state !== "loading" && availableSlots.length === 0 && (
-                <p className="text-sm text-white/60">No slots available for this date.</p>
+                <p className="text-sm text-[color:var(--st-ink-60)]">No slots available for this date.</p>
               )}
 
               <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
-                <Button disabled={!selection.slot} onClick={() => setStep(3)}>Next →</Button>
+                <ThemedButton variant="ghost" onClick={() => setStep(1)}>Back</ThemedButton>
+                <ThemedButton disabled={!selection.slot} onClick={() => setStep(3)}>Next →</ThemedButton>
               </div>
             </div>
           )}
 
           {step === 3 && (
             <div className="space-y-4">
-              <h2 className="font-heading text-2xl font-bold text-white">Your details</h2>
-              <Input label="Full name" value={selection.name} onChange={(e) => setSelection((p) => ({ ...p, name: e.target.value }))} required />
-              <Input label="Email address" type="email" value={selection.email} onChange={(e) => setSelection((p) => ({ ...p, email: e.target.value }))} required />
-              <Input label="Phone (optional)" type="tel" value={selection.phone} onChange={(e) => setSelection((p) => ({ ...p, phone: e.target.value }))} />
-              <div>
-                <label className="block text-sm font-medium text-white/80 mb-1.5">Notes (optional)</label>
-                <textarea
-                  rows={3}
-                  value={selection.notes}
-                  onChange={(e) => setSelection((p) => ({ ...p, notes: e.target.value }))}
-                  className="flex w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
-                />
-              </div>
+              <h2 className="font-heading text-2xl font-bold text-[color:var(--st-ink)]">Your details</h2>
+              <ThemedInput label="Full name" value={selection.name} onChange={(e) => setSelection((p) => ({ ...p, name: e.target.value }))} required />
+              <ThemedInput label="Email address" type="email" value={selection.email} onChange={(e) => setSelection((p) => ({ ...p, email: e.target.value }))} required />
+              <ThemedInput label="Phone (optional)" type="tel" value={selection.phone} onChange={(e) => setSelection((p) => ({ ...p, phone: e.target.value }))} />
+              <ThemedTextarea
+                label="Notes (optional)"
+                rows={3}
+                value={selection.notes}
+                onChange={(e) => setSelection((p) => ({ ...p, notes: e.target.value }))}
+              />
               <div className="flex gap-3">
-                <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
-                <Button disabled={!selection.name || !selection.email} onClick={() => setStep(4)}>Next →</Button>
+                <ThemedButton variant="ghost" onClick={() => setStep(2)}>Back</ThemedButton>
+                <ThemedButton disabled={!selection.name || !selection.email} onClick={() => setStep(4)}>Next →</ThemedButton>
               </div>
             </div>
           )}
@@ -312,8 +348,8 @@ export default function BookingWizard() {
               <input type="hidden" name="customer_phone" value={selection.phone} />
               <input type="hidden" name="notes" value={selection.notes} />
 
-              <h2 className="font-heading text-2xl font-bold text-white">Review & confirm</h2>
-              <div className="space-y-3 rounded-xl border border-white/10 bg-dark p-4 text-sm">
+              <h2 className="font-heading text-2xl font-bold text-[color:var(--st-ink)]">Review & confirm</h2>
+              <div className="space-y-3 rounded-xl border border-[color:var(--st-line-10)] bg-[color:var(--st-bg)] p-4 text-sm">
                 <Row label="Service" value={selection.service?.name ?? "—"} />
                 <Row label="Price" value={formatPence(selection.service?.price_pence ?? 0)} />
                 {deposit && selection.service && (
@@ -328,26 +364,26 @@ export default function BookingWizard() {
                 <Row label="Email" value={selection.email} />
               </div>
               {deposit && selection.service && (
-                <p className="text-xs text-white/50">
+                <p className="text-xs text-[color:var(--st-ink-50)]">
                   You&apos;ll be taken to a secure Stripe page to pay the deposit. The remaining balance is
                   settled at your appointment.
                 </p>
               )}
               <div className="flex gap-3">
-                <Button type="button" variant="ghost" onClick={() => setStep(3)}>Back</Button>
-                <Button type="submit" disabled={nav.state === "submitting"} className="flex-1">
+                <ThemedButton type="button" variant="ghost" onClick={() => setStep(3)}>Back</ThemedButton>
+                <ThemedButton type="submit" disabled={nav.state === "submitting"} className="flex-1">
                   {nav.state === "submitting"
                     ? "Confirming…"
                     : deposit
                       ? "Continue to payment →"
                       : "Confirm booking →"}
-                </Button>
+                </ThemedButton>
               </div>
-              <p className="text-center text-xs text-white/50">
+              <p className="text-center text-xs text-[color:var(--st-ink-50)]">
                 We use these details only to manage your booking. See our{" "}
                 <a
                   href={`/${slug}/privacy`}
-                  className="underline hover:text-white/80"
+                  className="underline hover:text-[color:var(--st-ink-80)]"
                 >
                   Privacy Policy
                 </a>
@@ -372,8 +408,8 @@ function formatSlotTime(iso: string, tz: string): string {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-white/50">{label}</span>
-      <span className="font-medium text-white">{value}</span>
+      <span className="text-[color:var(--st-ink-50)]">{label}</span>
+      <span className="font-medium text-[color:var(--st-ink)]">{value}</span>
     </div>
   );
 }
