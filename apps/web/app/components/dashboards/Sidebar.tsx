@@ -48,6 +48,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/admin/schedule", label: "Schedule", icon: Calendar },
   { href: "/admin/bookings", label: "Bookings", icon: CalendarDays },
   { href: "/admin/queue", label: "Queue", icon: Users2 },
+  { href: "/admin/waitlist", label: "Waitlist", icon: Clock },
   { href: "/admin/revenue", label: "Revenue", icon: BarChart3 },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/admin/payments", label: "Payments", icon: CreditCard },

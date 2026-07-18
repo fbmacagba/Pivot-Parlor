@@ -51,13 +51,23 @@ export async function seedScheduleDay(shopId: string, staffId: string, dayOfWeek
     .run();
 }
 
-export async function seedWaitlistEntry(shopId: string): Promise<string> {
+export async function seedWaitlistEntry(
+  shopId: string,
+  opts: { preferredDate?: string | null; staffId?: string | null; status?: string } = {}
+): Promise<string> {
   const id = uid("wait");
   await env.DB.prepare(
-    `INSERT INTO waitlist (id, shop_id, customer_name, customer_email)
-     VALUES (?, ?, 'Cust', 'cust@test.local')`
+    `INSERT INTO waitlist (id, shop_id, customer_name, customer_email, preferred_date, staff_id, status)
+     VALUES (?, ?, 'Cust', ?, ?, ?, ?)`
   )
-    .bind(id, shopId)
+    .bind(
+      id,
+      shopId,
+      `${id}@test.local`,
+      opts.preferredDate ?? null,
+      opts.staffId ?? null,
+      opts.status ?? "waiting"
+    )
     .run();
   return id;
 }

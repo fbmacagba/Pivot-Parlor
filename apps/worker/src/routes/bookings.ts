@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
   getBookingsByShop, getBookingById,
-  updateBookingStatus, getServiceById, getShopById,
+  updateBookingStatus, cancelBookingIfOpen, getServiceById, getShopById,
 } from "../db/queries.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { sendReviewRequest } from "../services/email.js";
+import { notifyWaitlistForOpenedSlot } from "../services/waitlist-notify.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { reportError } from "../services/report-error.js";
 
@@ -44,7 +45,19 @@ bookings.put("/:bookingId/status", async (c) => {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);
   }
 
-  await updateBookingStatus(c.env.DB, bookingId, body.status);
+  // Cancellation is applied atomically against the open statuses so that
+  // concurrent duplicate cancels perform the open → cancelled transition
+  // exactly once (only that request fires the waitlist fan-out below). Any
+  // other transition, and cancelling an already-closed booking, keeps the
+  // original unconditional behavior.
+  let freedSlot = false;
+  if (body.status === "cancelled") {
+    const res = await cancelBookingIfOpen(c.env.DB, bookingId);
+    freedSlot = (res.meta?.changes ?? 0) > 0;
+    if (!freedSlot) await updateBookingStatus(c.env.DB, bookingId, body.status);
+  } else {
+    await updateBookingStatus(c.env.DB, bookingId, body.status);
+  }
 
   // Send review request when booking is marked completed
   if (body.status === "completed" && c.env.RESEND_API_KEY) {
@@ -70,6 +83,27 @@ bookings.put("/:bookingId/status", async (c) => {
     } catch (err) {
       // Non-fatal: the status update stands even if the review email fails.
       reportError("booking.review_request_email", err, { shopId, bookingId });
+    }
+  }
+
+  // A real open → cancelled transition frees a slot: notify matching waitlist
+  // entries. `freedSlot` comes from the atomic UPDATE above (exactly once,
+  // never on no_show/completed/re-saves), and past bookings are skipped so
+  // housekeeping cancellations of old rows never advertise a slot that is
+  // not actually available.
+  const slotInFuture = new Date(booking.start_time).getTime() > Date.now();
+  if (freedSlot && slotInFuture && c.env.RESEND_API_KEY) {
+    try {
+      const shop = await getShopById(c.env.DB, shopId);
+      if (shop) {
+        await notifyWaitlistForOpenedSlot(c.env.DB, c.env.RESEND_API_KEY, shop, {
+          bookingDate: booking.booking_date,
+          staffId: booking.staff_id,
+        });
+      }
+    } catch (err) {
+      // Non-fatal: the cancellation stands even if waitlist emails fail.
+      reportError("booking.waitlist_notify", err, { shopId, bookingId });
     }
   }
 

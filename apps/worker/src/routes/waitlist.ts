@@ -1,8 +1,18 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
-import { getWaitlistByShop, createWaitlistEntry, getShopById, getShopBySlug } from "../db/queries.js";
+import {
+  getWaitlistByShop,
+  createWaitlistEntry,
+  getShopById,
+  getShopBySlug,
+  getWaitlistEntryById,
+  claimWaitlistNotification,
+  revertWaitlistNotification,
+} from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { sendWaitlistSlotOpen } from "../services/email.js";
+import { reportError } from "../services/report-error.js";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
 
@@ -131,6 +141,68 @@ waitlist.patch("/:id/status", authMiddleware, async (c) => {
     .bind(body.status, id)
     .run();
   return c.json({ success: true });
+});
+
+// ─── POST /api/waitlist/:id/notify — admin/staff/developer ────────────────────
+//
+// Sends the "a slot just opened" email to one waiting entry and marks it
+// notified. The claim is atomic (UPDATE ... WHERE status='waiting') so two
+// admins double-clicking produce exactly one email; a failed send reverts the
+// claim. Re-notification goes through PATCH back to 'waiting' first.
+
+waitlist.post("/:id/notify", authMiddleware, async (c) => {
+  const user = getUser(c);
+  if (!user || !["developer", "admin", "staff"].includes(user.role)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+  const { id } = c.req.param();
+  const entry = await getWaitlistEntryById(c.env.DB, id);
+  if (!entry || (user.role !== "developer" && user.shop_id !== entry.shop_id)) {
+    return c.json({ success: false, error: "Not found" }, 404);
+  }
+
+  if (entry.status === "notified") {
+    return c.json({ success: true, data: { notified: false, already_notified: true } });
+  }
+  if (entry.status !== "waiting") {
+    return c.json({ success: false, error: "Only waiting entries can be notified" }, 400);
+  }
+  // An explicit admin action must not silently mark notified with no email.
+  if (!c.env.RESEND_API_KEY) {
+    return c.json({ success: false, error: "Email sending is not configured" }, 503);
+  }
+
+  const shop = await getShopById(c.env.DB, entry.shop_id);
+  if (!shop) return c.json({ success: false, error: "Not found" }, 404);
+
+  const claim = await claimWaitlistNotification(c.env.DB, id);
+  if (!claim.meta || claim.meta.changes === 0) {
+    // Lost the race: re-read to report accurately. A concurrent click that
+    // already sent leaves it notified; a concurrent booked/expired transition
+    // means it can no longer be notified.
+    const current = await getWaitlistEntryById(c.env.DB, id);
+    if (current?.status === "notified") {
+      return c.json({ success: true, data: { notified: false, already_notified: true } });
+    }
+    return c.json({ success: false, error: "Only waiting entries can be notified" }, 400);
+  }
+
+  try {
+    await sendWaitlistSlotOpen(c.env.RESEND_API_KEY, {
+      customer_name: entry.customer_name,
+      customer_email: entry.customer_email,
+      shop_name: shop.name,
+      shop_slug: shop.slug,
+      service_name: entry.service_name,
+      preferred_date: entry.preferred_date,
+    });
+  } catch (err) {
+    await revertWaitlistNotification(c.env.DB, id);
+    reportError("waitlist.notify_email", err, { entryId: id, shopId: entry.shop_id });
+    return c.json({ success: false, error: "Failed to send notification email" }, 502);
+  }
+
+  return c.json({ success: true, data: { notified: true } });
 });
 
 export default waitlist;
