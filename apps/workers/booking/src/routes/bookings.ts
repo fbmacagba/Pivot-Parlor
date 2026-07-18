@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { addMinutesToHm, todayUtcYmd } from "../lib/time.js";
-import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent } from "../lib/stripe.js";
+import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent, createRefund } from "../lib/stripe.js";
 import {
   SaleInputError,
   resolveSaleLines,
@@ -205,9 +205,17 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   // deposit_paid_at stamped by the webhook) is money already received — a
   // credit against today's total, never captured. A legacy HOLD (manual-
   // capture PI, no deposit_paid_at) is captured here exactly as before.
-  const depositPaid = typeof st.deposit_paid_at === "string" && st.deposit_paid_at.length > 0;
+  // A REFUNDED deposit (cancel-with-refund, or an out-of-band Stripe refund)
+  // must never be credited: the customer got that money back.
+  const checkoutDepositTx = await db
+    .prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit' LIMIT 1")
+    .bind(bookingId)
+    .first<{ status: string }>();
+  const depositRefunded = checkoutDepositTx?.status === "refunded";
+  const depositPaid =
+    !depositRefunded && typeof st.deposit_paid_at === "string" && st.deposit_paid_at.length > 0;
   const piId =
-    !depositPaid && typeof st.stripe_payment_intent_id === "string"
+    !depositRefunded && !depositPaid && typeof st.stripe_payment_intent_id === "string"
       ? st.stripe_payment_intent_id.trim() || null
       : null;
   const depositPence = piId ? Number(st.deposit_amount_pence ?? 0) : 0;
@@ -800,6 +808,221 @@ r.post("/:shopId/check-in", async (c) => {
     serviceName: svc?.name ?? "",
     staffName: stf?.display_name ?? "",
     checkedInAt,
+  });
+});
+
+// ─── POST /:shopId/bookings/:bookingId/cancel — cancel with deposit disposition ─
+//
+// The only cancellation path that is deposit-aware. Policy ("we only earn when
+// you earn"): staff choose whether a CHARGED deposit is refunded (full refund,
+// application fee reversed too — createRefund already sets
+// refund_application_fee + reverse_transfer) or kept (shop earned the deposit,
+// the commission already collected on it stands). An uncaptured HOLD is always
+// voided — there is nothing to keep. Already-cancelled bookings are accepted
+// so deposits stranded by the deposit-blind customer self-cancel path remain
+// refundable afterwards.
+
+r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
+  const shopId = c.req.param("shopId");
+  const bookingId = c.req.param("bookingId");
+  const db = c.env.DB;
+  if (!(await shopExists(c, shopId))) {
+    return c.json({ success: false, error: "Shop not found" }, 404);
+  }
+
+  let body: { refundDeposit?: boolean };
+  try {
+    body = (await c.req.json()) as typeof body;
+  } catch {
+    body = {};
+  }
+  // Fresh cancels default to refund; the RECOVERY path (already-cancelled
+  // booking) acts only on an EXPLICIT true, so a bare re-cancel can never
+  // silently refund a deposit staff deliberately chose to keep.
+  const refundExplicit = body.refundDeposit === true;
+  const refundDeposit = body.refundDeposit !== false;
+
+  const booking = await db
+    .prepare("SELECT * FROM bookings WHERE id = ? AND shop_id = ? LIMIT 1")
+    .bind(bookingId, shopId)
+    .first<Record<string, unknown>>();
+  if (!booking) {
+    return c.json({ success: false, error: "Booking not found" }, 404);
+  }
+  if (booking.status === "completed" || booking.status === "no_show") {
+    return c.json({ success: false, error: "Closed bookings cannot be cancelled" }, 400);
+  }
+
+  const st = await db
+    .prepare("SELECT * FROM bw_booking_state WHERE booking_id = ? AND shop_id = ? LIMIT 1")
+    .bind(bookingId, shopId)
+    .first<Record<string, unknown>>();
+  const depositTx = await db
+    .prepare(
+      "SELECT id, status, sale_id FROM bw_transactions WHERE booking_id = ? AND type = 'deposit' LIMIT 1"
+    )
+    .bind(bookingId)
+    .first<{ id: string; status: string; sale_id: string | null }>();
+  const refundTx = await db
+    .prepare(
+      "SELECT id FROM bw_transactions WHERE booking_id = ? AND type = 'refund' LIMIT 1"
+    )
+    .bind(bookingId)
+    .first<{ id: string }>();
+
+  const piId =
+    typeof st?.stripe_payment_intent_id === "string"
+      ? st.stripe_payment_intent_id.trim() || null
+      : null;
+  const depositPaid = typeof st?.deposit_paid_at === "string" && st.deposit_paid_at.length > 0;
+  const depositPence = Number(st?.deposit_amount_pence ?? 0);
+  const depositFeePence = Number(st?.deposit_application_fee_pence ?? 0);
+
+  const alreadyRefunded = Boolean(refundTx) || depositTx?.status === "refunded";
+  const chargedDeposit =
+    depositPaid &&
+    piId !== null &&
+    depositTx?.status === "captured" &&
+    !depositTx.sale_id &&
+    !alreadyRefunded &&
+    depositPence > 0;
+  const holdDeposit = !depositPaid && piId !== null && depositTx?.status === "pending";
+
+  // Atomic claim (idiom of the checkout claim above): flip open → cancelled
+  // exactly once; concurrent duplicate cancels lose the UPDATE. An already-
+  // cancelled booking skips the flip — that is the recovery path for deposits
+  // stranded by the customer self-cancel, and it acts only on an explicit
+  // refund request (or a stranded hold, which can only be voided).
+  const priorStatus = String(booking.status);
+  let flipped = false;
+  if (priorStatus !== "cancelled") {
+    const claim = await db
+      .prepare(
+        "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('pending', 'confirmed')"
+      )
+      .bind(bookingId, shopId)
+      .run();
+    if ((claim.meta?.changes ?? 0) !== 1) {
+      return c.json({ success: false, error: "Booking was modified by another request" }, 409);
+    }
+    flipped = true;
+  } else if (!refundExplicit || !(chargedDeposit || holdDeposit)) {
+    const reason = alreadyRefunded ? "Deposit already refunded" : "Booking is already cancelled";
+    return c.json({ success: false, error: reason }, 400);
+  }
+  // On a refund failure the correct open status is 'confirmed': a captured
+  // deposit means the settle webhook ran, even if the pre-claim read caught
+  // the booking mid-flip as 'pending'.
+  const revertClaim = () =>
+    flipped
+      ? db
+          .prepare(
+            "UPDATE bookings SET status = 'confirmed' WHERE id = ? AND shop_id = ? AND status = 'cancelled'"
+          )
+          .bind(bookingId, shopId)
+          .run()
+      : Promise.resolve(null);
+
+  let depositAction: "refunded" | "kept" | "hold_voided" | "none" = "none";
+  let refundPence = 0;
+
+  if (chargedDeposit && refundDeposit) {
+    // Atomic deposit claim BEFORE Stripe: zeroing deposit_amount_pence (a)
+    // serializes concurrent refund attempts (the loser sees changes 0 and
+    // never reaches Stripe), and (b) kills the checkout deposit-credit
+    // first, so even a refund-succeeded-but-recording-failed crash can never
+    // credit money the customer got back — the failure direction is always
+    // "shop must settle manually", never "customer paid twice is credited".
+    const nowIso = new Date().toISOString();
+    const depClaim = await db
+      .prepare(
+        `UPDATE bw_booking_state SET deposit_amount_pence = 0, deposit_application_fee_pence = 0,
+           updated_at = ? WHERE booking_id = ? AND shop_id = ? AND deposit_amount_pence > 0`
+      )
+      .bind(nowIso, bookingId, shopId)
+      .run();
+    if ((depClaim.meta?.changes ?? 0) === 1) {
+      let refundId = "";
+      try {
+        const refund = await createRefund({
+          secret: c.env.STRIPE_SECRET_KEY,
+          paymentIntentId: piId!,
+          amountPence: depositPence,
+          metadata: { shopId, bookingId, type: "deposit_refund" },
+          idempotencyKey: `deposit-refund:${bookingId}`,
+        });
+        refundId = refund.id;
+      } catch (err) {
+        reportError("booking.deposit_cancel_refund", err, { shopId, bookingId });
+        // Restore the claimed deposit and the open status; the deterministic
+        // Idempotency-Key makes a retry safe even if Stripe actually
+        // committed the refund before the failure.
+        await db
+          .prepare(
+            `UPDATE bw_booking_state SET deposit_amount_pence = ?, deposit_application_fee_pence = ?,
+               updated_at = ? WHERE booking_id = ? AND shop_id = ? AND deposit_amount_pence = 0`
+          )
+          .bind(depositPence, depositFeePence, nowIso, bookingId, shopId)
+          .run();
+        await revertClaim();
+        return c.json(
+          { success: false, error: "Deposit refund failed. The booking was not cancelled. Try again." },
+          502
+        );
+      }
+      // Record the refund. The tx carries the REFUND id — charge.refunded
+      // flips the original deposit tx (keyed by PI id) and completes this
+      // one; if that webhook already landed, insert as completed directly.
+      const depNow = await db
+        .prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit' LIMIT 1")
+        .bind(bookingId)
+        .first<{ status: string }>();
+      await db
+        .prepare(
+          `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
+           VALUES (?, ?, ?, 'refund', ?, ?, ?)`
+        )
+        .bind(
+          crypto.randomUUID(),
+          bookingId,
+          shopId,
+          depositPence,
+          depNow?.status === "refunded" ? "completed" : "pending",
+          refundId
+        )
+        .run();
+      depositAction = "refunded";
+      refundPence = depositPence;
+    }
+    // depClaim changes 0: a concurrent refund won the claim — the booking
+    // stays cancelled and the deposit is already being handled; report none.
+  } else if (chargedDeposit && !refundDeposit) {
+    depositAction = "kept";
+  } else if (holdDeposit) {
+    // A hold can only be voided; refundDeposit is meaningless here. Non-fatal
+    // on Stripe error — the uncaptured hold auto-expires in ~7 days.
+    try {
+      await cancelPaymentIntent(c.env.STRIPE_SECRET_KEY, piId!, `cancel:${piId}`);
+    } catch (err) {
+      reportError("booking.deposit_cancel_void", err, { shopId, bookingId, piId });
+    }
+    await db
+      .prepare(
+        "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
+      )
+      .bind(bookingId)
+      .run();
+    depositAction = "hold_voided";
+  }
+
+  return c.json({
+    success: true,
+    data: {
+      status: "cancelled",
+      flipped,
+      deposit_action: depositAction,
+      refund_pence: refundPence,
+    },
   });
 });
 

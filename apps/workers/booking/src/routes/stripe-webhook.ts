@@ -477,8 +477,37 @@ r.post("/stripe", async (c) => {
 
         // Booking-only money (deposits/balances without a sale): legacy path.
         const marked = await markTransactionsByStripeId(db, piId, "refunded");
-        if (marked.bookingId)
-          await setLedgerStatus(db, marked.bookingId, null, "refunded");
+        if (marked.bookingId) {
+          // Never poison a real sale's commission record: if the booking has
+          // since been resurrected and checked out, its ledger row belongs to
+          // that sale, not to this deposit refund.
+          const hasSale = await db
+            .prepare("SELECT id FROM sales WHERE booking_id = ? LIMIT 1")
+            .bind(marked.bookingId)
+            .first<{ id: string }>();
+          if (!hasSale) {
+            await setLedgerStatus(db, marked.bookingId, null, "refunded");
+          }
+          // Kill the checkout deposit-credit even when the refund happened
+          // out-of-band (Stripe dashboard) or the cancel endpoint crashed
+          // before recording — the webhook is the durable reconciler.
+          await db
+            .prepare(
+              `UPDATE bw_booking_state SET deposit_amount_pence = 0, deposit_application_fee_pence = 0,
+                 updated_at = ? WHERE booking_id = ?`
+            )
+            .bind(new Date().toISOString(), marked.bookingId)
+            .run();
+          // Complete the refund tx the deposit-cancel endpoint inserted (it
+          // carries the refund id, not the PI id, so the mark above cannot
+          // touch it) — mirrors the sale-refund completion above.
+          await db
+            .prepare(
+              "UPDATE bw_transactions SET status = 'completed' WHERE booking_id = ? AND type = 'refund' AND status = 'pending'"
+            )
+            .bind(marked.bookingId)
+            .run();
+        }
         break;
       }
 
