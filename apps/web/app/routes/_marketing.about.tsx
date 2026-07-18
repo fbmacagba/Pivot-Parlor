@@ -88,7 +88,7 @@ export default function About() {
             {[
               { title: "£100 one-time setup", desc: "No monthly fees. Just 10% commission on completed bookings." },
               { title: "AI-branded pages", desc: "Your shop gets a unique identity, not a template." },
-              { title: "Built on Cloudflare", desc: "99.99% uptime, global edge network." },
+              { title: "Built on Cloudflare", desc: "Served from a global edge network for speed and reliability." },
               { title: "GDPR compliant", desc: "Your customer data is isolated and protected." },
             ].map(({ title, desc }) => (
               <div key={title} className="rounded-xl border border-white/10 bg-dark p-5">

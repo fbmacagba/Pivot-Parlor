@@ -38,8 +38,8 @@ export default function Pricing() {
               "Waitlist management",
               "Automated reminders",
               "Commission dashboard",
-              "Customer management",
-              "99.99% uptime SLA",
+              "Walk-in queue",
+              "Point of sale & inventory",
             ].map((feat) => (
               <div key={feat} className="flex items-center gap-2 text-sm text-white/70">
                 <Check className="h-4 w-4 text-gold shrink-0" />
@@ -60,8 +60,10 @@ export default function Pricing() {
           <h3 className="font-heading text-lg font-semibold text-white mb-3">How commission works</h3>
           <p className="text-sm text-white/60 leading-relaxed">
             When a customer completes a booking through your Pivot Parlor page, we take 10% of the
-            booking value as our commission. No-shows and cancellations are not charged. You see
-            a full breakdown of all transactions in your dashboard in real time.
+            booking value as our commission. We only earn when you do: cancellations with a
+            refunded deposit are never charged, and if you keep a deposit for a no-show or late
+            cancellation, the same 10% applies only to the amount you keep. You see a full
+            breakdown of transactions in your dashboard.
           </p>
         </div>
       </div>

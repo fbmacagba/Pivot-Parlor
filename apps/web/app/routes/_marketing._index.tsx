@@ -106,7 +106,7 @@ export default function Homepage() {
                 {
                   icon: Zap,
                   title: "Reminders",
-                  desc: "Email and SMS nudges to cut no-shows.",
+                  desc: "Automatic email reminders to cut no-shows.",
                 },
               ].map(({ icon: Icon, title, desc }) => (
                 <div key={title} className="flex gap-4">
@@ -142,7 +142,7 @@ export default function Homepage() {
               {
                 step: "01",
                 title: "Developer onboards your shop",
-                desc: "We handle setup: tech, domain, and configuration, so you do not have to.",
+                desc: "We handle the technical setup: your site and booking system, so you do not have to.",
               },
               {
                 step: "02",
