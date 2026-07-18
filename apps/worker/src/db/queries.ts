@@ -1195,6 +1195,21 @@ export function updateBookingStatus(
     .run();
 }
 
+/**
+ * Cancel a booking only if it is still open (pending/confirmed). The caller
+ * checks meta.changes: 1 means this request performed the open → cancelled
+ * transition (a slot really freed, exactly once even under concurrent
+ * duplicate cancels), 0 means the booking was already closed.
+ */
+export function cancelBookingIfOpen(db: D1Database, id: string) {
+  return db
+    .prepare(
+      "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')",
+    )
+    .bind(id)
+    .run();
+}
+
 export function markReminderSent(db: D1Database, id: string) {
   return db
     .prepare("UPDATE bookings SET reminder_sent = 1 WHERE id = ?")
@@ -1251,6 +1266,61 @@ export function createWaitlistEntry(
       entry.preferred_date ?? null,
     )
     .run();
+}
+
+export function getWaitlistEntryById(db: D1Database, id: string) {
+  return db
+    .prepare(
+      `SELECT w.*, sv.name AS service_name
+       FROM waitlist w
+       LEFT JOIN services sv ON sv.id = w.service_id
+       WHERE w.id = ? LIMIT 1`,
+    )
+    .bind(id)
+    .first<DBWaitlist & { service_name: string | null }>();
+}
+
+/** Atomically claim a waiting entry for notification (caller checks meta.changes). */
+export function claimWaitlistNotification(db: D1Database, id: string) {
+  return db
+    .prepare("UPDATE waitlist SET status = 'notified' WHERE id = ? AND status = 'waiting'")
+    .bind(id)
+    .run();
+}
+
+/** Roll a claimed entry back to waiting when the notification email fails. */
+export function revertWaitlistNotification(db: D1Database, id: string) {
+  return db
+    .prepare("UPDATE waitlist SET status = 'waiting' WHERE id = ? AND status = 'notified'")
+    .bind(id)
+    .run();
+}
+
+/**
+ * Waiting entries that match a freed slot: NULL preferred_date/staff_id are
+ * wildcards. Oldest first so the queue is fair; caller caps the batch.
+ */
+export async function getWaitingEntriesForOpenedSlot(
+  db: D1Database,
+  shopId: string,
+  bookingDate: string,
+  staffId: string,
+  limit: number,
+) {
+  const { results } = await db
+    .prepare(
+      `SELECT w.*, sv.name AS service_name
+       FROM waitlist w
+       LEFT JOIN services sv ON sv.id = w.service_id
+       WHERE w.shop_id = ? AND w.status = 'waiting'
+         AND (w.preferred_date IS NULL OR w.preferred_date = ?)
+         AND (w.staff_id IS NULL OR w.staff_id = ?)
+       ORDER BY w.created_at
+       LIMIT ?`,
+    )
+    .bind(shopId, bookingDate, staffId, limit)
+    .all<DBWaitlist & { service_name: string | null }>();
+  return results;
 }
 
 // ─── Revenue helpers ──────────────────────────────────────────────────────────

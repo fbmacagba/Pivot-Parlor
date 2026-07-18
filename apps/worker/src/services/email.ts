@@ -247,3 +247,70 @@ export async function sendReviewRequest(
     reviewRequestHtml(data),
   );
 }
+
+// ─── Waitlist slot-opened ─────────────────────────────────────────────────────
+
+export interface WaitlistSlotOpenData {
+  customer_name: string;
+  customer_email: string;
+  shop_name: string;
+  shop_slug: string;
+  service_name?: string | null;
+  preferred_date?: string | null;
+}
+
+/**
+ * The waitlist signup is public, so customer_name (and via services,
+ * service_name) is attacker-writable: without escaping, a signup could put
+ * arbitrary HTML into a DKIM-signed platform email sent to an address the
+ * attacker chose. Escape every interpolated value.
+ */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function waitlistSlotOpenHtml(d: WaitlistSlotOpenData): string {
+  const customerName = escapeHtml(d.customer_name);
+  const shopName = escapeHtml(d.shop_name);
+  const bookUrl = `https://pivotparlor.com/${encodeURIComponent(d.shop_slug)}/book`;
+  const what = d.service_name
+    ? `a slot for <strong style="color:#ffffff;">${escapeHtml(d.service_name)}</strong>`
+    : "a slot";
+  const when = d.preferred_date
+    ? ` on <strong style="color:#ffffff;">${escapeHtml(formatEmailDate(d.preferred_date))}</strong>`
+    : "";
+  return emailBaseLayout(
+    emailHeader(
+      "🎉 A slot just opened",
+      `Hi ${customerName}, good news from ${shopName}.`,
+    ) +
+      emailBodySection(
+        `<p style="font-size:14px;line-height:1.6;color:#b3bac4;margin:0 0 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+        You asked us to let you know when ${what}${when} became available at
+        <strong style="color:#ffffff;">${shopName}</strong>. One just did.
+      </p>` +
+          emailButton(bookUrl, "Book now →") +
+          emailNote(
+            "Slots are first come, first served, so book soon. If you have already booked, you can ignore this email.",
+          ),
+      ),
+    shopName,
+  );
+}
+
+export async function sendWaitlistSlotOpen(
+  apiKey: string,
+  data: WaitlistSlotOpenData,
+): Promise<void> {
+  await sendEmail(
+    apiKey,
+    data.customer_email,
+    `A slot just opened at ${data.shop_name}`,
+    waitlistSlotOpenHtml(data),
+  );
+}

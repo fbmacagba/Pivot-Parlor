@@ -10,9 +10,12 @@ import {
   getBookingsByShop,
   getPlatformRevenueByMonth,
   getRevenueByShop,
+  getShopById,
   getStaffByShop,
   getWaitlistByShop,
 } from "../db/queries.js";
+import { notifyWaitlistForOpenedSlot } from "../services/waitlist-notify.js";
+import { reportError } from "../services/report-error.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /api/dev  — Developer-only platform stats
@@ -786,6 +789,22 @@ meRouter.post("/bookings/:bookingId/cancel", async (c) => {
       },
       409
     );
+  }
+
+  // The freed slot may match waiting waitlist entries. Non-fatal: the
+  // cancellation stands even if the notification emails fail.
+  if (c.env.RESEND_API_KEY) {
+    try {
+      const shop = await getShopById(c.env.DB, booking.shop_id);
+      if (shop) {
+        await notifyWaitlistForOpenedSlot(c.env.DB, c.env.RESEND_API_KEY, shop, {
+          bookingDate: booking.booking_date,
+          staffId: booking.staff_id,
+        });
+      }
+    } catch (err) {
+      reportError("me.cancel_waitlist_notify", err, { bookingId });
+    }
   }
 
   return c.json({ success: true });
