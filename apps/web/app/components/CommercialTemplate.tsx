@@ -16,6 +16,8 @@ import { FinalCtaSection } from "~/components/site/sections/FinalCtaSection";
 import { TrustSection } from "~/components/site/sections/TrustSection";
 import { TrustChipsSection } from "~/components/site/sections/TrustChipsSection";
 import { ServicesSection } from "~/components/site/sections/ServicesSection";
+import { ServicesRowsSection } from "~/components/site/sections/ServicesRowsSection";
+import { ServicesShowcaseSection } from "~/components/site/sections/ServicesShowcaseSection";
 import { AboutSection } from "~/components/site/sections/AboutSection";
 import { TeamSection } from "~/components/site/sections/TeamSection";
 import { TeamStripSection } from "~/components/site/sections/TeamStripSection";
@@ -219,7 +221,13 @@ export default function CommercialTemplate({
       case "trust":
         return variant === "chips" ? <TrustChipsSection ctx={ctx} density={plan.density} /> : <TrustSection ctx={ctx} />;
       case "services":
-        return <ServicesSection ctx={ctx} cols={3} glow={plan.glow} />;
+        return variant === "rows" ? (
+          <ServicesRowsSection ctx={ctx} density={plan.density} glow={plan.glow} />
+        ) : variant === "showcase" ? (
+          <ServicesShowcaseSection ctx={ctx} density={plan.density} glow={plan.glow} />
+        ) : (
+          <ServicesSection ctx={ctx} cols={3} glow={plan.glow} />
+        );
       case "about":
         return <AboutSection ctx={ctx} pillarStyle="icons" />;
       case "team":
