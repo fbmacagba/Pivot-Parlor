@@ -9,6 +9,7 @@ import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { Badge } from "~/components/ui/Badge";
 import { COLOR_PALETTES } from "~/lib/color-palettes";
+import { ModelPicker } from "~/components/dev-shops/ModelPicker";
 import type { AIModel, BrandConfig } from "@repo/types";
 
 interface Shop {
@@ -41,7 +42,8 @@ export default function DevAIDeploy() {
   const { shops, models, apiUrl } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
 
-  const recommendedId = models.find((m) => m.recommended)?.id ?? models[0]?.id ?? "";
+  const textModels = models.filter((m) => m.kind === "text");
+  const recommendedId = textModels.find((m) => m.recommended)?.id ?? textModels[0]?.id ?? "";
 
   const [shopId, setShopId] = useState(params.get("shopId") ?? "");
   const [modelChoice, setModelChoice] = useState("");
@@ -98,14 +100,6 @@ export default function DevAIDeploy() {
       throw new Error(err?.trim() || `Request failed (HTTP ${res.status})`);
     }
     return data;
-  }
-
-  function modelOptionLabel(m: AIModel): string {
-    const price = `$${m.costPer1MInput}/M in · $${m.costPer1MOutput}/M out`;
-    const flags = [m.recommended ? "★ recommended" : "", m.supportsEffort ? "effort" : ""]
-      .filter(Boolean)
-      .join(", ");
-    return `${m.providerLabel} | ${m.name} — ${price}${flags ? ` (${flags})` : ""}`;
   }
 
   function paletteBody(): Record<string, string> {
@@ -213,54 +207,23 @@ export default function DevAIDeploy() {
 
           {/* Model selector — top 10 providers via OpenRouter, live pricing */}
           <div>
-            <label className="block text-sm font-medium text-white/80 mb-1.5">
-              LLM Model <span className="text-white/60">(top 10 providers via OpenRouter)</span>
-            </label>
-            <select
+            <ModelPicker
+              label="Theme"
+              models={textModels}
               value={modelId}
-              onChange={(e) => {
-                setModelChoice(e.target.value);
+              onChange={(id) => {
+                setModelChoice(id);
                 setEffort("");
               }}
-              className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-            >
-              {models.map((m) => (
-                <option key={m.id} value={m.id} className="bg-dark">
-                  {modelOptionLabel(m)}
-                </option>
-              ))}
-            </select>
-            {selectedModel && (
-              <p className="mt-1.5 text-xs text-white/50">{selectedModel.description}</p>
-            )}
+              effort={effort}
+              onEffortChange={setEffort}
+            />
             <p className="mt-1 text-xs text-white/50">
               {models.some((m) => m.livePricing)
                 ? "Live pricing from the OpenRouter catalogue (refreshed hourly)."
                 : "OpenRouter catalogue unreachable — showing last-known pricing."}
             </p>
           </div>
-
-          {/* Reasoning effort — only for models that support it */}
-          {effortAvailable && (
-            <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">
-                Reasoning effort
-              </label>
-              <select
-                value={effort}
-                onChange={(e) => setEffort(e.target.value)}
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-              >
-                <option value="" className="bg-dark">Default (model decides)</option>
-                <option value="low" className="bg-dark">Low — fastest, cheapest</option>
-                <option value="medium" className="bg-dark">Medium — balanced</option>
-                <option value="high" className="bg-dark">High — deepest thinking, most tokens</option>
-              </select>
-              <p className="mt-1 text-xs text-white/50">
-                Higher effort spends more output tokens on reasoning before writing.
-              </p>
-            </div>
-          )}
 
           {/* Colour palette — Let AI choose (default) or lock a curated pair */}
           <div>
@@ -336,17 +299,12 @@ export default function DevAIDeploy() {
 
           {compareMode && (
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">Model B</label>
-              <select
+              <ModelPicker
+                label="Model B"
+                models={textModels}
                 value={modelBId}
-                onChange={(e) => setModelBId(e.target.value)}
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-              >
-                <option value="" className="bg-dark">Select model B…</option>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id} className="bg-dark">{modelOptionLabel(m)}</option>
-                ))}
-              </select>
+                onChange={setModelBId}
+              />
               <Button onClick={handleCompare} disabled={loading || !shopId || !modelBId} className="mt-2 w-full">
                 {loading && compareMode ? "Comparing…" : "Compare models"}
               </Button>
