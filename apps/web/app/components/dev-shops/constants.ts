@@ -1,65 +1,31 @@
 // Constants for the developer "Shops" dashboard (dev.shops route).
 // Extracted from dev.shops.tsx (T7.7) — no behavior change.
+import {
+  catalogModels,
+  DEFAULT_TEXT_MODEL_ID,
+  DEFAULT_IMAGE_MODEL_ID,
+  type ModelKind,
+} from "@repo/utils";
 import type { Shop } from "./types";
+import type { PickerModel } from "./modelPicker.helpers";
 
-export const DEFAULT_TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
-export const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+export const DEFAULT_TEXT_MODEL = DEFAULT_TEXT_MODEL_ID;
+export const DEFAULT_IMAGE_MODEL = DEFAULT_IMAGE_MODEL_ID;
 
-/** Top-10 OpenRouter providers, one flagship each. Pricing snapshot 2026-07-10;
- *  the live-priced list is served by /api/ai/models (AI Deploy page). Keep this
- *  in sync with CURATED_MODELS in apps/worker/src/services/model-registry.ts. */
-export const TEXT_MODEL_OPTIONS: { value: string; label: string; supportsEffort?: boolean }[] = [
-  {
-    value: "google/gemini-3.1-flash-lite-preview",
-    label: "Google | Gemini 3.1 Flash Lite — $0.25/1M in · $1.50/1M out (default)",
-    supportsEffort: true,
-  },
-  {
-    value: "anthropic/claude-sonnet-5",
-    label: "Anthropic | Claude Sonnet 5 — $2.00/1M in · $10.00/1M out ★",
-    supportsEffort: true,
-  },
-  {
-    value: "openai/gpt-5.6-terra",
-    label: "OpenAI | GPT-5.6 Terra — $2.50/1M in · $15.00/1M out",
-    supportsEffort: true,
-  },
-  {
-    value: "x-ai/grok-4.5",
-    label: "xAI | Grok 4.5 — $2.00/1M in · $6.00/1M out",
-    supportsEffort: true,
-  },
-  {
-    value: "deepseek/deepseek-v4-pro",
-    label: "DeepSeek | DeepSeek V4 Pro — $0.44/1M in · $0.87/1M out",
-    supportsEffort: true,
-  },
-  {
-    value: "meta-llama/llama-4-maverick",
-    label: "Meta | Llama 4 Maverick — $0.15/1M in · $0.60/1M out",
-    supportsEffort: false,
-  },
-  {
-    value: "mistralai/mistral-medium-3-5",
-    label: "Mistral | Mistral Medium 3.5 — $1.50/1M in · $7.50/1M out",
-    supportsEffort: true,
-  },
-  {
-    value: "qwen/qwen3.7-max",
-    label: "Qwen | Qwen 3.7 Max — $1.25/1M in · $3.75/1M out",
-    supportsEffort: true,
-  },
-  {
-    value: "moonshotai/kimi-k2.6",
-    label: "Moonshot | Kimi K2.6 — $0.66/1M in · $3.41/1M out",
-    supportsEffort: true,
-  },
-  {
-    value: "z-ai/glm-5.2",
-    label: "Z.AI | GLM 5.2 — $0.42/1M in · $1.32/1M out",
-    supportsEffort: true,
-  },
-];
+/** Catalog entries with snapshot pricing, for pickers without a live-priced loader. */
+export function staticPickerModels(kind: ModelKind): PickerModel[] {
+  return catalogModels(kind).map((m) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+    providerLabel: m.providerLabel,
+    costPer1MInput: m.fallbackInput,
+    costPer1MOutput: m.fallbackOutput,
+    supportsEffort: m.supportsEffort,
+    recommended: m.recommended,
+    livePricing: false,
+  }));
+}
 
 /** Reasoning-effort choices for models that support the OpenRouter reasoning param. */
 export const EFFORT_OPTIONS: { value: string; label: string }[] = [
@@ -67,25 +33,6 @@ export const EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: "low", label: "Low — fastest, cheapest" },
   { value: "medium", label: "Medium — balanced" },
   { value: "high", label: "High — deepest thinking, most tokens" },
-];
-
-export const IMAGE_MODEL_OPTIONS: { value: string; label: string }[] = [
-  {
-    value: "google/gemini-3.1-flash-image-preview",
-    label: "Gemini 3.1 Flash Image (Nano Banana 2) — $0.50/1M in · $3.00/1M out (default)",
-  },
-  {
-    value: "google/gemini-2.5-flash-preview:thinking",
-    label: "Gemini 2.5 Flash Image (Nano Banana) — $0.50/1M in · $3.00/1M out",
-  },
-  {
-    value: "black-forest-labs/flux-1.1-pro",
-    label: "FLUX 1.1 Pro — ~$0.04/image",
-  },
-  {
-    value: "black-forest-labs/flux-schnell",
-    label: "FLUX Schnell — FREE",
-  },
 ];
 
 export const REGEN_STEP_LABELS = [
