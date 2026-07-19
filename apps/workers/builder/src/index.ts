@@ -75,6 +75,8 @@ interface GenResearchKvPayload {
   /** Owner-chosen palette override (6-digit hex pair) — persisted to the winning owner_color_* slot. */
   owner_color_primary?: string;
   owner_color_accent?: string;
+  /** Design Director (v3) composition spec — opaque JSON, persisted as-is. Absent on legacy (v2) payloads. */
+  design_spec?: unknown;
 }
 
 /** Sanitized design-intent column values extracted from the research spec. */
@@ -349,6 +351,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   let ownerColorPrimary: string | null = null;
   let ownerColorAccent: string | null = null;
   let intent = designIntentFrom(undefined);
+  let rawDesignSpec: unknown;
   if (researchRaw) {
     try {
       const r = JSON.parse(researchRaw) as GenResearchKvPayload;
@@ -358,10 +361,17 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         ownerColorAccent = r.owner_color_accent!;
       }
       intent = designIntentFrom(r.spec);
+      rawDesignSpec = r.design_spec;
     } catch {
       /* keep default */
     }
   }
+
+  // Design Director (v3): present on payloads from the new research worker;
+  // absent -> legacy v2 write so mid-deploy jobs stay consistent.
+  const design_spec_json =
+    rawDesignSpec && typeof rawDesignSpec === "object" ? JSON.stringify(rawDesignSpec) : null;
+  const design_version = design_spec_json ? 3 : 2;
 
   const now = new Date().toISOString();
   const services_json = servicesForJson(text.services);
@@ -387,7 +397,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       trust_signals_json = ?, usps_json = ?, layout_mood = ?, brand_voice = ?,
       hero_cta = ?, about_title = ?, palette_json = ?,
       heading_weight = ?, heading_style = ?,
-      design_version = 2,
+      design_spec = ?, design_version = ?,
       status = 'active', generated_at = ?
     WHERE shop_id = ?`
   )
@@ -414,6 +424,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       intent.palette_json,
       intent.heading_weight,
       intent.heading_style,
+      design_spec_json,
+      design_version,
       now,
       shopId
     )
@@ -429,8 +441,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         hero_image_url, logo_url, catalog_images_json, generated_at, status,
         seo_title, seo_description,
         trust_signals_json, usps_json, layout_mood, brand_voice,
-        hero_cta, about_title, palette_json, heading_weight, heading_style, design_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 2)`
+        hero_cta, about_title, palette_json, heading_weight, heading_style,
+        design_spec, design_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         siteId,
@@ -458,7 +471,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         intent.about_title,
         intent.palette_json,
         intent.heading_weight,
-        intent.heading_style
+        intent.heading_style,
+        design_spec_json,
+        design_version
       )
       .run();
     console.log(`[${jobId}] [pivot-parlor-assembler] INSERT shop_sites id=${siteId} shopId=${shopId}`);
