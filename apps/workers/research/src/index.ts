@@ -2,6 +2,14 @@
  * pivot-parlor-research — Consumes site-research-queue: OpenRouter spec → D1 + KV → site-images-queue + site-text-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
+import {
+  seedComposeDesignSpec,
+  normalizeDesignSpec,
+  parseComposer,
+  TEMPLATE_HERO_CONSTRAINTS,
+  type DesignSpec,
+  type ComposerId,
+} from "./design-spec";
 
 export interface Env {
   DB: D1Database;
@@ -34,6 +42,8 @@ export interface ResearchQueueMessage {
   color_accent?: string;
   /** Owner-chosen template (WS-6) — pins layout_mood. Absent = model's choice. */
   template?: string;
+  /** Design Director (v3) composer selection — "seed" skips the AI design_spec prompt. */
+  composer?: ComposerId;
 }
 
 export interface ResearchSpec {
@@ -74,6 +84,10 @@ export interface ResearchSpec {
     cookie_policy: string;
   };
   social_stubs: Record<string, string>;
+  /** Design Director (v3) — not validated by validateResearchSpec; a bad
+   *  design_spec must never fail the whole research spec (normalizeDesignSpec
+   *  repairs it field by field against the seed fallback). */
+  design_spec?: unknown;
 }
 
 /** Stored at gen:{jobId}:research (TTL 1h) for images + text workers. */
@@ -93,6 +107,7 @@ export interface GenResearchKvPayload {
   /** Owner-chosen palette override forwarded to the text worker (6-digit hex pair). */
   owner_color_primary?: string;
   owner_color_accent?: string;
+  design_spec: DesignSpec;
 }
 
 const KV_TTL_SEC = 3600;
@@ -202,9 +217,24 @@ function buildUserPrompt(msg: ResearchQueueMessage): string {
   const servicesText = msg.services.map((s) => `${s.name} (£${s.price_gbp}, ${s.duration_min} min)`).join("; ");
   const style = msg.styleNotes?.trim() || "not provided";
   const pinnedMood = layoutMoodForTemplate(msg.template);
+  const heroConstraint = pinnedMood
+    ? TEMPLATE_HERO_CONSTRAINTS[msg.template!.trim().toLowerCase()]
+    : undefined;
   const moodLine = pinnedMood
-    ? `The owner has explicitly chosen the "${msg.template}" template: layout_mood MUST be "${pinnedMood}", and the palette, typography and imagery must express that mood.\n`
+    ? `The owner has explicitly chosen the "${msg.template}" template: layout_mood MUST be "${pinnedMood}", and the palette, typography and imagery must express that mood. The design_spec hero.variant must be one of: ${heroConstraint!.join(", ")}.\n`
     : "";
+  const designSpecBlock =
+    msg.composer !== "seed"
+      ? `,
+  "design_spec": {
+    "hero": { "variant": "full-bleed"|"split"|"editorial"|"minimal" (choose the treatment that best expresses this shop's character and the layout_mood), "motion": "parallax"|"fade"|"none" },
+    "sections": [ ordered array covering EXACTLY these seven keys once each: trust, services, about, team, how, reviews, location. Each entry is {"key": string, "variant": string, "include": boolean}. Allowed variants: trust: icons|chips; services: grid|rows|showcase; about: standard|split-image|story; team: cards|strip; how: grid|row; reviews: cards|marquee|spotlight; location: standard|map-first. services and location must have include true. Order and exclusions should serve this shop's story. ],
+    "motion": { "intensity": "calm"|"lively"|"off", "reveal": "fade-up"|"scale"|"slide" },
+    "motif": "line"|"dot-grid"|"arc"|"none" (decorative accent motif),
+    "signature": "gallery"|"marquee-reviews"|"spotlight"|null (at most one showpiece section),
+    "density": "airy"|"compact"
+  }`
+      : "";
   return `Shop name: ${msg.shopName}
 Shop type: ${msg.shopType}
 Style notes from owner: ${style}
@@ -257,7 +287,7 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
     "youtube_url": "",
     "whatsapp_url": "",
     "linkedin_url": ""
-  }
+  }${designSpecBlock}
 }
 
 You MUST include exactly ${msg.services.length} strings in image_prompts.catalog (same order as services listed above).`;
@@ -441,6 +471,9 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
   const op = typeof o.color_primary === "string" && HEX6.test(o.color_primary.trim()) ? o.color_primary.trim() : undefined;
   const oa = typeof o.color_accent === "string" && HEX6.test(o.color_accent.trim()) ? o.color_accent.trim() : undefined;
   const hasColorOverride = Boolean(op && oa);
+  const composer: ComposerId = parseComposer(o.composer) ?? "ai";
+  const template =
+    typeof o.template === "string" && o.template.trim() ? o.template.trim() : undefined;
   return {
     jobId: o.jobId,
     shopId: o.shopId,
@@ -455,6 +488,8 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     image_model,
     skip_images,
     ...(hasColorOverride ? { color_primary: op, color_accent: oa } : {}),
+    composer,
+    ...(template ? { template } : {}),
   };
 }
 
@@ -573,8 +608,26 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     spec.typography.body_font = coerceCuratedFont(spec.typography.body_font, "body", "");
     const fullJson = JSON.stringify(spec);
 
+    // Design Director (v3): seed spec is both the deterministic composer and
+    // the fallback for invalid AI output. Per-field repair keeps generation
+    // unfailable on a bad design_spec.
+    const seedSpec = seedComposeDesignSpec(shopId, { template: input.template });
+    let designSpec: DesignSpec;
+    if (input.composer === "seed") {
+      designSpec = seedSpec;
+    } else {
+      const normalized = normalizeDesignSpec(spec.design_spec, seedSpec);
+      designSpec = normalized.spec;
+      if (normalized.fellBack.length > 0) {
+        console.warn(
+          `[${jobId}] [pivot-parlor-research] design_spec fields fell back to seed: ${normalized.fellBack.join(", ")}`
+        );
+      }
+    }
+
     const payload: GenResearchKvPayload = {
       spec,
+      design_spec: designSpec,
       services: input.services.map((s) => ({
         name: s.name,
         price_gbp: s.price_gbp,
