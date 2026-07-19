@@ -74,7 +74,7 @@ export function ModelPicker({
           {providerModels.map((m) => (
             <option key={m.id} value={m.id} className="bg-dark">
               {m.name}
-              {m.recommended ? " ★" : ""} — {modelPriceLabel(m)}
+              {m.recommended ? " ★" : ""} · {modelPriceLabel(m)}
             </option>
           ))}
         </select>
