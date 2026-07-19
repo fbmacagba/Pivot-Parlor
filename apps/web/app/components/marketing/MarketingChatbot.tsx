@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "@remix-run/react";
 import { X, Send, ThumbsUp, Smile, Scissors, ChevronDown } from "lucide-react";
+import { useModalA11y } from "~/lib/useModalA11y";
 
 type Message = {
   role: "user" | "assistant";
@@ -53,6 +54,17 @@ export function MarketingChatbot() {
   const inputRef    = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
 
+  // Escape closes the panel and focus returns to the launcher. No Tab trap
+  // (non-modal panel) and no scroll lock here — the mobile-only lock below
+  // stays as-is. Focus-in lands on the header close button, NOT the input:
+  // focusing the input would defeat its readOnly no-keyboard-pop trick.
+  const dialogRef = useModalA11y<HTMLDivElement>({
+    active: open,
+    onClose: () => setOpen(false),
+    lockScroll: false,
+    trapTabs: false,
+  });
+
   useEffect(() => {
     const t = setTimeout(() => {
       if (!open) setShowTeaser(true);
@@ -73,8 +85,11 @@ export function MarketingChatbot() {
   useEffect(() => {
     if (!open) {
       setInputFocused(false);
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
+      // Dismiss the mobile keyboard if the chat input still holds focus.
+      // Only the input: useModalA11y has already restored focus to the
+      // launcher by now, and a blanket blur would undo that restore.
+      if (document.activeElement === inputRef.current) {
+        inputRef.current?.blur();
       }
     }
   }, [open]);
@@ -196,7 +211,7 @@ export function MarketingChatbot() {
 
       {/* ── Chat window ── */}
       {open && (
-        <div role="dialog" data-pip-chat="" aria-label="Chat with Pip, Pivot Parlor's AI assistant"
+        <div ref={dialogRef} role="dialog" data-pip-chat="" aria-label="Chat with Pip, Pivot Parlor's AI assistant"
           className="
             fixed z-50 flex flex-col overflow-hidden
             inset-0

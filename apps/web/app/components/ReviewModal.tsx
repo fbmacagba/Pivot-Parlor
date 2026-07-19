@@ -5,6 +5,8 @@ import { useModalA11y } from "~/lib/useModalA11y";
 interface ReviewModalProps {
   shopId: string;
   shopName: string;
+  /** Shop slug for the point-of-collection privacy link (shop = controller). */
+  shopSlug: string;
   bookingId: string | null;
   customerName?: string;
   onClose: () => void;
@@ -33,7 +35,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (n: number) 
   );
 }
 
-export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose }: ReviewModalProps) {
+export function ReviewModal({ shopId, shopName, shopSlug, bookingId, customerName, onClose }: ReviewModalProps) {
   const id = useId();
   const titleId = `${id}-title`;
   const nameId = `${id}-name`;
@@ -203,6 +205,19 @@ export function ReviewModal({ shopId, shopName, bookingId, customerName, onClose
             >
               {state === "submitting" ? "Submitting..." : "Submit review"}
             </button>
+
+            {/* Point-of-collection notice (LEG-3): reviews are public. */}
+            <p className="text-center text-xs text-white/60">
+              Your name, rating and review will be shown publicly on{" "}
+              {shopName}&apos;s page. See our{" "}
+              <a
+                href={`/${shopSlug}/privacy`}
+                className="underline hover:text-white/80"
+              >
+                Privacy Policy
+              </a>
+              .
+            </p>
           </div>
         )}
       </div>

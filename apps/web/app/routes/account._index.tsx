@@ -267,6 +267,15 @@ function ProfileCard({ me }: { me: Me }) {
               {saving ? "Saving…" : "Save"}
             </button>
           </div>
+          {/* Point-of-collection notice (LEG-3): platform account data. */}
+          <p className="text-xs text-white/60">
+            We use these details to run your account and manage your bookings.
+            See our{" "}
+            <Link to="/privacy" className="underline hover:text-white/80">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </div>
       ) : (
         <dl className="space-y-2 text-sm">

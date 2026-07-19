@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Shop-site cookie notice (PECR / UK GDPR).
 //
@@ -38,6 +38,7 @@ export function ShopSiteCookieConsent({
   onClose: () => void;
 }) {
   const [visible, setVisible] = useState(false);
+  const dismissRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (forceOpen) {
@@ -48,6 +49,23 @@ export function ShopSiteCookieConsent({
     if (alreadyAcknowledgedOnPlatform()) return;
     if (!alreadyAcknowledgedOnShop()) setVisible(true);
   }, [forceOpen]);
+
+  // When reopened from the footer link, move focus to the notice so keyboard
+  // and screen-reader users land on what just appeared; restore it on close.
+  // Guarded on `visible` so the button exists before we focus it.
+  useEffect(() => {
+    if (!forceOpen || !visible) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    dismissRef.current?.focus();
+    return () => {
+      if (previouslyFocused && previouslyFocused.isConnected) {
+        previouslyFocused.focus();
+      }
+    };
+  }, [forceOpen, visible]);
 
   const dismiss = useCallback(() => {
     try {
@@ -83,6 +101,7 @@ export function ShopSiteCookieConsent({
           </p>
         </div>
         <button
+          ref={dismissRef}
           type="button"
           className="min-h-12 min-w-[10rem] shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-black"
           onClick={dismiss}
