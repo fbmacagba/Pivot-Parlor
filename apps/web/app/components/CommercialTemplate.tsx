@@ -9,6 +9,9 @@ import { normalizeDesignSpec, seedComposeDesignSpec } from "@repo/utils";
 import { composeRenderPlan } from "~/components/site/composePlan";
 import type { RenderPlan } from "~/components/site/composePlan";
 import { HeroSection } from "~/components/site/sections/HeroSection";
+import { HeroSplitSection } from "~/components/site/sections/HeroSplitSection";
+import { HeroEditorialSection } from "~/components/site/sections/HeroEditorialSection";
+import { HeroMinimalSection } from "~/components/site/sections/HeroMinimalSection";
 import { FinalCtaSection } from "~/components/site/sections/FinalCtaSection";
 import { TrustSection } from "~/components/site/sections/TrustSection";
 import { ServicesSection } from "~/components/site/sections/ServicesSection";
@@ -227,6 +230,21 @@ export default function CommercialTemplate({
     }
   };
 
+  const v3Hero = (plan: RenderPlan): ReactNode => {
+    const motionClass = plan.hero.motion === "fade" ? "st-hero-fade" : "";
+    const parallax = plan.hero.motion === "parallax";
+    switch (plan.hero.variant) {
+      case "split":
+        return <HeroSplitSection ctx={ctx} density={plan.density} motif={plan.motif} motionClass={motionClass} parallax={parallax} />;
+      case "editorial":
+        return <HeroEditorialSection ctx={ctx} density={plan.density} motif={plan.motif} motionClass={motionClass} parallax={parallax} />;
+      case "minimal":
+        return <HeroMinimalSection ctx={ctx} density={plan.density} motif={plan.motif} motionClass={motionClass} />;
+      default:
+        return <HeroSection ctx={ctx} centered={plan.hero.centered} minH={plan.hero.minH} motionClass={motionClass} parallax={parallax} />;
+    }
+  };
+
   // A wrapped-but-empty reveal div would still animate; skip sections that
   // will render null (same conditions the components enforce internally).
   const sectionHasContent = (key: SectionKey): boolean =>
@@ -249,7 +267,7 @@ export default function CommercialTemplate({
           const style = plan.reveal?.style ?? "fade-up";
           const body = (
             <>
-              <HeroSection ctx={ctx} centered={plan.hero.centered} minH={plan.hero.minH} />
+              {v3Hero(plan)}
               {visible.map((p, i) => (
                 <Reveal key={p.key} enabled={enabled} style={style} index={i} lively={lively}>
                   {v3SectionNode(p.key, p.variant, plan)}

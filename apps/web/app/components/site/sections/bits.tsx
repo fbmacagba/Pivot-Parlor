@@ -1,3 +1,5 @@
+import type { Density, Motif } from "@repo/utils";
+
 type HoursRecord = Record<string, string | null | undefined>;
 
 export function parseHours(json?: string): HoursRecord | null {
@@ -70,5 +72,45 @@ export function HoursTable({ hoursJson }: { hoursJson?: string }) {
         })}
       </tbody>
     </table>
+  );
+}
+
+/** Vertical rhythm for NEW v3 variants only (existing sections keep their
+ *  hardcoded padding — parity). Callers add their own horizontal padding. */
+export function sectionPadY(density: Density): string {
+  return density === "compact" ? "py-12 md:py-16" : "py-16 md:py-24";
+}
+
+/** Decorative accent for new-variant heroes and signature sections only.
+ *  "line" renders in-flow (caller places it, usually with w-fit/mb-*);
+ *  "dot-grid" and "arc" are absolutely positioned via className. Always
+ *  aria-hidden, always token colours. */
+export function MotifDecor({ motif, className = "" }: { motif: Motif; className?: string }) {
+  if (motif === "none") return null;
+  if (motif === "line") {
+    return (
+      <span className={`pointer-events-none flex items-center gap-3 ${className}`} aria-hidden>
+        <span className="h-px w-16 bg-[color:var(--st-accent-40)]" />
+        <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--st-accent-40)]" />
+      </span>
+    );
+  }
+  if (motif === "dot-grid") {
+    return (
+      <span
+        className={`pointer-events-none absolute h-40 w-40 ${className}`}
+        style={{
+          backgroundImage: "radial-gradient(var(--st-accent-25) 1.5px, transparent 1.5px)",
+          backgroundSize: "14px 14px",
+        }}
+        aria-hidden
+      />
+    );
+  }
+  return (
+    <span
+      className={`pointer-events-none absolute h-72 w-72 rounded-full border border-[color:var(--st-accent-15)] ${className}`}
+      aria-hidden
+    />
   );
 }

@@ -1,23 +1,30 @@
 import { Link } from "@remix-run/react";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { StarRow } from "~/components/site/sections/bits";
+import { useParallax } from "~/components/site/motion/useParallax";
 
 export function HeroSection({
   ctx,
   centered,
   minH,
+  motionClass = "",
+  parallax = false,
 }: {
   ctx: SiteRenderContext;
   centered: boolean;
   minH: "screen" | "tall";
+  motionClass?: string;
+  parallax?: boolean;
 }) {
+  const imgRef = useParallax<HTMLImageElement>(parallax, 14, "scale(1.05)");
   const minHClass = minH === "tall" ? "min-h-[85vh]" : "min-h-screen";
   return (
-    <section className={`relative flex ${minHClass} flex-col overflow-hidden`}>
+    <section className={`relative flex ${minHClass} flex-col overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
       <div className="absolute inset-0 -z-0">
         {ctx.heroSrc ? (
           <>
             <img
+              ref={imgRef}
               src={ctx.heroSrc}
               alt={`${ctx.site.shop_name} hero photo`}
               className="absolute inset-0 h-full w-full scale-105 object-cover"
