@@ -71,6 +71,11 @@ export function ModelPicker({
           disabled={disabled}
           className={SELECT_CLASS}
         >
+          {!selected && (
+            <option value="" disabled className="bg-dark">
+              Select a model
+            </option>
+          )}
           {providerModels.map((m) => (
             <option key={m.id} value={m.id} className="bg-dark">
               {m.name}
