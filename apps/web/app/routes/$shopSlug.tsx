@@ -126,6 +126,9 @@ export interface ShopSiteData {
   /** Curated typography (WS-6 item 5). */
   heading_weight?: string | null;
   heading_style?: string | null;
+  /** Site Design v3 (Design Director) composition spec — see @repo/utils DesignSpec.
+   *  NULL for v1/v2 sites. */
+  design_spec?: unknown;
 }
 
 export async function loader({ params, context }: LoaderFunctionArgs) {
