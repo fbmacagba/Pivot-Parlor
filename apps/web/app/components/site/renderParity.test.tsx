@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { DesignSpec } from "@repo/utils";
+import type { SiteData } from "~/components/commercialSiteTypes";
 
 vi.mock("@remix-run/react", async () => {
   const React = await import("react");
@@ -24,7 +25,7 @@ vi.mock("~/components/CommercialShopChrome", async () => {
 
 import CommercialTemplate from "~/components/CommercialTemplate";
 
-const baseSite = {
+const baseSite: SiteData = {
   shop_id: "parity-shop-id",
   shop_name: "Parity Barbers",
   headline: "Sharp cuts",
@@ -52,20 +53,47 @@ const mirrorSpec: DesignSpec = {
 };
 
 describe("v3 composer parity", () => {
+  const services = [
+    { id: "s1", name: "Haircut", price_gbp: 25, duration_minutes: 30 },
+    { id: "s2", name: "Beard trim", price_gbp: 15, duration_minutes: 20 },
+  ];
+
   it("renders byte-identical HTML to the legacy path for a mirroring spec", () => {
-    const services = [
-      { id: "s1", name: "Haircut", price_gbp: 25, duration_minutes: 30 },
-      { id: "s2", name: "Beard trim", price_gbp: 15, duration_minutes: 20 },
-    ];
     const legacy = renderToStaticMarkup(
       <CommercialTemplate site={{ ...baseSite }} services={services} />,
     );
     const v3 = renderToStaticMarkup(
       <CommercialTemplate
-        site={{ ...baseSite, design_version: 3, design_spec: mirrorSpec } as never}
+        site={{ ...baseSite, design_version: 3, design_spec: mirrorSpec }}
         services={services}
       />,
     );
     expect(v3).toBe(legacy);
+  });
+
+  it("honours exclusion and reordering for a non-mirroring spec", () => {
+    const spec: DesignSpec = {
+      ...mirrorSpec,
+      sections: [
+        { key: "trust", variant: "icons", include: true },
+        { key: "services", variant: "grid", include: true },
+        { key: "reviews", variant: "cards", include: true },
+        { key: "about", variant: "standard", include: true },
+        { key: "team", variant: "cards", include: false },
+        { key: "how", variant: "grid", include: true },
+        { key: "location", variant: "standard", include: true },
+      ],
+    };
+    const html = renderToStaticMarkup(
+      <CommercialTemplate
+        site={{ ...baseSite, design_version: 3, design_spec: spec }}
+        services={services}
+        staff={[{ id: "st1", display_name: "Alex Doe" }]}
+        reviews={[{ id: "r1", customer_name: "Sam", rating: 5, body: "Great cut.", created_at: "2026-01-05T10:00:00Z" }]}
+      />,
+    );
+    expect(html).not.toContain("Meet the team");
+    expect(html.indexOf("Great cut.")).toBeGreaterThan(-1);
+    expect(html.indexOf("Great cut.")).toBeLessThan(html.indexOf("Why us"));
   });
 });

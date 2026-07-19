@@ -8,7 +8,11 @@ describe("composeRenderPlan", () => {
   it("maps hero variants to the fixed align/height pairs", () => {
     expect(composeRenderPlan({ ...spec, hero: { variant: "full-bleed", motion: "none" } }).hero)
       .toEqual({ centered: false, minH: "screen" });
+    expect(composeRenderPlan({ ...spec, hero: { variant: "split", motion: "none" } }).hero)
+      .toEqual({ centered: false, minH: "screen" });
     expect(composeRenderPlan({ ...spec, hero: { variant: "editorial", motion: "none" } }).hero)
+      .toEqual({ centered: true, minH: "tall" });
+    expect(composeRenderPlan({ ...spec, hero: { variant: "minimal", motion: "none" } }).hero)
       .toEqual({ centered: true, minH: "tall" });
   });
 
