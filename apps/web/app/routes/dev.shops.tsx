@@ -242,6 +242,7 @@ export default function DevShops() {
     setRegenTextModel(DEFAULT_TEXT_MODEL);
     setRegenTextEffort("");
     setRegenImageModel(DEFAULT_IMAGE_MODEL);
+    setRegenComposer("ai");
     regenPrefsFetcher.load(`/api/shops/${regenShopId}/generation-prefs`);
   }, [regenShopId]); // eslint-disable-line react-hooks/exhaustive-deps -- regenPrefsFetcher.load is stable; only shop id matters
 
