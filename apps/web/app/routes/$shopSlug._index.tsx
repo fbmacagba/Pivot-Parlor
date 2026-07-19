@@ -115,6 +115,7 @@ export default function ShopLanding() {
       typeof s.heading_weight === "string" && s.heading_weight.trim() ? s.heading_weight.trim() : undefined,
     heading_style:
       typeof s.heading_style === "string" && s.heading_style.trim() ? s.heading_style.trim() : undefined,
+    design_spec: s.design_spec ?? undefined,
   };
 
   return (

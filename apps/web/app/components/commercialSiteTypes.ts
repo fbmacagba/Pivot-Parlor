@@ -32,6 +32,10 @@ export type SiteData = {
    *  legacy font names onto the curated self-hosted set. */
   heading_weight?: string;
   heading_style?: string;
+  /** Site Design v3 (Design Director) composition spec — see @repo/utils
+   *  `DesignSpec` (packages/utils/src/designSpec.ts). NULL/undefined for v1/v2
+   *  sites; the composer only reads it when design_version >= 3. */
+  design_spec?: unknown;
 };
 
 export type ShopSettings = {

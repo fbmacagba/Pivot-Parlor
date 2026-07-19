@@ -209,6 +209,7 @@ shops.get("/:shopId/site", async (c) => {
     design_version?: number | null;
     heading_weight?: string | null;
     heading_style?: string | null;
+    design_spec?: string | null;
   };
   const designIntent = {
     trust_signals: safeJsonParse<string[]>(siteExtra.trust_signals_json) ?? [],
@@ -225,6 +226,9 @@ shops.get("/:shopId/site", async (c) => {
     // v2 sites; heading_style hints serif/sans when resolving legacy fonts.
     heading_weight: siteExtra.heading_weight ?? null,
     heading_style: siteExtra.heading_style ?? null,
+    // Site Design v3 (Design Director): the composition spec, if the site was
+    // generated/composed at design_version >= 3. NULL for v1/v2 sites.
+    design_spec: safeJsonParse<unknown>(siteExtra.design_spec ?? undefined) ?? null,
   };
 
   const cached = await c.env.KV.get(`site:${shop.slug}`);

@@ -183,9 +183,7 @@ export default function CommercialTemplate({
   // original markup and conditional-render rule (team needs staff, reviews
   // need reviews, location needs an address) so it is null exactly when the
   // section would not have rendered before.
-  // design_spec is typed in SiteData by the plumbing task (Task 5); read it
-  // via a local cast until then.
-  const rawSpec = (site as { design_spec?: unknown }).design_spec;
+  const rawSpec = site.design_spec;
   let v3Plan: RenderPlan | null = null;
   if ((site.design_version ?? 1) >= 3 && rawSpec && typeof rawSpec === "object") {
     // A stored spec is already normalized by the pipeline; normalize again on
