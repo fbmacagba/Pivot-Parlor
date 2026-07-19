@@ -5,6 +5,9 @@ import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 import { archetypeFor } from "~/components/siteArchetype";
 import type { SectionKey } from "~/components/siteArchetype";
+import { normalizeDesignSpec, seedComposeDesignSpec } from "@repo/utils";
+import { composeRenderPlan } from "~/components/site/composePlan";
+import type { RenderPlan } from "~/components/site/composePlan";
 import { HeroSection } from "~/components/site/sections/HeroSection";
 import { FinalCtaSection } from "~/components/site/sections/FinalCtaSection";
 import { TrustSection } from "~/components/site/sections/TrustSection";
@@ -180,26 +183,62 @@ export default function CommercialTemplate({
   // original markup and conditional-render rule (team needs staff, reviews
   // need reviews, location needs an address) so it is null exactly when the
   // section would not have rendered before.
+  // design_spec is typed in SiteData by the plumbing task (Task 5); read it
+  // via a local cast until then.
+  const rawSpec = (site as { design_spec?: unknown }).design_spec;
+  let v3Plan: RenderPlan | null = null;
+  if ((site.design_version ?? 1) >= 3 && rawSpec && typeof rawSpec === "object") {
+    // A stored spec is already normalized by the pipeline; normalize again on
+    // read as belt-and-braces — a corrupt row falls back to the legacy path
+    // rather than blanking the site.
+    const { spec, fellBack } = normalizeDesignSpec(rawSpec, seedComposeDesignSpec(site.shop_id ?? "unknown"));
+    v3Plan = fellBack.includes("all") ? null : composeRenderPlan(spec);
+  }
+
   const sections: Record<SectionKey, ReactNode> = {
     trust: <TrustSection ctx={ctx} />,
-    services: <ServicesSection ctx={ctx} cols={archetype.servicesCols} glow={archetype.glow} />,
-    about: <AboutSection ctx={ctx} pillarStyle={archetype.pillarStyle} />,
+    services: (
+      <ServicesSection
+        ctx={ctx}
+        cols={v3Plan ? 3 : archetype.servicesCols}
+        glow={v3Plan ? v3Plan.glow : archetype.glow}
+      />
+    ),
+    about: <AboutSection ctx={ctx} pillarStyle={v3Plan ? "icons" : archetype.pillarStyle} />,
     team: <TeamSection ctx={ctx} />,
-    how: <HowSection ctx={ctx} stepsStyle={archetype.stepsStyle} glow={archetype.glow} />,
+    how: (
+      <HowSection
+        ctx={ctx}
+        stepsStyle={v3Plan ? "grid" : archetype.stepsStyle}
+        glow={v3Plan ? v3Plan.glow : archetype.glow}
+      />
+    ),
     reviews: <ReviewsSection ctx={ctx} />,
     location: <LocationSection ctx={ctx} />,
   };
 
   return (
     <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
-      <HeroSection ctx={ctx} centered={heroCentered} minH={archetype.heroMinH} />
+      {v3Plan ? (
+        <>
+          <HeroSection ctx={ctx} centered={v3Plan.hero.centered} minH={v3Plan.hero.minH} />
+          {v3Plan.sections.map((p) => (
+            <Fragment key={p.key}>{sections[p.key]}</Fragment>
+          ))}
+          <FinalCtaSection ctx={ctx} glow={v3Plan.glow} />
+        </>
+      ) : (
+        <>
+          <HeroSection ctx={ctx} centered={heroCentered} minH={archetype.heroMinH} />
 
-      {/* Middle sections in the archetype's order */}
-      {archetype.order.map((key) => (
-        <Fragment key={key}>{sections[key]}</Fragment>
-      ))}
+          {/* Middle sections in the archetype's order */}
+          {archetype.order.map((key) => (
+            <Fragment key={key}>{sections[key]}</Fragment>
+          ))}
 
-      <FinalCtaSection ctx={ctx} glow={archetype.glow} />
+          <FinalCtaSection ctx={ctx} glow={archetype.glow} />
+        </>
+      )}
     </CommercialShopChrome>
   );
 }
