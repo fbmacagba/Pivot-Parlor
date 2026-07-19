@@ -176,6 +176,7 @@ export interface AIModel {
   /** OpenRouter model slug, e.g. "anthropic/claude-sonnet-5". */
   id: string;
   name: string;
+  kind: "text" | "image";
   /** OpenRouter vendor prefix, e.g. "anthropic". */
   provider: string;
   /** Display name for the provider, e.g. "Anthropic". */

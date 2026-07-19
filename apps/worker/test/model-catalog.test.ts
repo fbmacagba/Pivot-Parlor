@@ -6,6 +6,7 @@ import {
   DEFAULT_TEXT_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
 } from "@repo/utils";
+import { mergeLiveModels, fallbackModels, getModel } from "../src/services/model-registry";
 
 describe("MODEL_CATALOG shape", () => {
   it("carries exactly the top 5 providers in order", () => {
@@ -69,5 +70,41 @@ describe("MODEL_CATALOG shape", () => {
     expect(findCatalogModel("anthropic/claude-sonnet-5")?.providerLabel).toBe("Anthropic");
     expect(findCatalogModel("anthropic/claude-sonnet-5", "image")).toBeUndefined();
     expect(findCatalogModel("black-forest-labs/flux-schnell")).toBeUndefined();
+  });
+});
+
+describe("model-registry derives from the shared catalog", () => {
+  it("serves all catalog models (text + image) with kind", () => {
+    const all = fallbackModels();
+    expect(all.length).toBe(catalogModels().length);
+    expect(all.find((m) => m.id === "google/gemini-3.1-flash-image-preview")?.kind).toBe("image");
+    expect(all.find((m) => m.id === "anthropic/claude-sonnet-5")?.kind).toBe("text");
+  });
+
+  it("drops removed legacy models", () => {
+    const ids = fallbackModels().map((m) => m.id);
+    expect(ids).not.toContain("meta-llama/llama-4-maverick");
+    expect(ids).not.toContain("black-forest-labs/flux-schnell");
+  });
+
+  it("merges live pricing by id and marks livePricing", () => {
+    const merged = mergeLiveModels([
+      {
+        id: "anthropic/claude-sonnet-5",
+        pricing: { prompt: "0.000002", completion: "0.00001" },
+        supported_parameters: ["reasoning"],
+      },
+    ]);
+    const sonnet = merged.find((m) => m.id === "anthropic/claude-sonnet-5");
+    expect(sonnet?.livePricing).toBe(true);
+    expect(sonnet?.costPer1MInput).toBe(2);
+    const other = merged.find((m) => m.id === "x-ai/grok-4.5");
+    expect(other?.livePricing).toBe(false);
+  });
+
+  it("getModel enforces kind when asked", () => {
+    expect(getModel("anthropic/claude-sonnet-5", "text")).toBeDefined();
+    expect(getModel("anthropic/claude-sonnet-5", "image")).toBeUndefined();
+    expect(getModel("google/gemini-3.1-flash-image-preview", "image")).toBeDefined();
   });
 });

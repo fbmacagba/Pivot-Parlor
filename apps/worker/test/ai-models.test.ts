@@ -1,5 +1,5 @@
 /**
- * /api/ai/models must serve the curated top-10 catalogue with LIVE OpenRouter
+ * /api/ai/models must serve the shared-catalog models with LIVE OpenRouter
  * pricing when the catalogue is reachable, and the fallback snapshot when it
  * is not — and the theme generator must forward a validated reasoning effort
  * to OpenRouter (and reject garbage efforts with a 400).
@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { dispatch } from "./request";
 import { seedShop, seedUser, tokenFor, authHeaders } from "./helpers";
 
-const MODELS_KV_KEY = "ai:models:openrouter:v1";
+const MODELS_KV_KEY = "ai:models:openrouter:v2";
 const originalFetch = globalThis.fetch;
 
 type FetchStub = (url: string, init?: RequestInit) => Promise<Response> | null;
@@ -61,7 +61,7 @@ describe("GET /api/ai/models", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[] };
     expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(10);
+    expect(body.data).toHaveLength(18);
 
     const sonnet = body.data.find((m) => m.id === "anthropic/claude-sonnet-5")!;
     expect(sonnet.costPer1MInput).toBe(4.2); // live value, not the 2.00 fallback
@@ -70,9 +70,9 @@ describe("GET /api/ai/models", () => {
     expect(sonnet.supportsEffort).toBe(true);
 
     // Models absent from the live payload keep their fallback pricing.
-    const glm = body.data.find((m) => m.id === "z-ai/glm-5.2")!;
-    expect(glm.livePricing).toBe(false);
-    expect(glm.costPer1MInput).toBe(0.42);
+    const grok = body.data.find((m) => m.id === "x-ai/grok-4.5")!;
+    expect(grok.livePricing).toBe(false);
+    expect(grok.costPer1MInput).toBe(2);
   });
 
   it("serves the fallback snapshot when OpenRouter is unreachable", async () => {
@@ -89,7 +89,7 @@ describe("GET /api/ai/models", () => {
     const res = await dispatch("GET", "/api/ai/models", { headers: authHeaders(await devToken()) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[] };
-    expect(body.data).toHaveLength(10);
+    expect(body.data).toHaveLength(18);
     expect(body.data.every((m) => m.livePricing === false)).toBe(true);
     // Every entry still carries usable pricing and the pipe-able display fields.
     for (const m of body.data) {
