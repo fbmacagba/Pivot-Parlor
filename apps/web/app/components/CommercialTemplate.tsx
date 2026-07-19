@@ -14,12 +14,15 @@ import { HeroEditorialSection } from "~/components/site/sections/HeroEditorialSe
 import { HeroMinimalSection } from "~/components/site/sections/HeroMinimalSection";
 import { FinalCtaSection } from "~/components/site/sections/FinalCtaSection";
 import { TrustSection } from "~/components/site/sections/TrustSection";
+import { TrustChipsSection } from "~/components/site/sections/TrustChipsSection";
 import { ServicesSection } from "~/components/site/sections/ServicesSection";
 import { AboutSection } from "~/components/site/sections/AboutSection";
 import { TeamSection } from "~/components/site/sections/TeamSection";
+import { TeamStripSection } from "~/components/site/sections/TeamStripSection";
 import { HowSection } from "~/components/site/sections/HowSection";
 import { ReviewsSection } from "~/components/site/sections/ReviewsSection";
 import { LocationSection } from "~/components/site/sections/LocationSection";
+import { LocationMapFirstSection } from "~/components/site/sections/LocationMapFirstSection";
 import { isGenericCategory } from "~/components/site/sections/bits";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { Reveal } from "~/components/site/motion/Reveal";
@@ -214,19 +217,19 @@ export default function CommercialTemplate({
   const v3SectionNode = (key: SectionKey, variant: string, plan: RenderPlan): ReactNode => {
     switch (key) {
       case "trust":
-        return <TrustSection ctx={ctx} />;
+        return variant === "chips" ? <TrustChipsSection ctx={ctx} density={plan.density} /> : <TrustSection ctx={ctx} />;
       case "services":
         return <ServicesSection ctx={ctx} cols={3} glow={plan.glow} />;
       case "about":
         return <AboutSection ctx={ctx} pillarStyle="icons" />;
       case "team":
-        return <TeamSection ctx={ctx} />;
+        return variant === "strip" ? <TeamStripSection ctx={ctx} density={plan.density} /> : <TeamSection ctx={ctx} />;
       case "how":
         return <HowSection ctx={ctx} stepsStyle={variant === "row" ? "row" : "grid"} glow={plan.glow} />;
       case "reviews":
         return <ReviewsSection ctx={ctx} />;
       case "location":
-        return <LocationSection ctx={ctx} />;
+        return variant === "map-first" ? <LocationMapFirstSection ctx={ctx} density={plan.density} /> : <LocationSection ctx={ctx} />;
     }
   };
 
