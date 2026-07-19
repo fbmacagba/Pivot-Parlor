@@ -89,6 +89,42 @@ describe("model id validation", () => {
     expect(captured).toBeNull();
   });
 
+  it("rejects an unknown image model on generate-image", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-image`, {
+      headers: devHeaders,
+      body: { type: "logo", image_model: "black-forest-labs/flux-schnell" },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { success: boolean; error?: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Unknown image model");
+  });
+
+  it("rejects a text model submitted as image model on generate-image", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-image`, {
+      headers: devHeaders,
+      body: { type: "logo", image_model: "anthropic/claude-sonnet-5" },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { success: boolean; error?: string };
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Unknown image model");
+  });
+
+  it("does not 400 a valid catalog image model on generate-image", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-image`, {
+      headers: devHeaders,
+      body: { type: "logo", image_model: "google/gemini-3.1-flash-lite-image" },
+    });
+    // The catalog gate must not reject a valid id. It may still fail later
+    // (no real OpenRouter connectivity in tests) — that is not what this
+    // asserts.
+    expect(res.status).not.toBe(400);
+  });
+
   it("degrades a legacy unknown model stored in KV to the default instead of 400ing", async () => {
     const { shopId, devHeaders } = await seedShopWithDev();
     // Simulate a shop whose saved generation settings predate a catalog

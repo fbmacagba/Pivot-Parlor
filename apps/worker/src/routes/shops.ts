@@ -802,10 +802,11 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
   }
 
   const imageModelRaw = body.image_model;
-  const imageModel =
-    typeof imageModelRaw === "string" && imageModelRaw.trim()
-      ? imageModelRaw.trim()
-      : DEFAULT_OPENROUTER_IMAGE_MODEL;
+  const imageModelIn = typeof imageModelRaw === "string" ? imageModelRaw.trim() : "";
+  if (imageModelIn && !findCatalogModel(imageModelIn, "image")) {
+    return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
+  }
+  const imageModel = imageModelIn || DEFAULT_OPENROUTER_IMAGE_MODEL;
   const notes =
     typeof body.design_notes === "string" ? body.design_notes.trim() : "";
 
