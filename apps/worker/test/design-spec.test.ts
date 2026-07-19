@@ -46,6 +46,33 @@ describe("seedComposeDesignSpec", () => {
       expect(TEMPLATE_HERO_CONSTRAINTS.luxury).toContain(spec.hero.variant);
     }
   });
+
+  // Golden pin: the composer's every axis is derived from fnv1a hashes of
+  // strings like `${shopId}:design:${axis}`. An innocent refactor of those
+  // hash-input strings (renaming an axis, reordering SECTION_ORDERS, etc.)
+  // would silently re-theme every seed-composed site without any other test
+  // noticing, since the other tests only check shape/validity, not the exact
+  // mapping. This pins the full output for one fixed shop id.
+  it("pins the exact composed spec for a fixed shop id (golden)", () => {
+    const spec = seedComposeDesignSpec("golden-shop");
+    expect(spec).toEqual({
+      composer: "seed",
+      hero: { variant: "split", motion: "fade" },
+      sections: [
+        { key: "trust", variant: "icons", include: true },
+        { key: "services", variant: "showcase", include: true },
+        { key: "team", variant: "strip", include: true },
+        { key: "about", variant: "story", include: true },
+        { key: "how", variant: "grid", include: true },
+        { key: "reviews", variant: "marquee", include: true },
+        { key: "location", variant: "map-first", include: true },
+      ],
+      motion: { intensity: "calm", reveal: "scale" },
+      motif: "line",
+      signature: "gallery",
+      density: "compact",
+    });
+  });
 });
 
 describe("normalizeDesignSpec", () => {
