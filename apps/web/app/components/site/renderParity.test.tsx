@@ -6,19 +6,21 @@ import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { DesignSpec } from "@repo/utils";
 
-vi.mock("@remix-run/react", () => ({
-  Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) => {
-    const React = require("react");
-    return React.createElement("a", { href: String(to), ...rest }, children as never);
-  },
-  useParams: () => ({ shopSlug: "parity-shop" }),
-}));
-vi.mock("~/components/CommercialShopChrome", () => ({
-  CommercialShopChrome: ({ children }: { children: unknown }) => {
-    const React = require("react");
-    return React.createElement("div", null, children as never);
-  },
-}));
+vi.mock("@remix-run/react", async () => {
+  const React = await import("react");
+  return {
+    Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>
+      React.createElement("a", { href: String(to), ...rest }, children as never),
+    useParams: () => ({ shopSlug: "parity-shop" }),
+  };
+});
+vi.mock("~/components/CommercialShopChrome", async () => {
+  const React = await import("react");
+  return {
+    CommercialShopChrome: ({ children }: { children: unknown }) =>
+      React.createElement("div", null, children as never),
+  };
+});
 
 import CommercialTemplate from "~/components/CommercialTemplate";
 
