@@ -1,5 +1,9 @@
 /** Reveal wrapper: hidden state is JS-applied only (no-JS visitors always see
  *  content); disabled renders children with no wrapper at all. */
+// React 18.3's `act` (imported from "react" below) only suppresses its
+// DOM-update-tracking warnings when the environment opts in; without this,
+// react-dom logs "not configured to support act(...)" on every act() call.
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
