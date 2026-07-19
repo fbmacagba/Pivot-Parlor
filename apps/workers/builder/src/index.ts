@@ -253,6 +253,8 @@ async function ensureShopSitesSeoColumns(db: D1Database): Promise<void> {
   // Curated typography (WS-6 item 5). Canonical DDL: migration 042.
   await tryAdd("heading_weight", "TEXT");
   await tryAdd("heading_style", "TEXT");
+  // Design Director spec (Site Design v3). Canonical DDL: migration 044.
+  await tryAdd("design_spec", "TEXT");
 }
 
 async function processOne(body: unknown, env: Env): Promise<void> {
