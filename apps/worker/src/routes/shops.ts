@@ -28,6 +28,7 @@ import {
   findCatalogModel,
   DEFAULT_TEXT_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
+  parseComposer,
 } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
@@ -695,6 +696,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
     text_model?: string;
     text_effort?: string;
     image_model?: string;
+    composer?: string;
   };
   const body = await c.req.json<GenSettingsBody>().catch((): GenSettingsBody => ({}));
 
@@ -706,6 +708,10 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
   if (imageModelIn && !findCatalogModel(imageModelIn, "image")) {
     return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
   }
+  const composerIn = typeof body.composer === "string" ? body.composer.trim() : "";
+  if (composerIn && !parseComposer(composerIn)) {
+    return c.json({ success: false, error: `Unknown composer: ${composerIn}` }, 400);
+  }
 
   await c.env.KV.put(
     genSettingsKvKey(shop.id),
@@ -714,6 +720,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
       text_model: textModelIn,
       text_effort: parseTextEffort(body.text_effort) ?? "",
       image_model: imageModelIn,
+      composer: composerIn || undefined,
     }),
     { expirationTtl: 60 * 60 * 24 }
   );
@@ -1047,6 +1054,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     text_effort?: string;
     image_model?: string;
     skip_images?: boolean;
+    composer?: string;
   } = {};
 
   if (contentType.includes("multipart/form-data")) {
@@ -1057,6 +1065,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       color_accent: form.color_accent?.toString(),
       design_notes: form.design_notes?.toString(),
       logo_file: form.logo_file instanceof File ? form.logo_file : undefined,
+      composer: form.composer?.toString(),
     };
   } else {
     const json = await c.req.json<typeof body>().catch((): typeof body => ({}));
@@ -1078,6 +1087,10 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
   if (bodyImage && !findCatalogModel(bodyImage, "image")) {
     return c.json({ success: false, error: `Unknown image model: ${bodyImage}` }, 400);
   }
+  const bodyComposerRaw = typeof body.composer === "string" ? body.composer.trim() : "";
+  if (bodyComposerRaw && !parseComposer(bodyComposerRaw)) {
+    return c.json({ success: false, error: `Unknown composer: ${bodyComposerRaw}` }, 400);
+  }
 
   const settingsRaw = await c.env.KV.get(genSettingsKvKey(shop.id));
   let settingsKv: {
@@ -1085,6 +1098,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     text_model?: string;
     text_effort?: string;
     image_model?: string;
+    composer?: string;
   } = {};
   if (settingsRaw) {
     try {
@@ -1154,6 +1168,10 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       (storedImage && findCatalogModel(storedImage, "image")
         ? storedImage
         : DEFAULT_IMAGE_MODEL_ID);
+    // Design Director composer: request wins over saved settings; anything
+    // but ai/seed (incl. legacy junk in KV) silently defaults to "ai".
+    const composer =
+      parseComposer(bodyComposerRaw) ?? parseComposer(settingsKv.composer) ?? "ai";
 
     // Optional owner-chosen palette. Only honour a complete, valid pair so a
     // partial/garbage value can never override the AI-generated palette.
@@ -1184,6 +1202,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       text_model,
       ...(text_effort ? { text_effort } : {}),
       image_model,
+      composer,
       skip_images,
       ...(hasColorOverride
         ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
