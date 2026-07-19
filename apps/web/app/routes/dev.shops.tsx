@@ -99,6 +99,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
     const body: Record<string, unknown> = {};
     if (template) body.template = template;
+    const composer = form.get("composer")?.toString();
+    if (composer === "ai" || composer === "seed") body.composer = composer;
     try {
       const result = await api.post<{ jobId: string; message: string }>(
         `/api/shops/${shopId}/generate-site`,
@@ -176,6 +178,7 @@ export default function DevShops() {
   const [regenTextModel, setRegenTextModel] = useState(DEFAULT_TEXT_MODEL);
   const [regenTextEffort, setRegenTextEffort] = useState("");
   const [regenImageModel, setRegenImageModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [regenComposer, setRegenComposer] = useState("ai");
 
   const [shopToDelete, setShopToDelete] = useState<Shop | null>(null);
   const [expandedShopId, setExpandedShopId] = useState<string | null>(null);
@@ -941,6 +944,14 @@ export default function DevShops() {
                                   <option value="classic">Classic</option>
                                   <option value="fresh">Fresh</option>
                                 </select>
+                                <select
+                                  name="composer"
+                                  className="rounded border border-white/20 bg-white/5 px-2 py-1 text-xs text-white"
+                                  title="Site composer"
+                                >
+                                  <option value="ai">AI design director</option>
+                                  <option value="seed">Deterministic seed</option>
+                                </select>
                                 <Button
                                   type="submit"
                                   variant="ghost"
@@ -1394,6 +1405,18 @@ export default function DevShops() {
               onChange={setRegenImageModel}
               disabled={settingsFetcher.state !== "idle"}
             />
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-white/80">Site composer</label>
+              <select
+                value={regenComposer}
+                onChange={(e) => setRegenComposer(e.target.value)}
+                disabled={settingsFetcher.state !== "idle"}
+                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+              >
+                <option value="ai" className="bg-dark">AI design director (default)</option>
+                <option value="seed" className="bg-dark">Deterministic seed</option>
+              </select>
+            </div>
             <div className="flex flex-wrap gap-2 pt-2">
               <Button
                 type="button"
@@ -1417,6 +1440,7 @@ export default function DevShops() {
                       text_model: regenTextModel,
                       text_effort: regenTextEffort,
                       image_model: regenImageModel,
+                      composer: regenComposer,
                     },
                     {
                       method: "POST",
