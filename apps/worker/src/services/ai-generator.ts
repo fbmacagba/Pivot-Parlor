@@ -221,7 +221,7 @@ export async function generateShopTheme(
   openrouterKey: string,
   options: ThemeGenerationOptions = {}
 ): Promise<BrandConfig> {
-  const model = getModel(modelId);
+  const model = getModel(modelId, "text");
   if (!model) throw new Error(`Unknown model: ${modelId}`);
 
   const prompt = buildPrompt(shopName, shopType, styleKeywords, options.palette);

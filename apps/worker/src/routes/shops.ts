@@ -23,7 +23,12 @@ import {
   updateShopSiteWebsiteStatus,
   type DBService,
 } from "../db/queries.js";
-import { safeJsonParse } from "@repo/utils";
+import {
+  safeJsonParse,
+  findCatalogModel,
+  DEFAULT_TEXT_MODEL_ID,
+  DEFAULT_IMAGE_MODEL_ID,
+} from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
@@ -692,13 +697,23 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
     image_model?: string;
   };
   const body = await c.req.json<GenSettingsBody>().catch((): GenSettingsBody => ({}));
+
+  const textModelIn = typeof body.text_model === "string" ? body.text_model.trim() : "";
+  if (textModelIn && !findCatalogModel(textModelIn, "text")) {
+    return c.json({ success: false, error: `Unknown text model: ${textModelIn}` }, 400);
+  }
+  const imageModelIn = typeof body.image_model === "string" ? body.image_model.trim() : "";
+  if (imageModelIn && !findCatalogModel(imageModelIn, "image")) {
+    return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
+  }
+
   await c.env.KV.put(
     genSettingsKvKey(shop.id),
     JSON.stringify({
       design_notes: typeof body.design_notes === "string" ? body.design_notes : "",
-      text_model: typeof body.text_model === "string" ? body.text_model : "",
+      text_model: textModelIn,
       text_effort: parseTextEffort(body.text_effort) ?? "",
-      image_model: typeof body.image_model === "string" ? body.image_model : "",
+      image_model: imageModelIn,
     }),
     { expirationTtl: 60 * 60 * 24 }
   );
@@ -787,10 +802,11 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
   }
 
   const imageModelRaw = body.image_model;
-  const imageModel =
-    typeof imageModelRaw === "string" && imageModelRaw.trim()
-      ? imageModelRaw.trim()
-      : DEFAULT_OPENROUTER_IMAGE_MODEL;
+  const imageModelIn = typeof imageModelRaw === "string" ? imageModelRaw.trim() : "";
+  if (imageModelIn && !findCatalogModel(imageModelIn, "image")) {
+    return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
+  }
+  const imageModel = imageModelIn || DEFAULT_OPENROUTER_IMAGE_MODEL;
   const notes =
     typeof body.design_notes === "string" ? body.design_notes.trim() : "";
 
@@ -1052,6 +1068,17 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Logo file too large (max 5MB)" }, 400);
   }
 
+  // Validate explicit model ids before any job/KV state is created below —
+  // an unknown or wrong-kind id must 400 without orphaning a queued job row.
+  const bodyText = typeof body.text_model === "string" ? body.text_model.trim() : "";
+  if (bodyText && !findCatalogModel(bodyText, "text")) {
+    return c.json({ success: false, error: `Unknown text model: ${bodyText}` }, 400);
+  }
+  const bodyImage = typeof body.image_model === "string" ? body.image_model.trim() : "";
+  if (bodyImage && !findCatalogModel(bodyImage, "image")) {
+    return c.json({ success: false, error: `Unknown image model: ${bodyImage}` }, 400);
+  }
+
   const settingsRaw = await c.env.KV.get(genSettingsKvKey(shop.id));
   let settingsKv: {
     design_notes?: string;
@@ -1109,18 +1136,24 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     const hasLogoFile =
       Boolean(body.logo_file && body.logo_file.size > 0) || logoUploadHead !== null;
 
+    // bodyText/bodyImage are already validated (400'd above if unknown). A
+    // stored KV value that no longer resolves in the catalog (a catalog
+    // shrink) silently degrades to the pipeline default instead of 400ing,
+    // so legacy shops keep generating.
+    const storedText = settingsKv.text_model?.trim() ?? "";
     const text_model =
-      typeof body.text_model === "string" && body.text_model.trim()
-        ? body.text_model.trim()
-        : settingsKv.text_model?.trim() || "google/gemini-3.1-flash-lite-preview";
+      bodyText ||
+      (storedText && findCatalogModel(storedText, "text") ? storedText : DEFAULT_TEXT_MODEL_ID);
     // Reasoning effort for the text/research model. Request wins over saved
     // settings; anything but low/medium/high is dropped (pipeline default).
     const text_effort =
       parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
+    const storedImage = settingsKv.image_model?.trim() ?? "";
     const image_model =
-      typeof body.image_model === "string" && body.image_model.trim()
-        ? body.image_model.trim()
-        : settingsKv.image_model?.trim() || "google/gemini-3.1-flash-image-preview";
+      bodyImage ||
+      (storedImage && findCatalogModel(storedImage, "image")
+        ? storedImage
+        : DEFAULT_IMAGE_MODEL_ID);
 
     // Optional owner-chosen palette. Only honour a complete, valid pair so a
     // partial/garbage value can never override the AI-generated palette.

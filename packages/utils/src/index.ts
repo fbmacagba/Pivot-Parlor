@@ -142,3 +142,5 @@ export function reminderDelaySeconds(sendAt: Date, now: Date): number {
   if (remainingS <= 0) return 0;
   return Math.min(remainingS, MAX_QUEUE_DELAY_S);
 }
+
+export * from "./modelCatalog";

@@ -1,21 +1,27 @@
 /**
  * OpenRouter-backed model catalogue for the developer AI tools.
  *
- * The curated list below is the source of truth for WHICH models are offered
- * (top 10 providers, one flagship each — kept small so a developer can pick at
- * a glance and so the theme endpoint can't be used as a proxy to arbitrary
- * expensive models). Pricing and reasoning-effort support are refreshed at
- * read time from the public OpenRouter catalogue and cached in KV for an hour;
- * when OpenRouter is unreachable the fallback values below are served instead
- * (marked livePricing: false).
+ * WHICH models are offered is defined by the shared `MODEL_CATALOG` in
+ * `@repo/utils` (consumed here via `catalogModels`/`findCatalogModel`) so the
+ * worker and web pickers stay in sync. Pricing and reasoning-effort support
+ * are refreshed at read time from the public OpenRouter catalogue and cached
+ * in KV for an hour; when OpenRouter is unreachable the fallback values from
+ * the shared catalogue are served instead (marked livePricing: false).
  */
 import type { KVNamespace } from "@cloudflare/workers-types";
+import {
+  catalogModels,
+  findCatalogModel,
+  type ModelKind,
+  type TextEffort,
+} from "@repo/utils";
 
-export type TextEffort = "low" | "medium" | "high";
+export type { TextEffort };
 
 export interface AIModel {
   id: string;
   name: string;
+  kind: ModelKind;
   provider: string;
   providerLabel: string;
   description: string;
@@ -26,136 +32,10 @@ export interface AIModel {
   livePricing: boolean;
 }
 
-interface CuratedEntry {
-  id: string;
-  name: string;
-  provider: string;
-  providerLabel: string;
-  description: string;
-  fallbackInput: number;
-  fallbackOutput: number;
-  fallbackSupportsEffort: boolean;
-  recommended: boolean;
-}
-
-/** Fallback pricing snapshot taken from the OpenRouter catalogue on 2026-07-10. */
-export const CURATED_MODELS: CuratedEntry[] = [
-  {
-    id: "google/gemini-3.1-flash-lite-preview",
-    name: "Gemini 3.1 Flash Lite",
-    provider: "google",
-    providerLabel: "Google",
-    description: "Pipeline default. Fast and very cheap; solid site copy.",
-    fallbackInput: 0.25,
-    fallbackOutput: 1.5,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "anthropic/claude-sonnet-5",
-    name: "Claude Sonnet 5",
-    provider: "anthropic",
-    providerLabel: "Anthropic",
-    description: "Best copy quality for the price. Recommended for client-facing sites.",
-    fallbackInput: 2.0,
-    fallbackOutput: 10.0,
-    fallbackSupportsEffort: true,
-    recommended: true,
-  },
-  {
-    id: "openai/gpt-5.6-terra",
-    name: "GPT-5.6 Terra",
-    provider: "openai",
-    providerLabel: "OpenAI",
-    description: "Strong creative writing and layout sense.",
-    fallbackInput: 2.5,
-    fallbackOutput: 15.0,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "x-ai/grok-4.5",
-    name: "Grok 4.5",
-    provider: "x-ai",
-    providerLabel: "xAI",
-    description: "Punchy, direct copy. Good price for a frontier model.",
-    fallbackInput: 2.0,
-    fallbackOutput: 6.0,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "deepseek/deepseek-v4-pro",
-    name: "DeepSeek V4 Pro",
-    provider: "deepseek",
-    providerLabel: "DeepSeek",
-    description: "Near-frontier quality at budget pricing.",
-    fallbackInput: 0.435,
-    fallbackOutput: 0.87,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "meta-llama/llama-4-maverick",
-    name: "Llama 4 Maverick",
-    provider: "meta-llama",
-    providerLabel: "Meta",
-    description: "Cheapest open-weights option. No reasoning effort.",
-    fallbackInput: 0.15,
-    fallbackOutput: 0.6,
-    fallbackSupportsEffort: false,
-    recommended: false,
-  },
-  {
-    id: "mistralai/mistral-medium-3-5",
-    name: "Mistral Medium 3.5",
-    provider: "mistralai",
-    providerLabel: "Mistral",
-    description: "Balanced European model with clean, concise output.",
-    fallbackInput: 1.5,
-    fallbackOutput: 7.5,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "qwen/qwen3.7-max",
-    name: "Qwen 3.7 Max",
-    provider: "qwen",
-    providerLabel: "Qwen",
-    description: "Top Qwen tier; strong multilingual copy.",
-    fallbackInput: 1.25,
-    fallbackOutput: 3.75,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "moonshotai/kimi-k2.6",
-    name: "Kimi K2.6",
-    provider: "moonshotai",
-    providerLabel: "Moonshot",
-    description: "Creative long-form writing at mid-range pricing.",
-    fallbackInput: 0.66,
-    fallbackOutput: 3.41,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-  {
-    id: "z-ai/glm-5.2",
-    name: "GLM 5.2",
-    provider: "z-ai",
-    providerLabel: "Z.AI",
-    description: "Capable generalist; one of the cheapest reasoning models.",
-    fallbackInput: 0.42,
-    fallbackOutput: 1.32,
-    fallbackSupportsEffort: true,
-    recommended: false,
-  },
-];
-
 /** Default model for the theme generator (site pipeline default lives in shops.ts). */
 export const DEFAULT_THEME_MODEL = "anthropic/claude-sonnet-5";
 
-const MODELS_KV_KEY = "ai:models:openrouter:v1";
+const MODELS_KV_KEY = "ai:models:openrouter:v2";
 const MODELS_KV_TTL = 3600; // 1h — pricing moves slowly; avoids hammering the catalogue
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 
@@ -169,10 +49,10 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-/** Join the curated list with the live OpenRouter catalogue (pure; unit-tested). */
+/** Join the shared catalog with the live OpenRouter catalogue (pure; unit-tested). */
 export function mergeLiveModels(live: OpenRouterCatalogueModel[]): AIModel[] {
   const byId = new Map(live.map((m) => [m.id, m]));
-  return CURATED_MODELS.map((c) => {
+  return catalogModels().map((c) => {
     const lm = byId.get(c.id);
     const promptUsd = lm?.pricing?.prompt != null ? Number(lm.pricing.prompt) : NaN;
     const completionUsd = lm?.pricing?.completion != null ? Number(lm.pricing.completion) : NaN;
@@ -180,6 +60,7 @@ export function mergeLiveModels(live: OpenRouterCatalogueModel[]): AIModel[] {
     return {
       id: c.id,
       name: c.name,
+      kind: c.kind,
       provider: c.provider,
       providerLabel: c.providerLabel,
       description: c.description,
@@ -187,8 +68,8 @@ export function mergeLiveModels(live: OpenRouterCatalogueModel[]): AIModel[] {
       costPer1MOutput: hasLive ? round3(completionUsd * 1e6) : c.fallbackOutput,
       supportsEffort: lm?.supported_parameters
         ? lm.supported_parameters.includes("reasoning")
-        : c.fallbackSupportsEffort,
-      recommended: c.recommended,
+        : c.supportsEffort,
+      recommended: c.recommended === true,
       livePricing: hasLive,
     };
   });
@@ -230,7 +111,8 @@ export async function getLiveModels(kv: KVNamespace): Promise<AIModel[]> {
 }
 
 /** Look up a curated model (fallback values) — used for validation, not display. */
-export function getModel(modelId: string): AIModel | undefined {
+export function getModel(modelId: string, kind?: ModelKind): AIModel | undefined {
+  if (kind && !findCatalogModel(modelId, kind)) return undefined;
   return fallbackModels().find((m) => m.id === modelId);
 }
 
