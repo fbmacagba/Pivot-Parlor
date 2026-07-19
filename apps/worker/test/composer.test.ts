@@ -109,4 +109,32 @@ describe("composer option", () => {
     expect(captured).not.toBeNull();
     expect(captured!.composer).toBe("ai");
   });
+
+  it("degrades a legacy stored-invalid composer to ai instead of 400ing", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    // Simulate a shop whose saved generation settings have an invalid composer
+    // value (e.g., from before validation existed). Seed it directly to KV,
+    // bypassing settings-save validation, then confirm generate-site still
+    // succeeds and degrades to "ai".
+    await env.KV.put(
+      `gen:settings:${shopId}`,
+      JSON.stringify({
+        design_notes: "",
+        text_model: "",
+        text_effort: "",
+        image_model: "",
+        composer: "vibes",
+      }),
+      { expirationTtl: 60 * 60 * 24 }
+    );
+
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
+      headers: devHeaders,
+      body: { skip_images: true },
+    });
+
+    expect(res.status).toBe(202);
+    expect(captured).not.toBeNull();
+    expect(captured!.composer).toBe("ai");
+  });
 });
