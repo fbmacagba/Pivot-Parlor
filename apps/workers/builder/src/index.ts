@@ -368,7 +368,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   // Design Director (v3): present on payloads from the new research worker;
   // absent -> legacy v2 write so mid-deploy jobs stay consistent.
   const design_spec_json =
-    rawDesignSpec && typeof rawDesignSpec === "object" ? JSON.stringify(rawDesignSpec) : null;
+    rawDesignSpec && typeof rawDesignSpec === "object" && !Array.isArray(rawDesignSpec)
+      ? JSON.stringify(rawDesignSpec)
+      : null;
   const design_version = design_spec_json ? 3 : 2;
 
   const now = new Date().toISOString();
