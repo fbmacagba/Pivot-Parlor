@@ -7,6 +7,7 @@ import {
   normalizeDesignSpec,
   parseComposer,
   TEMPLATE_HERO_CONSTRAINTS,
+  HERO_VARIANTS,
   type DesignSpec,
   type ComposerId,
 } from "./design-spec";
@@ -217,11 +218,12 @@ function buildUserPrompt(msg: ResearchQueueMessage): string {
   const servicesText = msg.services.map((s) => `${s.name} (£${s.price_gbp}, ${s.duration_min} min)`).join("; ");
   const style = msg.styleNotes?.trim() || "not provided";
   const pinnedMood = layoutMoodForTemplate(msg.template);
-  const heroConstraint = pinnedMood
-    ? TEMPLATE_HERO_CONSTRAINTS[msg.template!.trim().toLowerCase()]
-    : undefined;
+  // Falls back to the full HERO_VARIANTS pool if a template key is ever
+  // missing from TEMPLATE_HERO_CONSTRAINTS, so key-set drift can't throw here.
+  const heroConstraint =
+    TEMPLATE_HERO_CONSTRAINTS[(msg.template ?? "").trim().toLowerCase()] ?? HERO_VARIANTS;
   const moodLine = pinnedMood
-    ? `The owner has explicitly chosen the "${msg.template}" template: layout_mood MUST be "${pinnedMood}", and the palette, typography and imagery must express that mood. The design_spec hero.variant must be one of: ${heroConstraint!.join(", ")}.\n`
+    ? `The owner has explicitly chosen the "${msg.template}" template: layout_mood MUST be "${pinnedMood}", and the palette, typography and imagery must express that mood. The design_spec hero.variant must be one of: ${heroConstraint.join(", ")}.\n`
     : "";
   const designSpecBlock =
     msg.composer !== "seed"
