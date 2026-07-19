@@ -5,6 +5,10 @@ import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 import { archetypeFor } from "~/components/siteArchetype";
 import type { SectionKey } from "~/components/siteArchetype";
+import { HeroSection } from "~/components/site/sections/HeroSection";
+import { FinalCtaSection } from "~/components/site/sections/FinalCtaSection";
+import { StarRow, formatReviewDate, HoursTable } from "~/components/site/sections/bits";
+import type { SiteRenderContext } from "~/components/site/sectionContext";
 
 export type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 
@@ -62,68 +66,6 @@ function isGenericCategory(category?: string | null): boolean {
 
 type Pillar = { title: string; body?: string; icon: ReactNode };
 
-type HoursRecord = Record<string, string | null | undefined>;
-
-function parseHours(json?: string): HoursRecord | null {
-  if (!json) return null;
-  try {
-    const o = JSON.parse(json) as unknown;
-    if (!o || typeof o !== "object") return null;
-    return o as HoursRecord;
-  } catch {
-    return null;
-  }
-}
-
-function formatReviewDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function StarRow({ rating, className }: { rating: number; className?: string }) {
-  const full = Math.round(Math.min(5, Math.max(0, rating)));
-  return (
-    <span className={className} aria-hidden>
-      {[1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className={i <= full ? "text-[color:var(--st-accent-text)]" : "text-[color:var(--st-ink-25)]"}>
-          ★
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function HoursTable({ hoursJson }: { hoursJson?: string }) {
-  const hours = parseHours(hoursJson);
-  const rows = [
-    { k: "mon", label: "Monday" },
-    { k: "tue", label: "Tuesday" },
-    { k: "wed", label: "Wednesday" },
-    { k: "thu", label: "Thursday" },
-    { k: "fri", label: "Friday" },
-    { k: "sat", label: "Saturday" },
-    { k: "sun", label: "Sunday" },
-  ] as const;
-
-  return (
-    <table className="w-full text-left text-sm text-[color:var(--st-ink-80)]">
-      <tbody>
-        {rows.map(({ k, label }) => {
-          const v = hours?.[k];
-          const text = v == null || v === "" ? "Closed" : String(v);
-          return (
-            <tr key={k} className="border-b border-[color:var(--st-line-10)]">
-              <th className="py-3 pr-4 font-medium text-[color:var(--st-ink-90)]">{label}</th>
-              <td className="py-3">{text}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
-}
-
 export default function CommercialTemplate({
   site,
   staff = [],
@@ -177,7 +119,6 @@ export default function CommercialTemplate({
   // back to the template's original literals so pre-WS-6 sites render unchanged.
   const archetype = archetypeFor(site.layout_mood);
   const heroCentered = archetype.heroAlign === "center";
-  const heroMinHClass = archetype.heroMinH === "tall" ? "min-h-[85vh]" : "min-h-screen";
   const servicesColsClass = archetype.servicesCols === 2 ? "lg:grid-cols-2" : "lg:grid-cols-3";
 
   const trustSignals = (site.trust_signals ?? []).map((s) => s.trim()).filter(Boolean);
@@ -486,100 +427,46 @@ export default function CommercialTemplate({
       ) : null,
   };
 
+  const ctx: SiteRenderContext = {
+    site,
+    settings,
+    shopSlug,
+    services,
+    filteredServices,
+    categories,
+    category,
+    setCategory,
+    staff,
+    sortedReviews,
+    reviewCount,
+    hasAddress,
+    hasSocialProof,
+    statsHappy,
+    statsRating,
+    trustSignals,
+    heroSubline,
+    heroHeadline,
+    heroTagline,
+    heroSrc,
+    aboutText,
+    aboutHeading,
+    bookLabel,
+    pillars,
+    steps,
+    archetype,
+    scrollToId,
+  };
+
   return (
     <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
-      {/* Hero */}
-      <section className={`relative flex ${heroMinHClass} flex-col overflow-hidden`}>
-        <div className="absolute inset-0 -z-0">
-          {heroSrc ? (
-            <>
-              <img
-                src={heroSrc}
-                alt={`${site.shop_name} hero photo`}
-                className="absolute inset-0 h-full w-full scale-105 object-cover"
-                loading="eager"
-                decoding="async"
-              />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-black/65 to-black/90" aria-hidden />
-              <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-black/40" aria-hidden />
-            </>
-          ) : (
-            <>
-              <div className="h-full w-full" style={{ background: "linear-gradient(145deg, var(--color-brand) 0%, #000 45%, var(--color-accent) 160%)" }} aria-hidden />
-              <div className="absolute inset-0 bg-gradient-to-b from-black/80 via-black/55 to-black/90" aria-hidden />
-            </>
-          )}
-        </div>
-
-        <div className={`relative z-10 flex ${heroMinHClass} w-full flex-col justify-center px-4 pb-6 pt-7 md:px-6 md:pb-8 md:pt-8`}>
-          <div className={`mx-auto w-full max-w-7xl translate-y-2 md:translate-y-4 lg:translate-y-[max(1rem,2vh)]${heroCentered ? " text-center" : ""}`}>
-            <div className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 bg-black/35 px-4 py-2 text-sm text-white/95 backdrop-blur-md">
-              {hasSocialProof ? (
-                <>
-                  <StarRow rating={typeof site.rating === "number" ? site.rating : 5} className="text-sm" />
-                  <span>{statsRating}★ from {reviewCount} review{reviewCount === 1 ? "" : "s"}</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-[color:var(--color-accent)]" aria-hidden>✓</span>
-                  <span>Online booking · Instant confirmation</span>
-                </>
-              )}
-            </div>
-
-            <h1 className={`mt-8 max-w-[700px] text-5xl font-bold leading-[1.08] tracking-tight text-white md:text-7xl${heroCentered ? " mx-auto" : ""}`}>
-              {heroHeadline}
-            </h1>
-            {heroTagline ? (
-              <h2 className={`mt-4 max-w-2xl text-[clamp(1.05rem,2.5vw,1.35rem)] font-normal font-light leading-relaxed text-white/75${heroCentered ? " mx-auto" : ""}`}>
-                {heroTagline}
-              </h2>
-            ) : null}
-
-            {/* Hero sits over a dark image scrim in both schemes, so its copy
-                stays literal white — only accent-filled controls tokenize. */}
-            <div className={`mt-10 flex flex-wrap gap-4${heroCentered ? " justify-center" : ""}`}>
-              <Link to={`/${shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-black/30 transition hover:brightness-110">
-                {bookLabel} →
-              </Link>
-              <button type="button" onClick={() => scrollToId("services")}
-                className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] border-2 border-white/50 bg-transparent px-8 pp-heading text-base font-semibold text-white transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]">
-                See Our Services
-              </button>
-            </div>
-
-            <p className="mt-8 text-sm text-white/55 md:text-base">
-              {heroSubline}
-            </p>
-          </div>
-        </div>
-
-        <button type="button" className="absolute bottom-6 left-1/2 z-10 hidden -translate-x-1/2 md:block"
-          aria-label="Scroll down" onClick={() => scrollToId("stats-bar")}>
-          <span className="text-3xl text-white/60 transition hover:text-white/90">↓</span>
-        </button>
-      </section>
+      <HeroSection ctx={ctx} centered={heroCentered} minH={archetype.heroMinH} />
 
       {/* Middle sections in the archetype's order */}
       {archetype.order.map((key) => (
         <Fragment key={key}>{sections[key]}</Fragment>
       ))}
 
-      {/* Final CTA */}
-      <section className="relative overflow-hidden border-t border-[color:var(--st-line-10)] bg-[color:var(--st-accent-10)] px-4 py-20 md:px-6 md:py-28">
-        {archetype.glow && (
-          <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-[44rem] max-w-full -translate-x-1/2 -translate-y-1/2 rounded-full bg-[color:var(--st-accent-15)] blur-3xl" aria-hidden />
-        )}
-        <div className="relative mx-auto max-w-3xl text-center">
-          <h2 className="pp-heading text-[clamp(1.85rem,4.5vw,3rem)] font-bold leading-tight text-[color:var(--st-ink)]">{archetype.ctaHeading}</h2>
-          <p className="mt-4 text-lg text-[color:var(--st-ink-70)]">{archetype.ctaSub}</p>
-          <Link to={`/${shopSlug}/book`}
-            className="mt-10 inline-flex min-h-14 min-w-[14rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-12 pp-heading text-lg font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-accent-25)] transition hover:brightness-110">
-            {bookLabel} →
-          </Link>
-          <p className="mt-6 text-sm text-[color:var(--st-ink-55)]">Book in under a minute · No account needed</p>
-        </div>
-      </section>
+      <FinalCtaSection ctx={ctx} glow={archetype.glow} />
     </CommercialShopChrome>
   );
 }
