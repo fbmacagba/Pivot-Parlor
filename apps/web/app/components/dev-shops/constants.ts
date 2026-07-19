@@ -30,9 +30,9 @@ export function staticPickerModels(kind: ModelKind): PickerModel[] {
 /** Reasoning-effort choices for models that support the OpenRouter reasoning param. */
 export const EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Default (model decides)" },
-  { value: "low", label: "Low — fastest, cheapest" },
-  { value: "medium", label: "Medium — balanced" },
-  { value: "high", label: "High — deepest thinking, most tokens" },
+  { value: "low", label: "Low - fastest, cheapest" },
+  { value: "medium", label: "Medium - balanced" },
+  { value: "high", label: "High - deepest thinking, most tokens" },
 ];
 
 export const REGEN_STEP_LABELS = [
