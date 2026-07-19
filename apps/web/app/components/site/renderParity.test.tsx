@@ -39,14 +39,22 @@ const baseSite: SiteData = {
   about_title: "Why us",
 };
 
-/** Mirrors luxury-dark exactly: same order, all included, glow on. */
+/** Mirrors luxury-dark exactly with motion OFF: same order, all included,
+ *  legacy-matching variants, glow on (motif line), no signature. This is the
+ *  2b-2 parity anchor: v3-with-motion-off === legacy, byte for byte. */
 const mirrorSpec: DesignSpec = {
   composer: "ai",
   hero: { variant: "full-bleed", motion: "none" },
-  sections: (["trust", "services", "about", "team", "how", "reviews", "location"] as const).map(
-    (key) => ({ key, variant: "any", include: true }),
-  ),
-  motion: { intensity: "calm", reveal: "fade-up" },
+  sections: [
+    { key: "trust", variant: "icons", include: true },
+    { key: "services", variant: "grid", include: true },
+    { key: "about", variant: "standard", include: true },
+    { key: "team", variant: "cards", include: true },
+    { key: "how", variant: "grid", include: true },
+    { key: "reviews", variant: "cards", include: true },
+    { key: "location", variant: "standard", include: true },
+  ],
+  motion: { intensity: "off", reveal: "fade-up" },
   motif: "line",
   signature: null,
   density: "airy",
@@ -95,5 +103,17 @@ describe("v3 composer parity", () => {
     expect(html).not.toContain("Meet the team");
     expect(html.indexOf("Great cut.")).toBeGreaterThan(-1);
     expect(html.indexOf("Great cut.")).toBeLessThan(html.indexOf("Why us"));
+  });
+
+  it("wraps sections in reveal wrappers when motion is on", () => {
+    const calm: DesignSpec = { ...mirrorSpec, motion: { intensity: "calm", reveal: "fade-up" } };
+    const html = renderToStaticMarkup(
+      <CommercialTemplate
+        site={{ ...baseSite, design_version: 3, design_spec: calm }}
+        services={services}
+      />,
+    );
+    expect(html).toContain("st-motion-calm");
+    expect(html).toContain('class="st-reveal-wrap st-reveal--fade-up"');
   });
 });

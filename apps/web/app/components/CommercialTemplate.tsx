@@ -19,6 +19,8 @@ import { ReviewsSection } from "~/components/site/sections/ReviewsSection";
 import { LocationSection } from "~/components/site/sections/LocationSection";
 import { isGenericCategory } from "~/components/site/sections/bits";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
+import { Reveal } from "~/components/site/motion/Reveal";
+import "~/components/site/motion/motion.css";
 
 export type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 
@@ -195,45 +197,82 @@ export default function CommercialTemplate({
 
   const sections: Record<SectionKey, ReactNode> = {
     trust: <TrustSection ctx={ctx} />,
-    services: (
-      <ServicesSection
-        ctx={ctx}
-        cols={v3Plan ? 3 : archetype.servicesCols}
-        glow={v3Plan ? v3Plan.glow : archetype.glow}
-      />
-    ),
-    about: <AboutSection ctx={ctx} pillarStyle={v3Plan ? "icons" : archetype.pillarStyle} />,
+    services: <ServicesSection ctx={ctx} cols={archetype.servicesCols} glow={archetype.glow} />,
+    about: <AboutSection ctx={ctx} pillarStyle={archetype.pillarStyle} />,
     team: <TeamSection ctx={ctx} />,
-    how: (
-      <HowSection
-        ctx={ctx}
-        stepsStyle={v3Plan ? "grid" : archetype.stepsStyle}
-        glow={v3Plan ? v3Plan.glow : archetype.glow}
-      />
-    ),
+    how: <HowSection ctx={ctx} stepsStyle={archetype.stepsStyle} glow={archetype.glow} />,
     reviews: <ReviewsSection ctx={ctx} />,
     location: <LocationSection ctx={ctx} />,
   };
 
+  // v3 dispatch: variant -> component + options. Alternate variants land in
+  // 2b-2 tasks 4-9; until then every id renders the section's standard
+  // component. The "how" variants already exist as stepsStyle.
+  const v3SectionNode = (key: SectionKey, variant: string, plan: RenderPlan): ReactNode => {
+    switch (key) {
+      case "trust":
+        return <TrustSection ctx={ctx} />;
+      case "services":
+        return <ServicesSection ctx={ctx} cols={3} glow={plan.glow} />;
+      case "about":
+        return <AboutSection ctx={ctx} pillarStyle="icons" />;
+      case "team":
+        return <TeamSection ctx={ctx} />;
+      case "how":
+        return <HowSection ctx={ctx} stepsStyle={variant === "row" ? "row" : "grid"} glow={plan.glow} />;
+      case "reviews":
+        return <ReviewsSection ctx={ctx} />;
+      case "location":
+        return <LocationSection ctx={ctx} />;
+    }
+  };
+
+  // A wrapped-but-empty reveal div would still animate; skip sections that
+  // will render null (same conditions the components enforce internally).
+  const sectionHasContent = (key: SectionKey): boolean =>
+    key === "team"
+      ? staff.length > 0
+      : key === "reviews"
+        ? sortedReviews.length > 0
+        : key === "location"
+          ? hasAddress
+          : true;
+
   return (
     <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
       {v3Plan ? (
-        <>
-          <HeroSection ctx={ctx} centered={v3Plan.hero.centered} minH={v3Plan.hero.minH} />
-          {v3Plan.sections.map((p) => (
-            <Fragment key={p.key}>{sections[p.key]}</Fragment>
-          ))}
-          <FinalCtaSection ctx={ctx} glow={v3Plan.glow} />
-        </>
+        (() => {
+          const plan = v3Plan;
+          const visible = plan.sections.filter((p) => sectionHasContent(p.key));
+          const enabled = plan.reveal !== null;
+          const lively = plan.reveal?.intensity === "lively";
+          const style = plan.reveal?.style ?? "fade-up";
+          const body = (
+            <>
+              <HeroSection ctx={ctx} centered={plan.hero.centered} minH={plan.hero.minH} />
+              {visible.map((p, i) => (
+                <Reveal key={p.key} enabled={enabled} style={style} index={i} lively={lively}>
+                  {v3SectionNode(p.key, p.variant, plan)}
+                </Reveal>
+              ))}
+              <Reveal enabled={enabled} style={style} index={visible.length} lively={lively}>
+                <FinalCtaSection ctx={ctx} glow={plan.glow} />
+              </Reveal>
+            </>
+          );
+          return plan.reveal ? (
+            <div className={`st-motion-${plan.reveal.intensity}`}>{body}</div>
+          ) : (
+            body
+          );
+        })()
       ) : (
         <>
           <HeroSection ctx={ctx} centered={heroCentered} minH={archetype.heroMinH} />
-
           {/* Middle sections in the archetype's order */}
           {archetype.order.map((key) => (
             <Fragment key={key}>{sections[key]}</Fragment>
           ))}
-
           <FinalCtaSection ctx={ctx} glow={archetype.glow} />
         </>
       )}
