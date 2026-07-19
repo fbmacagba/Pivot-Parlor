@@ -1,6 +1,7 @@
 export * from "./siteTheme";
 export * from "./curatedFonts";
 export * from "./emailTemplate";
+export * from "./designSpec";
 
 /** Generate a URL-friendly slug from a string */
 export function slugify(text: string): string {
