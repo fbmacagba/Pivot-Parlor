@@ -21,12 +21,11 @@ import { COLOR_PALETTES } from "~/lib/color-palettes";
 import {
   DEFAULT_TEXT_MODEL,
   DEFAULT_IMAGE_MODEL,
-  TEXT_MODEL_OPTIONS,
-  IMAGE_MODEL_OPTIONS,
-  EFFORT_OPTIONS,
+  staticPickerModels,
   REGEN_STEP_LABELS,
   E2E_STRIPE_LIST_SHOPS,
 } from "~/components/dev-shops/constants";
+import { ModelPicker } from "~/components/dev-shops/ModelPicker";
 import {
   regenJobStepStates,
   toSlug,
@@ -1379,56 +1378,22 @@ export default function DevShops() {
                 placeholder="Style and content hints for the pipeline…"
               />
             </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-white/80">Text &amp; Research Model</label>
-              <select
-                value={regenTextModel}
-                onChange={(e) => {
-                  setRegenTextModel(e.target.value);
-                  setRegenTextEffort("");
-                }}
-                disabled={settingsFetcher.state !== "idle"}
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-              >
-                {TEXT_MODEL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value} className="bg-dark">
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {TEXT_MODEL_OPTIONS.find((o) => o.value === regenTextModel)?.supportsEffort !== false && (
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-white/80">Reasoning effort</label>
-                <select
-                  value={regenTextEffort}
-                  onChange={(e) => setRegenTextEffort(e.target.value)}
-                  disabled={settingsFetcher.state !== "idle"}
-                  className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-                >
-                  {EFFORT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value} className="bg-dark">
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-white/80">Image Model</label>
-              <select
-                value={regenImageModel}
-                onChange={(e) => setRegenImageModel(e.target.value)}
-                disabled={settingsFetcher.state !== "idle"}
-                className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-              >
-                {IMAGE_MODEL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value} className="bg-dark">
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <ModelPicker
+              label="Text & research"
+              models={staticPickerModels("text")}
+              value={regenTextModel}
+              onChange={setRegenTextModel}
+              effort={regenTextEffort}
+              onEffortChange={setRegenTextEffort}
+              disabled={settingsFetcher.state !== "idle"}
+            />
+            <ModelPicker
+              label="Image"
+              models={staticPickerModels("image")}
+              value={regenImageModel}
+              onChange={setRegenImageModel}
+              disabled={settingsFetcher.state !== "idle"}
+            />
             <div className="flex flex-wrap gap-2 pt-2">
               <Button
                 type="button"
