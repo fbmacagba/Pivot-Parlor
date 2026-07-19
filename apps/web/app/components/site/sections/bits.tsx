@@ -30,6 +30,19 @@ export function StarRow({ rating, className }: { rating: number; className?: str
   );
 }
 
+/** Match the booking/owner UI: show pennies only when the price has them,
+ *  so the figure on the card equals the total shown at checkout. */
+export function formatPrice(n: number): string {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "0";
+  return Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2);
+}
+
+/** The normaliser assigns "Service" to uncategorised items; treat it as no category. */
+export function isGenericCategory(category?: string | null): boolean {
+  return !category || !category.trim() || category.trim().toLowerCase() === "service";
+}
+
 export function HoursTable({ hoursJson }: { hoursJson?: string }) {
   const hours = parseHours(hoursJson);
   const rows = [
