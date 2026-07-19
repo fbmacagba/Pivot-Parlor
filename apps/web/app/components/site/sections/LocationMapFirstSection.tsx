@@ -26,7 +26,7 @@ export function LocationMapFirstSection({ ctx, density }: { ctx: SiteRenderConte
           <div>
             {ctx.settings.phone ? (
               <p className="text-lg">
-                <a href={`tel:${ctx.settings.phone.replace(/\s/g, "")}`} className="text-[color:var(--st-accent-text)]">{ctx.settings.phone}</a>
+                <a href={`tel:${ctx.settings.phone.replace(/\s/g, "")}`} className="inline-flex min-h-11 items-center text-[color:var(--st-accent-text)]">{ctx.settings.phone}</a>
               </p>
             ) : null}
             <p className="mt-2 text-[color:var(--st-ink-70)]">{ctx.settings.address}</p>

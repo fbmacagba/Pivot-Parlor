@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { makeTestCtx } from "../testCtx";
+import { makeTestCtx } from "~/components/site/testCtx";
 
 vi.mock("@remix-run/react", async () => {
   const React = await import("react");
