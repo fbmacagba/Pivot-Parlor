@@ -951,7 +951,7 @@ export default function DevShops() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => setRegenShopId(shop.id)}
+                                onClick={() => navigate(`/dev/shops/${shop.id}`)}
                               >
                                 {ws === "live" || ws === "paused" ? "Edit" : "Regenerate"}
                               </Button>

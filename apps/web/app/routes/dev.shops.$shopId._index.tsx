@@ -1,19 +1,6 @@
-import {
-  Form,
-  Link,
-  useActionData,
-  useFetcher,
-  useNavigate,
-  useNavigation,
-  useOutletContext,
-} from "@remix-run/react";
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
-import { Loader2, Sparkles, Trash2, UserCircle } from "lucide-react";
-import { useEffect, useState } from "react";
-import { getSessionToken } from "~/lib/auth";
-import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
-import { createApiClient } from "~/lib/api";
+import { Link, useFetcher, useNavigate, useOutletContext, useRevalidator } from "@remix-run/react";
+import { Check, Loader2, Sparkles, Trash2, Upload, UserCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "~/components/ui/Button";
 import {
   Dialog,
@@ -22,63 +9,241 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "~/components/ui/Dialog";
-import type { DevGenerationPrefs, DevShopDetail, DevShopOwnerDetails } from "./dev.shops.$shopId";
+import { ModelPicker } from "~/components/dev-shops/ModelPicker";
+import { RegenStepRow } from "~/components/dev-shops/RegenStepRow";
+import { COLOR_PALETTES } from "~/lib/color-palettes";
+import {
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_TEXT_MODEL,
+  REGEN_STEP_LABELS,
+  staticPickerModels,
+} from "~/components/dev-shops/constants";
+import {
+  buildRegeneratePayload,
+  decidePollAction,
+  regenJobStepStates,
+  resolvePublicAssetImageUrl,
+  withImageCacheBust,
+} from "~/components/dev-shops/helpers";
+import type { Shop } from "~/components/dev-shops/types";
+import type { DevGenerationPrefs, DevShopOwnerDetails } from "./dev.shops.$shopId";
 
-export async function action({ request, params, context }: ActionFunctionArgs) {
-  const shopId = params.shopId!;
-  const form = await request.formData();
-  if (form.get("_action") !== "regenerate-site") {
-    return json({ ok: false, error: "Unknown action" }, 400);
-  }
-
-  const env = context.env as { API_URL: string };
-  const token = getSessionToken(request);
-  if (!token) return json({ ok: false, error: "Unauthorized" }, 401);
-  const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
-
-  let prefs: DevGenerationPrefs;
-  try {
-    prefs = await api.get<DevGenerationPrefs>(`/api/shops/${shopId}/generation-prefs`);
-  } catch {
-    prefs = {
-      template: "minimal",
-      design_notes: null,
-      color_primary: null,
-      color_accent: null,
-    };
-  }
-
-  const body: Record<string, unknown> = {
-    template: prefs.template?.trim() || "minimal",
-  };
-  if (prefs.design_notes?.trim()) body.design_notes = prefs.design_notes.trim();
-  if (prefs.color_primary?.trim()) body.color_primary = prefs.color_primary.trim();
-  if (prefs.color_accent?.trim()) body.color_accent = prefs.color_accent.trim();
-
-  try {
-    const result = await api.post<{ jobId: string }>(`/api/shops/${shopId}/generate-site`, body);
-    return redirect(`/dev/shops/${shopId}/generation/${result.jobId}`);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Site generation failed";
-    return json({ ok: false, error: msg }, 400);
-  }
-}
+type OutletCtx = {
+  shop: Shop;
+  apiUrl: string;
+  generationPrefs: DevGenerationPrefs;
+  ownerDetails: DevShopOwnerDetails | null;
+};
 
 export default function DevShopDetailIndex() {
-  const { shop, generationPrefs, ownerDetails } = useOutletContext<{
-    shop: DevShopDetail;
-    generationPrefs: DevGenerationPrefs;
-    ownerDetails: DevShopOwnerDetails | null;
-  }>();
-  const navigation = useNavigation();
-  const actionData = useActionData<{ ok?: boolean; error?: string }>();
-  const deleteShopFetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const { shop, apiUrl, generationPrefs, ownerDetails } = useOutletContext<OutletCtx>();
+  const revalidator = useRevalidator();
   const navigate = useNavigate();
+
+  // ── Configure ──────────────────────────────────────────────────────────────
+  const [designNotes, setDesignNotes] = useState(generationPrefs.design_notes ?? "");
+  const [textModel, setTextModel] = useState(DEFAULT_TEXT_MODEL);
+  const [textEffort, setTextEffort] = useState("");
+  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
+  const [composer, setComposer] = useState("ai");
+  const [paletteId, setPaletteId] = useState<string | null>(null);
+  const [includeImages, setIncludeImages] = useState(true);
+  const selectedPalette = paletteId ? COLOR_PALETTES.find((p) => p.id === paletteId) ?? null : null;
+
+  // ── Regenerate flow ──────────────────────────────────────────────────────────
+  const [genBusy, setGenBusy] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const [genJobId, setGenJobId] = useState<string | null>(null);
+  const [genPoll, setGenPoll] = useState<{ status: string; stage: string; error?: string } | null>(null);
+
+  // Reusing images requires the shop to already have them.
+  const hasHero = Boolean(shop.hero_image_url);
+  const hasLogo = Boolean(shop.logo_url);
+  const reuseBlocked = !includeImages && (!hasHero || !hasLogo);
+
+  async function handleRegenerate() {
+    if (reuseBlocked || genBusy || genJobId) return;
+    setGenError(null);
+    setGenPoll(null);
+    setGenJobId(null);
+    setGenBusy(true);
+    try {
+      // 1) Persist the chosen models/notes/composer (same KV the pipeline reads).
+      const sRes = await fetch(`/api/shops/${shop.id}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          design_notes: designNotes,
+          text_model: textModel,
+          text_effort: textEffort,
+          image_model: imageModel,
+          composer,
+        }),
+      });
+      const sJson = (await sRes.json().catch(() => ({}))) as { ok?: boolean; success?: boolean; error?: string };
+      if (!sRes.ok || sJson.ok === false || sJson.success === false) {
+        setGenError(sJson.error?.trim() || "Could not save settings.");
+        setGenBusy(false);
+        return;
+      }
+      // 2) Kick off generation with the palette + include-images choice.
+      const gRes = await fetch(`/api/shops/${shop.id}/generate-site`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildRegeneratePayload({ includeImages, palette: selectedPalette })),
+      });
+      const gJson = (await gRes.json().catch(() => ({}))) as { data?: { jobId?: string }; error?: string };
+      const jobId = gJson.data?.jobId;
+      if (!gRes.ok || !jobId) {
+        setGenError(gJson.error?.trim() || "Could not start generation.");
+        setGenBusy(false);
+        return;
+      }
+      setGenJobId(jobId); // starts the poller
+    } catch {
+      setGenError("Could not reach the server. Please try again.");
+      setGenBusy(false);
+    }
+  }
+
+  // Poll the job with the shared failure floor so the bar always resolves.
+  useEffect(() => {
+    if (!genJobId) return;
+    let cancelled = false;
+    const jobId = genJobId;
+    const startedAt = Date.now();
+    let failures = 0;
+    let iv: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (iv !== undefined) {
+        clearInterval(iv);
+        iv = undefined;
+      }
+    };
+    const tick = async () => {
+      let data: { status?: string; stage?: string; error?: string } | undefined;
+      try {
+        const r = await fetch(`/api/jobs/${jobId}/status`, { cache: "no-store" });
+        const j = (await r.json()) as {
+          success?: boolean;
+          data?: { status?: string; stage?: string; error?: string };
+        };
+        if (cancelled) return;
+        if (j.success && j.data) data = j.data;
+      } catch {
+        /* network/parse failure → counts as a failed poll below */
+      }
+      if (cancelled) return;
+
+      const ok = data !== undefined;
+      failures = ok ? 0 : failures + 1;
+      const decision = decidePollAction({
+        ok,
+        status: data?.status ?? "",
+        stage: data?.stage ?? "",
+        elapsedMs: Date.now() - startedAt,
+        consecutiveFailures: failures,
+      });
+      if (ok) {
+        setGenPoll({ status: data!.status ?? "", stage: data!.stage ?? "", error: data!.error ?? undefined });
+      }
+      switch (decision.kind) {
+        case "terminal":
+          stop();
+          setGenBusy(false);
+          if ((data?.status ?? "") !== "failed") {
+            setGenJobId(null);
+            revalidator.revalidate(); // pull the regenerated copy/images into the page
+          }
+          break;
+        case "stalled":
+        case "give-up":
+          setGenPoll((prev) => ({
+            status: "failed",
+            stage: prev?.stage ?? data?.stage ?? "",
+            error: decision.message,
+          }));
+          stop();
+          setGenBusy(false);
+          break;
+        // "update" | "keep-going": keep polling.
+      }
+    };
+    void tick();
+    iv = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- revalidator is stable; only the job id matters
+  }, [genJobId]);
+
+  const pollStatus = (genPoll?.status ?? "").toLowerCase();
+  const pollStage = (genPoll?.stage ?? "").toLowerCase();
+  const optimistic = genBusy && !genPoll;
+  const stepStates = regenJobStepStates(
+    optimistic ? "queued" : pollStatus,
+    optimistic ? "research" : pollStage || "research",
+  );
+  const jobComplete = pollStatus === "complete" || pollStage === "complete" || pollStage === "done";
+  const jobFailed = pollStatus === "failed";
+  const running = Boolean(genJobId) || genBusy;
+  const showProgress = running || jobComplete || jobFailed;
+
+  // ── Brand images ─────────────────────────────────────────────────────────────
+  const [imgBusy, setImgBusy] = useState<"logo" | "hero" | null>(null);
+  const [imgError, setImgError] = useState<string | null>(null);
+  const [logoBust, setLogoBust] = useState(0);
+  const [heroBust, setHeroBust] = useState(0);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const heroInputRef = useRef<HTMLInputElement | null>(null);
+
+  const logoSrc = shop.logo_url
+    ? withImageCacheBust(resolvePublicAssetImageUrl(shop.logo_url, apiUrl), logoBust)
+    : "";
+  const heroSrc = shop.hero_image_url
+    ? withImageCacheBust(resolvePublicAssetImageUrl(shop.hero_image_url, apiUrl), heroBust)
+    : "";
+
+  async function handleImageUpload(type: "logo" | "hero", file: File) {
+    if (imgBusy) return;
+    setImgError(null);
+    setImgBusy(type);
+    try {
+      const fd = new FormData();
+      fd.set("type", type);
+      fd.set("file", file);
+      const upRes = await fetch(`/api/shops/${shop.id}/upload-image`, { method: "POST", body: fd });
+      const upJson = (await upRes.json().catch(() => ({}))) as { imageUrl?: string; error?: string };
+      const url = typeof upJson.imageUrl === "string" ? upJson.imageUrl.trim() : "";
+      if (!upRes.ok || !url) {
+        setImgError(upJson.error?.trim() || "Upload failed.");
+        return;
+      }
+      const svRes = await fetch(`/api/shops/${shop.id}/save-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, imageUrl: url }),
+      });
+      const svJson = (await svRes.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!svRes.ok || svJson.ok === false) {
+        setImgError(svJson.error?.trim() || "Could not save the image.");
+        return;
+      }
+      if (type === "logo") setLogoBust(Date.now());
+      else setHeroBust(Date.now());
+      revalidator.revalidate();
+    } catch {
+      setImgError("Could not upload the image. Please try again.");
+    } finally {
+      setImgBusy(null);
+    }
+  }
+
+  // ── Owner + delete ───────────────────────────────────────────────────────────
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const busy =
-    navigation.state !== "idle" &&
-    navigation.formData?.get("_action") === "regenerate-site";
+  const deleteShopFetcher = useFetcher<{ success?: boolean; error?: string }>();
 
   useEffect(() => {
     if (deleteShopFetcher.state !== "idle" || !deleteShopFetcher.data?.success) return;
@@ -155,63 +320,229 @@ export default function DevShopDetailIndex() {
         </Dialog>
       </div>
 
-      {actionData?.error && (
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          {actionData.error}
-        </div>
-      )}
-      <section className="rounded-xl border border-white/10 bg-dark-100 p-6">
-        <h2 className="font-heading text-lg font-semibold text-white">Saved generation inputs</h2>
-        <p className="mt-1 text-sm text-white/50">
-          Regenerate uses these values from the active <code className="text-white/70">shop_sites</code> row (owner
-          colours and design notes when set).
-        </p>
-        <dl className="mt-4 space-y-2 text-sm">
-          <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/60">Template</dt>
-            <dd className="text-white">{generationPrefs.template}</dd>
-          </div>
-          <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/60">Primary</dt>
-            <dd className="text-white">{generationPrefs.color_primary ?? "—"}</dd>
-          </div>
-          <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/60">Accent</dt>
-            <dd className="text-white">{generationPrefs.color_accent ?? "—"}</dd>
-          </div>
-          <div className="flex gap-2">
-            <dt className="w-36 shrink-0 text-white/60 align-top">Design notes</dt>
-            <dd className="whitespace-pre-wrap text-white/80">
-              {generationPrefs.design_notes?.trim() ? generationPrefs.design_notes : "—"}
-            </dd>
-          </div>
-        </dl>
-      </section>
-
+      {/* ── Configure & regenerate ─────────────────────────────────────────────── */}
       <section className="rounded-xl border border-gold/30 bg-gold/5 p-6">
-        <h2 className="font-heading text-lg font-semibold text-white">Regenerate site</h2>
+        <h2 className="font-heading text-lg font-semibold text-white">Configure &amp; regenerate</h2>
         <p className="mt-1 text-sm text-white/50">
-          Queues a new full site generation run with the saved inputs above (same as{" "}
-          <code className="text-white/70">POST /api/shops/:shopId/generate-site</code>).
+          Set the design brief, models, and palette, then regenerate the site. Progress shows below.
         </p>
-        <Form method="post" className="mt-4">
-          <input type="hidden" name="_action" value="regenerate-site" />
-          <Button type="submit" disabled={busy} className="min-h-12">
-            {busy ? (
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-white/80">Design notes</label>
+            <textarea
+              value={designNotes}
+              onChange={(e) => setDesignNotes(e.target.value)}
+              rows={4}
+              disabled={running}
+              className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold"
+              placeholder="Style and content hints for the pipeline…"
+            />
+          </div>
+
+          <ModelPicker
+            label="Text & research"
+            models={staticPickerModels("text")}
+            value={textModel}
+            onChange={setTextModel}
+            effort={textEffort}
+            onEffortChange={setTextEffort}
+            disabled={running}
+          />
+          <ModelPicker
+            label="Image"
+            models={staticPickerModels("image")}
+            value={imageModel}
+            onChange={setImageModel}
+            disabled={running}
+          />
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-white/80">Site composer</label>
+            <select
+              value={composer}
+              onChange={(e) => setComposer(e.target.value)}
+              disabled={running}
+              className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+            >
+              <option value="ai" className="bg-dark">AI design director (default)</option>
+              <option value="seed" className="bg-dark">Deterministic seed</option>
+            </select>
+          </div>
+
+          {/* Palette */}
+          <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Colour palette</h3>
+              <span className="text-xs text-white/60">{selectedPalette ? selectedPalette.name : "Auto (AI picks)"}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Colour palette">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={selectedPalette === null}
+                disabled={running}
+                onClick={() => setPaletteId(null)}
+                className={`col-span-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                  selectedPalette === null
+                    ? "border-gold text-white ring-2 ring-gold/40"
+                    : "border-white/15 text-white/70 hover:border-white/35"
+                }`}
+              >
+                <Sparkles className="h-4 w-4 shrink-0 text-gold" />
+                <span className="flex-1">Let AI choose the palette</span>
+                {selectedPalette === null ? <Check className="h-4 w-4 shrink-0 text-gold" /> : null}
+              </button>
+              {COLOR_PALETTES.map((p) => {
+                const isSel = p.id === paletteId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={isSel}
+                    aria-label={p.name}
+                    title={p.name}
+                    disabled={running}
+                    onClick={() => setPaletteId(p.id)}
+                    className={`relative flex aspect-square flex-col overflow-hidden rounded-lg border transition-colors ${
+                      isSel ? "border-gold ring-2 ring-gold/40" : "border-white/15 hover:border-white/35"
+                    }`}
+                  >
+                    <span className="flex-1" style={{ background: p.primary }} />
+                    <span className="h-2.5 w-full" style={{ background: p.accent }} />
+                    {isSel ? (
+                      <span className="absolute right-1 top-1 rounded-full bg-gold p-0.5 text-black">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Include images + action */}
+          <label className="flex w-fit cursor-pointer select-none items-start gap-2.5 text-sm text-white/80">
+            <input
+              type="checkbox"
+              checked={includeImages}
+              disabled={running}
+              onChange={(e) => setIncludeImages(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-gold"
+            />
+            <span>
+              Generate new images (hero, logo, service photos)
+              <span className="ml-1 text-white/45">— slower, 1–3 min. Uncheck to reuse the current images.</span>
+            </span>
+          </label>
+
+          {reuseBlocked ? (
+            <p className="text-xs text-amber-300/80">
+              This shop has no saved hero/logo yet, so images must be generated. Tick the box above (or upload them below).
+            </p>
+          ) : null}
+
+          {genError ? (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+              {genError}
+            </div>
+          ) : null}
+
+          <Button type="button" className="min-h-12" disabled={running || reuseBlocked} onClick={handleRegenerate}>
+            {running ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Starting…
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {genBusy && !genPoll ? "Starting…" : "Generating…"}
               </>
             ) : (
               <>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Regenerate site
+                <Sparkles className="mr-2 h-4 w-4" /> Regenerate site
               </>
             )}
           </Button>
-        </Form>
+
+          {showProgress ? (
+            <div className="rounded-xl border border-white/10 bg-dark-100 p-4">
+              <ol className="list-none space-y-2 p-0" aria-label="Generation progress">
+                {REGEN_STEP_LABELS.map((label, i) => (
+                  <RegenStepRow key={label} label={label} state={stepStates[i]!} index={i} />
+                ))}
+              </ol>
+              {jobComplete ? (
+                <p className="mt-3 text-sm text-emerald-300">Done. The updated site is live.</p>
+              ) : null}
+              {jobFailed ? (
+                <p className="mt-3 text-sm text-red-300">{genPoll?.error ?? "Generation failed."}</p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </section>
 
+      {/* ── Brand images ────────────────────────────────────────────────────────── */}
+      <section className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <h2 className="font-heading text-lg font-semibold text-white">Brand images</h2>
+        <p className="mt-1 text-sm text-white/50">
+          Upload a logo or hero image to use instead of AI-generated ones. Regenerate with images unchecked to keep them.
+        </p>
+        {imgError ? (
+          <div className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            {imgError}
+          </div>
+        ) : null}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {(["logo", "hero"] as const).map((type) => {
+            const src = type === "logo" ? logoSrc : heroSrc;
+            const inputRef = type === "logo" ? logoInputRef : heroInputRef;
+            const busy = imgBusy === type;
+            return (
+              <div key={type} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-medium capitalize text-white/80">{type}</span>
+                </div>
+                <div className="flex aspect-video items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/30">
+                  {src ? (
+                    <img src={src} alt={`${type} preview`} className="max-h-full max-w-full object-contain" />
+                  ) : (
+                    <span className="text-xs text-white/40">No {type} set</span>
+                  )}
+                </div>
+                <input
+                  ref={inputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) void handleImageUpload(type, f);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3 w-full"
+                  disabled={busy}
+                  onClick={() => inputRef.current?.click()}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Uploading…
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="mr-1 h-3.5 w-3.5" /> Upload {type}
+                    </>
+                  )}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── Danger zone ─────────────────────────────────────────────────────────── */}
       <section className="rounded-xl border border-red-500/30 bg-red-500/5 p-6">
         <h2 className="font-heading text-lg font-semibold text-red-200/90">Danger zone</h2>
         <p className="mt-1 text-sm text-white/60">
