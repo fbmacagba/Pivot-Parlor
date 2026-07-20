@@ -11,6 +11,25 @@ export function isTerminalJobState(status: string, stage: string): boolean {
   return st === "complete" || st === "failed" || sg === "complete" || sg === "done";
 }
 
+/** Body for a site-regeneration request from the expanded dev editor.
+ *  `includeImages` false keeps the fast path that reuses the existing
+ *  hero/logo/catalog images (skip_images); true regenerates them (hero, logo,
+ *  service photos). A chosen palette overrides the AI's colours; "auto"
+ *  (palette null/omitted) leaves both out so the AI picks. */
+export function buildRegeneratePayload(opts: {
+  includeImages: boolean;
+  palette?: { primary: string; accent: string } | null;
+}): { skip_images: boolean; color_primary?: string; color_accent?: string } {
+  const body: { skip_images: boolean; color_primary?: string; color_accent?: string } = {
+    skip_images: !opts.includeImages,
+  };
+  if (opts.palette) {
+    body.color_primary = opts.palette.primary;
+    body.color_accent = opts.palette.accent;
+  }
+  return body;
+}
+
 /** Map Worker job status/stage to the 7-row progress UI (indices 0–6). */
 export function regenJobStepStates(status: string, stage: string): RegenStepUiState[] {
   const st = (status || "").toLowerCase();
