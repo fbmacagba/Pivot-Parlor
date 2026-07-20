@@ -43,7 +43,3 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   if (!workerResponseLooksLikeJson(res)) return json({ error: "Bad gateway" }, { status: 502 });
   return json(await res.json(), { status: res.status });
 }
-
-export default function ApiShopGenerateImage() {
-  return null;
-}

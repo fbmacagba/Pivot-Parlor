@@ -24,7 +24,3 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const data = await res.json();
   return json(data, { status: res.status });
 }
-
-export default function ApiMeProfile() {
-  return null;
-}

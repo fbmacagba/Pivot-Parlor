@@ -607,9 +607,6 @@ export default function DevShops() {
                               </generateFetcher.Form>
                             )}
                             <Button asChild variant="ghost" size="sm">
-                              <Link to={`/dev/shops/${shop.id}`}>Details</Link>
-                            </Button>
-                            <Button asChild variant="ghost" size="sm">
                               <Link to={`/dev/ai-deploy?shopId=${shop.id}`}>
                                 <Bot className="h-3.5 w-3.5 mr-1" /> AI Deploy
                               </Link>

@@ -23,7 +23,3 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
   return json(data, { status: res.status });
 }
-
-export default function ApiMeResendVerification() {
-  return null;
-}

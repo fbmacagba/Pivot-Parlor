@@ -54,7 +54,3 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return json({ success: false, error: "Unable to reach shop service" }, { status: 502 });
   }
 }
-
-export default function ApiShopDelete() {
-  return null;
-}
