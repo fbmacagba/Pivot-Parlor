@@ -29,6 +29,8 @@ import { ReviewsMarqueeSection } from "~/components/site/sections/ReviewsMarquee
 import { ReviewsSpotlightSection } from "~/components/site/sections/ReviewsSpotlightSection";
 import { LocationSection } from "~/components/site/sections/LocationSection";
 import { LocationMapFirstSection } from "~/components/site/sections/LocationMapFirstSection";
+import { SignatureGallerySection } from "~/components/site/sections/SignatureGallerySection";
+import { SignatureSpotlightSection } from "~/components/site/sections/SignatureSpotlightSection";
 import { isGenericCategory } from "~/components/site/sections/bits";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { Reveal } from "~/components/site/motion/Reveal";
@@ -283,6 +285,30 @@ export default function CommercialTemplate({
           ? hasAddress
           : true;
 
+  // Signature imagery pool: hero + service photos, deduped, order-stable.
+  const signatureImages = Array.from(
+    new Set([heroSrc, ...services.map((s) => (typeof s.image_url === "string" ? s.image_url : ""))].map((s) => s.trim()).filter(Boolean)),
+  );
+
+  const v3SignatureNode = (plan: RenderPlan): ReactNode => {
+    switch (plan.signature) {
+      case "gallery":
+        return signatureImages.length >= 3 ? (
+          <SignatureGallerySection ctx={ctx} images={signatureImages} density={plan.density} motif={plan.motif} />
+        ) : null;
+      case "marquee-reviews":
+        return sortedReviews.length > 0 ? (
+          <ReviewsMarqueeSection ctx={ctx} density={plan.density} animate={plan.reveal !== null} heading="What clients say" />
+        ) : null;
+      case "spotlight":
+        return services.length > 0 ? (
+          <SignatureSpotlightSection ctx={ctx} density={plan.density} motif={plan.motif} animate={plan.reveal !== null} />
+        ) : null;
+      default:
+        return null;
+    }
+  };
+
   return (
     <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
       {v3Plan ? (
@@ -300,7 +326,15 @@ export default function CommercialTemplate({
                   {v3SectionNode(p.key, p.variant, plan)}
                 </Reveal>
               ))}
-              <Reveal enabled={enabled} style={style} index={visible.length} lively={lively}>
+              {(() => {
+                const sig = v3SignatureNode(plan);
+                return sig ? (
+                  <Reveal enabled={enabled} style={style} index={visible.length} lively={lively}>
+                    {sig}
+                  </Reveal>
+                ) : null;
+              })()}
+              <Reveal enabled={enabled} style={style} index={visible.length + 1} lively={lively}>
                 <FinalCtaSection ctx={ctx} glow={plan.glow} />
               </Reveal>
             </>
