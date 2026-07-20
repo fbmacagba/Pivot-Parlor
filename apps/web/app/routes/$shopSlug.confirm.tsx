@@ -8,6 +8,7 @@ import { createApiClient } from "~/lib/api";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
 import { ThemedButton, lightDark, platformFallbackVars } from "~/components/ThemedBookingControls";
+import { BookingConfirmMap } from "~/components/BookingConfirmMap";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 type BookingStatus = {
@@ -73,6 +74,8 @@ function ConfirmShell({ children }: { children: ReactNode }) {
 
 export default function BookingConfirm() {
   const { slug, booking, bookingId, awaitingPayment, apiUrl } = useLoaderData<typeof loader>();
+  const layoutData = useRouteLoaderData<typeof shopLoader>("routes/$shopSlug");
+  const shopAddress = layoutData?.settings?.address?.trim() || null;
   const [status, setStatus] = useState<string>(booking?.status ?? "unknown");
   const [pollTimedOut, setPollTimedOut] = useState(false);
 
@@ -160,6 +163,7 @@ export default function BookingConfirm() {
       {bookingId && (
         <p className="mt-2 font-mono text-xs text-[color:var(--st-ink-50)]">Ref: {bookingId}</p>
       )}
+      {shopAddress ? <BookingConfirmMap address={shopAddress} /> : null}
       <div className="mt-8 flex flex-col gap-3">
         <ThemedButton asChild size="lg">
           <a
