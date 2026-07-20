@@ -19,6 +19,8 @@ import { ServicesSection } from "~/components/site/sections/ServicesSection";
 import { ServicesRowsSection } from "~/components/site/sections/ServicesRowsSection";
 import { ServicesShowcaseSection } from "~/components/site/sections/ServicesShowcaseSection";
 import { AboutSection } from "~/components/site/sections/AboutSection";
+import { AboutSplitImageSection } from "~/components/site/sections/AboutSplitImageSection";
+import { AboutStorySection } from "~/components/site/sections/AboutStorySection";
 import { TeamSection } from "~/components/site/sections/TeamSection";
 import { TeamStripSection } from "~/components/site/sections/TeamStripSection";
 import { HowSection } from "~/components/site/sections/HowSection";
@@ -229,7 +231,13 @@ export default function CommercialTemplate({
           <ServicesSection ctx={ctx} cols={3} glow={plan.glow} />
         );
       case "about":
-        return <AboutSection ctx={ctx} pillarStyle="icons" />;
+        return variant === "split-image" ? (
+          <AboutSplitImageSection ctx={ctx} density={plan.density} />
+        ) : variant === "story" ? (
+          <AboutStorySection ctx={ctx} density={plan.density} />
+        ) : (
+          <AboutSection ctx={ctx} pillarStyle="icons" />
+        );
       case "team":
         return variant === "strip" ? <TeamStripSection ctx={ctx} density={plan.density} /> : <TeamSection ctx={ctx} />;
       case "how":
