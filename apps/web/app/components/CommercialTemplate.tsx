@@ -9,16 +9,32 @@ import { normalizeDesignSpec, seedComposeDesignSpec } from "@repo/utils";
 import { composeRenderPlan } from "~/components/site/composePlan";
 import type { RenderPlan } from "~/components/site/composePlan";
 import { HeroSection } from "~/components/site/sections/HeroSection";
+import { HeroSplitSection } from "~/components/site/sections/HeroSplitSection";
+import { HeroEditorialSection } from "~/components/site/sections/HeroEditorialSection";
+import { HeroMinimalSection } from "~/components/site/sections/HeroMinimalSection";
 import { FinalCtaSection } from "~/components/site/sections/FinalCtaSection";
 import { TrustSection } from "~/components/site/sections/TrustSection";
+import { TrustChipsSection } from "~/components/site/sections/TrustChipsSection";
 import { ServicesSection } from "~/components/site/sections/ServicesSection";
+import { ServicesRowsSection } from "~/components/site/sections/ServicesRowsSection";
+import { ServicesShowcaseSection } from "~/components/site/sections/ServicesShowcaseSection";
 import { AboutSection } from "~/components/site/sections/AboutSection";
+import { AboutSplitImageSection } from "~/components/site/sections/AboutSplitImageSection";
+import { AboutStorySection } from "~/components/site/sections/AboutStorySection";
 import { TeamSection } from "~/components/site/sections/TeamSection";
+import { TeamStripSection } from "~/components/site/sections/TeamStripSection";
 import { HowSection } from "~/components/site/sections/HowSection";
 import { ReviewsSection } from "~/components/site/sections/ReviewsSection";
+import { ReviewsMarqueeSection } from "~/components/site/sections/ReviewsMarqueeSection";
+import { ReviewsSpotlightSection } from "~/components/site/sections/ReviewsSpotlightSection";
 import { LocationSection } from "~/components/site/sections/LocationSection";
+import { LocationMapFirstSection } from "~/components/site/sections/LocationMapFirstSection";
+import { SignatureGallerySection } from "~/components/site/sections/SignatureGallerySection";
+import { SignatureSpotlightSection } from "~/components/site/sections/SignatureSpotlightSection";
 import { isGenericCategory } from "~/components/site/sections/bits";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
+import { Reveal } from "~/components/site/motion/Reveal";
+import "~/components/site/motion/motion.css";
 
 export type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 
@@ -195,45 +211,146 @@ export default function CommercialTemplate({
 
   const sections: Record<SectionKey, ReactNode> = {
     trust: <TrustSection ctx={ctx} />,
-    services: (
-      <ServicesSection
-        ctx={ctx}
-        cols={v3Plan ? 3 : archetype.servicesCols}
-        glow={v3Plan ? v3Plan.glow : archetype.glow}
-      />
-    ),
-    about: <AboutSection ctx={ctx} pillarStyle={v3Plan ? "icons" : archetype.pillarStyle} />,
+    services: <ServicesSection ctx={ctx} cols={archetype.servicesCols} glow={archetype.glow} />,
+    about: <AboutSection ctx={ctx} pillarStyle={archetype.pillarStyle} />,
     team: <TeamSection ctx={ctx} />,
-    how: (
-      <HowSection
-        ctx={ctx}
-        stepsStyle={v3Plan ? "grid" : archetype.stepsStyle}
-        glow={v3Plan ? v3Plan.glow : archetype.glow}
-      />
-    ),
+    how: <HowSection ctx={ctx} stepsStyle={archetype.stepsStyle} glow={archetype.glow} />,
     reviews: <ReviewsSection ctx={ctx} />,
     location: <LocationSection ctx={ctx} />,
+  };
+
+  // v3 dispatch: variant -> component + options. Unknown ids render the
+  // section's standard component. The "how" variants map onto stepsStyle.
+  const v3SectionNode = (key: SectionKey, variant: string, plan: RenderPlan): ReactNode => {
+    switch (key) {
+      case "trust":
+        return variant === "chips" ? <TrustChipsSection ctx={ctx} density={plan.density} /> : <TrustSection ctx={ctx} />;
+      case "services":
+        return variant === "rows" ? (
+          <ServicesRowsSection ctx={ctx} density={plan.density} glow={plan.glow} />
+        ) : variant === "showcase" ? (
+          <ServicesShowcaseSection ctx={ctx} density={plan.density} glow={plan.glow} />
+        ) : (
+          <ServicesSection ctx={ctx} cols={3} glow={plan.glow} />
+        );
+      case "about":
+        return variant === "split-image" ? (
+          <AboutSplitImageSection ctx={ctx} density={plan.density} />
+        ) : variant === "story" ? (
+          <AboutStorySection ctx={ctx} density={plan.density} />
+        ) : (
+          <AboutSection ctx={ctx} pillarStyle="icons" />
+        );
+      case "team":
+        return variant === "strip" ? <TeamStripSection ctx={ctx} density={plan.density} /> : <TeamSection ctx={ctx} />;
+      case "how":
+        return <HowSection ctx={ctx} stepsStyle={variant === "row" ? "row" : "grid"} glow={plan.glow} />;
+      case "reviews":
+        return variant === "marquee" ? (
+          <ReviewsMarqueeSection ctx={ctx} density={plan.density} animate={plan.reveal !== null} />
+        ) : variant === "spotlight" ? (
+          <ReviewsSpotlightSection ctx={ctx} density={plan.density} />
+        ) : (
+          <ReviewsSection ctx={ctx} />
+        );
+      case "location":
+        return variant === "map-first" ? <LocationMapFirstSection ctx={ctx} density={plan.density} /> : <LocationSection ctx={ctx} />;
+    }
+  };
+
+  const v3Hero = (plan: RenderPlan): ReactNode => {
+    const motionClass = plan.hero.motion === "fade" ? "st-hero-fade" : "";
+    const parallax = plan.hero.motion === "parallax";
+    switch (plan.hero.variant) {
+      case "split":
+        return <HeroSplitSection ctx={ctx} density={plan.density} motif={plan.motif} motionClass={motionClass} parallax={parallax} />;
+      case "editorial":
+        return <HeroEditorialSection ctx={ctx} density={plan.density} motif={plan.motif} motionClass={motionClass} parallax={parallax} />;
+      case "minimal":
+        return <HeroMinimalSection ctx={ctx} density={plan.density} motif={plan.motif} motionClass={motionClass} />;
+      default:
+        return <HeroSection ctx={ctx} centered={plan.hero.centered} minH={plan.hero.minH} motionClass={motionClass} parallax={parallax} />;
+    }
+  };
+
+  // A wrapped-but-empty reveal div would still animate; skip sections that
+  // will render null (same conditions the components enforce internally).
+  const sectionHasContent = (key: SectionKey): boolean =>
+    key === "team"
+      ? staff.length > 0
+      : key === "reviews"
+        ? sortedReviews.length > 0
+        : key === "location"
+          ? hasAddress
+          : true;
+
+  // Signature imagery pool: hero + service photos, deduped, order-stable.
+  const signatureImages = Array.from(
+    new Set([heroSrc, ...services.map((s) => (typeof s.image_url === "string" ? s.image_url : ""))].map((s) => s.trim()).filter(Boolean)),
+  );
+
+  const v3SignatureNode = (plan: RenderPlan): ReactNode => {
+    switch (plan.signature) {
+      case "gallery":
+        return signatureImages.length >= 3 ? (
+          <SignatureGallerySection ctx={ctx} images={signatureImages} density={plan.density} motif={plan.motif} />
+        ) : null;
+      case "marquee-reviews":
+        return sortedReviews.length > 0 ? (
+          <ReviewsMarqueeSection ctx={ctx} density={plan.density} animate={plan.reveal !== null} heading="What clients say" />
+        ) : null;
+      case "spotlight":
+        return services.length > 0 ? (
+          <SignatureSpotlightSection ctx={ctx} density={plan.density} motif={plan.motif} animate={plan.reveal !== null} />
+        ) : null;
+      default:
+        return null;
+    }
   };
 
   return (
     <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
       {v3Plan ? (
-        <>
-          <HeroSection ctx={ctx} centered={v3Plan.hero.centered} minH={v3Plan.hero.minH} />
-          {v3Plan.sections.map((p) => (
-            <Fragment key={p.key}>{sections[p.key]}</Fragment>
-          ))}
-          <FinalCtaSection ctx={ctx} glow={v3Plan.glow} />
-        </>
+        (() => {
+          const plan = v3Plan;
+          const visible = plan.sections.filter((p) => sectionHasContent(p.key));
+          const enabled = plan.reveal !== null;
+          const lively = plan.reveal?.intensity === "lively";
+          const style = plan.reveal?.style ?? "fade-up";
+          const body = (
+            <>
+              {v3Hero(plan)}
+              {visible.map((p, i) => (
+                <Reveal key={p.key} enabled={enabled} style={style} index={i} lively={lively}>
+                  {v3SectionNode(p.key, p.variant, plan)}
+                </Reveal>
+              ))}
+              {(() => {
+                const sig = v3SignatureNode(plan);
+                return sig ? (
+                  <Reveal enabled={enabled} style={style} index={visible.length} lively={lively}>
+                    {sig}
+                  </Reveal>
+                ) : null;
+              })()}
+              <Reveal enabled={enabled} style={style} index={visible.length + 1} lively={lively}>
+                <FinalCtaSection ctx={ctx} glow={plan.glow} />
+              </Reveal>
+            </>
+          );
+          return plan.reveal ? (
+            <div className={`st-motion-${plan.reveal.intensity}`}>{body}</div>
+          ) : (
+            body
+          );
+        })()
       ) : (
         <>
           <HeroSection ctx={ctx} centered={heroCentered} minH={archetype.heroMinH} />
-
           {/* Middle sections in the archetype's order */}
           {archetype.order.map((key) => (
             <Fragment key={key}>{sections[key]}</Fragment>
           ))}
-
           <FinalCtaSection ctx={ctx} glow={archetype.glow} />
         </>
       )}

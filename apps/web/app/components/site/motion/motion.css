@@ -1,0 +1,92 @@
+/* Site Design v3 motion (2b-2). The hidden state (.st-reveal) is added only
+   by JS after hydration, so no-JS visitors always see every section. Reduced
+   motion kills all movement at the stylesheet level. */
+
+.st-reveal {
+  opacity: 0;
+  transition:
+    opacity var(--st-reveal-dur, 600ms) ease-out var(--st-reveal-delay, 0ms),
+    transform var(--st-reveal-dur, 600ms) ease-out var(--st-reveal-delay, 0ms);
+}
+.st-reveal.st-reveal--fade-up {
+  transform: translateY(var(--st-reveal-dist, 20px));
+}
+.st-reveal.st-reveal--scale {
+  transform: scale(0.96);
+}
+.st-reveal.st-reveal--slide {
+  transform: translateX(calc(var(--st-reveal-dist, 20px) * -1));
+}
+.st-reveal.is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* Intensity scopes set the distance/duration the reveal transitions read. */
+.st-motion-calm {
+  --st-reveal-dist: 14px;
+  --st-reveal-dur: 500ms;
+}
+.st-motion-lively {
+  --st-reveal-dist: 26px;
+  --st-reveal-dur: 650ms;
+}
+
+/* Hero load-in (hero.motion "fade"). */
+@keyframes st-hero-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.st-hero-fade {
+  animation: st-hero-fade 700ms ease-out both;
+}
+
+/* Reviews marquee: the track holds the card list twice; shifting half the
+   track width loops seamlessly. Hover or keyboard focus pauses it. */
+@keyframes st-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.st-marquee-track {
+  animation: st-marquee var(--st-marquee-dur, 45s) linear infinite;
+}
+.st-marquee:hover .st-marquee-track,
+.st-marquee:focus-within .st-marquee-track {
+  animation-play-state: paused;
+}
+
+/* Touch devices cannot hover-pause: stop the animation and let the rail be
+   swiped instead, hiding the loop's duplicate half. */
+@media (pointer: coarse) {
+  .st-marquee {
+    overflow-x: auto;
+  }
+  .st-marquee-track {
+    animation: none;
+  }
+  .st-marquee-track > [aria-hidden] {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .st-hero-fade {
+    animation: none;
+  }
+  .st-marquee-track {
+    animation: none;
+  }
+}
