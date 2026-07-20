@@ -68,7 +68,7 @@ export const MODEL_CATALOG: CatalogProvider[] = [
         supportsEffort: true,
       },
       {
-        id: "google/gemini-3.1-flash-image-preview",
+        id: "google/gemini-3.1-flash-image",
         name: "Gemini 3.1 Flash Image",
         kind: "image",
         description: "Pipeline default (Nano Banana 2).",
@@ -258,4 +258,4 @@ export function findCatalogModel(
 }
 
 export const DEFAULT_TEXT_MODEL_ID = "google/gemini-3.1-flash-lite-preview";
-export const DEFAULT_IMAGE_MODEL_ID = "google/gemini-3.1-flash-image-preview";
+export const DEFAULT_IMAGE_MODEL_ID = "google/gemini-3.1-flash-image";

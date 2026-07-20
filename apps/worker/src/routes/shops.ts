@@ -733,7 +733,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
 
 // ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer or admin) ───
 
-const DEFAULT_OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+const DEFAULT_OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 
 shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
   const user = getUser(c);

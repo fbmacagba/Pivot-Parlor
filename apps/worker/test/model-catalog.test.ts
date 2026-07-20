@@ -39,7 +39,7 @@ describe("MODEL_CATALOG shape", () => {
 
   it("keeps the pipeline defaults unchanged", () => {
     expect(DEFAULT_TEXT_MODEL_ID).toBe("google/gemini-3.1-flash-lite-preview");
-    expect(DEFAULT_IMAGE_MODEL_ID).toBe("google/gemini-3.1-flash-image-preview");
+    expect(DEFAULT_IMAGE_MODEL_ID).toBe("google/gemini-3.1-flash-image");
   });
 
   it("offers image models only from providers that have one (google, openai)", () => {
@@ -77,7 +77,7 @@ describe("model-registry derives from the shared catalog", () => {
   it("serves all catalog models (text + image) with kind", () => {
     const all = fallbackModels();
     expect(all.length).toBe(catalogModels().length);
-    expect(all.find((m) => m.id === "google/gemini-3.1-flash-image-preview")?.kind).toBe("image");
+    expect(all.find((m) => m.id === "google/gemini-3.1-flash-image")?.kind).toBe("image");
     expect(all.find((m) => m.id === "anthropic/claude-sonnet-5")?.kind).toBe("text");
   });
 
@@ -105,6 +105,6 @@ describe("model-registry derives from the shared catalog", () => {
   it("getModel enforces kind when asked", () => {
     expect(getModel("anthropic/claude-sonnet-5", "text")).toBeDefined();
     expect(getModel("anthropic/claude-sonnet-5", "image")).toBeUndefined();
-    expect(getModel("google/gemini-3.1-flash-image-preview", "image")).toBeDefined();
+    expect(getModel("google/gemini-3.1-flash-image", "image")).toBeDefined();
   });
 });

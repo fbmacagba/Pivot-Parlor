@@ -3,7 +3,7 @@
  * FLUX (plain chat body, image URL in response.data[0].url or message).
  */
 
-export const OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+export const OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
