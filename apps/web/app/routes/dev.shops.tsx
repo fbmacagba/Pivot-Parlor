@@ -657,7 +657,11 @@ export default function DevShops() {
       cancelled = true;
       stop();
     };
-  }, [expandedGenJob?.jobId, revalidator]);
+    // Keyed on the job id only: revalidator.revalidate is stable, and including
+    // the (identity-unstable) revalidator object would rebuild this interval on
+    // every unrelated revalidation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedGenJob?.jobId]);
 
   const showExpandedGenProgressUi =
     Boolean(expandedGenJob) || expandedGenFetcher.state === "submitting";
@@ -800,8 +804,8 @@ export default function DevShops() {
                 const isActiveShop = shop.status === "active";
                 const isExpanded = expandedShopId === shop.id;
                 const showDraftTools = isActiveShop && shop.has_site && ws === "draft";
-                const pollStatus = expandedGenPoll?.status ?? "";
-                const pollStage = expandedGenPoll?.stage ?? "";
+                const pollStatus = (expandedGenPoll?.status ?? "").toLowerCase();
+                const pollStage = (expandedGenPoll?.stage ?? "").toLowerCase();
                 const optimisticQueued =
                   expandedGenFetcher.state === "submitting" ||
                   (Boolean(expandedGenJob) && expandedGenJob?.shopId === shop.id && !expandedGenPoll);
