@@ -388,10 +388,16 @@ export default function DevShops() {
     setExpLogoPendingUrl(null);
     setExpHeroPendingUrl(null);
     setExpPaletteId(null);
-    setRegenIncludeImages(true);
     setExpandedGenJob(null);
     setExpandedGenPoll(null);
   }, [expandedShopId, shops, apiUrl]);
+
+  // Reset the "include images" choice only when a different row opens — keyed on
+  // expandedShopId alone so an unrelated list revalidation (which changes the
+  // `shops` reference) can't silently re-check the box after the user unchecks it.
+  useEffect(() => {
+    setRegenIncludeImages(true);
+  }, [expandedShopId]);
 
   useEffect(() => {
     if (uploadImageFetcher.state !== "idle") return;
