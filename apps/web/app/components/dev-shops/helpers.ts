@@ -2,6 +2,15 @@
 // Extracted from dev.shops.tsx (T7.7) — no behavior change.
 import type { RegenStepUiState } from "./types";
 
+/** True once a generation job has reached a terminal state (nothing more will
+ *  happen). Mirrors the display's jobComplete/jobFailed test so the poller and
+ *  the UI agree on when to stop. */
+export function isTerminalJobState(status: string, stage: string): boolean {
+  const st = (status || "").toLowerCase();
+  const sg = (stage || "").toLowerCase();
+  return st === "complete" || st === "failed" || sg === "complete" || sg === "done";
+}
+
 /** Map Worker job status/stage to the 7-row progress UI (indices 0–6). */
 export function regenJobStepStates(status: string, stage: string): RegenStepUiState[] {
   const st = (status || "").toLowerCase();
