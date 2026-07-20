@@ -72,3 +72,41 @@ export function composeRenderPlan(spec: DesignSpec): RenderPlan {
     reveal,
   };
 }
+
+/** Which of the shop's own photos exist. A few v3 variants are built around
+ *  imagery and fall back to a plain gradient panel when there is none — on a
+ *  photo-less shop that reads as blank squares, not a design. */
+export interface ImageAvailability {
+  /** At least one service carries a non-empty image_url. */
+  hasServiceImages: boolean;
+  /** A non-empty hero image is present. */
+  hasHeroImage: boolean;
+}
+
+/** Post-process a render plan for a shop with no photography: swap the
+ *  image-hungry variants for their text-forward equivalents so no section
+ *  renders a placeholder panel. Applied after composeRenderPlan at render time
+ *  (it needs the shop's live media, which the pure spec does not carry).
+ *
+ *  When any service image exists, every affected variant can draw a real
+ *  photo, so the plan is returned untouched. With no service images:
+ *   - services "showcase" (full-bleed photo cards) → "rows" (a price list)
+ *   - "spotlight" signature (a photo stage) is dropped
+ *   - about "split-image" → "story", but only when there is also no hero
+ *     image, since split-image falls back to the hero photo before going blank
+ *  Every other variant (grid's thin accent band, the self-guarding gallery
+ *  signature, all hero variants) already degrades to an intentional look and
+ *  is left alone. */
+export function downgradeForImages(plan: RenderPlan, images: ImageAvailability): RenderPlan {
+  if (images.hasServiceImages) return plan;
+  return {
+    ...plan,
+    sections: plan.sections.map((s) => {
+      if (s.key === "services" && s.variant === "showcase") return { ...s, variant: "rows" };
+      if (s.key === "about" && s.variant === "split-image" && !images.hasHeroImage)
+        return { ...s, variant: "story" };
+      return s;
+    }),
+    signature: plan.signature === "spotlight" ? null : plan.signature,
+  };
+}

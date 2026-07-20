@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { seedComposeDesignSpec, type DesignSpec } from "@repo/utils";
-import { composeRenderPlan } from "./composePlan";
+import { composeRenderPlan, downgradeForImages, type RenderPlan } from "./composePlan";
 
 describe("composeRenderPlan", () => {
   const spec: DesignSpec = seedComposeDesignSpec("plan-shop");
@@ -61,5 +61,51 @@ describe("composeRenderPlan", () => {
     expect(p.sections.some((s) => s.key === "reviews")).toBe(false);
     const q = composeRenderPlan({ ...spec, signature: "gallery" });
     expect(q.sections.some((s) => s.key === "reviews")).toBe(true);
+  });
+});
+
+describe("downgradeForImages", () => {
+  const base = composeRenderPlan(seedComposeDesignSpec("dg-shop"));
+  // A plan that exercises every image-hungry variant at once.
+  const imageHungry: RenderPlan = {
+    ...base,
+    sections: [
+      { key: "services", variant: "showcase" },
+      { key: "about", variant: "split-image" },
+      { key: "team", variant: "cards" },
+    ],
+    signature: "spotlight",
+  };
+  const svar = (p: RenderPlan, key: string) => p.sections.find((s) => s.key === key)?.variant;
+
+  it("returns the plan untouched when any service image exists", () => {
+    const out = downgradeForImages(imageHungry, { hasServiceImages: true, hasHeroImage: false });
+    expect(out).toEqual(imageHungry);
+  });
+
+  it("with no service images: showcase → rows and the spotlight signature drops", () => {
+    const out = downgradeForImages(imageHungry, { hasServiceImages: false, hasHeroImage: true });
+    expect(svar(out, "services")).toBe("rows");
+    expect(out.signature).toBeNull();
+  });
+
+  it("downgrades split-image to story only when there is no hero image either", () => {
+    const withHero = downgradeForImages(imageHungry, { hasServiceImages: false, hasHeroImage: true });
+    expect(svar(withHero, "about")).toBe("split-image");
+    const noHero = downgradeForImages(imageHungry, { hasServiceImages: false, hasHeroImage: false });
+    expect(svar(noHero, "about")).toBe("story");
+  });
+
+  it("leaves non-image-hungry variants alone", () => {
+    const safe: RenderPlan = {
+      ...base,
+      sections: [
+        { key: "services", variant: "grid" },
+        { key: "about", variant: "story" },
+      ],
+      signature: "gallery",
+    };
+    const out = downgradeForImages(safe, { hasServiceImages: false, hasHeroImage: false });
+    expect(out).toEqual(safe);
   });
 });

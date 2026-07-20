@@ -6,7 +6,7 @@ import type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 import { archetypeFor } from "~/components/siteArchetype";
 import type { SectionKey } from "~/components/siteArchetype";
 import { normalizeDesignSpec, seedComposeDesignSpec } from "@repo/utils";
-import { composeRenderPlan } from "~/components/site/composePlan";
+import { composeRenderPlan, downgradeForImages } from "~/components/site/composePlan";
 import type { RenderPlan } from "~/components/site/composePlan";
 import { HeroSection } from "~/components/site/sections/HeroSection";
 import { HeroSplitSection } from "~/components/site/sections/HeroSplitSection";
@@ -199,6 +199,11 @@ export default function CommercialTemplate({
   // original markup and conditional-render rule (team needs staff, reviews
   // need reviews, location needs an address) so it is null exactly when the
   // section would not have rendered before.
+  // Which of the shop's own photos exist — decides whether the image-hungry v3
+  // variants would render placeholder panels (blank squares) for this shop.
+  const hasServiceImages = services.some((s) => trimMediaUrl(s.image_url).length > 0);
+  const hasHeroImage = heroSrc.length > 0;
+
   const rawSpec = site.design_spec;
   let v3Plan: RenderPlan | null = null;
   if ((site.design_version ?? 1) >= 3 && rawSpec && typeof rawSpec === "object") {
@@ -206,7 +211,9 @@ export default function CommercialTemplate({
     // read as belt-and-braces — a corrupt row falls back to the legacy path
     // rather than blanking the site.
     const { spec, fellBack } = normalizeDesignSpec(rawSpec, seedComposeDesignSpec(site.shop_id ?? "unknown"));
-    v3Plan = fellBack.includes("all") ? null : composeRenderPlan(spec);
+    v3Plan = fellBack.includes("all")
+      ? null
+      : downgradeForImages(composeRenderPlan(spec), { hasServiceImages, hasHeroImage });
   }
 
   const sections: Record<SectionKey, ReactNode> = {
