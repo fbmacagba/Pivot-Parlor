@@ -63,6 +63,20 @@
   animation-play-state: paused;
 }
 
+/* Touch devices cannot hover-pause: stop the animation and let the rail be
+   swiped instead, hiding the loop's duplicate half. */
+@media (pointer: coarse) {
+  .st-marquee {
+    overflow-x: auto;
+  }
+  .st-marquee-track {
+    animation: none;
+  }
+  .st-marquee-track > [aria-hidden] {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .st-reveal {
     opacity: 1;

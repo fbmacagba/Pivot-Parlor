@@ -19,13 +19,13 @@ export function TrustChipsSection({ ctx, density }: { ctx: SiteRenderContext; de
           <li className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[color:var(--st-accent-50)] bg-[color:var(--st-accent-10)] px-5 text-sm font-semibold text-[color:var(--st-ink-90)]">
             <StarRow rating={typeof ctx.site.rating === "number" ? ctx.site.rating : 5} className="text-sm" />
             <span>
-              {ctx.statsRating} from {ctx.reviewCount} review{ctx.reviewCount === 1 ? "" : "s"}
+              {ctx.statsRating}★ from {ctx.reviewCount} review{ctx.reviewCount === 1 ? "" : "s"}
             </span>
           </li>
         ) : null}
-        {signals.map((s) => (
+        {signals.map((s, i) => (
           <li
-            key={s}
+            key={`${s}-${i}`}
             className="inline-flex min-h-11 items-center rounded-full border border-[color:var(--st-line-20)] bg-[color:var(--st-card)] px-5 text-sm font-medium text-[color:var(--st-ink-80)]"
           >
             {s}

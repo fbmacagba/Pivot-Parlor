@@ -38,7 +38,7 @@ export function TeamStripSection({ ctx, density }: { ctx: SiteRenderContext; den
                 to={`/${ctx.shopSlug}/book?staffId=${encodeURIComponent(m.id)}`}
                 className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-[var(--st-r-sm)] border border-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--st-accent-text)] transition hover:bg-[color:var(--st-accent-10)]"
               >
-                Book with {m.display_name.split(" ")[0]}
+                Book with {m.display_name.trim().split(/\s+/)[0]}
               </Link>
             </li>
           );

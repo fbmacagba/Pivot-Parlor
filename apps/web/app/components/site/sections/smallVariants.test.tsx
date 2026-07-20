@@ -23,7 +23,7 @@ describe("trust chips", () => {
     expect(html).toContain('id="stats-bar"');
     expect(html).toContain("Walk-ins welcome");
     expect(html).toContain("5-star rated");
-    expect(html).toContain("4.8 from 12 reviews");
+    expect(html).toContain("4.8★ from 12 reviews");
   });
   it("falls back to booking-benefit chips without signals or proof", () => {
     const html = renderToStaticMarkup(

@@ -31,24 +31,31 @@ export function ReviewsMarqueeSection({
   heading?: string;
 }) {
   if (ctx.sortedReviews.length === 0) return null;
-  const cards = ctx.sortedReviews.map((r) => <MarqueeCard key={r.id} r={r} />);
+  const repeat = Math.max(1, Math.ceil(8 / ctx.sortedReviews.length));
+  const half = Array.from({ length: repeat }, (_, rep) =>
+    ctx.sortedReviews.map((r) => <MarqueeCard key={`${r.id}-${rep}`} r={r} />),
+  ).flat();
   return (
     <section className={`overflow-hidden ${sectionPadY(density)}`}>
       <h2 className="mx-auto max-w-7xl px-4 pp-heading text-[clamp(1.75rem,4vw,2.5rem)] font-bold text-[color:var(--st-ink)] md:px-6">
         {heading}
       </h2>
       {animate ? (
-        <div className="st-marquee mt-10">
+        <div className="st-marquee mt-10" role="group" tabIndex={0} aria-label="Customer reviews. Focus to pause the scrolling.">
           <div
             className="st-marquee-track flex w-max"
-            style={{ "--st-marquee-dur": `${Math.max(30, ctx.sortedReviews.length * 8)}s` } as CSSProperties}
+            style={{ "--st-marquee-dur": `${Math.max(30, repeat * ctx.sortedReviews.length * 8)}s` } as CSSProperties}
           >
-            <div className="flex gap-6 pr-6">{cards}</div>
-            <div className="flex gap-6 pr-6" aria-hidden>{cards}</div>
+            <div className="flex gap-6 pr-6">{half}</div>
+            <div className="flex gap-6 pr-6" aria-hidden>{half}</div>
           </div>
         </div>
       ) : (
-        <div className="mt-10 flex snap-x gap-6 overflow-x-auto px-4 pb-4 md:px-6">{cards}</div>
+        <div className="mt-10 flex snap-x gap-6 overflow-x-auto px-4 pb-4 md:px-6">
+          {ctx.sortedReviews.map((r) => (
+            <MarqueeCard key={r.id} r={r} />
+          ))}
+        </div>
       )}
     </section>
   );

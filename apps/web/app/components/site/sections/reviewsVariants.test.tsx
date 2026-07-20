@@ -15,6 +15,23 @@ describe("reviews marquee", () => {
     expect(second).toBeGreaterThan(first); // duplicated for the seamless loop
     expect(html).toContain("aria-hidden");
   });
+  it("fills the animated half to at least 8 cards even with few reviews", () => {
+    const html = renderToStaticMarkup(
+      <ReviewsMarqueeSection
+        ctx={makeTestCtx({
+          sortedReviews: [
+            { id: "r1", customer_name: "Sam", rating: 5, body: "Great cut, will be back.", created_at: "2026-01-05T10:00:00Z" },
+            { id: "r2", customer_name: "Ash", rating: 4, body: "Friendly and quick.", created_at: "2026-01-04T10:00:00Z" },
+          ],
+        })}
+        density="airy"
+        animate
+      />,
+    );
+    // repeat = ceil(8/2) = 4 per half; two halves => 8 total occurrences.
+    expect(html.split("Great cut, will be back.").length - 1).toBe(8);
+    expect(html).toContain('tabindex="0"');
+  });
   it("renders a hand-scrollable rail when motion is off", () => {
     const html = renderToStaticMarkup(<ReviewsMarqueeSection ctx={ctx} density="airy" animate={false} />);
     expect(html).not.toContain("st-marquee-track");

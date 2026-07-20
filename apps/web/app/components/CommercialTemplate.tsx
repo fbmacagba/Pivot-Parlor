@@ -219,9 +219,8 @@ export default function CommercialTemplate({
     location: <LocationSection ctx={ctx} />,
   };
 
-  // v3 dispatch: variant -> component + options. Alternate variants land in
-  // 2b-2 tasks 4-9; until then every id renders the section's standard
-  // component. The "how" variants already exist as stepsStyle.
+  // v3 dispatch: variant -> component + options. Unknown ids render the
+  // section's standard component. The "how" variants map onto stepsStyle.
   const v3SectionNode = (key: SectionKey, variant: string, plan: RenderPlan): ReactNode => {
     switch (key) {
       case "trust":
