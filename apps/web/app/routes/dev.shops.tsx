@@ -28,7 +28,7 @@ import {
 import { ModelPicker } from "~/components/dev-shops/ModelPicker";
 import {
   regenJobStepStates,
-  isTerminalJobState,
+  decidePollAction,
   buildRegeneratePayload,
   toSlug,
   resolvePublicAssetImageUrl,
@@ -581,7 +581,19 @@ export default function DevShops() {
   useEffect(() => {
     if (!devGenJob) return;
     let cancelled = false;
+    const startedAt = Date.now();
+    let failures = 0;
+    let iv: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (iv !== undefined) {
+        clearInterval(iv);
+        iv = undefined;
+      }
+    };
     const tick = async () => {
+      let data:
+        | { status?: string; stage?: string; shopSlug?: string; error?: string }
+        | undefined;
       try {
         const r = await fetch(`/api/jobs/${devGenJob.id}/status`, { cache: "no-store" });
         const j = (await r.json()) as {
@@ -589,26 +601,49 @@ export default function DevShops() {
           data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
         };
         if (cancelled) return;
-        if (!j.success || !j.data) return;
-        const { status, stage, shopSlug, error } = j.data;
-        if (status === "failed") {
-          console.warn("[dev/shops] generation failed", error);
-          setDevGenJob(null);
-          return;
-        }
-        if (stage === "done" || status === "complete") {
-          setDevGenDoneSlug(shopSlug || devGenJob.slug);
-          setDevGenJob(null);
-        }
+        if (j.success && j.data) data = j.data;
       } catch {
-        /* ignore */
+        /* network/parse failure → counts as a failed poll below */
+      }
+      if (cancelled) return;
+
+      const ok = data !== undefined;
+      failures = ok ? 0 : failures + 1;
+      const decision = decidePollAction({
+        ok,
+        status: data?.status ?? "",
+        stage: data?.stage ?? "",
+        elapsedMs: Date.now() - startedAt,
+        consecutiveFailures: failures,
+      });
+
+      switch (decision.kind) {
+        case "terminal":
+          stop();
+          if ((data?.status ?? "") === "failed") {
+            console.warn("[dev/shops] generation failed", data?.error);
+          } else {
+            setDevGenDoneSlug(data?.shopSlug || devGenJob.slug);
+          }
+          setDevGenJob(null);
+          break;
+        case "stalled":
+        case "give-up":
+          // Same failure floor as the regenerate poller: a job the pipeline
+          // orphaned never reaches a terminal state, so stop rather than poll
+          // forever behind the "generation in progress" banner.
+          console.warn("[dev/shops] generation stalled:", decision.message);
+          stop();
+          setDevGenJob(null);
+          break;
+        // "update" | "keep-going": keep polling.
       }
     };
     void tick();
-    const iv = setInterval(tick, 3000);
+    iv = setInterval(tick, 3000);
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      stop();
     };
   }, [devGenJob]);
   const inviteUrl = inviteToken
@@ -635,7 +670,12 @@ export default function DevShops() {
         iv = undefined;
       }
     };
+    const startedAt = Date.now();
+    let failures = 0;
     const tick = async () => {
+      let data:
+        | { status?: string; stage?: string; shopSlug?: string; error?: string }
+        | undefined;
       try {
         const r = await fetch(`/api/jobs/${jobId}/status`, { cache: "no-store" });
         const j = (await r.json()) as {
@@ -643,24 +683,55 @@ export default function DevShops() {
           data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
         };
         if (cancelled) return;
-        if (!j.success || !j.data) return;
-        const { status: st, stage: sg, shopSlug, error: err } = j.data;
-        setExpandedGenPoll({
-          status: st ?? "",
-          stage: sg ?? "",
-          shopSlug,
-          error: err ?? undefined,
-        });
-        // Terminal state: keep the final poll (so the panel shows Complete /
-        // Failed) but stop polling — leaving the interval running hammered the
-        // status endpoint indefinitely. Refresh the list on success so the
-        // regenerated site's new state loads.
-        if (isTerminalJobState(st ?? "", sg ?? "")) {
-          stop();
-          if (st !== "failed") revalidator.revalidate();
-        }
+        if (j.success && j.data) data = j.data;
       } catch {
-        /* keep last poll */
+        /* network/parse failure → counts as a failed poll below */
+      }
+      if (cancelled) return;
+
+      const ok = data !== undefined;
+      failures = ok ? 0 : failures + 1;
+      const decision = decidePollAction({
+        ok,
+        status: data?.status ?? "",
+        stage: data?.stage ?? "",
+        elapsedMs: Date.now() - startedAt,
+        consecutiveFailures: failures,
+      });
+
+      // Reflect any healthy poll — including the final terminal one, so the
+      // panel can show Complete / Failed with the real stage.
+      if (ok) {
+        setExpandedGenPoll({
+          status: data!.status ?? "",
+          stage: data!.stage ?? "",
+          shopSlug: data!.shopSlug,
+          error: data!.error ?? undefined,
+        });
+      }
+
+      switch (decision.kind) {
+        case "terminal":
+          // Stop polling (leaving the interval running hammered the endpoint)
+          // and refresh the list on success so the regenerated site loads.
+          stop();
+          if ((data?.status ?? "") !== "failed") revalidator.revalidate();
+          break;
+        case "stalled":
+        case "give-up":
+          // A crashed/dropped pipeline worker leaves the job non-terminal
+          // forever; without a floor the poller spins and the bar freezes on
+          // "Researching brand & style". Surface it as a failed panel (with a
+          // Try Again button) and stop.
+          setExpandedGenPoll((prev) => ({
+            status: "failed",
+            stage: prev?.stage ?? data?.stage ?? "",
+            shopSlug: prev?.shopSlug ?? data?.shopSlug,
+            error: decision.message,
+          }));
+          stop();
+          break;
+        // "update" | "keep-going": reflected above (if any); keep polling.
       }
     };
     void tick();
