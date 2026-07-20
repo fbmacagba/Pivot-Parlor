@@ -25,6 +25,8 @@ import { TeamSection } from "~/components/site/sections/TeamSection";
 import { TeamStripSection } from "~/components/site/sections/TeamStripSection";
 import { HowSection } from "~/components/site/sections/HowSection";
 import { ReviewsSection } from "~/components/site/sections/ReviewsSection";
+import { ReviewsMarqueeSection } from "~/components/site/sections/ReviewsMarqueeSection";
+import { ReviewsSpotlightSection } from "~/components/site/sections/ReviewsSpotlightSection";
 import { LocationSection } from "~/components/site/sections/LocationSection";
 import { LocationMapFirstSection } from "~/components/site/sections/LocationMapFirstSection";
 import { isGenericCategory } from "~/components/site/sections/bits";
@@ -243,7 +245,13 @@ export default function CommercialTemplate({
       case "how":
         return <HowSection ctx={ctx} stepsStyle={variant === "row" ? "row" : "grid"} glow={plan.glow} />;
       case "reviews":
-        return <ReviewsSection ctx={ctx} />;
+        return variant === "marquee" ? (
+          <ReviewsMarqueeSection ctx={ctx} density={plan.density} animate={plan.reveal !== null} />
+        ) : variant === "spotlight" ? (
+          <ReviewsSpotlightSection ctx={ctx} density={plan.density} />
+        ) : (
+          <ReviewsSection ctx={ctx} />
+        );
       case "location":
         return variant === "map-first" ? <LocationMapFirstSection ctx={ctx} density={plan.density} /> : <LocationSection ctx={ctx} />;
     }
