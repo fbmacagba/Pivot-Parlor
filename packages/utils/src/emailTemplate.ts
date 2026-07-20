@@ -130,6 +130,15 @@ export function googleMapsUrl(query: string): string {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
+/**
+ * Google Maps embeddable iframe URL for a free-form query (a bare address).
+ * Same rule as googleMapsUrl above: pass the bare address, never a
+ * business-name prefix.
+ */
+export function googleMapsEmbedUrl(query: string): string {
+  return `https://www.google.com/maps?q=${encodeURIComponent(query)}&output=embed`;
+}
+
 /** Muted note paragraph (cancellation policy, expiry notes, etc.). */
 export function emailNote(text: string): string {
   return `<p style="font-size:13px;line-height:1.6;color:${COLORS.muted};margin:20px 0 0;font-family:${FONT_STACK};">${text}</p>`;
