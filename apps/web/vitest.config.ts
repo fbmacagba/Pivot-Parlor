@@ -7,8 +7,22 @@ import tsconfigPaths from "vite-tsconfig-paths";
 // via the `~/*` alias the same way route/component code does.
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  // The monorepo root hoists a second React (19.x, pulled in by tooling)
+  // alongside this app's React 18. Externalized deps like @radix-ui/*
+  // would resolve that root copy at require time, and two React instances
+  // in one render break isValidElement (Radix Slot rejects the child as
+  // "not a valid React child"). Dedupe + inlining keeps every import on
+  // this app's React — matching how Vite resolves the production build.
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
   test: {
     environment: "jsdom",
     include: ["app/**/*.test.{ts,tsx}"],
+    server: {
+      deps: {
+        inline: [/@radix-ui/],
+      },
+    },
   },
 });
