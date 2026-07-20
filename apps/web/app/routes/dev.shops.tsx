@@ -28,6 +28,7 @@ import {
 import { ModelPicker } from "~/components/dev-shops/ModelPicker";
 import {
   regenJobStepStates,
+  isTerminalJobState,
   toSlug,
   resolvePublicAssetImageUrl,
   withImageCacheBust,
@@ -570,7 +571,7 @@ export default function DevShops() {
     let cancelled = false;
     const tick = async () => {
       try {
-        const r = await fetch(`/api/jobs/${devGenJob.id}/status`);
+        const r = await fetch(`/api/jobs/${devGenJob.id}/status`, { cache: "no-store" });
         const j = (await r.json()) as {
           success?: boolean;
           data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
@@ -615,9 +616,16 @@ export default function DevShops() {
     if (!expandedGenJob?.jobId) return;
     let cancelled = false;
     const jobId = expandedGenJob.jobId;
+    let iv: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (iv !== undefined) {
+        clearInterval(iv);
+        iv = undefined;
+      }
+    };
     const tick = async () => {
       try {
-        const r = await fetch(`/api/jobs/${jobId}/status`);
+        const r = await fetch(`/api/jobs/${jobId}/status`, { cache: "no-store" });
         const j = (await r.json()) as {
           success?: boolean;
           data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
@@ -631,16 +639,28 @@ export default function DevShops() {
           shopSlug,
           error: err ?? undefined,
         });
+        // Terminal state: keep the final poll (so the panel shows Complete /
+        // Failed) but stop polling — leaving the interval running hammered the
+        // status endpoint indefinitely. Refresh the list on success so the
+        // regenerated site's new state loads.
+        if (isTerminalJobState(st ?? "", sg ?? "")) {
+          stop();
+          if (st !== "failed") revalidator.revalidate();
+        }
       } catch {
         /* keep last poll */
       }
     };
     void tick();
-    const iv = setInterval(tick, 3000);
+    iv = setInterval(tick, 3000);
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      stop();
     };
+    // Keyed on the job id only: revalidator.revalidate is stable, and including
+    // the (identity-unstable) revalidator object would rebuild this interval on
+    // every unrelated revalidation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedGenJob?.jobId]);
 
   const showExpandedGenProgressUi =
@@ -784,8 +804,8 @@ export default function DevShops() {
                 const isActiveShop = shop.status === "active";
                 const isExpanded = expandedShopId === shop.id;
                 const showDraftTools = isActiveShop && shop.has_site && ws === "draft";
-                const pollStatus = expandedGenPoll?.status ?? "";
-                const pollStage = expandedGenPoll?.stage ?? "";
+                const pollStatus = (expandedGenPoll?.status ?? "").toLowerCase();
+                const pollStage = (expandedGenPoll?.stage ?? "").toLowerCase();
                 const optimisticQueued =
                   expandedGenFetcher.state === "submitting" ||
                   (Boolean(expandedGenJob) && expandedGenJob?.shopId === shop.id && !expandedGenPoll);
