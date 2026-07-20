@@ -4,15 +4,7 @@ import { json } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
-
-export type DevShopDetail = {
-  id: string;
-  shop_number: number;
-  name: string;
-  slug: string;
-  type: string;
-  created_at?: string;
-};
+import type { Shop } from "~/components/dev-shops/types";
 
 export type DevGenerationPrefs = {
   template: string;
@@ -43,9 +35,15 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!token) throw new Response("Unauthorized", { status: 401 });
   const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
 
-  let shop: DevShopDetail;
+  // The public GET /api/shops/:id returns a minimal shape; the regenerate hub
+  // needs the developer-scoped fields (has_site, website_status, hero/logo
+  // urls), so pull the full row from the developer shops list and match by id.
+  let shop: Shop;
   try {
-    shop = await api.get<DevShopDetail>(`/api/shops/${shopId}`);
+    const shops = await api.get<Shop[]>("/api/shops");
+    const found = shops.find((s) => s.id === shopId || s.slug === shopId);
+    if (!found) throw new Error("not found");
+    shop = found;
   } catch {
     throw new Response("Shop not found", { status: 404 });
   }
@@ -69,11 +67,11 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     ownerDetails = null;
   }
 
-  return json({ shop, generationPrefs, ownerDetails });
+  return json({ shop, apiUrl: env.API_URL, generationPrefs, ownerDetails });
 }
 
 export default function DevShopLayout() {
-  const { shop, generationPrefs, ownerDetails } = useLoaderData<typeof loader>();
+  const { shop, apiUrl, generationPrefs, ownerDetails } = useLoaderData<typeof loader>();
 
   return (
     <div className="space-y-6">
@@ -88,7 +86,7 @@ export default function DevShopLayout() {
           /{shop.slug} · #{shop.shop_number}
         </p>
       </div>
-      <Outlet context={{ shop, generationPrefs, ownerDetails }} />
+      <Outlet context={{ shop, apiUrl, generationPrefs, ownerDetails }} />
     </div>
   );
 }

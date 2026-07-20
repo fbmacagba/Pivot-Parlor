@@ -8,7 +8,10 @@ import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import type { ShopSiteData } from "./$shopSlug";
-import type { DevShopDetail } from "./dev.shops.$shopId";
+
+// The public GET /api/shops/:id returns this minimal shape (the preview only
+// needs the name/slug to render the header + fetch the site).
+type PreviewShop = { id: string; shop_number: number; name: string; slug: string; type: string };
 
 function shopNameInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -25,9 +28,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
 
-  let shop: DevShopDetail;
+  let shop: PreviewShop;
   try {
-    shop = await api.get<DevShopDetail>(`/api/shops/${shopId}`);
+    shop = await api.get<PreviewShop>(`/api/shops/${shopId}`);
   } catch {
     throw new Response("Shop not found", { status: 404 });
   }
