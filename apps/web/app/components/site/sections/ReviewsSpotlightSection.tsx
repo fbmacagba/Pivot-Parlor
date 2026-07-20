@@ -23,7 +23,7 @@ export function ReviewsSpotlightSection({ ctx, density }: { ctx: SiteRenderConte
           </blockquote>
           <figcaption className="mt-5 text-sm text-[color:var(--st-ink-60)]">
             <cite className="not-italic font-semibold text-[color:var(--st-ink-80)]">{featured!.customer_name}</cite>
-            {" - "}
+            {" · "}
             {formatReviewDate(featured!.created_at)}
           </figcaption>
         </figure>
