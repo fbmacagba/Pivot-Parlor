@@ -168,13 +168,17 @@ function designIntentFrom(spec: GenResearchKvPayload["spec"] | undefined): Desig
 }
 
 const KV_TTL_SEC = 3600;
-const ASSEMBLE_MAX_RETRIES = 10;
+// 20 × 60s = 20 min max wait for the images KV. Slow image models (e.g.
+// openai/gpt-5.4-image-2 at ~2-3 min/image) take ~15 min to produce all five
+// images; the previous 10-min ceiling timed out and completed jobs with no
+// imagery even though the images finished moments later. Stays under KV_TTL_SEC.
+const ASSEMBLE_MAX_RETRIES = 20;
 const ASSEMBLE_RETRY_DELAY_SEC = 60;
 const genResearchKey = (jobId: string) => `gen:${jobId}:research`;
 const genImagesKey = (jobId: string) => `gen:${jobId}:images`;
 const genTextKey = (jobId: string) => `gen:${jobId}:text`;
 const genAssembleRetriesKey = (jobId: string) => `gen:${jobId}:assemble:retries`;
-/** Separate from assemble:retries so image phase always gets up to 10 waits after text is ready. */
+/** Separate from assemble:retries so image phase always gets up to ASSEMBLE_MAX_RETRIES waits after text is ready. */
 const genAssembleTextRetriesKey = (jobId: string) => `gen:${jobId}:assemble:text_retries`;
 
 const emptyImagesPayload = (jobId: string): ImagesKvPayload => ({
