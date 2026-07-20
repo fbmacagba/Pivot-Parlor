@@ -201,7 +201,11 @@ export default function CommercialTemplate({
   // section would not have rendered before.
   // Which of the shop's own photos exist — decides whether the image-hungry v3
   // variants would render placeholder panels (blank squares) for this shop.
-  const hasServiceImages = services.some((s) => trimMediaUrl(s.image_url).length > 0);
+  // "every" vs "any" because showcase photographs every card while the
+  // single-photo variants need only one. Uses the unfiltered service list
+  // (not category-filtered) so the choice is stable across SSR/hydration.
+  const everyServiceImaged = services.every((s) => trimMediaUrl(s.image_url).length > 0);
+  const anyServiceImaged = services.some((s) => trimMediaUrl(s.image_url).length > 0);
   const hasHeroImage = heroSrc.length > 0;
 
   const rawSpec = site.design_spec;
@@ -213,7 +217,7 @@ export default function CommercialTemplate({
     const { spec, fellBack } = normalizeDesignSpec(rawSpec, seedComposeDesignSpec(site.shop_id ?? "unknown"));
     v3Plan = fellBack.includes("all")
       ? null
-      : downgradeForImages(composeRenderPlan(spec), { hasServiceImages, hasHeroImage });
+      : downgradeForImages(composeRenderPlan(spec), { everyServiceImaged, anyServiceImaged, hasHeroImage });
   }
 
   const sections: Record<SectionKey, ReactNode> = {

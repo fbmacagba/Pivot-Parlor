@@ -78,22 +78,55 @@ describe("downgradeForImages", () => {
   };
   const svar = (p: RenderPlan, key: string) => p.sections.find((s) => s.key === key)?.variant;
 
-  it("returns the plan untouched when any service image exists", () => {
-    const out = downgradeForImages(imageHungry, { hasServiceImages: true, hasHeroImage: false });
+  it("leaves the plan untouched when every service is imaged", () => {
+    const out = downgradeForImages(imageHungry, {
+      everyServiceImaged: true,
+      anyServiceImaged: true,
+      hasHeroImage: false,
+    });
     expect(out).toEqual(imageHungry);
   });
 
-  it("with no service images: showcase → rows and the spotlight signature drops", () => {
-    const out = downgradeForImages(imageHungry, { hasServiceImages: false, hasHeroImage: true });
-    expect(svar(out, "services")).toBe("rows");
-    expect(out.signature).toBeNull();
+  it("downgrades showcase to rows unless EVERY service is imaged (partial coverage still blanks cards)", () => {
+    const partial = downgradeForImages(imageHungry, {
+      everyServiceImaged: false,
+      anyServiceImaged: true,
+      hasHeroImage: false,
+    });
+    expect(svar(partial, "services")).toBe("rows");
+    // one service image is enough for the single-photo variants — not downgraded
+    expect(partial.signature).toBe("spotlight");
+    expect(svar(partial, "about")).toBe("split-image");
   });
 
-  it("downgrades split-image to story only when there is no hero image either", () => {
-    const withHero = downgradeForImages(imageHungry, { hasServiceImages: false, hasHeroImage: true });
+  it("drops the spotlight signature only when no service is imaged", () => {
+    const anyImaged = downgradeForImages(imageHungry, {
+      everyServiceImaged: false,
+      anyServiceImaged: true,
+      hasHeroImage: false,
+    });
+    expect(anyImaged.signature).toBe("spotlight");
+    const noneImaged = downgradeForImages(imageHungry, {
+      everyServiceImaged: false,
+      anyServiceImaged: false,
+      hasHeroImage: true,
+    });
+    expect(noneImaged.signature).toBeNull();
+  });
+
+  it("downgrades split-image to story only when there is neither a service image nor a hero image", () => {
+    const withHero = downgradeForImages(imageHungry, {
+      everyServiceImaged: false,
+      anyServiceImaged: false,
+      hasHeroImage: true,
+    });
     expect(svar(withHero, "about")).toBe("split-image");
-    const noHero = downgradeForImages(imageHungry, { hasServiceImages: false, hasHeroImage: false });
-    expect(svar(noHero, "about")).toBe("story");
+    const nothing = downgradeForImages(imageHungry, {
+      everyServiceImaged: false,
+      anyServiceImaged: false,
+      hasHeroImage: false,
+    });
+    expect(svar(nothing, "about")).toBe("story");
   });
 
   it("leaves non-image-hungry variants alone", () => {
@@ -105,7 +138,11 @@ describe("downgradeForImages", () => {
       ],
       signature: "gallery",
     };
-    const out = downgradeForImages(safe, { hasServiceImages: false, hasHeroImage: false });
+    const out = downgradeForImages(safe, {
+      everyServiceImaged: false,
+      anyServiceImaged: false,
+      hasHeroImage: false,
+    });
     expect(out).toEqual(safe);
   });
 });
