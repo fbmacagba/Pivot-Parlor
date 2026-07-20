@@ -29,6 +29,7 @@ import { ModelPicker } from "~/components/dev-shops/ModelPicker";
 import {
   regenJobStepStates,
   isTerminalJobState,
+  buildRegeneratePayload,
   toSlug,
   resolvePublicAssetImageUrl,
   withImageCacheBust,
@@ -201,6 +202,10 @@ export default function DevShops() {
   const selectedPalette = expPaletteId
     ? COLOR_PALETTES.find((p) => p.id === expPaletteId) ?? null
     : null;
+  /** Regenerate with fresh hero/logo/service photos (skip_images = false).
+   *  Defaults on so "Generate Website" produces a complete site; unchecking
+   *  keeps the faster path that reuses the existing images. */
+  const [regenIncludeImages, setRegenIncludeImages] = useState(true);
 
   const [expandedGenJob, setExpandedGenJob] = useState<{
     jobId: string;
@@ -386,6 +391,13 @@ export default function DevShops() {
     setExpandedGenJob(null);
     setExpandedGenPoll(null);
   }, [expandedShopId, shops, apiUrl]);
+
+  // Reset the "include images" choice only when a different row opens — keyed on
+  // expandedShopId alone so an unrelated list revalidation (which changes the
+  // `shops` reference) can't silently re-check the box after the user unchecks it.
+  useEffect(() => {
+    setRegenIncludeImages(true);
+  }, [expandedShopId]);
 
   useEffect(() => {
     if (uploadImageFetcher.state !== "idle") return;
@@ -1264,41 +1276,53 @@ export default function DevShops() {
                               </div>
                             ) : null}
 
-                            <div className="flex flex-wrap items-center gap-3">
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={
-                                  !expLogoInSync ||
-                                  !expHeroInSync ||
-                                  expandedGenFetcher.state === "submitting" ||
-                                  (expandedGenJob?.shopId === shop.id && !jobComplete && !jobFailed)
-                                }
-                                onClick={() => {
-                                  const payload: {
-                                    skip_images: boolean;
-                                    color_primary?: string;
-                                    color_accent?: string;
-                                  } = { skip_images: true };
-                                  if (selectedPalette) {
-                                    payload.color_primary = selectedPalette.primary;
-                                    payload.color_accent = selectedPalette.accent;
+                            <div className="space-y-3">
+                              <label className="flex w-fit cursor-pointer select-none items-start gap-2.5 text-sm text-white/80">
+                                <input
+                                  type="checkbox"
+                                  checked={regenIncludeImages}
+                                  onChange={(e) => setRegenIncludeImages(e.target.checked)}
+                                  className="mt-0.5 h-4 w-4 accent-gold"
+                                />
+                                <span>
+                                  Generate new images (hero, logo, service photos)
+                                  <span className="ml-1 text-white/45">
+                                    — slower, 1–3 min. Uncheck to reuse the current images.
+                                  </span>
+                                </span>
+                              </label>
+                              <div className="flex flex-wrap items-center gap-3">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  disabled={
+                                    (!regenIncludeImages && (!expLogoInSync || !expHeroInSync)) ||
+                                    expandedGenFetcher.state === "submitting" ||
+                                    (expandedGenJob?.shopId === shop.id && !jobComplete && !jobFailed)
                                   }
-                                  expandedGenFetcher.submit(payload, {
-                                    method: "POST",
-                                    action: `/api/shops/${shop.id}/generate-site`,
-                                    encType: "application/json",
-                                  });
-                                }}
-                              >
-                                {expandedGenFetcher.state === "submitting" ? (
-                                  <>
-                                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Starting…
-                                  </>
-                                ) : (
-                                  "Generate Website →"
-                                )}
-                              </Button>
+                                  onClick={() => {
+                                    expandedGenFetcher.submit(
+                                      buildRegeneratePayload({
+                                        includeImages: regenIncludeImages,
+                                        palette: selectedPalette,
+                                      }),
+                                      {
+                                        method: "POST",
+                                        action: `/api/shops/${shop.id}/generate-site`,
+                                        encType: "application/json",
+                                      }
+                                    );
+                                  }}
+                                >
+                                  {expandedGenFetcher.state === "submitting" ? (
+                                    <>
+                                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Starting…
+                                    </>
+                                  ) : (
+                                    "Generate Website →"
+                                  )}
+                                </Button>
+                              </div>
                             </div>
 
                             {isExpanded &&

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isTerminalJobState, regenJobStepStates } from "./helpers";
+import { buildRegeneratePayload, isTerminalJobState, regenJobStepStates } from "./helpers";
 
 describe("isTerminalJobState", () => {
   it("is true once the job reaches a terminal status or stage", () => {
@@ -33,6 +33,26 @@ describe("isTerminalJobState", () => {
       const uiTerminal = steps.every((s) => s === "done") || steps.some((s) => s === "failed");
       expect(isTerminalJobState(status, stage)).toBe(uiTerminal);
     }
+  });
+});
+
+describe("buildRegeneratePayload", () => {
+  it("includes images when requested (skip_images false) and skips them otherwise", () => {
+    expect(buildRegeneratePayload({ includeImages: true }).skip_images).toBe(false);
+    expect(buildRegeneratePayload({ includeImages: false }).skip_images).toBe(true);
+  });
+
+  it("adds a chosen palette as color_primary/accent", () => {
+    const body = buildRegeneratePayload({
+      includeImages: true,
+      palette: { primary: "#0F0F10", accent: "#C9A24B" },
+    });
+    expect(body).toEqual({ skip_images: false, color_primary: "#0F0F10", color_accent: "#C9A24B" });
+  });
+
+  it("omits colours when the palette is auto (null/absent)", () => {
+    expect(buildRegeneratePayload({ includeImages: false, palette: null })).toEqual({ skip_images: true });
+    expect(buildRegeneratePayload({ includeImages: true })).toEqual({ skip_images: false });
   });
 });
 
