@@ -72,3 +72,48 @@ export function composeRenderPlan(spec: DesignSpec): RenderPlan {
     reveal,
   };
 }
+
+/** Which of the shop's own photos exist. A few v3 variants are built around
+ *  imagery and fall back to a plain gradient panel when there is none — on a
+ *  photo-less shop that reads as blank squares, not a design. The two service
+ *  signals differ because the variants consume images differently: "showcase"
+ *  puts a photo in every card, while the single-photo variants need only one. */
+export interface ImageAvailability {
+  /** Every service carries a non-empty image_url (so "showcase" fills every
+   *  card — one imageless service leaves a blank card). */
+  everyServiceImaged: boolean;
+  /** At least one service carries a non-empty image_url (enough for the
+   *  single-photo variants: the spotlight signature and about "split-image"). */
+  anyServiceImaged: boolean;
+  /** A non-empty hero image is present. */
+  hasHeroImage: boolean;
+}
+
+/** Post-process a render plan so no image-hungry variant renders a placeholder
+ *  panel for a shop that lacks the photos it needs. Applied after
+ *  composeRenderPlan at render time (it needs the shop's live media, which the
+ *  pure spec does not carry). Each affected variant is downgraded exactly when
+ *  it would go blank:
+ *   - services "showcase" → "rows" (a price list) unless EVERY service is
+ *     imaged, because showcase gives each card its own photo slot
+ *   - "spotlight" signature (a single-photo stage) is dropped when no service
+ *     is imaged
+ *   - about "split-image" → "story" only when there is neither a service image
+ *     nor a hero image, since split-image falls back to the hero photo
+ *  Every other variant (grid's thin accent band, the self-guarding gallery
+ *  signature, all hero variants) already degrades to an intentional look and
+ *  is left alone. */
+export function downgradeForImages(plan: RenderPlan, images: ImageAvailability): RenderPlan {
+  const { everyServiceImaged, anyServiceImaged, hasHeroImage } = images;
+  return {
+    ...plan,
+    sections: plan.sections.map((s) => {
+      if (s.key === "services" && s.variant === "showcase" && !everyServiceImaged)
+        return { ...s, variant: "rows" };
+      if (s.key === "about" && s.variant === "split-image" && !anyServiceImaged && !hasHeroImage)
+        return { ...s, variant: "story" };
+      return s;
+    }),
+    signature: plan.signature === "spotlight" && !anyServiceImaged ? null : plan.signature,
+  };
+}
