@@ -47,7 +47,7 @@ interface ImagesKvPayload {
   errors: Array<{ step: string; detail: string }>;
 }
 
-const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const KV_TTL_SEC = 3600;
 
@@ -104,6 +104,19 @@ function normalizeContentParts(content: unknown): unknown[] {
 function extractDataImageUrlFromMessage(message: unknown): string | null {
   if (!message || typeof message !== "object") return null;
   const m = message as Record<string, unknown>;
+
+  // OpenRouter image models (Gemini flash-image) return the generated image in
+  // the assistant message's `images` array; `content` is usually null/text.
+  const images = m.images;
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      if (!img || typeof img !== "object") continue;
+      const iu = (img as { image_url?: unknown }).image_url;
+      const url = typeof iu === "string" ? iu : (iu as { url?: string } | null)?.url;
+      if (typeof url === "string" && url.startsWith("data:image/")) return url;
+    }
+  }
+
   const content = m.content;
 
   const direct = (content as { image_url?: { url?: string } } | null)?.image_url?.url;

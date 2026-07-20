@@ -116,7 +116,7 @@ const genResearchKey = (jobId: string) => `gen:${jobId}:research`;
 const genImagesKey = (jobId: string) => `gen:${jobId}:images`;
 
 const DEFAULT_TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
-const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image-preview";
+const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 
 const LAYOUT_MOOD_TO_TEMPLATE: Record<string, string> = {
   "luxury-dark": "luxury",
