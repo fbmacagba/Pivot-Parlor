@@ -693,6 +693,20 @@ export function updateShopSiteWebsiteStatus(
     .run();
 }
 
+/** Ensure the shop has a shop_sites row to write image URLs onto, creating a
+ *  minimal draft row when none exists yet. */
+export async function ensureDraftShopSiteRow(db: D1Database, shopId: string): Promise<void> {
+  const existing = await getShopSiteByShopId(db, shopId);
+  if (existing) return;
+  await createShopSite(db, {
+    id: crypto.randomUUID(),
+    shop_id: shopId,
+    template: "minimal",
+    status: "active",
+    website_status: "draft",
+  });
+}
+
 export function updateShopSiteHeroImageUrl(
   db: D1Database,
   shopId: string,
