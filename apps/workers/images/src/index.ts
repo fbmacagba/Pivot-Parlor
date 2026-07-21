@@ -294,7 +294,18 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const heroPrompt = typeof ip?.hero === "string" ? ip.hero : "";
   const logoPrompt = typeof ip?.logo === "string" ? ip.logo : "";
   const catalogAll = Array.isArray(ip?.catalog) ? ip.catalog.filter((x): x is string => typeof x === "string") : [];
-  const catalogPrompts = catalogAll.slice(0, 3);
+  // One catalog image per service: research emits exactly services.length prompts.
+  // Generation is sequential (~15-20s/image on the fast default model), so a
+  // generous ceiling keeps a pathological service count inside the queue-consumer
+  // budget. It TRUNCATES rather than fails, and logs so a truncation is visible;
+  // truncated services render imageless (positional mapping on the site).
+  const CATALOG_MAX = 15;
+  const catalogPrompts = catalogAll.slice(0, CATALOG_MAX);
+  if (catalogAll.length > CATALOG_MAX) {
+    console.warn(
+      `[${jobId}] [pivot-parlor-images] catalog prompts ${catalogAll.length} exceed ceiling ${CATALOG_MAX}; generating first ${CATALOG_MAX}, remaining services render imageless`
+    );
+  }
 
   console.log(
     `[${jobId}] [pivot-parlor-images] KV gen:${jobId}:research found=${researchFound} heroPromptLen=${heroPrompt.length} usingModel=${resolvedImageModel}`

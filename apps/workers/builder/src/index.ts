@@ -379,8 +379,15 @@ async function processOne(body: unknown, env: Env): Promise<void> {
 
   const now = new Date().toISOString();
   const services_json = servicesForJson(text.services);
-  const catalog_filtered = (images.catalogUrls ?? []).filter((u) => typeof u === "string" && u.length > 0);
-  const catalog_images_json = JSON.stringify(catalog_filtered);
+  // Positional: one slot per service, in service order. A failed image is kept
+  // as an empty-string hole, NOT removed — compacting here would shift every
+  // later service's photo, because the site maps catalog[index] -> service[index].
+  // An empty string renders that one service's card imageless (a state the site
+  // already handles), so a single failed image never lands on the wrong service.
+  const catalog_positional = (images.catalogUrls ?? []).map((u) =>
+    typeof u === "string" ? u : ""
+  );
+  const catalog_images_json = JSON.stringify(catalog_positional);
 
   const hero_image_url = images.heroUrl?.trim() || null;
   const logo_url = images.logoUrl?.trim() || null;

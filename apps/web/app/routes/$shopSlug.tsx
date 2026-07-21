@@ -47,10 +47,13 @@ export function normalizeCommercialServices(
         : "Service";
     const description =
       typeof raw.description === "string" ? raw.description : undefined;
+    // Catalog images are positional: catalog[index] is service[index]'s image.
+    // A missing or failed image ("" / undefined) falls through to the imageless
+    // card variant, so a hole never shifts a later service's photo onto it.
     const image_url =
       typeof raw.image_url === "string"
         ? raw.image_url
-        : catalog[index % catalog.length] || "";
+        : catalog[index] || "";
     return {
       id,
       name,
@@ -63,7 +66,7 @@ export function normalizeCommercialServices(
   });
 }
 
-function mapApiServicesToCommercial(
+export function mapApiServicesToCommercial(
   apiList: ApiPublicService[],
   catalog: string[]
 ): Service[] {
@@ -74,7 +77,8 @@ function mapApiServicesToCommercial(
     price_gbp: row.price_pence / 100,
     description: row.description?.trim() || undefined,
     category: row.category?.trim() || "Service",
-    image_url: catalog[index % catalog.length] || "",
+    // Positional: catalog[index] -> service[index]; a hole ("") = imageless card.
+    image_url: catalog[index] || "",
   }));
 }
 
