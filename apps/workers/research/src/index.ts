@@ -237,6 +237,14 @@ function buildUserPrompt(msg: ResearchQueueMessage): string {
     "density": "airy"|"compact"
   }`
       : "";
+  // Depict the shop's typical clientele in the hero so a barber shop shows a
+  // male client and a beauty parlor a female one (matches the per-service fix).
+  const heroPeople =
+    msg.shopType === "barber_shop"
+      ? "a barber mid-service with a relaxed, happy male client"
+      : msg.shopType === "beauty_parlor"
+        ? "a stylist mid-service with a relaxed, happy female client"
+        : "a barber or stylist mid-service with a relaxed, happy client";
   return `Shop name: ${msg.shopName}
 Shop type: ${msg.shopType}
 Style notes from owner: ${style}
@@ -272,7 +280,7 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
     "seo_description": string (max 155 chars, includes booking CTA)
   },
   "image_prompts": {
-    "hero": string (detailed photorealistic prompt for a full-bleed hero image featuring real people — a barber or stylist mid-service with a relaxed, happy client — set in a barbershop or beauty salon that matches the layout_mood and palette; warm natural light, authentic candid moment, and leave clean negative space on one side or the top for an overlaid headline),
+    "hero": string (detailed photorealistic prompt for a full-bleed hero image featuring real people — ${heroPeople} — set in a barbershop or beauty salon that matches the layout_mood and palette; warm natural light, authentic candid moment, and leave clean negative space on one side or the top for an overlaid headline),
     "logo": string (detailed prompt for a professional logo — style matching layout_mood, includes shop name, clean and scalable, white background),
     "catalog": string[] (one prompt per service in the input services array, in the same order — each prompt describes the ACTUAL finished result of that specific service on a real person (a fresh haircut, a styled beard, a finished colour or style), photographed close and flattering so the style itself is clearly readable, square format, professional lighting)
   },
@@ -413,13 +421,22 @@ function fitArray(arr: string[], n: number, fill: (i: number) => string): string
   return out;
 }
 
+/** Depict the shop's typical clientele so a barber shop shows men and a beauty
+ *  parlor shows women — leaving the subject unspecified produced e.g. all-female
+ *  service photos on a barber shop. "both" stays neutral (mixed clientele). */
+function catalogSubjectFor(shopType: string): string {
+  if (shopType === "barber_shop") return "a male client";
+  if (shopType === "beauty_parlor") return "a female client";
+  return "a client";
+}
+
 /**
  * Coerce the count-sensitive arrays to exactly what downstream expects, so a
  * model that returns e.g. 5 catalog prompts for 6 services (or 2 trust signals
  * instead of 3) yields a usable site instead of failing the whole job. The
  * image worker maps catalog[i] → services[i], so catalog must match 1:1.
  */
-function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[]): void {
+function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[], shopType: string): void {
   spec.content.trust_signals = fitArray(
     spec.content.trust_signals,
     3,
@@ -431,11 +448,21 @@ function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[]): voi
     (i) =>
       ["Experienced professionals", "Convenient online booking", "Welcoming atmosphere"][i] ?? "Great value"
   );
-  spec.image_prompts.catalog = fitArray(
-    spec.image_prompts.catalog,
-    services.length,
-    (i) =>
-      `Photorealistic close-up of the finished ${services[i]?.name ?? "service"} result on a real person, flattering professional lighting, square format`
+  // Catalog images map positionally: the images worker generates catalog[i]
+  // from this prompt and the site renders it on services[i]. Both the catalog
+  // build and the site's service list come from getServicesByShop (ORDER BY
+  // category, name), so their order matches by construction. Build each prompt
+  // DETERMINISTICALLY from its service instead of trusting the model's returned
+  // catalog[] order: it is an unlabeled string[] we cannot realign, so a single
+  // reordered or dropped entry would put the wrong style on the wrong card.
+  // Barber/beauty service names are descriptive, so a name-based template reads
+  // well; if brand-y names ("The Executive") ever make these too generic, the
+  // upgrade path is a model-authored catalog KEYED BY service name (mapped back
+  // by name) with a test — not an in-order string[].
+  const subject = catalogSubjectFor(shopType);
+  spec.image_prompts.catalog = services.map(
+    (s) =>
+      `Photorealistic close-up of the finished ${s?.name ?? "service"} result on ${subject}, flattering professional lighting, square format`
   );
 }
 
@@ -589,7 +616,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       return;
     }
 
-    coerceSpecCounts(spec, input.services);
+    coerceSpecCounts(spec, input.services, input.shopType);
     // Honour an owner-chosen palette: overwrite the AI palette so the text
     // worker's research fallback and any spec consumer see the chosen colours.
     // The text worker re-applies the same override after its own copy pass,
