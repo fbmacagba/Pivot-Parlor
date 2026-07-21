@@ -23,6 +23,7 @@ import {
   updateShopSiteHeroImageUrl,
   updateShopSiteLogoUrl,
   setShopSiteImageLock,
+  clearShopSiteImageLock,
   updateShopSiteWebsiteStatus,
   type DBService,
 } from "../db/queries.js";
@@ -966,6 +967,45 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
   // Bust KV cache so the public site reflects the new image immediately
   await c.env.KV.delete(`site:${shop.slug}`);
 
+  return c.json({ ok: true });
+});
+
+// ─── POST /api/shops/:shopId/remove-image — clear a visual (developer-only) ───
+
+shops.post("/:shopId/remove-image", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer") {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const body = await c.req.json<{ type?: string }>().catch((): { type?: string } => ({}));
+  const type = typeof body.type === "string" ? body.type : "";
+  const serviceId = /^service:(.+)$/.exec(type)?.[1];
+  const isHero = type === "hero";
+  const isLogo = type === "logo";
+  if (!isHero && !isLogo && !serviceId) {
+    return c.json({ success: false, error: "type must be logo, hero or service:<id>" }, 400);
+  }
+
+  if (serviceId) {
+    const svc = await getServiceById(c.env.DB, serviceId);
+    if (!svc || svc.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
+    await updateServiceImageUrl(c.env.DB, serviceId, shop.id, null);
+  } else if (isHero) {
+    await updateShopSiteHeroImageUrl(c.env.DB, shop.id, null);
+    await clearShopSiteImageLock(c.env.DB, shop.id, "hero");
+  } else {
+    await updateShopSiteLogoUrl(c.env.DB, shop.id, null);
+    await clearShopSiteImageLock(c.env.DB, shop.id, "logo");
+  }
+
+  await c.env.KV.delete(`site:${shop.slug}`);
   return c.json({ ok: true });
 });
 
