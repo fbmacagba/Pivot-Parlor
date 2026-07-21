@@ -79,3 +79,22 @@ describe("catalog images map positionally to services", () => {
     expect(out.map((s) => s.image_url)).toEqual(["", ""]);
   });
 });
+
+describe("mapApiServicesToCommercial image resolution", () => {
+  it("prefers a service's own image_url over the positional catalog", () => {
+    const rows = [
+      { id: "s1", name: "A", durationMinutes: 30, price_pence: 1000, category: "Hair", image_url: "https://x/custom.png" },
+      { id: "s2", name: "B", durationMinutes: 30, price_pence: 1000, category: "Hair", image_url: null },
+    ];
+    const catalog = ["https://x/cat0.png", "https://x/cat1.png"];
+    const out = mapApiServicesToCommercial(rows, catalog);
+    expect(out[0].image_url).toBe("https://x/custom.png"); // custom wins
+    expect(out[1].image_url).toBe("https://x/cat1.png");   // falls back to catalog[index]
+  });
+
+  it("falls back to an imageless card when neither is present", () => {
+    const rows = [{ id: "s1", name: "A", durationMinutes: 30, price_pence: 1000, category: "Hair", image_url: null }];
+    const out = mapApiServicesToCommercial(rows, []);
+    expect(out[0].image_url).toBe("");
+  });
+});
