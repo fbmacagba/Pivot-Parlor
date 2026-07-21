@@ -125,4 +125,24 @@ describe("clearVisualImage", () => {
     expect(row?.hero_image_url).toBeNull();
     expect(JSON.parse(row?.locked_images_json ?? "{}").hero).toBeUndefined();
   });
+
+  it("clears logo url and its lock, leaving a hero lock intact", async () => {
+    const shopId = await seedShop("Clear Logo");
+    await env.DB.prepare(
+      "INSERT INTO shop_sites (id, shop_id, template, status, hero_image_url, logo_url, locked_images_json) VALUES (?, ?, 'minimal', 'active', 'https://x/hero.png', 'https://x/logo.png', '{\"hero\":true,\"logo\":true}')"
+    ).bind(`site-${crypto.randomUUID()}`, shopId).run();
+
+    await clearVisualImage(env.DB, env.KV, {
+      shopId,
+      slug: "clear-logo",
+      target: { kind: "logo" },
+    });
+
+    const row = await env.DB.prepare("SELECT hero_image_url, logo_url, locked_images_json FROM shop_sites WHERE shop_id = ?").bind(shopId).first<{ hero_image_url: string | null; logo_url: string | null; locked_images_json: string | null }>();
+    expect(row?.logo_url).toBeNull();
+    const parsed = JSON.parse(row?.locked_images_json ?? "{}");
+    expect(parsed.logo).toBeUndefined();
+    expect(parsed.hero).toBe(true); // only the logo lock is cleared
+    expect(row?.hero_image_url).toBe("https://x/hero.png");
+  });
 });
