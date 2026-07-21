@@ -18,6 +18,7 @@ import {
   updateGenerationJob,
   getStaffByShop,
   getServicesByShop,
+  getServiceById,
   updateShopSiteHeroImageUrl,
   updateShopSiteLogoUrl,
   updateShopSiteWebsiteStatus,
@@ -875,8 +876,18 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Invalid multipart body" }, 400);
   }
   const typeRaw = form.type;
-  const type = typeRaw === "hero" || typeRaw === "logo" ? typeRaw : null;
-  if (!type) return c.json({ success: false, error: "type must be logo or hero" }, 400);
+  const type = typeof typeRaw === "string" ? typeRaw : "";
+  const serviceId = /^service:(.+)$/.exec(type)?.[1];
+  const isBrand = type === "hero" || type === "logo";
+  if (!isBrand && !serviceId) {
+    return c.json({ success: false, error: "type must be logo, hero or service:<id>" }, 400);
+  }
+  if (serviceId) {
+    const svc = await getServiceById(c.env.DB, serviceId);
+    if (!svc || svc.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
+  }
   const file = form.file;
   if (!(file instanceof File) || file.size === 0) {
     return c.json({ success: false, error: "file required" }, 400);
@@ -885,7 +896,7 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "File too large (max 5MB)" }, 400);
   }
 
-  const filename = `${type}.png`;
+  const filename = serviceId ? `service-${serviceId}.png` : `${type}.png`;
   const key = `shops/${shop.slug}/${filename}`;
   const buf = await file.arrayBuffer();
   const ext = file.name.match(/\.(png|jpg|jpeg|webp)$/i)?.[1] ?? "png";
