@@ -28,6 +28,7 @@ function toPublicService(row: DBService) {
     price_pence: row.price_pence,
     category: row.category ?? "",
     isActive: row.is_active === 1,
+    image_url: row.image_url ?? null,
   };
 }
 

@@ -9,7 +9,6 @@ import {
   ensureE2eBookableShop,
   E2E_BOOKABLE_SLUG,
   createShop,
-  createShopSite,
   getNextShopNumber,
   createInvite,
   getShopSiteByShopId,
@@ -18,17 +17,23 @@ import {
   updateGenerationJob,
   getStaffByShop,
   getServicesByShop,
-  updateShopSiteHeroImageUrl,
-  updateShopSiteLogoUrl,
+  getServiceById,
+  getShopSiteImages,
   updateShopSiteWebsiteStatus,
   type DBService,
 } from "../db/queries.js";
+import {
+  parseVisualType,
+  persistVisualImage,
+  clearVisualImage,
+} from "../services/visual-images.js";
 import {
   safeJsonParse,
   findCatalogModel,
   DEFAULT_TEXT_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
   parseComposer,
+  buildServiceImagePrompt,
 } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
@@ -671,17 +676,6 @@ function assetPublicUrl(
   return `${base}/assets/${shopSlug}/${filename}`;
 }
 
-async function ensureDraftShopSiteRow(db: D1Database, shopId: string): Promise<void> {
-  const existing = await getShopSiteByShopId(db, shopId);
-  if (existing) return;
-  await createShopSite(db, {
-    id: crypto.randomUUID(),
-    shop_id: shopId,
-    template: "minimal",
-    status: "active",
-    website_status: "draft",
-  });
-}
 
 // ─── POST /api/shops/:shopId/settings — save dev generation prefs to KV (24h) ───
 
@@ -731,7 +725,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
   return c.json({ ok: true });
 });
 
-// ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer or admin) ───
+// ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer-only) ───
 
 const DEFAULT_OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 
@@ -741,7 +735,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
   const shop =
     (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ error: "Shop not found" }, 404);
-  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+  if (user.role !== "developer") {
     return c.json({ error: "Forbidden" }, 403);
   }
 
@@ -783,33 +777,23 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     return c.json(
       {
         error:
-          'Empty request body: send JSON with required field "type" ("logo" or "hero"); optional "image_model" and "design_notes".',
+          'Empty request body: send JSON with required field "type" ("logo", "hero" or "service:<id>"); optional "image_model" and "design_notes".',
       },
       400
     );
   }
 
-  const typeRaw = body.type;
-  const type = typeRaw === "hero" || typeRaw === "logo" ? typeRaw : null;
-  if (!type) {
-    console.error("[generate-image] invalid or missing type", {
-      shopId: shop.id,
-      receivedBody: body,
-      typeField: typeRaw,
-      typeFieldType: typeof typeRaw,
-    });
-    const got =
-      typeRaw === undefined
-        ? "undefined (missing)"
-        : typeof typeRaw === "string"
-          ? JSON.stringify(typeRaw)
-          : JSON.stringify(typeRaw);
-    return c.json(
-      {
-        error: `Invalid field "type": must be "logo" or "hero"; received ${got}`,
-      },
-      400
-    );
+  const target = parseVisualType(body.type);
+  if (!target) {
+    console.error("[generate-image] invalid or missing type", { shopId: shop.id, typeField: body.type });
+    return c.json({ error: `Invalid field "type": must be "logo", "hero" or "service:<id>"` }, 400);
+  }
+  let serviceRow: Awaited<ReturnType<typeof getServiceById>> = null;
+  if (target.kind === "service") {
+    serviceRow = await getServiceById(c.env.DB, target.serviceId);
+    if (!serviceRow || serviceRow.shop_id !== shop.id) {
+      return c.json({ error: "Service not found" }, 404);
+    }
   }
 
   const imageModelRaw = body.image_model;
@@ -822,14 +806,17 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     typeof body.design_notes === "string" ? body.design_notes.trim() : "";
 
   const shopTypeLabel = shop.type.replace(/_/g, " ");
+  const typeLabel = target.kind === "service" ? `service:${target.serviceId}` : target.kind;
 
   const prompt =
-    type === "hero"
-      ? `Cinematic interior of a ${shopTypeLabel} called ${shop.name}. ${notes}. Professional photography, dramatic lighting, no people, wide angle.`
-      : `Minimalist professional logo for ${shop.name}. ${notes}. Clean lines, scalable, white background.`;
+    target.kind === "service"
+      ? buildServiceImagePrompt(serviceRow!.name, shop.type)
+      : target.kind === "hero"
+        ? `Cinematic interior of a ${shopTypeLabel} called ${shop.name}. ${notes}. Professional photography, dramatic lighting, no people, wide angle.`
+        : `Minimalist professional logo for ${shop.name}. ${notes}. Clean lines, scalable, white background.`;
 
-  const aspectRatio = type === "hero" ? "16:9" : "1:1";
-  const filename = `${type}.png`;
+  const aspectRatio = target.kind === "hero" ? "16:9" : "1:1";
+  const filename = target.kind === "service" ? `service-${target.serviceId}.png` : `${target.kind}.png`;
   const key = `shops/${shop.slug}/${filename}`;
 
   try {
@@ -837,18 +824,26 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
       prompt,
       aspectRatio,
       apiKey,
-      `[shop-generate-image][${type}]`,
+      `[shop-generate-image][${typeLabel}]`,
       imageModel
     );
     await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType: "image/png" } });
     const imageUrl = assetPublicUrl(c, shop.slug, filename);
+
+    await persistVisualImage(c.env.DB, c.env.KV, {
+      shopId: shop.id,
+      slug: shop.slug,
+      target,
+      imageUrl,
+    });
+
     return c.json({ imageUrl });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[generate-image] image generation or upload failed", {
       shopId: shop.id,
       slug: shop.slug,
-      type,
+      type: typeLabel,
       imageModel,
       error: msg,
     });
@@ -874,9 +869,16 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
   } catch {
     return c.json({ success: false, error: "Invalid multipart body" }, 400);
   }
-  const typeRaw = form.type;
-  const type = typeRaw === "hero" || typeRaw === "logo" ? typeRaw : null;
-  if (!type) return c.json({ success: false, error: "type must be logo or hero" }, 400);
+  const target = parseVisualType(form.type);
+  if (!target) {
+    return c.json({ success: false, error: "type must be logo, hero or service:<id>" }, 400);
+  }
+  if (target.kind === "service") {
+    const svc = await getServiceById(c.env.DB, target.serviceId);
+    if (!svc || svc.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
+  }
   const file = form.file;
   if (!(file instanceof File) || file.size === 0) {
     return c.json({ success: false, error: "file required" }, 400);
@@ -885,7 +887,7 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "File too large (max 5MB)" }, 400);
   }
 
-  const filename = `${type}.png`;
+  const filename = target.kind === "service" ? `service-${target.serviceId}.png` : `${target.kind}.png`;
   const key = `shops/${shop.slug}/${filename}`;
   const buf = await file.arrayBuffer();
   const ext = file.name.match(/\.(png|jpg|jpeg|webp)$/i)?.[1] ?? "png";
@@ -913,21 +915,107 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
   const body = await c.req
     .json<{ type?: string; imageUrl?: string }>()
     .catch((): { type?: string; imageUrl?: string } => ({}));
-  const type = body.type === "hero" || body.type === "logo" ? body.type : null;
+  const target = parseVisualType(body.type);
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
-  if (!type || !imageUrl) return c.json({ success: false, error: "type and imageUrl required" }, 400);
-
-  await ensureDraftShopSiteRow(c.env.DB, shop.id);
-  if (type === "hero") {
-    await updateShopSiteHeroImageUrl(c.env.DB, shop.id, imageUrl);
-  } else {
-    await updateShopSiteLogoUrl(c.env.DB, shop.id, imageUrl);
+  if (!target || !imageUrl) {
+    return c.json({ success: false, error: "type and imageUrl required" }, 400);
   }
 
-  // Bust KV cache so the public site reflects the new image immediately
-  await c.env.KV.delete(`site:${shop.slug}`);
+  if (target.kind === "service") {
+    const svc = await getServiceById(c.env.DB, target.serviceId);
+    if (!svc || svc.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
+  }
+
+  // persistVisualImage sets the URL, locks hero/logo, and busts the site cache.
+  await persistVisualImage(c.env.DB, c.env.KV, {
+    shopId: shop.id,
+    slug: shop.slug,
+    target,
+    imageUrl,
+  });
 
   return c.json({ ok: true });
+});
+
+// ─── POST /api/shops/:shopId/remove-image — clear a visual (developer-only) ───
+
+shops.post("/:shopId/remove-image", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer") {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const body = await c.req.json<{ type?: string }>().catch((): { type?: string } => ({}));
+  const target = parseVisualType(body.type);
+  if (!target) {
+    return c.json({ success: false, error: "type must be logo, hero or service:<id>" }, 400);
+  }
+
+  if (target.kind === "service") {
+    const svc = await getServiceById(c.env.DB, target.serviceId);
+    if (!svc || svc.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
+  }
+
+  await clearVisualImage(c.env.DB, c.env.KV, {
+    shopId: shop.id,
+    slug: shop.slug,
+    target,
+  });
+  return c.json({ ok: true });
+});
+
+// ─── GET /api/shops/:shopId/visuals — Visual Editor read model ────────────────
+
+shops.get("/:shopId/visuals", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const site = await getShopSiteImages(c.env.DB, shop.id);
+  let locked: Record<string, unknown> = {};
+  try {
+    const parsed = site?.locked_images_json ? (JSON.parse(site.locked_images_json) as unknown) : {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      locked = parsed as Record<string, unknown>;
+    }
+  } catch {
+    locked = {};
+  }
+  let catalog: string[] = [];
+  try {
+    const parsed = site?.catalog_images_json ? (JSON.parse(site.catalog_images_json) as unknown) : [];
+    if (Array.isArray(parsed)) catalog = parsed.map((x) => (typeof x === "string" ? x : ""));
+  } catch {
+    catalog = [];
+  }
+  const services = (await getServicesByShop(c.env.DB, shop.id)).map((s) => ({
+    id: s.id,
+    name: s.name,
+    image_url: s.image_url ?? null,
+  }));
+
+  return c.json({
+    success: true,
+    data: {
+      hero: { url: site?.hero_image_url ?? null, locked: locked.hero === true },
+      logo: { url: site?.logo_url ?? null, locked: locked.logo === true },
+      catalog,
+      services,
+    },
+  });
 });
 
 // ─── GET /api/shops/:shopId/owner-details — developer: shop onboarding + linked users ───

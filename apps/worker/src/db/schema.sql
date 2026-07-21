@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS services (
   duration_min INTEGER NOT NULL DEFAULT 30,
   price_pence  INTEGER NOT NULL DEFAULT 0,
   category     TEXT,
-  is_active    INTEGER NOT NULL DEFAULT 1
+  is_active    INTEGER NOT NULL DEFAULT 1,
+  image_url    TEXT
 );
 
 -- ─── Staff ────────────────────────────────────────────────────────────────────

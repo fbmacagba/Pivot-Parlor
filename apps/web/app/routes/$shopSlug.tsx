@@ -18,6 +18,7 @@ type ApiPublicService = {
   durationMinutes: number;
   price_pence: number;
   category?: string;
+  image_url?: string | null;
 };
 
 export function normalizeCommercialServices(
@@ -77,8 +78,8 @@ export function mapApiServicesToCommercial(
     price_gbp: row.price_pence / 100,
     description: row.description?.trim() || undefined,
     category: row.category?.trim() || "Service",
-    // Positional: catalog[index] -> service[index]; a hole ("") = imageless card.
-    image_url: catalog[index] || "",
+    // Custom per-service photo wins; else the positional AI pool; else imageless.
+    image_url: row.image_url || catalog[index] || "",
   }));
 }
 
