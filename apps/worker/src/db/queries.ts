@@ -696,7 +696,7 @@ export function updateShopSiteWebsiteStatus(
 export function updateShopSiteHeroImageUrl(
   db: D1Database,
   shopId: string,
-  url: string,
+  url: string | null,
 ) {
   return db
     .prepare(
@@ -709,7 +709,7 @@ export function updateShopSiteHeroImageUrl(
 export function updateShopSiteLogoUrl(
   db: D1Database,
   shopId: string,
-  url: string,
+  url: string | null,
 ) {
   return db
     .prepare(
@@ -717,6 +717,67 @@ export function updateShopSiteLogoUrl(
     )
     .bind(url, shopId)
     .run();
+}
+
+// ─── Visual Editor (per-service image + hero/logo lock flags) ─────────────────
+
+/** Set or clear (`null`) a service's own photo. NULL reverts the card to the AI
+ *  catalog pool. Shop-scoped so a stray/foreign service id cannot write across
+ *  shops. */
+export function updateServiceImageUrl(
+  db: D1Database,
+  serviceId: string,
+  shopId: string,
+  url: string | null,
+) {
+  return db
+    .prepare("UPDATE services SET image_url = ? WHERE id = ? AND shop_id = ?")
+    .bind(url, serviceId, shopId)
+    .run();
+}
+
+/** Mark hero/logo custom so a full-site regenerate preserves it. Idempotent;
+ *  initialises a NULL column to '{}' via COALESCE. */
+export function setShopSiteImageLock(
+  db: D1Database,
+  shopId: string,
+  key: "hero" | "logo",
+) {
+  return db
+    .prepare(
+      "UPDATE shop_sites SET locked_images_json = json_set(COALESCE(locked_images_json, '{}'), ?, json('true')) WHERE shop_id = ? AND status = 'active'",
+    )
+    .bind(`$.${key}`, shopId)
+    .run();
+}
+
+/** Unmark hero/logo (Remove) so a later regenerate may overwrite it again. */
+export function clearShopSiteImageLock(
+  db: D1Database,
+  shopId: string,
+  key: "hero" | "logo",
+) {
+  return db
+    .prepare(
+      "UPDATE shop_sites SET locked_images_json = json_remove(COALESCE(locked_images_json, '{}'), ?) WHERE shop_id = ? AND status = 'active'",
+    )
+    .bind(`$.${key}`, shopId)
+    .run();
+}
+
+/** Read the hero/logo/catalog/lock state the Visual Editor renders. */
+export function getShopSiteImages(db: D1Database, shopId: string) {
+  return db
+    .prepare(
+      "SELECT hero_image_url, logo_url, locked_images_json, catalog_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1",
+    )
+    .bind(shopId)
+    .first<{
+      hero_image_url: string | null;
+      logo_url: string | null;
+      locked_images_json: string | null;
+      catalog_images_json: string | null;
+    }>();
 }
 
 /** Replace existing site row for shop (pipeline / regeneration). */
