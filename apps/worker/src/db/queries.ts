@@ -53,6 +53,7 @@ export interface DBService {
   price_pence: number;
   category: string | null;
   is_active: number;
+  image_url: string | null;
 }
 
 export interface DBStaff {
