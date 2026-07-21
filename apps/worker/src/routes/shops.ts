@@ -19,6 +19,7 @@ import {
   getStaffByShop,
   getServicesByShop,
   getServiceById,
+  getShopSiteImages,
   updateServiceImageUrl,
   updateShopSiteHeroImageUrl,
   updateShopSiteLogoUrl,
@@ -1007,6 +1008,49 @@ shops.post("/:shopId/remove-image", authMiddleware, async (c) => {
 
   await c.env.KV.delete(`site:${shop.slug}`);
   return c.json({ ok: true });
+});
+
+// ─── GET /api/shops/:shopId/visuals — Visual Editor read model ────────────────
+
+shops.get("/:shopId/visuals", authMiddleware, async (c) => {
+  const user = getUser(c);
+  const param = c.req.param("shopId");
+  const shop =
+    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+    return c.json({ success: false, error: "Forbidden" }, 403);
+  }
+
+  const site = await getShopSiteImages(c.env.DB, shop.id);
+  let locked: Record<string, unknown> = {};
+  try {
+    locked = site?.locked_images_json ? (JSON.parse(site.locked_images_json) as Record<string, unknown>) : {};
+  } catch {
+    locked = {};
+  }
+  let catalog: string[] = [];
+  try {
+    const parsed = site?.catalog_images_json ? (JSON.parse(site.catalog_images_json) as unknown) : [];
+    if (Array.isArray(parsed)) catalog = parsed.map((x) => (typeof x === "string" ? x : ""));
+  } catch {
+    catalog = [];
+  }
+  const services = (await getServicesByShop(c.env.DB, shop.id)).map((s) => ({
+    id: s.id,
+    name: s.name,
+    image_url: s.image_url ?? null,
+  }));
+
+  return c.json({
+    success: true,
+    data: {
+      hero: { url: site?.hero_image_url ?? null, locked: locked.hero === true },
+      logo: { url: site?.logo_url ?? null, locked: locked.logo === true },
+      catalog,
+      services,
+    },
+  });
 });
 
 // ─── GET /api/shops/:shopId/owner-details — developer: shop onboarding + linked users ───
