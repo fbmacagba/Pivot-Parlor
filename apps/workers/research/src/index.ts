@@ -272,9 +272,9 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
     "seo_description": string (max 155 chars, includes booking CTA)
   },
   "image_prompts": {
-    "hero": string (detailed photorealistic prompt for a hero background image — full-bleed barbershop or beauty salon atmosphere matching the layout_mood and palette, no people visible, focus on ambiance, lighting, textures),
+    "hero": string (detailed photorealistic prompt for a full-bleed hero image featuring real people — a barber or stylist mid-service with a relaxed, happy client — set in a barbershop or beauty salon that matches the layout_mood and palette; warm natural light, authentic candid moment, and leave clean negative space on one side or the top for an overlaid headline),
     "logo": string (detailed prompt for a professional logo — style matching layout_mood, includes shop name, clean and scalable, white background),
-    "catalog": string[] (one prompt per service in the input services array — each prompt describes a clean product/style photography shot for that specific service, square format, professional lighting)
+    "catalog": string[] (one prompt per service in the input services array, in the same order — each prompt describes the ACTUAL finished result of that specific service on a real person (a fresh haircut, a styled beard, a finished colour or style), photographed close and flattering so the style itself is clearly readable, square format, professional lighting)
   },
   "legal_content": {
     "privacy_policy": string (full GDPR and UK PECR compliant privacy policy for a barber/beauty booking platform — includes: data collected, how used, cookies, third parties, customer rights, contact details placeholder, shop name inserted throughout),
@@ -435,7 +435,7 @@ function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[]): voi
     spec.image_prompts.catalog,
     services.length,
     (i) =>
-      `Professional product photo for ${services[i]?.name ?? "service"}, square format, studio lighting, clean background`
+      `Photorealistic close-up of the finished ${services[i]?.name ?? "service"} result on a real person, flattering professional lighting, square format`
   );
 }
 
