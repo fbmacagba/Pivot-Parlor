@@ -32,6 +32,7 @@ import {
   DEFAULT_TEXT_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
   parseComposer,
+  buildServiceImagePrompt,
 } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
@@ -734,7 +735,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
   return c.json({ ok: true });
 });
 
-// ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer or admin) ───
+// ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer-only) ───
 
 const DEFAULT_OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 
@@ -744,7 +745,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
   const shop =
     (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ error: "Shop not found" }, 404);
-  if (user.role !== "developer" && (user.role !== "admin" || user.shop_id !== shop.id)) {
+  if (user.role !== "developer") {
     return c.json({ error: "Forbidden" }, 403);
   }
 
@@ -786,33 +787,27 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     return c.json(
       {
         error:
-          'Empty request body: send JSON with required field "type" ("logo" or "hero"); optional "image_model" and "design_notes".',
+          'Empty request body: send JSON with required field "type" ("logo", "hero" or "service:<id>"); optional "image_model" and "design_notes".',
       },
       400
     );
   }
 
   const typeRaw = body.type;
-  const type = typeRaw === "hero" || typeRaw === "logo" ? typeRaw : null;
-  if (!type) {
-    console.error("[generate-image] invalid or missing type", {
-      shopId: shop.id,
-      receivedBody: body,
-      typeField: typeRaw,
-      typeFieldType: typeof typeRaw,
-    });
-    const got =
-      typeRaw === undefined
-        ? "undefined (missing)"
-        : typeof typeRaw === "string"
-          ? JSON.stringify(typeRaw)
-          : JSON.stringify(typeRaw);
-    return c.json(
-      {
-        error: `Invalid field "type": must be "logo" or "hero"; received ${got}`,
-      },
-      400
-    );
+  const type = typeof typeRaw === "string" ? typeRaw : "";
+  const serviceId = /^service:(.+)$/.exec(type)?.[1];
+  const isHero = type === "hero";
+  const isLogo = type === "logo";
+  if (!isHero && !isLogo && !serviceId) {
+    console.error("[generate-image] invalid or missing type", { shopId: shop.id, typeField: typeRaw });
+    return c.json({ error: `Invalid field "type": must be "logo", "hero" or "service:<id>"` }, 400);
+  }
+  let serviceRow: Awaited<ReturnType<typeof getServiceById>> = null;
+  if (serviceId) {
+    serviceRow = await getServiceById(c.env.DB, serviceId);
+    if (!serviceRow || serviceRow.shop_id !== shop.id) {
+      return c.json({ error: "Service not found" }, 404);
+    }
   }
 
   const imageModelRaw = body.image_model;
@@ -826,13 +821,14 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
 
   const shopTypeLabel = shop.type.replace(/_/g, " ");
 
-  const prompt =
-    type === "hero"
+  const prompt = serviceId
+    ? buildServiceImagePrompt(serviceRow!.name, shop.type)
+    : isHero
       ? `Cinematic interior of a ${shopTypeLabel} called ${shop.name}. ${notes}. Professional photography, dramatic lighting, no people, wide angle.`
       : `Minimalist professional logo for ${shop.name}. ${notes}. Clean lines, scalable, white background.`;
 
-  const aspectRatio = type === "hero" ? "16:9" : "1:1";
-  const filename = `${type}.png`;
+  const aspectRatio = isHero ? "16:9" : "1:1";
+  const filename = serviceId ? `service-${serviceId}.png` : `${type}.png`;
   const key = `shops/${shop.slug}/${filename}`;
 
   try {
@@ -845,6 +841,21 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     );
     await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType: "image/png" } });
     const imageUrl = assetPublicUrl(c, shop.slug, filename);
+
+    if (serviceId) {
+      await updateServiceImageUrl(c.env.DB, serviceId, shop.id, imageUrl);
+    } else {
+      await ensureDraftShopSiteRow(c.env.DB, shop.id);
+      if (isHero) {
+        await updateShopSiteHeroImageUrl(c.env.DB, shop.id, imageUrl);
+        await setShopSiteImageLock(c.env.DB, shop.id, "hero");
+      } else {
+        await updateShopSiteLogoUrl(c.env.DB, shop.id, imageUrl);
+        await setShopSiteImageLock(c.env.DB, shop.id, "logo");
+      }
+    }
+    await c.env.KV.delete(`site:${shop.slug}`);
+
     return c.json({ imageUrl });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
