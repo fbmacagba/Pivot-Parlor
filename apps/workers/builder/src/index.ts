@@ -2,6 +2,7 @@
  * pivot-parlor-assembler — Consumes site-assemble-queue: merge KV images+text → shop_sites, complete job, cleanup KV.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
+import { parseLockedImages, resolveRegeneratedImageUrls } from "./lockedImages";
 
 export interface Env {
   DB: D1Database;
@@ -389,8 +390,23 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   );
   const catalog_images_json = JSON.stringify(catalog_positional);
 
-  const hero_image_url = images.heroUrl?.trim() || null;
-  const logo_url = images.logoUrl?.trim() || null;
+  // Preserve a customised (locked) hero/logo across a regenerate. Read the
+  // existing active row; for a locked slot keep its stored url instead of the
+  // freshly generated one. No existing row (fresh INSERT) => nothing locked.
+  const existingRow = await env.DB.prepare(
+    "SELECT hero_image_url, logo_url, locked_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+  )
+    .bind(shopId)
+    .first<{ hero_image_url: string | null; logo_url: string | null; locked_images_json: string | null }>();
+  const resolvedImages = resolveRegeneratedImageUrls({
+    existingHero: existingRow?.hero_image_url ?? null,
+    existingLogo: existingRow?.logo_url ?? null,
+    generatedHero: images.heroUrl?.trim() || null,
+    generatedLogo: images.logoUrl?.trim() || null,
+    locked: parseLockedImages(existingRow?.locked_images_json),
+  });
+  const hero_image_url = resolvedImages.hero;
+  const logo_url = resolvedImages.logo;
 
   // Curated typography (WS-6 item 5): the research worker already pins fonts,
   // but text output from older payloads may carry anything — coerce again so
