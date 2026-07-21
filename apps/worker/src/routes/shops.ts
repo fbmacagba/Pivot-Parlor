@@ -1025,7 +1025,10 @@ shops.get("/:shopId/visuals", authMiddleware, async (c) => {
   const site = await getShopSiteImages(c.env.DB, shop.id);
   let locked: Record<string, unknown> = {};
   try {
-    locked = site?.locked_images_json ? (JSON.parse(site.locked_images_json) as Record<string, unknown>) : {};
+    const parsed = site?.locked_images_json ? (JSON.parse(site.locked_images_json) as unknown) : {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      locked = parsed as Record<string, unknown>;
+    }
   } catch {
     locked = {};
   }

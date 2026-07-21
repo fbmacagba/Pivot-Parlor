@@ -31,6 +31,22 @@ describe("GET /visuals", () => {
     expect(body.data.services).toEqual([{ id: svcId, name: "Fade", image_url: "https://x/svc.png" }]);
   });
 
+  it("does not 500 when locked_images_json is the literal string 'null'", async () => {
+    const shopId = await seedShop("Vis Shop Null Lock");
+    await env.DB.prepare(
+      "INSERT INTO shop_sites (id, shop_id, template, status, hero_image_url, logo_url, locked_images_json, catalog_images_json) VALUES (?, ?, 'minimal', 'active', 'https://x/hero.png', 'https://x/logo.png', 'null', '[]')"
+    ).bind(`site-${crypto.randomUUID()}`, shopId).run();
+    const dev = authHeaders(await tokenFor(await seedUser("developer", null), "developer", null));
+
+    const res = await dispatch("GET", `/api/shops/${shopId}/visuals`, { headers: dev });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { hero: { locked: boolean }; logo: { locked: boolean } };
+    };
+    expect(body.data.hero.locked).toBe(false);
+    expect(body.data.logo.locked).toBe(false);
+  });
+
   it("403s for an admin of a different shop", async () => {
     const shopId = await seedShop("Vis Shop 2");
     const otherShop = await seedShop("Vis Other");
