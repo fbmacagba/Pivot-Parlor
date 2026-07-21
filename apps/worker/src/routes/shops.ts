@@ -19,8 +19,10 @@ import {
   getStaffByShop,
   getServicesByShop,
   getServiceById,
+  updateServiceImageUrl,
   updateShopSiteHeroImageUrl,
   updateShopSiteLogoUrl,
+  setShopSiteImageLock,
   updateShopSiteWebsiteStatus,
   type DBService,
 } from "../db/queries.js";
@@ -924,15 +926,30 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
   const body = await c.req
     .json<{ type?: string; imageUrl?: string }>()
     .catch((): { type?: string; imageUrl?: string } => ({}));
-  const type = body.type === "hero" || body.type === "logo" ? body.type : null;
+  const type = typeof body.type === "string" ? body.type : "";
+  const serviceId = /^service:(.+)$/.exec(type)?.[1];
+  const isHero = type === "hero";
+  const isLogo = type === "logo";
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
-  if (!type || !imageUrl) return c.json({ success: false, error: "type and imageUrl required" }, 400);
+  if ((!isHero && !isLogo && !serviceId) || !imageUrl) {
+    return c.json({ success: false, error: "type and imageUrl required" }, 400);
+  }
 
-  await ensureDraftShopSiteRow(c.env.DB, shop.id);
-  if (type === "hero") {
-    await updateShopSiteHeroImageUrl(c.env.DB, shop.id, imageUrl);
+  if (serviceId) {
+    const svc = await getServiceById(c.env.DB, serviceId);
+    if (!svc || svc.shop_id !== shop.id) {
+      return c.json({ success: false, error: "Service not found" }, 404);
+    }
+    await updateServiceImageUrl(c.env.DB, serviceId, shop.id, imageUrl);
   } else {
-    await updateShopSiteLogoUrl(c.env.DB, shop.id, imageUrl);
+    await ensureDraftShopSiteRow(c.env.DB, shop.id);
+    if (isHero) {
+      await updateShopSiteHeroImageUrl(c.env.DB, shop.id, imageUrl);
+      await setShopSiteImageLock(c.env.DB, shop.id, "hero");
+    } else {
+      await updateShopSiteLogoUrl(c.env.DB, shop.id, imageUrl);
+      await setShopSiteImageLock(c.env.DB, shop.id, "logo");
+    }
   }
 
   // Bust KV cache so the public site reflects the new image immediately
