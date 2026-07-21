@@ -5,6 +5,7 @@ import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import type { Shop } from "~/components/dev-shops/types";
+import type { VisualsData } from "~/components/VisualManager";
 
 export type DevGenerationPrefs = {
   template: string;
@@ -67,11 +68,18 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     ownerDetails = null;
   }
 
-  return json({ shop, apiUrl: env.API_URL, generationPrefs, ownerDetails });
+  let visuals: VisualsData | null = null;
+  try {
+    visuals = await api.get<VisualsData>(`/api/shops/${shop.id}/visuals`);
+  } catch {
+    visuals = null;
+  }
+
+  return json({ shop, apiUrl: env.API_URL, generationPrefs, ownerDetails, visuals });
 }
 
 export default function DevShopLayout() {
-  const { shop, apiUrl, generationPrefs, ownerDetails } = useLoaderData<typeof loader>();
+  const { shop, apiUrl, generationPrefs, ownerDetails, visuals } = useLoaderData<typeof loader>();
 
   return (
     <div className="space-y-6">
@@ -86,7 +94,7 @@ export default function DevShopLayout() {
           /{shop.slug} · #{shop.shop_number}
         </p>
       </div>
-      <Outlet context={{ shop, apiUrl, generationPrefs, ownerDetails }} />
+      <Outlet context={{ shop, apiUrl, generationPrefs, ownerDetails, visuals }} />
     </div>
   );
 }

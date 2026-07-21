@@ -1,6 +1,6 @@
 import { Link, useFetcher, useNavigate, useOutletContext, useRevalidator } from "@remix-run/react";
-import { Check, Loader2, Sparkles, Trash2, Upload, UserCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Check, Loader2, Sparkles, Trash2, UserCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/Button";
 import {
   Dialog,
@@ -18,13 +18,8 @@ import {
   REGEN_STEP_LABELS,
   staticPickerModels,
 } from "~/components/dev-shops/constants";
-import {
-  buildRegeneratePayload,
-  decidePollAction,
-  regenJobStepStates,
-  resolvePublicAssetImageUrl,
-  withImageCacheBust,
-} from "~/components/dev-shops/helpers";
+import { buildRegeneratePayload, decidePollAction, regenJobStepStates } from "~/components/dev-shops/helpers";
+import { VisualManager, type VisualsData } from "~/components/VisualManager";
 import type { Shop } from "~/components/dev-shops/types";
 import type { DevGenerationPrefs, DevShopOwnerDetails } from "./dev.shops.$shopId";
 
@@ -33,10 +28,11 @@ type OutletCtx = {
   apiUrl: string;
   generationPrefs: DevGenerationPrefs;
   ownerDetails: DevShopOwnerDetails | null;
+  visuals: VisualsData | null;
 };
 
 export default function DevShopDetailIndex() {
-  const { shop, apiUrl, generationPrefs, ownerDetails } = useOutletContext<OutletCtx>();
+  const { shop, apiUrl, generationPrefs, ownerDetails, visuals } = useOutletContext<OutletCtx>();
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
@@ -189,56 +185,6 @@ export default function DevShopDetailIndex() {
   const jobFailed = pollStatus === "failed";
   const running = Boolean(genJobId) || genBusy;
   const showProgress = running || jobComplete || jobFailed;
-
-  // ── Brand images ─────────────────────────────────────────────────────────────
-  const [imgBusy, setImgBusy] = useState<"logo" | "hero" | null>(null);
-  const [imgError, setImgError] = useState<string | null>(null);
-  const [logoBust, setLogoBust] = useState(0);
-  const [heroBust, setHeroBust] = useState(0);
-  const logoInputRef = useRef<HTMLInputElement | null>(null);
-  const heroInputRef = useRef<HTMLInputElement | null>(null);
-
-  const logoSrc = shop.logo_url
-    ? withImageCacheBust(resolvePublicAssetImageUrl(shop.logo_url, apiUrl), logoBust)
-    : "";
-  const heroSrc = shop.hero_image_url
-    ? withImageCacheBust(resolvePublicAssetImageUrl(shop.hero_image_url, apiUrl), heroBust)
-    : "";
-
-  async function handleImageUpload(type: "logo" | "hero", file: File) {
-    if (imgBusy) return;
-    setImgError(null);
-    setImgBusy(type);
-    try {
-      const fd = new FormData();
-      fd.set("type", type);
-      fd.set("file", file);
-      const upRes = await fetch(`/api/shops/${shop.id}/upload-image`, { method: "POST", body: fd });
-      const upJson = (await upRes.json().catch(() => ({}))) as { imageUrl?: string; error?: string };
-      const url = typeof upJson.imageUrl === "string" ? upJson.imageUrl.trim() : "";
-      if (!upRes.ok || !url) {
-        setImgError(upJson.error?.trim() || "Upload failed.");
-        return;
-      }
-      const svRes = await fetch(`/api/shops/${shop.id}/save-image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, imageUrl: url }),
-      });
-      const svJson = (await svRes.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (!svRes.ok || svJson.ok === false) {
-        setImgError(svJson.error?.trim() || "Could not save the image.");
-        return;
-      }
-      if (type === "logo") setLogoBust(Date.now());
-      else setHeroBust(Date.now());
-      revalidator.revalidate();
-    } catch {
-      setImgError("Could not upload the image. Please try again.");
-    } finally {
-      setImgBusy(null);
-    }
-  }
 
   // ── Owner + delete ───────────────────────────────────────────────────────────
   const [ownerDialogOpen, setOwnerDialogOpen] = useState(false);
@@ -479,68 +425,15 @@ export default function DevShopDetailIndex() {
         </div>
       </section>
 
-      {/* ── Brand images ────────────────────────────────────────────────────────── */}
-      <section className="rounded-xl border border-white/10 bg-dark-100 p-6">
-        <h2 className="font-heading text-lg font-semibold text-white">Brand images</h2>
-        <p className="mt-1 text-sm text-white/50">
-          Upload a logo or hero image to use instead of AI-generated ones. Regenerate with images unchecked to keep them.
-        </p>
-        {imgError ? (
-          <div className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-            {imgError}
-          </div>
-        ) : null}
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          {(["logo", "hero"] as const).map((type) => {
-            const src = type === "logo" ? logoSrc : heroSrc;
-            const inputRef = type === "logo" ? logoInputRef : heroInputRef;
-            const busy = imgBusy === type;
-            return (
-              <div key={type} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-medium capitalize text-white/80">{type}</span>
-                </div>
-                <div className="flex aspect-video items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/30">
-                  {src ? (
-                    <img src={src} alt={`${type} preview`} className="max-h-full max-w-full object-contain" />
-                  ) : (
-                    <span className="text-xs text-white/40">No {type} set</span>
-                  )}
-                </div>
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    e.target.value = "";
-                    if (f) void handleImageUpload(type, f);
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="mt-3 w-full"
-                  disabled={busy}
-                  onClick={() => inputRef.current?.click()}
-                >
-                  {busy ? (
-                    <>
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Uploading…
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="mr-1 h-3.5 w-3.5" /> Upload {type}
-                    </>
-                  )}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+      {/* ── Visuals (logo, hero, per-service photos) ──────────────────────────── */}
+      {visuals ? (
+        <VisualManager role="developer" shopId={shop.id} apiUrl={apiUrl} {...visuals} />
+      ) : (
+        <section className="rounded-xl border border-white/10 bg-dark-100 p-6">
+          <h2 className="font-heading text-lg font-semibold text-white">Visuals</h2>
+          <p className="mt-1 text-sm text-white/50">Visuals are unavailable for this shop right now.</p>
+        </section>
+      )}
 
       {/* ── Danger zone ─────────────────────────────────────────────────────────── */}
       <section className="rounded-xl border border-red-500/30 bg-red-500/5 p-6">
