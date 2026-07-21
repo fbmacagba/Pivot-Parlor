@@ -20,7 +20,3 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (!workerResponseLooksLikeJson(res)) return json({ success: false, error: "Bad gateway" }, { status: 502 });
   return json(await res.json(), { status: res.status });
 }
-
-export default function ApiAiApplyTheme() {
-  return null;
-}

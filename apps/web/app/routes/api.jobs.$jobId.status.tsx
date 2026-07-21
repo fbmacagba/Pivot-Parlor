@@ -35,7 +35,3 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     return json({ success: false, error: "Job status service is unavailable" }, { status: 502, headers: NO_STORE });
   }
 }
-
-export default function JobStatusApi() {
-  return null;
-}

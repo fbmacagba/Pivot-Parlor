@@ -48,7 +48,3 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
   return json(data, { status: res.status });
 }
-
-export default function ApiMeBookings() {
-  return null;
-}

@@ -31,7 +31,3 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     return json({ success: false, error: "Generation prefs service is unavailable" }, 502);
   }
 }
-
-export default function GenerationPrefsApi() {
-  return null;
-}

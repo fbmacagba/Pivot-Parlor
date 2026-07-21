@@ -102,7 +102,3 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const body = (await res.json()) as unknown;
   return json(body, { status: res.status });
 }
-
-export default function GenerateSiteApi() {
-  return null;
-}

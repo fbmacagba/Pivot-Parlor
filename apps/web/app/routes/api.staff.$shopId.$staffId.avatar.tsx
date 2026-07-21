@@ -28,7 +28,3 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const data = await res.json();
   return json(data, { status: res.status });
 }
-
-export default function ApiStaffAvatar() {
-  return null;
-}
