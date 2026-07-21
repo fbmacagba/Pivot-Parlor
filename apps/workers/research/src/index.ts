@@ -431,11 +431,20 @@ function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[]): voi
     (i) =>
       ["Experienced professionals", "Convenient online booking", "Welcoming atmosphere"][i] ?? "Great value"
   );
-  spec.image_prompts.catalog = fitArray(
-    spec.image_prompts.catalog,
-    services.length,
-    (i) =>
-      `Photorealistic close-up of the finished ${services[i]?.name ?? "service"} result on a real person, flattering professional lighting, square format`
+  // Catalog images map positionally: the images worker generates catalog[i]
+  // from this prompt and the site renders it on services[i]. Both the catalog
+  // build and the site's service list come from getServicesByShop (ORDER BY
+  // category, name), so their order matches by construction. Build each prompt
+  // DETERMINISTICALLY from its service instead of trusting the model's returned
+  // catalog[] order: it is an unlabeled string[] we cannot realign, so a single
+  // reordered or dropped entry would put the wrong style on the wrong card.
+  // Barber/beauty service names are descriptive, so a name-based template reads
+  // well; if brand-y names ("The Executive") ever make these too generic, the
+  // upgrade path is a model-authored catalog KEYED BY service name (mapped back
+  // by name) with a test — not an in-order string[].
+  spec.image_prompts.catalog = services.map(
+    (s) =>
+      `Photorealistic close-up of the finished ${s?.name ?? "service"} result on a real person, flattering professional lighting, square format`
   );
 }
 
