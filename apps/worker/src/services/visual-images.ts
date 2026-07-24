@@ -33,6 +33,21 @@ export function parseVisualType(rawType: unknown): VisualType | null {
 }
 
 /**
+ * Filename for a custom visual write (owner upload / dev single-visual
+ * regenerate). Two guarantees, both load-bearing:
+ * - the `custom-` namespace is never written by the site pipeline (it writes
+ *   hero.png / logo.png / catalog-<n>.png), so a locked visual's R2 bytes
+ *   cannot be clobbered by a full-site regenerate;
+ * - the random suffix makes every write a fresh object, so replacing a visual
+ *   never serves stale bytes from caches keyed on the old URL.
+ */
+export function customVisualFilename(target: VisualType): string {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const base = target.kind === "service" ? `service-${target.serviceId}` : target.kind;
+  return `custom-${base}-${suffix}.png`;
+}
+
+/**
  * Persist a resolved image URL for a visual and, for hero/logo, mark it locked
  * so a full-site regenerate preserves it; then bust the public-site cache.
  * Shared by save-image and generate-image. The caller must have validated a

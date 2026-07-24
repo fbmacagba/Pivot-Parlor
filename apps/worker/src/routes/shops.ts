@@ -26,6 +26,7 @@ import {
   parseVisualType,
   persistVisualImage,
   clearVisualImage,
+  customVisualFilename,
 } from "../services/visual-images.js";
 import {
   safeJsonParse,
@@ -816,7 +817,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
         : `Minimalist professional logo for ${shop.name}. ${notes}. Clean lines, scalable, white background.`;
 
   const aspectRatio = target.kind === "hero" ? "16:9" : "1:1";
-  const filename = target.kind === "service" ? `service-${target.serviceId}.png` : `${target.kind}.png`;
+  const filename = customVisualFilename(target);
   const key = `shops/${shop.slug}/${filename}`;
 
   try {
@@ -887,7 +888,7 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "File too large (max 5MB)" }, 400);
   }
 
-  const filename = target.kind === "service" ? `service-${target.serviceId}.png` : `${target.kind}.png`;
+  const filename = customVisualFilename(target);
   const key = `shops/${shop.slug}/${filename}`;
   const buf = await file.arrayBuffer();
   const ext = file.name.match(/\.(png|jpg|jpeg|webp)$/i)?.[1] ?? "png";

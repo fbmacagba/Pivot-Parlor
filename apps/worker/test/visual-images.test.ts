@@ -6,7 +6,12 @@
  */
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { parseVisualType, persistVisualImage, clearVisualImage } from "../src/services/visual-images";
+import {
+  parseVisualType,
+  persistVisualImage,
+  clearVisualImage,
+  customVisualFilename,
+} from "../src/services/visual-images";
 import { seedShop } from "./helpers";
 
 async function seedService(shopId: string, name = "Fade"): Promise<string> {
@@ -36,6 +41,20 @@ describe("parseVisualType", () => {
     expect(parseVisualType("")).toBeNull();
     expect(parseVisualType(undefined)).toBeNull();
     expect(parseVisualType(42)).toBeNull();
+  });
+});
+
+describe("customVisualFilename", () => {
+  it("namespaces every custom visual under custom- so pipeline keys (hero.png, logo.png, catalog-N.png) can never collide", () => {
+    expect(customVisualFilename({ kind: "hero" })).toMatch(/^custom-hero-[0-9a-f]{8}\.png$/);
+    expect(customVisualFilename({ kind: "logo" })).toMatch(/^custom-logo-[0-9a-f]{8}\.png$/);
+    expect(customVisualFilename({ kind: "service", serviceId: "abc123" })).toMatch(
+      /^custom-service-abc123-[0-9a-f]{8}\.png$/,
+    );
+  });
+
+  it("returns a different name on every call so an existing R2 object is never overwritten", () => {
+    expect(customVisualFilename({ kind: "hero" })).not.toBe(customVisualFilename({ kind: "hero" }));
   });
 });
 

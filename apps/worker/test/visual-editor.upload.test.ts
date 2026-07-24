@@ -31,7 +31,7 @@ describe("upload-image service:<id>", () => {
     const res = await uploadImage(shopId, dev, `service:${svcId}`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as { imageUrl?: string };
-    expect(body.imageUrl).toContain(`/service-${svcId}.png`);
+    expect(body.imageUrl).toMatch(new RegExp(`/custom-service-${svcId}-[0-9a-f]{8}\\.png$`));
   });
 
   it("404s for a service not in the shop", async () => {
@@ -45,5 +45,32 @@ describe("upload-image service:<id>", () => {
 
     const res = await uploadImage(shopId, dev, `service:${foreign}`);
     expect(res.status).toBe(404);
+  });
+});
+
+// Regression: the images pipeline writes shops/<slug>/hero.png (and logo.png,
+// catalog-N.png), so a custom upload stored at the same key keeps its URL on a
+// locked regenerate but has its R2 BYTES replaced. Custom visuals must live in
+// their own key namespace, unique per write.
+describe("upload-image custom key namespace", () => {
+  it("stores a hero upload under a unique custom- key, never the pipeline's hero.png", async () => {
+    const shopId = await seedShop("Key Shop");
+    const dev = await tokenFor(await seedUser("developer", null), "developer", null);
+
+    const res = await uploadImage(shopId, dev, "hero");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { imageUrl?: string };
+    expect(body.imageUrl).toMatch(/\/custom-hero-[0-9a-f]{8}\.png$/);
+  });
+
+  it("gives repeat uploads of the same visual distinct URLs so no object is overwritten", async () => {
+    const shopId = await seedShop("Key Shop 2");
+    const dev = await tokenFor(await seedUser("developer", null), "developer", null);
+
+    const first = (await (await uploadImage(shopId, dev, "logo")).json()) as { imageUrl?: string };
+    const second = (await (await uploadImage(shopId, dev, "logo")).json()) as { imageUrl?: string };
+    expect(first.imageUrl).toMatch(/\/custom-logo-[0-9a-f]{8}\.png$/);
+    expect(second.imageUrl).toMatch(/\/custom-logo-[0-9a-f]{8}\.png$/);
+    expect(second.imageUrl).not.toBe(first.imageUrl);
   });
 });
