@@ -127,6 +127,28 @@ describe("CommercialShopChrome: safe areas", () => {
     expect(fabTag).not.toContain("bottom-6");
     expect(fabTag).not.toContain("right-6");
   });
+
+  it("opens the chat panel on the shared positioning class", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommercialShopChrome site={site} settings={{}} shopSlug="test-shop">
+          <main>content</main>
+        </CommercialShopChrome>,
+      ),
+    );
+    act(() => {
+      container.querySelector('button[aria-label="Open chat"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const panel = container.querySelector(".pp-chat-panel");
+    expect(panel).toBeTruthy();
+    expect(panel!.querySelector('button[aria-label="Close chat"]')).toBeTruthy();
+    await act(async () => {});
+    act(() => root.unmount());
+    container.remove();
+  });
 });
 
 describe("CommercialShopChrome: press feedback", () => {
@@ -142,5 +164,62 @@ describe("CommercialShopChrome: press feedback", () => {
     const primaries = tags.filter((tag) => tag.includes("bg-[color:var(--color-accent)]"));
     expect(primaries.length).toBe(3);
     for (const tag of primaries) expect(tag).toContain("active:scale-[0.98]");
+  });
+});
+
+describe("CommercialShopChrome: booking bar and the mobile menu", () => {
+  it("hides the bar and drops the launcher lift while the menu is open, and restores both on close", async () => {
+    let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null = null;
+    class MockIO {
+      constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        ioCallback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", MockIO);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommercialShopChrome site={site} settings={{}} shopSlug="test-shop">
+          <main>content</main>
+        </CommercialShopChrome>,
+      ),
+    );
+    const bar = () => container.querySelector(".pp-bottom-bar")!;
+    const chromeRoot = () => container.querySelector(".pp-commercial")!;
+    expect(bar().getAttribute("data-visible")).toBe("false");
+
+    act(() => {
+      ioCallback!([{ isIntersecting: false }]);
+    });
+    expect(bar().getAttribute("data-visible")).toBe("true");
+    expect(chromeRoot().classList.contains("pp-bar-shown")).toBe(true);
+
+    act(() => {
+      container.querySelector('button[aria-label="Open menu"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const menu = container.querySelector('[role="dialog"][aria-label="Menu"]')!;
+    expect(menu).toBeTruthy();
+    expect(bar().getAttribute("data-visible")).toBe("false");
+    expect(chromeRoot().classList.contains("pp-bar-shown")).toBe(false);
+    // The menu container's native-feel classes (previously untested).
+    for (const cls of ["pp-safe-top", "pp-safe-bottom", "pp-safe-x", "overscroll-contain"]) {
+      expect(menu.classList.contains(cls)).toBe(true);
+    }
+
+    act(() => {
+      container.querySelector('button[aria-label="Close menu"]')!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(bar().getAttribute("data-visible")).toBe("true");
+    expect(chromeRoot().classList.contains("pp-bar-shown")).toBe(true);
+
+    await act(async () => {});
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
   });
 });

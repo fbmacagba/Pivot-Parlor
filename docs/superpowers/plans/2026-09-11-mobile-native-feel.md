@@ -28,7 +28,7 @@ Every task's requirements implicitly include these:
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` and `Claude-Session: https://claude.ai/code/session_01LMfRpnPeH7bdF1jwW7xinB`.
 - **Temp files:** never write under `/tmp`; use `mktemp -d` (or the session scratchpad) for logs.
 - **Remix `.js` route twins:** none exist today (verified 2026-09-11). If a build emits one beside an edited `.tsx` route, delete it before committing.
-- **Existing standalone-mode body padding** in `apps/web/app/tailwind.css` (lines 16 to 24) stays as is. It pads in-flow content; fixed and sticky chrome ignores it, which is exactly what this plan fixes per surface.
+- **Existing standalone-mode body padding** in `apps/web/app/tailwind.css` (lines 16 to 24) stays as is. It pads in-flow content. Fixed chrome ignores it; the sticky header does not (it is in flow at rest), so shop-chrome.css zeroes the body's top padding under the shop chrome and the header owns the top inset.
 
 ## Decisions made while planning (surfaced for the owner; none block execution)
 

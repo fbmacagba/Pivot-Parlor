@@ -2,12 +2,16 @@
    CommercialShopChrome.tsx, so every shop page (landing, book, confirm,
    legal, waitlist) gets these rules. */
 
-/* Safe areas. The body's standalone-mode padding (tailwind.css) only moves
-   in-flow content; fixed and sticky chrome sits at the viewport edge and has
-   to pad itself. env() is 0 on devices without insets. An element that also
-   wants a padding floor of its own sets --pp-pad-* (Tailwind arbitrary
-   property, e.g. [--pp-pad-x:1rem]) instead of a Tailwind padding class on
-   the same side, so the two stylesheets never fight over one property. */
+/* Safe areas. The body's standalone-mode padding (tailwind.css) moves in-flow
+   content. Fixed chrome sits at the viewport edge and has to pad itself; the
+   sticky header is in flow at rest but at the viewport edge once stuck, so it
+   pads itself too and the standalone rule below hands it the top inset
+   outright. env() is 0 on devices without insets. An element that also wants
+   a padding floor of its own sets --pp-pad-* (Tailwind arbitrary property,
+   e.g. [--pp-pad-x:1rem]) instead of a Tailwind padding class on the same
+   side, so the two stylesheets never fight over one property. Only
+   --pp-pad-bottom and --pp-pad-x are set today (cookie notice); --pp-pad-top
+   is read for symmetry. */
 .pp-safe-top {
   padding-top: max(var(--pp-pad-top, 0px), env(safe-area-inset-top, 0px));
 }
@@ -17,6 +21,18 @@
 .pp-safe-x {
   padding-left: max(var(--pp-pad-x, 0px), env(safe-area-inset-left, 0px));
   padding-right: max(var(--pp-pad-x, 0px), env(safe-area-inset-right, 0px));
+}
+
+/* Installed (standalone) mode: on shop pages the sticky header owns the top
+   inset through pp-safe-top, so the body must not add it as well; otherwise
+   the header is double-padded at rest and jumps by one inset on first
+   scroll. A browser without :has() keeps the body padding (the pre-fix
+   behaviour), nothing worse. This sheet is unlayered, so it beats the
+   @layer base rule in tailwind.css regardless of order. */
+@media all and (display-mode: standalone) {
+  body:has(.pp-commercial) {
+    padding-top: 0;
+  }
 }
 
 /* First-viewport sentinel: what the bottom bar watches on pages that have no

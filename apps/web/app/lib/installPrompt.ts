@@ -88,7 +88,15 @@ export async function promptInstall(): Promise<"accepted" | "dismissed" | "unava
   if (!event) return "unavailable";
   deferred = null;
   emit();
-  await event.prompt();
+  try {
+    await event.prompt();
+  } catch {
+    // The browser refused to show the dialog (no user activation, or a
+    // platform error). Hand the event back so the next tap can try again.
+    deferred = event;
+    emit();
+    return "unavailable";
+  }
   const { outcome } = await event.userChoice;
   if (outcome === "accepted") installed = true;
   emit();

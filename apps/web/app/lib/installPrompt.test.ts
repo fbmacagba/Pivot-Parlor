@@ -105,4 +105,17 @@ describe("installPrompt store", () => {
     window.dispatchEvent(new Event("appinstalled"));
     expect(store.getInstallMode()).toBe("installed");
   });
+
+  it("keeps the captured prompt when the native dialog refuses to open", async () => {
+    const store = await freshStore();
+    const ev = fakePromptEvent("accepted");
+    ev.prompt = vi.fn(async () => {
+      throw new Error("NotAllowedError");
+    });
+    window.dispatchEvent(ev);
+    expect(store.getInstallMode()).toBe("native");
+    await expect(store.promptInstall()).resolves.toBe("unavailable");
+    expect(store.getInstallMode()).toBe("native");
+    expect(ev.prompt).toHaveBeenCalledTimes(1);
+  });
 });

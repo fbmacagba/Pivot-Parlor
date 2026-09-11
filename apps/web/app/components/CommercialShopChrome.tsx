@@ -295,6 +295,10 @@ export function CommercialShopChrome({
   // pages without one) has scrolled away. Never present in SSR markup.
   const { sentinelRef, pastHero } = useScrolledPastHero(bookingBar);
 
+  // The bar and the menu are phone-only fixed layers at the same z-index; the
+  // bar yields whenever the menu is open, and the chat-launcher lift follows it.
+  const barShown = pastHero && !navOpen;
+
   // Fonts resolve onto the curated SELF-HOSTED set (WS-6 item 5 / LEG-5) —
   // exact matches keep their family; unknown legacy names fall to the role's
   // default via the stored heading_style hint. No Google Fonts request.
@@ -352,7 +356,7 @@ export function CommercialShopChrome({
 
   return (
     <div
-      className={`pp-commercial relative min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]${pastHero ? " pp-bar-shown" : ""}`}
+      className={`pp-commercial relative min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]${barShown ? " pp-bar-shown" : ""}`}
       style={{ ...rootStyle, fontFamily: "var(--pp-font-body)" }}
     >
       <style
@@ -758,7 +762,7 @@ export function CommercialShopChrome({
       />
 
       {bookingBar ? (
-        <MobileBookingBar shopSlug={shopSlug} bookingEnabled={bookingEnabled} visible={pastHero} />
+        <MobileBookingBar shopSlug={shopSlug} bookingEnabled={bookingEnabled} visible={barShown} />
       ) : null}
 
       {chatOpen ? (
