@@ -1,0 +1,104 @@
+/* Shop chrome (Site Design v3, PR 3: native feel). Imported by
+   CommercialShopChrome.tsx, so every shop page (landing, book, confirm,
+   legal, waitlist) gets these rules. */
+
+/* Safe areas. The body's standalone-mode padding (tailwind.css) only moves
+   in-flow content; fixed and sticky chrome sits at the viewport edge and has
+   to pad itself. env() is 0 on devices without insets. An element that also
+   wants a padding floor of its own sets --pp-pad-* (Tailwind arbitrary
+   property, e.g. [--pp-pad-x:1rem]) instead of a Tailwind padding class on
+   the same side, so the two stylesheets never fight over one property. */
+.pp-safe-top {
+  padding-top: max(var(--pp-pad-top, 0px), env(safe-area-inset-top, 0px));
+}
+.pp-safe-bottom {
+  padding-bottom: max(var(--pp-pad-bottom, 0px), env(safe-area-inset-bottom, 0px));
+}
+.pp-safe-x {
+  padding-left: max(var(--pp-pad-x, 0px), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--pp-pad-x, 0px), env(safe-area-inset-right, 0px));
+}
+
+/* First-viewport sentinel: what the bottom bar watches on pages that have no
+   hero. Absolute inside the chrome root, so it takes no layout space. svh
+   tracks the visible viewport on phones; vh is the fallback. */
+.pp-bar-sentinel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 100vh;
+  height: 100svh;
+  pointer-events: none;
+}
+
+/* Bottom booking bar. Starts off-screen and invisible; JS flips data-visible
+   once the hero has scrolled away. `visibility` keeps the hidden bar out of
+   the tab order and the accessibility tree; its transition is delayed so the
+   slide-out is still seen. */
+.pp-bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  padding-top: 0.75rem;
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  border-top: 1px solid var(--st-line-10);
+  background: var(--st-header);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transform: translateY(100%);
+  visibility: hidden;
+  transition:
+    transform 250ms ease-out,
+    visibility 0s linear 250ms;
+}
+.pp-bottom-bar[data-visible="true"] {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 250ms ease-out,
+    visibility 0s;
+}
+
+/* How far the chat launcher and panel rise while the bar is showing. The bar
+   is display:none from md up (Tailwind md:hidden), so the lift is zero there. */
+.pp-commercial {
+  --pp-bar-lift: 0px;
+}
+.pp-bar-shown {
+  --pp-bar-lift: 4.75rem;
+}
+@media (min-width: 768px) {
+  .pp-bar-shown {
+    --pp-bar-lift: 0px;
+  }
+}
+
+/* Chat launcher and panel: positioned here (not with Tailwind bottom-*/right-*
+   classes) so the safe-area inset and the bar lift compose in one place. */
+.pp-chat-fab {
+  position: fixed;
+  z-index: 60;
+  right: max(1.5rem, env(safe-area-inset-right, 0px));
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + var(--pp-bar-lift));
+  transition: bottom 250ms ease-out;
+}
+.pp-chat-panel {
+  position: fixed;
+  z-index: 60;
+  right: max(1.5rem, env(safe-area-inset-right, 0px));
+  bottom: calc(6rem + env(safe-area-inset-bottom, 0px) + var(--pp-bar-lift));
+  height: min(480px, calc(100vh - 7.5rem - env(safe-area-inset-bottom, 0px) - var(--pp-bar-lift)));
+  overscroll-behavior: contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-bottom-bar,
+  .pp-chat-fab {
+    transition: none;
+  }
+}
