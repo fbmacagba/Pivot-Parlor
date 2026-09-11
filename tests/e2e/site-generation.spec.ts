@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setE2eCookiesOnPage } from "./e2e-cookies";
+import { acknowledgePlatformCookieNotice, setE2eCookiesOnPage } from "./e2e-cookies";
 import { installSiteGenerationOwnerFlowMocks } from "./shop-onboarding-routes";
 
 /**
@@ -9,11 +9,22 @@ import { installSiteGenerationOwnerFlowMocks } from "./shop-onboarding-routes";
  *
  * Tests are split into:
  * - Template UI: no auth; redirects to /login pass with note
- * - Site generation: slow tests that call AI or mock API, timeout 90s
+ * - Site generation: slow tests that call AI or mock API, timeout 90s. The ones that wait for a
+ *   real generated site are opt-in (E2E_SITE_GENERATION=1); see realGenerationEnabled below.
  */
 
 /** Stable job id for mocked async generation (browser polls /api/jobs/:id/status on Pages). */
 const E2E_MOCK_JOB_ID = "e2e-mock-generation-job";
+
+/**
+ * Real site generation needs the research/images/text/builder/audit pipeline behind the
+ * target API. Staging enqueues to site-research-queue-staging, which no worker consumes, so
+ * the tests that wait for a generated site can only pass against an environment that runs
+ * the pipeline. Opt in with E2E_SITE_GENERATION=1; everything else in this file still runs.
+ */
+const realGenerationEnabled = process.env.E2E_SITE_GENERATION === "1";
+const REAL_GENERATION_SKIP_REASON =
+  "needs a site-generation pipeline behind the target API (staging has no consumer for site-research-queue-staging); set E2E_SITE_GENERATION=1 to run";
 
 const MOCK_GENERATE_SITE_QUEUED = {
   success: true,
@@ -257,11 +268,12 @@ async function getInvitePathFromOpenDialog(page: import("@playwright/test").Page
   return null;
 }
 
-/** True when unauthenticated (dev login) or route missing (e.g. Pages 404). */
+/** True when unauthenticated (redirected to /login) or route missing (e.g. Pages 404). */
 async function templateSelectUnavailable(page: import("@playwright/test").Page): Promise<
   "login" | "notfound" | null
 > {
-  if (/\/dev\/login/.test(page.url())) return "login";
+  // Unauthenticated visitors land on the unified /login page (older builds used /dev/login).
+  if (/\/(dev\/)?login(\?|\/|$)/.test(page.url())) return "login";
   const notFound = page.getByRole("heading", { name: /404/i });
   if (await notFound.isVisible().catch(() => false)) return "notfound";
   return null;
@@ -276,7 +288,7 @@ test.describe("Template UI", () => {
 
     const skip = await templateSelectUnavailable(page);
     if (skip === "login") {
-      await expect(page.getByRole("heading", { name: /developer login/i })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /^sign in$|developer login/i })).toBeVisible();
       return;
     }
     if (skip === "notfound") {
@@ -298,7 +310,7 @@ test.describe("Template UI", () => {
     const skip = await templateSelectUnavailable(page);
     if (skip === "login") {
       test.info().annotations.push({ type: "note", description: "auth required" });
-      await expect(page.getByRole("heading", { name: /developer login/i })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /^sign in$|developer login/i })).toBeVisible();
       return;
     }
     if (skip === "notfound") {
@@ -317,7 +329,7 @@ test.describe("Template UI", () => {
     const skip = await templateSelectUnavailable(page);
     if (skip === "login") {
       test.info().annotations.push({ type: "note", description: "auth required" });
-      await expect(page.getByRole("heading", { name: /developer login/i })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /^sign in$|developer login/i })).toBeVisible();
       return;
     }
     if (skip === "notfound") {
@@ -340,6 +352,7 @@ test.describe.serial("Site generation", () => {
 
   // ── Integration test: real AI generation (only one that calls live API) ─────
   test("Dev can trigger site generation for a test shop", async ({ page }) => {
+    test.skip(!realGenerationEnabled, REAL_GENERATION_SKIP_REASON);
     test.setTimeout(120_000);
 
     const password = process.env.DEV_PASSWORD;
@@ -349,6 +362,8 @@ test.describe.serial("Site generation", () => {
     const shopName = `E2E Site Gen ${uniqueId}`;
     const ownerEmail = `e2e-sitegen-${uniqueId}@example.com`;
 
+    // Invite flow (no Stripe checkout): the list only shows "Generate Site" for active shops.
+    await setE2eCookiesOnPage(page, [{ name: "e2e_legacy_onboard", value: "1" }]);
     await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
@@ -384,6 +399,7 @@ test.describe.serial("Site generation", () => {
   });
 
   test("Public booking page loads and displays the generated headline", async ({ page }) => {
+    test.skip(!realGenerationEnabled, REAL_GENERATION_SKIP_REASON);
     expect(shopSlug, "previous test must capture shop slug from View Site link").toBeTruthy();
 
     await page.goto(`/${shopSlug}`);
@@ -397,6 +413,7 @@ test.describe.serial("Site generation", () => {
   });
 
   test("Commercial template renders on the public shop page", async ({ page }) => {
+    test.skip(!realGenerationEnabled, REAL_GENERATION_SKIP_REASON);
     expect(shopSlug, "previous test must capture shop slug from View Site link").toBeTruthy();
 
     await page.goto(`/${shopSlug}`);
@@ -448,6 +465,7 @@ test.describe.serial("Site generation", () => {
   });
 
   test("Generated images load without 404", async ({ page, request }) => {
+    test.skip(!realGenerationEnabled, REAL_GENERATION_SKIP_REASON);
     expect(shopSlug, "previous test must capture shop slug from View Site link").toBeTruthy();
 
     await page.goto(`/${shopSlug}`);
@@ -473,6 +491,8 @@ test.describe.serial("Site generation", () => {
     page,
   }) => {
     await setE2eCookiesOnPage(page, [{ name: "e2e_legacy_onboard", value: "1" }]);
+    // The platform cookie notice is a fixed bottom bar that would cover "Generate My Site".
+    await acknowledgePlatformCookieNotice(page);
     await installSiteGenerationOwnerFlowMocks(page);
     await installTemplateSelectAndAdmin404Fallbacks(page);
     await mockGenerateSiteResponse(page);
@@ -508,6 +528,8 @@ test.describe.serial("Site generation", () => {
     await page.getByLabel("Full name").fill("E2E Notes User");
     await page.getByLabel(/^Password$/).fill("SecurePass123!");
     await page.getByLabel(/confirm password/i).fill("SecurePass123!");
+    // The invite form requires the Terms/DPA consent box (#78), on the real page and the mock.
+    await page.getByRole("checkbox").check();
     await page.getByRole("button", { name: /activate account/i }).click();
     await page.waitForLoadState("networkidle");
 
@@ -536,6 +558,8 @@ test.describe.serial("Site generation", () => {
   // ── Mocked: logo upload + full generation progress (server-side generate-site not observable in browser)
   test("Logo upload skips AI logo generation", async ({ page }) => {
     await setE2eCookiesOnPage(page, [{ name: "e2e_legacy_onboard", value: "1" }]);
+    // The platform cookie notice is a fixed bottom bar that would cover "Generate My Site".
+    await acknowledgePlatformCookieNotice(page);
     await installSiteGenerationOwnerFlowMocks(page);
     await installTemplateSelectAndAdmin404Fallbacks(page);
 
@@ -601,6 +625,8 @@ test.describe.serial("Site generation", () => {
     await page.getByLabel("Full name").fill("E2E Logo User");
     await page.getByLabel(/^Password$/).fill("SecurePass123!");
     await page.getByLabel(/confirm password/i).fill("SecurePass123!");
+    // The invite form requires the Terms/DPA consent box (#78), on the real page and the mock.
+    await page.getByRole("checkbox").check();
     await page.getByRole("button", { name: /activate account/i }).click();
     await page.waitForLoadState("networkidle");
 
@@ -624,6 +650,7 @@ test.describe.serial("Site generation", () => {
 
   // ── Single public Commercial template (replaces per-template variants) ────────
   test("Commercial template shop generation yields a view-site slug", async ({ page }) => {
+    test.skip(!realGenerationEnabled, REAL_GENERATION_SKIP_REASON);
     test.setTimeout(120_000);
 
     const password = process.env.DEV_PASSWORD;
@@ -631,6 +658,8 @@ test.describe.serial("Site generation", () => {
 
     const slugs: string[] = [];
 
+    // Invite flow (no Stripe checkout): the list only shows "Generate Site" for active shops.
+    await setE2eCookiesOnPage(page, [{ name: "e2e_legacy_onboard", value: "1" }]);
     await page.goto("/login");
     await page.getByLabel("Email address").fill("dev@pivotparlor.com");
     await page.getByLabel("Password").fill(password);
