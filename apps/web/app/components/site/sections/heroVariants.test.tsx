@@ -24,6 +24,7 @@ vi.mock("~/components/CommercialShopChrome", async () => {
 import { HeroSplitSection } from "./HeroSplitSection";
 import { HeroEditorialSection } from "./HeroEditorialSection";
 import { HeroMinimalSection } from "./HeroMinimalSection";
+import { HeroSection } from "./HeroSection";
 import CommercialTemplate from "~/components/CommercialTemplate";
 
 const ctx = makeTestCtx();
@@ -73,6 +74,24 @@ describe("hero variants", () => {
       <HeroSplitSection ctx={ctx} density="compact" motif="none" motionClass="" parallax={false} />,
     );
     expect(airy).not.toBe(compact);
+  });
+
+  it("every hero variant carries the data-pp-hero marker on its root section", () => {
+    const props = { ctx, density: "airy" as const, motif: "none" as const, motionClass: "" };
+    const markups = [
+      renderToStaticMarkup(<HeroSplitSection {...props} parallax={false} />),
+      renderToStaticMarkup(<HeroEditorialSection {...props} parallax={false} />),
+      renderToStaticMarkup(<HeroMinimalSection {...props} />),
+    ];
+    for (const markup of markups) {
+      expect(markup.startsWith("<section")).toBe(true);
+      expect(markup.slice(0, markup.indexOf(">"))).toContain("data-pp-hero");
+    }
+  });
+
+  it("the legacy full-bleed hero carries the marker too", () => {
+    const markup = renderToStaticMarkup(<HeroSection ctx={ctx} centered={false} minH="tall" />);
+    expect(markup.slice(0, markup.indexOf(">"))).toContain("data-pp-hero");
   });
 });
 

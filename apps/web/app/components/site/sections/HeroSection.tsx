@@ -19,7 +19,7 @@ export function HeroSection({
   const imgRef = useParallax<HTMLImageElement>(parallax, 14, "scale(1.05)");
   const minHClass = minH === "tall" ? "min-h-[85vh]" : "min-h-screen";
   return (
-    <section className={`relative flex ${minHClass} flex-col overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
+    <section data-pp-hero="" className={`relative flex ${minHClass} flex-col overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
       <div className="absolute inset-0 -z-0">
         {ctx.heroSrc ? (
           <>

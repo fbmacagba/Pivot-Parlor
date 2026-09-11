@@ -23,7 +23,7 @@ export function HeroSplitSection({
   const imgRef = useParallax<HTMLImageElement>(parallax, 14, "scale(1.05)");
   const pad = density === "compact" ? "py-14 md:py-16" : "py-20 md:py-24";
   return (
-    <section className={`relative overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
+    <section data-pp-hero="" className={`relative overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
       <div className="grid w-full lg:grid-cols-2">
         <div className={`relative mx-auto flex w-full max-w-2xl flex-col justify-center px-4 ${pad} md:px-6 lg:min-h-screen lg:pl-[max(1.5rem,calc((100vw-80rem)/2))] lg:pr-16`}>
           {motif === "line" ? <MotifDecor motif="line" className="mb-6 w-fit" /> : <MotifDecor motif={motif} className="-left-10 bottom-8 opacity-70" />}
