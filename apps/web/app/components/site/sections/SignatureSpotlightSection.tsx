@@ -83,7 +83,7 @@ export function SignatureSpotlightSection({
           </dl>
           <Link
             to={`/${ctx.shopSlug}/book?serviceId=${encodeURIComponent(featured.id)}`}
-            className="mt-8 inline-flex min-h-12 items-center justify-center gap-1.5 rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] transition hover:brightness-110"
+            className="mt-8 inline-flex min-h-12 items-center justify-center gap-1.5 rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] transition hover:brightness-110 active:scale-[0.98]"
           >
             Book this <span aria-hidden>→</span>
           </Link>
