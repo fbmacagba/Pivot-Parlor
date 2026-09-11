@@ -15,6 +15,9 @@ import {
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 import { useModalA11y } from "~/lib/useModalA11y";
+import { useScrolledPastHero } from "~/lib/useScrolledPastHero";
+import { MobileBookingBar } from "~/components/MobileBookingBar";
+import "~/components/shop-chrome.css";
 
 const CHATBOT_CHAT_URL =
   "https://pivot-parlor-chatbot.bmorris0565.workers.dev/chat";
@@ -125,6 +128,11 @@ export type CommercialShopChromeProps = {
    * Used to populate the chatbot welcome chips — no extra fetch needed.
    */
   services?: { name: string; price_gbp: number; category?: string | null }[];
+  /**
+   * Render the phone-only sticky "Book now" bar (default true). Pages whose
+   * own flow owns the primary CTA (/book, /confirm, /waitlist) pass false.
+   */
+  bookingBar?: boolean;
 };
 
 export function CommercialShopChrome({
@@ -134,6 +142,7 @@ export function CommercialShopChrome({
   homeActive = false,
   children,
   services = [],
+  bookingBar = true,
 }: CommercialShopChromeProps) {
   const [navOpen, setNavOpen] = useState(false);
   const [cookieForce, setCookieForce] = useState(false);
@@ -281,6 +290,10 @@ export function CommercialShopChrome({
 
   const bookingEnabled = settings.booking_enabled !== false;
 
+  // Phone-only bottom bar: shown once the hero (or the first viewport, on
+  // pages without one) has scrolled away. Never present in SSR markup.
+  const { sentinelRef, pastHero } = useScrolledPastHero(bookingBar);
+
   // Fonts resolve onto the curated SELF-HOSTED set (WS-6 item 5 / LEG-5) —
   // exact matches keep their family; unknown legacy names fall to the role's
   // default via the stored heading_style hint. No Google Fonts request.
@@ -338,7 +351,7 @@ export function CommercialShopChrome({
 
   return (
     <div
-      className="pp-commercial min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]"
+      className={`pp-commercial relative min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]${pastHero ? " pp-bar-shown" : ""}`}
       style={{ ...rootStyle, fontFamily: "var(--pp-font-body)" }}
     >
       <style
@@ -346,6 +359,8 @@ export function CommercialShopChrome({
           __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);${headingWeight ? `font-weight:${headingWeight};` : ""}}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}`,
         }}
       />
+
+      {bookingBar ? <div ref={sentinelRef} className="pp-bar-sentinel" aria-hidden /> : null}
 
       <header className="sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
@@ -735,6 +750,10 @@ export function CommercialShopChrome({
         forceOpen={cookieForce}
         onClose={() => setCookieForce(false)}
       />
+
+      {bookingBar ? (
+        <MobileBookingBar shopSlug={shopSlug} bookingEnabled={bookingEnabled} visible={pastHero} />
+      ) : null}
 
       {chatOpen ? (
         <div

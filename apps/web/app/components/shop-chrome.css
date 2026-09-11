@@ -78,7 +78,7 @@
   }
 }
 
-/* Chat launcher and panel: positioned here (not with Tailwind bottom-*/right-*
+/* Chat launcher and panel: positioned here (not with Tailwind bottom-* / right-*
    classes) so the safe-area inset and the bar lift compose in one place. */
 .pp-chat-fab {
   position: fixed;
