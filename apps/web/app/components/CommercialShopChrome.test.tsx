@@ -29,12 +29,21 @@ function render(props: Partial<ComponentProps<typeof CommercialShopChrome>> = {}
   );
 }
 
+/** The bar's own markup: from its root div through the end of its link. */
+function barChunk(html: string): string {
+  const start = html.indexOf('class="pp-bottom-bar md:hidden"');
+  if (start < 0) return "";
+  return html.slice(start, html.indexOf("</a>", start));
+}
+
 describe("CommercialShopChrome: mobile booking bar", () => {
   it("renders the bar hidden by default, plus the first-viewport sentinel", () => {
     const html = render();
-    expect(html).toContain('class="pp-bottom-bar md:hidden"');
-    expect(html).toContain('data-visible="false"');
-    expect(html).toContain('href="/test-shop/book"');
+    const bar = barChunk(html);
+    expect(bar).not.toBe("");
+    expect(bar).toContain('data-visible="false"');
+    expect(bar).toContain('href="/test-shop/book"');
+    expect(bar).toContain("Book now");
     expect(html).toContain("pp-bar-sentinel");
     expect(html).not.toContain("pp-bar-shown");
   });
@@ -46,8 +55,10 @@ describe("CommercialShopChrome: mobile booking bar", () => {
   });
 
   it("points the bar at services when booking is disabled", () => {
-    const html = render({ settings: { booking_enabled: false } });
-    expect(html).toContain("View services");
-    expect(html).toContain('href="/test-shop#services"');
+    const bar = barChunk(render({ settings: { booking_enabled: false } }));
+    expect(bar).not.toBe("");
+    expect(bar).toContain('href="/test-shop#services"');
+    expect(bar).toContain("View services");
+    expect(bar).not.toContain("/test-shop/book");
   });
 });
