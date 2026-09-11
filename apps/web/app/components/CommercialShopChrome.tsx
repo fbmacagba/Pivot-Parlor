@@ -17,6 +17,7 @@ import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 import { useModalA11y } from "~/lib/useModalA11y";
 import { useScrolledPastHero } from "~/lib/useScrolledPastHero";
 import { MobileBookingBar } from "~/components/MobileBookingBar";
+import { InstallAppButton } from "~/components/InstallAppButton";
 import "~/components/shop-chrome.css";
 
 const CHATBOT_CHAT_URL =
@@ -530,6 +531,11 @@ export function CommercialShopChrome({
             >
               Sign in
             </Link>
+            {/* Install entry for the shop's PWA; renders nothing unless this
+                device can install. Closing the menu first lets the native
+                dialog (or the iOS walkthrough in the root-mounted prompt)
+                take focus cleanly. */}
+            <InstallAppButton shopName={site.shop_name} look="row" onActivate={closeNav} />
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}

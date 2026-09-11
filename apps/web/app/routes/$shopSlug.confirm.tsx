@@ -9,6 +9,7 @@ import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
 import { ThemedButton, lightDark, platformFallbackVars } from "~/components/ThemedBookingControls";
 import { BookingConfirmMap } from "~/components/BookingConfirmMap";
+import { InstallAppButton } from "~/components/InstallAppButton";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 type BookingStatus = {
@@ -164,6 +165,12 @@ export default function BookingConfirm() {
       {bookingId && (
         <p className="mt-2 font-mono text-xs text-[color:var(--st-ink-50)]">Ref: {bookingId}</p>
       )}
+      {/* Highest-intent install moment: the visitor has just booked here. */}
+      <InstallAppButton
+        shopName={layoutData?.shop?.name ?? "this shop"}
+        look="chip"
+        className="mt-6"
+      />
       {shopAddress ? <BookingConfirmMap address={shopAddress} /> : null}
       <div className="mt-8 flex flex-col gap-3">
         <ThemedButton asChild size="lg">
