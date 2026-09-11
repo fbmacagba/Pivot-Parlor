@@ -25,6 +25,7 @@ import { HeroSplitSection } from "./HeroSplitSection";
 import { HeroEditorialSection } from "./HeroEditorialSection";
 import { HeroMinimalSection } from "./HeroMinimalSection";
 import { HeroSection } from "./HeroSection";
+import { FinalCtaSection } from "./FinalCtaSection";
 import CommercialTemplate from "~/components/CommercialTemplate";
 
 const ctx = makeTestCtx();
@@ -92,6 +93,25 @@ describe("hero variants", () => {
   it("the legacy full-bleed hero carries the marker too", () => {
     const markup = renderToStaticMarkup(<HeroSection ctx={ctx} centered={false} minH="tall" />);
     expect(markup.slice(0, markup.indexOf(">"))).toContain("data-pp-hero");
+  });
+
+  it("primary booking CTAs give press feedback in every hero and the final CTA", () => {
+    const props = { ctx, density: "airy" as const, motif: "none" as const, motionClass: "" };
+    const pages = [
+      renderToStaticMarkup(<HeroSection ctx={ctx} centered={false} minH="tall" />),
+      renderToStaticMarkup(<HeroSplitSection {...props} parallax={false} />),
+      renderToStaticMarkup(<HeroEditorialSection {...props} parallax={false} />),
+      renderToStaticMarkup(<HeroMinimalSection {...props} />),
+      renderToStaticMarkup(<FinalCtaSection ctx={ctx} glow={false} />),
+    ];
+    for (const html of pages) {
+      // `to` precedes `className` in the JSX, so href comes first in the tag
+      // and the class list follows it up to the closing ">".
+      const start = html.indexOf('href="/test-shop/book"');
+      expect(start).toBeGreaterThan(-1);
+      const tag = html.slice(start, html.indexOf(">", start));
+      expect(tag).toContain("active:scale-[0.98]");
+    }
   });
 });
 

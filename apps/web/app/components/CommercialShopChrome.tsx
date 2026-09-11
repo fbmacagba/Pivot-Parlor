@@ -433,14 +433,14 @@ export function CommercialShopChrome({
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}
-                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]"
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
                 Book Now →
               </Link>
             ) : (
               <Link
                 to={`/${shopSlug}#services`}
-                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]"
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
                 View services →
               </Link>
@@ -453,7 +453,7 @@ export function CommercialShopChrome({
               <Link
                 to={`/${shopSlug}/book`}
                 onClick={closeNav}
-                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]"
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
                 Book
               </Link>
@@ -539,7 +539,7 @@ export function CommercialShopChrome({
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}
-                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)]"
+                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
                 Book Now →
@@ -547,7 +547,7 @@ export function CommercialShopChrome({
             ) : (
               <Link
                 to={`/${shopSlug}#services`}
-                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)]"
+                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
                 View services →
@@ -810,7 +810,7 @@ export function CommercialShopChrome({
           {/* Body */}
           <div
             ref={chatScrollRef}
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-3"
           >
             {/* Welcome state: greeting + service chips (shown before any message is sent) */}
             {!chatStarted && (

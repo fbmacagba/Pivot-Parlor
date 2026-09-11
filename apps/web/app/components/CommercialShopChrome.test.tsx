@@ -128,3 +128,19 @@ describe("CommercialShopChrome: safe areas", () => {
     expect(fabTag).not.toContain("right-6");
   });
 });
+
+describe("CommercialShopChrome: press feedback", () => {
+  it("every accent-filled booking CTA in the server markup carries the press state", () => {
+    const html = render();
+    // Server markup holds four /book anchors: the desktop nav text link
+    // "Book", the desktop "Book Now →" button, the mobile header "Book"
+    // button, and the bottom bar. Only the accent-filled buttons are
+    // primary CTAs; the nav text link is not one and needs no press state.
+    const anchors = html.split("<a ").filter((chunk) => chunk.includes('href="/test-shop/book"'));
+    expect(anchors.length).toBe(4);
+    const tags = anchors.map((chunk) => chunk.slice(0, chunk.indexOf(">")));
+    const primaries = tags.filter((tag) => tag.includes("bg-[color:var(--color-accent)]"));
+    expect(primaries.length).toBe(3);
+    for (const tag of primaries) expect(tag).toContain("active:scale-[0.98]");
+  });
+});
