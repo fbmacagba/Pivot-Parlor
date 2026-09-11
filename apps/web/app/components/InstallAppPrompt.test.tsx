@@ -133,4 +133,22 @@ describe("InstallAppPrompt", () => {
     // "update not wrapped in act" warning cannot fire after the test ends.
     await act(async () => {});
   });
+
+  it("declining the native dialog counts as Not now", async () => {
+    const m = await mount();
+    ({ root, container } = m);
+    const ev = fakePromptEvent("dismissed");
+    act(() => {
+      window.dispatchEvent(ev);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(container!.textContent).toContain("Install app");
+    click(buttonByText(container!, "Install app"));
+    await act(async () => {});
+    expect(ev.prompt).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem("pp-install-dismissed")).not.toBeNull();
+    expect(container!.innerHTML).toBe("");
+  });
 });

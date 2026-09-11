@@ -62,23 +62,22 @@ export function InstallAppPrompt() {
 
   const open = guideOpen || (invite && installable);
 
+  function rememberNotNow() {
+    writeDismissed();
+    setInvite(false);
+  }
+
   function dismiss() {
     // Only the unprompted invitation is remembered; closing the on-demand
     // guide must not silence a future explicit tap.
-    if (invite) {
-      writeDismissed();
-      setInvite(false);
-    }
+    if (invite) rememberNotNow();
     if (guideOpen) closeInstallGuide();
   }
 
   async function install() {
     const outcome = await promptInstall();
-    if (outcome === "dismissed") {
-      // Declining the native dialog counts as "not now".
-      writeDismissed();
-      setInvite(false);
-    }
+    // Declining the native dialog counts as "not now".
+    if (outcome === "dismissed") rememberNotNow();
     if (guideOpen) closeInstallGuide();
   }
 
