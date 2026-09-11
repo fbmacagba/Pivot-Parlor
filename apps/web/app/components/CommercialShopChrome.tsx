@@ -15,6 +15,10 @@ import {
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 import { useModalA11y } from "~/lib/useModalA11y";
+import { useScrolledPastHero } from "~/lib/useScrolledPastHero";
+import { MobileBookingBar } from "~/components/MobileBookingBar";
+import { InstallAppButton } from "~/components/InstallAppButton";
+import "~/components/shop-chrome.css";
 
 const CHATBOT_CHAT_URL =
   "https://pivot-parlor-chatbot.bmorris0565.workers.dev/chat";
@@ -125,6 +129,11 @@ export type CommercialShopChromeProps = {
    * Used to populate the chatbot welcome chips — no extra fetch needed.
    */
   services?: { name: string; price_gbp: number; category?: string | null }[];
+  /**
+   * Render the phone-only sticky "Book now" bar (default true). Pages whose
+   * own flow owns the primary CTA (/book, /confirm, /waitlist) pass false.
+   */
+  bookingBar?: boolean;
 };
 
 export function CommercialShopChrome({
@@ -134,6 +143,7 @@ export function CommercialShopChrome({
   homeActive = false,
   children,
   services = [],
+  bookingBar = true,
 }: CommercialShopChromeProps) {
   const [navOpen, setNavOpen] = useState(false);
   const [cookieForce, setCookieForce] = useState(false);
@@ -281,6 +291,14 @@ export function CommercialShopChrome({
 
   const bookingEnabled = settings.booking_enabled !== false;
 
+  // Phone-only bottom bar: shown once the hero (or the first viewport, on
+  // pages without one) has scrolled away. Never present in SSR markup.
+  const { sentinelRef, pastHero } = useScrolledPastHero(bookingBar);
+
+  // The bar and the menu are phone-only fixed layers at the same z-index; the
+  // bar yields whenever the menu is open, and the chat-launcher lift follows it.
+  const barShown = pastHero && !navOpen;
+
   // Fonts resolve onto the curated SELF-HOSTED set (WS-6 item 5 / LEG-5) —
   // exact matches keep their family; unknown legacy names fall to the role's
   // default via the stored heading_style hint. No Google Fonts request.
@@ -338,7 +356,7 @@ export function CommercialShopChrome({
 
   return (
     <div
-      className="pp-commercial min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]"
+      className={`pp-commercial relative min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]${barShown ? " pp-bar-shown" : ""}`}
       style={{ ...rootStyle, fontFamily: "var(--pp-font-body)" }}
     >
       <style
@@ -347,7 +365,9 @@ export function CommercialShopChrome({
         }}
       />
 
-      <header className="sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">
+      {bookingBar ? <div ref={sentinelRef} className="pp-bar-sentinel" aria-hidden /> : null}
+
+      <header className="pp-safe-top pp-safe-x sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
           <Link
             to={`/${shopSlug}`}
@@ -417,14 +437,14 @@ export function CommercialShopChrome({
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}
-                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]"
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
                 Book Now →
               </Link>
             ) : (
               <Link
                 to={`/${shopSlug}#services`}
-                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]"
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
                 View services →
               </Link>
@@ -437,7 +457,7 @@ export function CommercialShopChrome({
               <Link
                 to={`/${shopSlug}/book`}
                 onClick={closeNav}
-                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)]"
+                className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
                 Book
               </Link>
@@ -464,7 +484,7 @@ export function CommercialShopChrome({
           role="dialog"
           aria-modal="true"
           aria-label="Menu"
-          className="fixed inset-0 z-50 flex flex-col bg-[color:var(--st-bg)] md:hidden"
+          className="pp-safe-top pp-safe-bottom pp-safe-x fixed inset-0 z-50 flex flex-col overflow-y-auto overscroll-contain bg-[color:var(--st-bg)] md:hidden"
         >
           <div className="flex items-center justify-between border-b border-[color:var(--st-line-10)] px-4 py-3">
             <span className="pp-heading truncate text-lg">
@@ -515,10 +535,15 @@ export function CommercialShopChrome({
             >
               Sign in
             </Link>
+            {/* Install entry for the shop's PWA; renders nothing unless this
+                device can install. Closing the menu first lets the native
+                dialog (or the iOS walkthrough in the root-mounted prompt)
+                take focus cleanly. */}
+            <InstallAppButton shopName={site.shop_name} look="row" onActivate={closeNav} />
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}
-                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)]"
+                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
                 Book Now →
@@ -526,7 +551,7 @@ export function CommercialShopChrome({
             ) : (
               <Link
                 to={`/${shopSlug}#services`}
-                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)]"
+                className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
                 View services →
@@ -736,11 +761,14 @@ export function CommercialShopChrome({
         onClose={() => setCookieForce(false)}
       />
 
+      {bookingBar ? (
+        <MobileBookingBar shopSlug={shopSlug} bookingEnabled={bookingEnabled} visible={barShown} />
+      ) : null}
+
       {chatOpen ? (
         <div
           ref={chatDialogRef}
-          className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
-          style={{ height: 480, maxHeight: "min(480px, calc(100vh - 7.5rem))" }}
+          className="pp-chat-panel flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
           role="dialog"
           aria-label={`Chat with ${site.shop_name}'s AI assistant`}
           onClick={(e) => e.stopPropagation()}
@@ -786,7 +814,7 @@ export function CommercialShopChrome({
           {/* Body */}
           <div
             ref={chatScrollRef}
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-3"
           >
             {/* Welcome state: greeting + service chips (shown before any message is sent) */}
             {!chatStarted && (
@@ -935,7 +963,7 @@ export function CommercialShopChrome({
 
       <button
         type="button"
-        className="fixed bottom-6 right-6 z-[60] flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95"
+        className="pp-chat-fab flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95 active:scale-95"
         aria-label={chatOpen ? "Close chat" : "Open chat"}
         aria-expanded={chatOpen}
         onClick={() => {

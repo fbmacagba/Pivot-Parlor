@@ -23,7 +23,7 @@ export function HeroSplitSection({
   const imgRef = useParallax<HTMLImageElement>(parallax, 14, "scale(1.05)");
   const pad = density === "compact" ? "py-14 md:py-16" : "py-20 md:py-24";
   return (
-    <section className={`relative overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
+    <section data-pp-hero="" className={`relative overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
       <div className="grid w-full lg:grid-cols-2">
         <div className={`relative mx-auto flex w-full max-w-2xl flex-col justify-center px-4 ${pad} md:px-6 lg:min-h-screen lg:pl-[max(1.5rem,calc((100vw-80rem)/2))] lg:pr-16`}>
           {motif === "line" ? <MotifDecor motif="line" className="mb-6 w-fit" /> : <MotifDecor motif={motif} className="-left-10 bottom-8 opacity-70" />}
@@ -49,7 +49,7 @@ export function HeroSplitSection({
             </h2>
           ) : null}
           <div className="mt-10 flex flex-wrap gap-4">
-            <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110">
+            <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110 active:scale-[0.98]">
               {ctx.bookLabel} →
             </Link>
             <button type="button" onClick={() => ctx.scrollToId("services")}

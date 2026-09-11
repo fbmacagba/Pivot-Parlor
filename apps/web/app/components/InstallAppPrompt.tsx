@@ -2,104 +2,92 @@ import { useEffect, useState } from "react";
 import { Download, Share, SquarePlus, X } from "lucide-react";
 import { useShopMatch } from "~/lib/shop-match";
 import { useModalA11y } from "~/lib/useModalA11y";
+import {
+  closeInstallGuide,
+  promptInstall,
+  useInstallGuideOpen,
+  useInstallMode,
+} from "~/lib/installPrompt";
 
 /**
- * Centered "install the app" invitation, shown once per device until
- * dismissed or installed.
+ * Centered "install the app" dialog with two ways in:
  *
- * - Chromium (Android/desktop): captures `beforeinstallprompt` and triggers
- *   the native install dialog from the Install button.
- * - iOS/iPadOS Safari: no install API exists, so the modal shows the
- *   two-step Share -> Add to Home Screen walkthrough instead.
+ * 1. The unprompted invitation: shown once per device (until dismissed or
+ *    installed), after a short delay so it never competes with first paint.
+ *    Chromium shows an Install button (native prompt); iOS/iPadOS Safari has
+ *    no install API, so it shows the Share -> Add to Home Screen walkthrough.
+ * 2. On demand: the shop menu's "Install this shop's app" row and the
+ *    booking-confirmation chip call requestInstall(); on iOS that opens this
+ *    dialog in walkthrough form immediately, ignoring any earlier "Not now".
  *
- * Dismissal ("Not now", backdrop tap or the close button) is remembered in
- * localStorage. Renders nothing during SSR and in installed (standalone)
- * mode. Appears after a short delay so it never competes with first paint.
+ * Install capability itself (event capture, mode detection, the prompt) lives
+ * in lib/installPrompt so every surface shares one captured event. Renders
+ * nothing during SSR and in installed (standalone) mode.
  */
 
 const DISMISS_KEY = "pp-install-dismissed";
 const SHOW_DELAY_MS = 1500;
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+function readDismissed(): boolean {
+  try {
+    return localStorage.getItem(DISMISS_KEY) !== null;
+  } catch {
+    return false;
+  }
 }
 
-function isStandalone(): boolean {
-  return (
-    window.matchMedia("(display-mode: standalone)").matches ||
-    // iOS Safari's pre-standard flag
-    (navigator as { standalone?: boolean }).standalone === true
-  );
-}
-
-function isIosSafari(): boolean {
-  const ua = navigator.userAgent;
-  const isIos =
-    /iPad|iPhone|iPod/.test(ua) ||
-    // iPadOS 13+ reports as macOS but is the only Mac with touch
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  return isIos && !/CriOS|FxiOS|EdgiOS/.test(ua);
+function writeDismissed(): void {
+  try {
+    localStorage.setItem(DISMISS_KEY, new Date().toISOString());
+  } catch {
+    /* storage blocked: the invitation simply shows again next visit */
+  }
 }
 
 export function InstallAppPrompt() {
   // On a shop site the install captures the SHOP's app (per-shop manifest),
   // so the invitation carries the shop's name, not the platform's.
   const shop = useShopMatch();
-  const [mode, setMode] = useState<"hidden" | "native" | "ios">("hidden");
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
-    null,
-  );
+  const mode = useInstallMode();
+  const guideOpen = useInstallGuideOpen();
+  const [invite, setInvite] = useState(false);
+
+  const installable = mode === "native" || mode === "ios";
 
   useEffect(() => {
-    if (isStandalone() || localStorage.getItem(DISMISS_KEY)) return;
+    if (!installable || readDismissed()) return;
+    const timer = setTimeout(() => setInvite(true), SHOW_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [installable]);
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
+  const open = guideOpen || (invite && installable);
 
-    if (isIosSafari()) {
-      timer = setTimeout(() => setMode("ios"), SHOW_DELAY_MS);
-      return () => clearTimeout(timer);
-    }
-
-    function onPrompt(e: Event) {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-      timer = setTimeout(() => setMode("native"), SHOW_DELAY_MS);
-    }
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    // If the browser never fires the event (unsupported, or already
-    // installed), the invitation simply never appears.
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      if (timer) clearTimeout(timer);
-    };
-  }, []);
+  function rememberNotNow() {
+    writeDismissed();
+    setInvite(false);
+  }
 
   function dismiss() {
-    localStorage.setItem(DISMISS_KEY, new Date().toISOString());
-    setMode("hidden");
+    // Only the unprompted invitation is remembered; closing the on-demand
+    // guide must not silence a future explicit tap.
+    if (invite) rememberNotNow();
+    if (guideOpen) closeInstallGuide();
   }
 
   async function install() {
-    if (!deferred) return;
-    await deferred.prompt();
-    const choice = await deferred.userChoice;
-    setDeferred(null);
-    if (choice.outcome === "accepted") {
-      setMode("hidden");
-    } else {
-      // Declining the native dialog counts as "not now".
-      dismiss();
-    }
+    const outcome = await promptInstall();
+    // Declining the native dialog counts as "not now".
+    if (outcome === "dismissed") rememberNotNow();
+    if (guideOpen) closeInstallGuide();
   }
 
   // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
   const dialogRef = useModalA11y<HTMLDivElement>({
-    active: mode !== "hidden",
+    active: open,
     onClose: dismiss,
   });
 
-  if (mode === "hidden") return null;
+  if (!open) return null;
 
   return (
     <div

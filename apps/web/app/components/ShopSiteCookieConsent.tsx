@@ -87,7 +87,7 @@ export function ShopSiteCookieConsent({
 
   return (
     <div
-      className="fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0a0a0a]/95 p-4 shadow-2xl backdrop-blur-md md:p-6"
+      className="pp-safe-bottom pp-safe-x fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0a0a0a]/95 pt-4 [--pp-pad-bottom:1rem] [--pp-pad-x:1rem] shadow-2xl backdrop-blur-md md:pt-6 md:[--pp-pad-bottom:1.5rem] md:[--pp-pad-x:1.5rem]"
       role="region"
       aria-label="Cookie notice"
     >

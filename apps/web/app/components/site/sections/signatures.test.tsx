@@ -60,6 +60,15 @@ describe("signature spotlight", () => {
       ),
     ).toBe("");
   });
+
+  it("gives the booking CTA press feedback", () => {
+    const html = renderToStaticMarkup(<SignatureSpotlightSection ctx={ctx} density="airy" motif="arc" animate={false} />);
+    const start = html.indexOf('href="/test-shop/book?serviceId=s3"');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const anchor = html.slice(start, html.indexOf(">", start));
+    expect(anchor).toContain("bg-[color:var(--color-accent)]");
+    expect(anchor).toContain("active:scale-[0.98]");
+  });
 });
 
 describe("signature template placement", () => {

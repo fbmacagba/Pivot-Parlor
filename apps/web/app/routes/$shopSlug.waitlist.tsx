@@ -93,6 +93,7 @@ export default function Waitlist() {
         site={siteDataForChrome(layoutData.shop.name, site, layoutData.shop.id)}
         settings={layoutData.settings ?? {}}
         shopSlug={layoutData.slug}
+        bookingBar={false}
       >
         {body}
       </CommercialShopChrome>

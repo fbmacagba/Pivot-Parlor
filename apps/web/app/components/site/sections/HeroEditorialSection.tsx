@@ -23,7 +23,7 @@ export function HeroEditorialSection({
   const imgRef = useParallax<HTMLImageElement>(parallax, 10, "scale(1.05)");
   const pad = density === "compact" ? "pt-16 pb-12 md:pt-20 md:pb-16" : "pt-20 pb-16 md:pt-28 md:pb-24";
   return (
-    <section className={`relative overflow-hidden px-4 md:px-6 ${pad}${motionClass ? ` ${motionClass}` : ""}`}>
+    <section data-pp-hero="" className={`relative overflow-hidden px-4 md:px-6 ${pad}${motionClass ? ` ${motionClass}` : ""}`}>
       {motif !== "line" ? <MotifDecor motif={motif} className="-right-10 top-16" /> : null}
       <div className="relative mx-auto w-full max-w-5xl text-center">
         {motif === "line" ? <MotifDecor motif="line" className="mx-auto mb-8 w-fit" /> : null}
@@ -39,7 +39,7 @@ export function HeroEditorialSection({
           </h2>
         ) : null}
         <div className="mt-10 flex flex-wrap justify-center gap-4">
-          <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110">
+          <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110 active:scale-[0.98]">
             {ctx.bookLabel} →
           </Link>
           <button type="button" onClick={() => ctx.scrollToId("services")}

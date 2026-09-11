@@ -3,6 +3,8 @@ import type { Page } from "@playwright/test";
 /** Stable token for mocked create-shop JSON (64 hex chars). */
 export const E2E_ONBOARD_INVITE_TOKEN = "a".repeat(64);
 
+/** Mirrors apps/web/app/routes/invite.$token.tsx: name, password, confirm password and the
+ *  required Terms/DPA consent checkbox (#78). The spec ticks getByRole("checkbox"). */
 const INVITE_ACCEPT_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><title>Accept invite</title></head><body>
 <div class="rounded-2xl p-8">
   <h1 class="font-heading text-xl font-bold text-white">You&apos;re invited!</h1>
@@ -13,6 +15,7 @@ const INVITE_ACCEPT_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="
     <input id="password" name="password" type="password" required minlength="8" class="flex h-10 w-full rounded-lg border px-3 text-sm text-white" />
     <label for="confirm_password" class="block text-sm font-medium text-white/80">Confirm password</label>
     <input id="confirm_password" name="confirm_password" type="password" required class="flex h-10 w-full rounded-lg border px-3 text-sm text-white" />
+    <label for="accept_terms" class="flex items-start gap-2.5 text-xs text-white/60"><input id="accept_terms" name="accept_terms" type="checkbox" value="1" required class="mt-0.5 h-4 w-4" /> I have read and agree to the Terms of Service and the Data Processing Agreement</label>
     <button type="submit" class="w-full h-11 rounded-lg bg-[#C9A84C] text-black font-semibold text-sm">Activate account →</button>
   </form>
 </div>

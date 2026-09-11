@@ -19,7 +19,7 @@ export function HeroSection({
   const imgRef = useParallax<HTMLImageElement>(parallax, 14, "scale(1.05)");
   const minHClass = minH === "tall" ? "min-h-[85vh]" : "min-h-screen";
   return (
-    <section className={`relative flex ${minHClass} flex-col overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
+    <section data-pp-hero="" className={`relative flex ${minHClass} flex-col overflow-hidden${motionClass ? ` ${motionClass}` : ""}`}>
       <div className="absolute inset-0 -z-0">
         {ctx.heroSrc ? (
           <>
@@ -70,7 +70,7 @@ export function HeroSection({
           {/* Hero sits over a dark image scrim in both schemes, so its copy
               stays literal white — only accent-filled controls tokenize. */}
           <div className={`mt-10 flex flex-wrap gap-4${centered ? " justify-center" : ""}`}>
-            <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-black/30 transition hover:brightness-110">
+            <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-black/30 transition hover:brightness-110 active:scale-[0.98]">
               {ctx.bookLabel} →
             </Link>
             <button type="button" onClick={() => ctx.scrollToId("services")}

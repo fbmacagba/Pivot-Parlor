@@ -89,7 +89,7 @@ export function ServicesSection({
                         <div className="flex-1" aria-hidden />
                       )}
                       <Link to={`/${ctx.shopSlug}/book?serviceId=${encodeURIComponent(svc.id)}`}
-                        className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition hover:brightness-110">
+                        className="mt-5 inline-flex min-h-12 w-full items-center justify-center gap-1.5 rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition hover:brightness-110 active:scale-[0.98]">
                         Book this <span aria-hidden>→</span>
                       </Link>
                     </div>

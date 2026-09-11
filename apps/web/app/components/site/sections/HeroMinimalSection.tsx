@@ -18,7 +18,7 @@ export function HeroMinimalSection({
 }) {
   const pad = density === "compact" ? "py-24 md:py-28" : "py-28 md:py-36";
   return (
-    <section className={`relative flex min-h-[85vh] flex-col items-center justify-center overflow-hidden px-4 md:px-6 ${pad}${motionClass ? ` ${motionClass}` : ""}`}>
+    <section data-pp-hero="" className={`relative flex min-h-[85vh] flex-col items-center justify-center overflow-hidden px-4 md:px-6 ${pad}${motionClass ? ` ${motionClass}` : ""}`}>
       <div className="pointer-events-none absolute left-1/2 top-1/2 h-[36rem] w-[36rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[color:var(--st-accent-07)] blur-3xl" aria-hidden />
       {motif !== "line" ? <MotifDecor motif={motif} className="right-[12%] top-[18%]" /> : null}
       <div className="relative mx-auto w-full max-w-3xl text-center">
@@ -33,7 +33,7 @@ export function HeroMinimalSection({
           </h2>
         ) : null}
         <div className="mt-10 flex flex-wrap items-center justify-center gap-5">
-          <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110">
+          <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110 active:scale-[0.98]">
             {ctx.bookLabel} →
           </Link>
           <button type="button" onClick={() => ctx.scrollToId("services")}

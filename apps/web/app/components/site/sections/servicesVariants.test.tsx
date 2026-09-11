@@ -13,6 +13,7 @@ vi.mock("@remix-run/react", async () => {
 
 import { ServicesRowsSection } from "./ServicesRowsSection";
 import { ServicesShowcaseSection } from "./ServicesShowcaseSection";
+import { ServicesSection } from "./ServicesSection";
 
 const ctx = makeTestCtx();
 
@@ -46,5 +47,24 @@ describe("services showcase", () => {
     const html = renderToStaticMarkup(<ServicesShowcaseSection ctx={noImages} density="airy" glow={false} />);
     expect(html).not.toContain("<img");
     expect(html).toContain("bg-gradient-to-br");
+  });
+});
+
+describe("per-service booking CTAs", () => {
+  // The Link stub emits href before className, so each chunk runs from the href to the tag's closing ">".
+  const bookThis = (html: string) =>
+    html
+      .split('href="/test-shop/book?serviceId=')
+      .slice(1)
+      .map((chunk) => chunk.slice(0, chunk.indexOf(">")));
+  it("give press feedback in the services grid and the showcase", () => {
+    const grid = bookThis(renderToStaticMarkup(<ServicesSection ctx={ctx} cols={3} glow />));
+    const showcase = bookThis(renderToStaticMarkup(<ServicesShowcaseSection ctx={ctx} density="airy" glow />));
+    expect(grid.length).toBe(3);
+    expect(showcase.length).toBe(3);
+    for (const anchor of [...grid, ...showcase]) {
+      expect(anchor).toContain("bg-[color:var(--color-accent)]");
+      expect(anchor).toContain("active:scale-[0.98]");
+    }
   });
 });

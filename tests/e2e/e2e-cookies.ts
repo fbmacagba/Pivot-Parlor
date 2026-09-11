@@ -25,3 +25,21 @@ export async function setE2eCookiesOnPage(
 ): Promise<void> {
   await setE2eCookies(page.context(), entries);
 }
+
+/**
+ * Pre-acknowledge the platform cookie notice (PlatformCookieBanner, localStorage key
+ * pp_platform_consent) so its fixed bottom bar never covers buttons the test clicks.
+ * Runs before every document in this page, including the first navigation.
+ */
+export async function acknowledgePlatformCookieNotice(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem(
+        "pp_platform_consent",
+        JSON.stringify({ decided: true, timestamp: new Date().toISOString() })
+      );
+    } catch {
+      /* private browsing: the banner shows and the test may need to dismiss it */
+    }
+  });
+}
