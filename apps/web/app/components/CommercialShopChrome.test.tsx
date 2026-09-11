@@ -112,3 +112,19 @@ describe("CommercialShopChrome: install row in the mobile menu", () => {
     container.remove();
   });
 });
+
+describe("CommercialShopChrome: safe areas", () => {
+  it("pads the sticky header and positions the chat launcher through the shared classes", () => {
+    const html = render();
+    const headerTag = html.slice(html.indexOf("<header"), html.indexOf(">", html.indexOf("<header")));
+    expect(headerTag).toContain("pp-safe-top");
+    expect(headerTag).toContain("pp-safe-x");
+    // The launcher's opening tag: class comes before aria-label in the JSX,
+    // so take the whole <button ...> chunk that carries the label.
+    const fabChunk = html.split("<button ").find((chunk) => chunk.includes('aria-label="Open chat"'))!;
+    const fabTag = fabChunk.slice(0, fabChunk.indexOf(">"));
+    expect(fabTag).toContain("pp-chat-fab");
+    expect(fabTag).not.toContain("bottom-6");
+    expect(fabTag).not.toContain("right-6");
+  });
+});

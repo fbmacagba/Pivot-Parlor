@@ -363,7 +363,7 @@ export function CommercialShopChrome({
 
       {bookingBar ? <div ref={sentinelRef} className="pp-bar-sentinel" aria-hidden /> : null}
 
-      <header className="sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">
+      <header className="pp-safe-top pp-safe-x sticky top-0 z-40 border-b border-[color:var(--st-line-10)] bg-[color:var(--st-header)] backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
           <Link
             to={`/${shopSlug}`}
@@ -480,7 +480,7 @@ export function CommercialShopChrome({
           role="dialog"
           aria-modal="true"
           aria-label="Menu"
-          className="fixed inset-0 z-50 flex flex-col bg-[color:var(--st-bg)] md:hidden"
+          className="pp-safe-top pp-safe-bottom pp-safe-x fixed inset-0 z-50 flex flex-col overflow-y-auto overscroll-contain bg-[color:var(--st-bg)] md:hidden"
         >
           <div className="flex items-center justify-between border-b border-[color:var(--st-line-10)] px-4 py-3">
             <span className="pp-heading truncate text-lg">
@@ -764,8 +764,7 @@ export function CommercialShopChrome({
       {chatOpen ? (
         <div
           ref={chatDialogRef}
-          className="fixed bottom-24 right-6 z-[60] flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
-          style={{ height: 480, maxHeight: "min(480px, calc(100vh - 7.5rem))" }}
+          className="pp-chat-panel flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
           role="dialog"
           aria-label={`Chat with ${site.shop_name}'s AI assistant`}
           onClick={(e) => e.stopPropagation()}
@@ -960,7 +959,7 @@ export function CommercialShopChrome({
 
       <button
         type="button"
-        className="fixed bottom-6 right-6 z-[60] flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95"
+        className="pp-chat-fab flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95 active:scale-95"
         aria-label={chatOpen ? "Close chat" : "Open chat"}
         aria-expanded={chatOpen}
         onClick={() => {
