@@ -6,6 +6,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   type ModelKind,
 } from "@repo/utils";
+import type { AIModel } from "@repo/types";
 import type { Shop } from "./types";
 import type { PickerModel } from "./modelPicker.helpers";
 
@@ -28,6 +29,12 @@ export function staticPickerModels(kind: ModelKind): PickerModel[] {
     recommended: m.recommended,
     livePricing: false,
   }));
+}
+
+/** Live registry entries of one kind, else the snapshot (API unreachable or empty). */
+export function pickerModelsFrom(live: AIModel[] | null | undefined, kind: ModelKind): PickerModel[] {
+  const fromLive = (live ?? []).filter((m) => m.kind === kind);
+  return fromLive.length > 0 ? fromLive : staticPickerModels(kind);
 }
 
 /** Reasoning-effort choices; the picker filters them to the levels a model reports. */

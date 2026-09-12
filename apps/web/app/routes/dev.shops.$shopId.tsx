@@ -6,6 +6,7 @@ import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import type { Shop } from "~/components/dev-shops/types";
 import type { VisualsData } from "~/components/VisualManager";
+import type { AIModel } from "@repo/types";
 
 export type DevGenerationPrefs = {
   template: string;
@@ -75,11 +76,20 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     visuals = null;
   }
 
-  return json({ shop, apiUrl: env.API_URL, generationPrefs, ownerDetails, visuals });
+  // Live-priced model list for the generation pickers; null falls back to the
+  // snapshot in the route (the API worker caches this for an hour).
+  let models: AIModel[] | null = null;
+  try {
+    models = await api.get<AIModel[]>("/api/ai/models");
+  } catch {
+    models = null;
+  }
+
+  return json({ shop, apiUrl: env.API_URL, generationPrefs, ownerDetails, visuals, models });
 }
 
 export default function DevShopLayout() {
-  const { shop, apiUrl, generationPrefs, ownerDetails, visuals } = useLoaderData<typeof loader>();
+  const { shop, apiUrl, generationPrefs, ownerDetails, visuals, models } = useLoaderData<typeof loader>();
 
   return (
     <div className="space-y-6">
@@ -94,7 +104,7 @@ export default function DevShopLayout() {
           /{shop.slug} · #{shop.shop_number}
         </p>
       </div>
-      <Outlet context={{ shop, apiUrl, generationPrefs, ownerDetails, visuals }} />
+      <Outlet context={{ shop, apiUrl, generationPrefs, ownerDetails, visuals, models }} />
     </div>
   );
 }
