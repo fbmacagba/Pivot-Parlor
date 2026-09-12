@@ -2,7 +2,7 @@
 // vendor step; the direct providers (OpenAI API, Anthropic API) go straight to
 // the model. Pass live models (from /api/ai/models) when available, else the
 // static snapshot from staticPickerModels().
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { EFFORT_OPTIONS } from "./constants";
 import {
   defaultModelForGroup,
@@ -15,10 +15,12 @@ import {
 const SELECT_CLASS =
   "flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold";
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-white/80">{label}</label>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-white/80">
+        {label}
+      </label>
       {children}
     </div>
   );
@@ -42,6 +44,7 @@ export function ModelPicker({
   onEffortChange?: (effort: string) => void;
   disabled?: boolean;
 }) {
+  const uid = useId();
   const routes = groupByRoute(models);
   const selected = models.find((m) => m.id === value);
   const routeId = selected?.provider ?? routes[0]?.id ?? "";
@@ -62,8 +65,9 @@ export function ModelPicker({
 
   return (
     <div className="space-y-3">
-      <Field label={`${label} provider`}>
+      <Field id={`${uid}-provider`} label={`${label} provider`}>
         <select
+          id={`${uid}-provider`}
           value={routeId}
           onChange={(e) => {
             const r = routes.find((g) => g.id === e.target.value);
@@ -81,8 +85,9 @@ export function ModelPicker({
         </select>
       </Field>
       {showVendors && (
-        <Field label={`${label} vendor`}>
+        <Field id={`${uid}-vendor`} label={`${label} vendor`}>
           <select
+            id={`${uid}-vendor`}
             value={vendorId}
             onChange={(e) => {
               const v = route?.vendors.find((g) => g.id === e.target.value);
@@ -100,8 +105,9 @@ export function ModelPicker({
           </select>
         </Field>
       )}
-      <Field label={`${label} model`}>
+      <Field id={`${uid}-model`} label={`${label} model`}>
         <select
+          id={`${uid}-model`}
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
@@ -125,8 +131,9 @@ export function ModelPicker({
         </select>
       </Field>
       {effortVisible && (
-        <Field label="Reasoning effort">
+        <Field id={`${uid}-effort`} label="Reasoning effort">
           <select
+            id={`${uid}-effort`}
             value={effort ?? ""}
             onChange={(e) => onEffortChange?.(e.target.value)}
             disabled={disabled}

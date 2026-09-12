@@ -111,6 +111,9 @@ ai.post("/generate-theme", async (c) => {
   }
   const effort = parseTextEffort(body.effort);
   const modelId = body.model_id ?? DEFAULT_THEME_MODEL;
+  if (!(await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text"))) {
+    return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
+  }
 
   const shop = await c.env.DB.prepare(
     "SELECT id, name, type, ai_theme FROM shops WHERE id = ?"

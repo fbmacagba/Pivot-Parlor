@@ -704,13 +704,13 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
   };
   const body = await c.req.json<GenSettingsBody>().catch((): GenSettingsBody => ({}));
 
-  const listed = await modelLister(c);
   const textModelIn = typeof body.text_model === "string" ? body.text_model.trim() : "";
-  if (textModelIn && !listed(textModelIn, "text")) {
+  const imageModelIn = typeof body.image_model === "string" ? body.image_model.trim() : "";
+  const listed = textModelIn || imageModelIn ? await modelLister(c) : null;
+  if (textModelIn && !listed?.(textModelIn, "text")) {
     return c.json({ success: false, error: `Unknown text model: ${textModelIn}` }, 400);
   }
-  const imageModelIn = typeof body.image_model === "string" ? body.image_model.trim() : "";
-  if (imageModelIn && !listed(imageModelIn, "image")) {
+  if (imageModelIn && !listed?.(imageModelIn, "image")) {
     return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
   }
   const composerIn = typeof body.composer === "string" ? body.composer.trim() : "";

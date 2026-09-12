@@ -202,6 +202,21 @@ describe("GET /api/ai/models", () => {
     expect(puts.some(([key]) => key === MODELS_LAST_GOOD_KV_KEY)).toBe(false);
   });
 
+  it("caches for the degraded TTL and skips last-good when the OpenRouter feed fails", async () => {
+    stub = listStub({ fail: "openrouter" });
+    const { kv, puts } = recordingKv();
+
+    const models = await getLiveModels(kv, { openrouter: "k", openai: "k", anthropic: "k" });
+
+    // Every price is looked up via the OpenRouter feed, so a group that still
+    // listed successfully (openai) is served snapshot-priced, not dropped.
+    const openaiModel = models.find((m) => m.provider === "openai");
+    expect(openaiModel).toBeDefined();
+    expect(openaiModel?.livePricing).toBe(false);
+    expect(puts.find(([key]) => key === MODELS_KV_KEY)?.[1]).toBe(DEGRADED_KV_TTL);
+    expect(puts.some(([key]) => key === MODELS_LAST_GOOD_KV_KEY)).toBe(false);
+  });
+
   it("caches for the full TTL and writes last-good when every feed is healthy", async () => {
     stub = listStub();
     const { kv, puts } = recordingKv();
@@ -273,6 +288,18 @@ describe("POST /api/ai/generate-theme effort", () => {
     expect(captured!.reasoning).toEqual({ effort: "high" });
     // Effort raises the completion budget so reasoning doesn't starve output.
     expect(captured!.max_tokens).toBe(8192);
+  });
+
+  it("rejects an unknown model with 400", async () => {
+    stub = listStub();
+    const shopId = await seedShop("Unknown Model Shop");
+    const res = await dispatch("POST", "/api/ai/generate-theme", {
+      headers: authHeaders(await devToken()),
+      body: { shop_id: shopId, model_id: "nobody/nothing" },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("Unknown text model: nobody/nothing");
   });
 });
 

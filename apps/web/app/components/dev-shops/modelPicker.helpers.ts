@@ -31,7 +31,10 @@ export interface RouteGroup extends PickerGroup {
   vendors: PickerGroup[];
 }
 
-export const ALL_EFFORT_LEVELS = ["low", "medium", "high"];
+export type Effort = "low" | "medium" | "high";
+
+const effortLevels: Effort[] = ["low", "medium", "high"];
+export const ALL_EFFORT_LEVELS: readonly Effort[] = Object.freeze(effortLevels);
 
 function groupBy(models: PickerModel[], key: (m: PickerModel) => { id: string; label: string }): PickerGroup[] {
   const groups: PickerGroup[] = [];
@@ -73,6 +76,6 @@ export function defaultModelForGroup(group: PickerGroup): PickerModel | undefine
 /** Effort levels to offer for a model: the reported subset, all three when unreported, none when unsupported. */
 export function effortLevelsFor(m: PickerModel | undefined): string[] {
   if (!m || !m.supportsEffort) return [];
-  if (m.effortLevels === undefined) return ALL_EFFORT_LEVELS;
-  return m.effortLevels.filter((level) => ALL_EFFORT_LEVELS.includes(level));
+  if (m.effortLevels === undefined) return [...ALL_EFFORT_LEVELS];
+  return m.effortLevels.filter((level) => (ALL_EFFORT_LEVELS as readonly string[]).includes(level));
 }

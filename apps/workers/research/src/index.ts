@@ -552,10 +552,6 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     for (let i = 0; i < attempts.length; i++) {
       const { model, effort } = attempts[i]!;
       const attempt = i + 1;
-      if (i > 0) {
-        // 3s, 6s, 9s… — enough for transient upstream rate limits to clear.
-        await new Promise((resolve) => setTimeout(resolve, 3000 * i));
-      }
       if (model !== input.text_model) {
         console.warn(
           `[${jobId}] [pivot-parlor-research] ${input.text_model} exhausted, falling back to default model ${model}`

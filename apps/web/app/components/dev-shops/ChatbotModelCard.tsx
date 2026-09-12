@@ -66,10 +66,12 @@ export function ChatbotModelCard({
       <Button onClick={handleSave} disabled={!dirty || state === "saving"} className="w-full">
         {state === "saving" ? "Saving…" : "Save chatbot model"}
       </Button>
-      {state === "saved" && (
-        <p className="text-xs text-emerald-400">Saved. New conversations use this model from now on.</p>
-      )}
-      {state === "error" && <p className="text-xs text-red-400">{error}</p>}
+      <div aria-live="polite">
+        {state === "saved" && (
+          <p className="text-xs text-emerald-400">Saved. New conversations use this model from now on.</p>
+        )}
+        {state === "error" && <p className="text-xs text-red-400">{error}</p>}
+      </div>
     </section>
   );
 }

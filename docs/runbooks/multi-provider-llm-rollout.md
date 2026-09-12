@@ -41,6 +41,14 @@ CI deploys the API worker and the web app. The model cache key changes to
 `ai:models:v3`, so the first `/api/ai/models` call after deploy rebuilds the
 list (three fetches, up to 10 s each).
 
+A vendor key added or removed after `ai:models:v3` already exists takes
+effect only when that cache entry expires (up to 1 h). To force an immediate
+refresh, delete it (run from `apps/worker`):
+
+```bash
+npx wrangler kv key delete --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:models:v3
+```
+
 ## 4. Verify on a test shop
 
 1. AI Deploy: the Theme provider select shows OpenRouter, OpenAI API,
@@ -53,6 +61,11 @@ list (three fetches, up to 10 s each).
 3. Chatbot card: save a model, send a message on a shop site,
    `npx wrangler tail pivot-parlor-chatbot` shows `[chatbot] llm route=<route> model=<model>`,
    and the newest `ai_usage_log` row's `model` column holds the saved id.
+   The tailed `route=`/`model=` line must show the saved id. A preceding
+   `[chatbot] <id> failed: ...` line followed by
+   `model=google/gemini-3.1-flash-lite-preview` means the chosen model is
+   being rescued on every request (a 150-token reply budget can starve
+   reasoning-heavy models); pick another model.
 4. Registry contents:
    `npx wrangler kv key get --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:models:v3 | head -c 600`
    shows entries with `"provider":"openai"` and `"provider":"anthropic"`.

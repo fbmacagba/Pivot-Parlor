@@ -1,5 +1,5 @@
 import { chatComplete, type ChatDeps, type ProviderKeys } from "@repo/llm";
-import { DEFAULT_CHATBOT_MODEL } from "./model";
+import { DEFAULT_CHATBOT_MODEL } from "./model.js";
 
 export type HistoryMessage = { role: "user" | "assistant" | "system"; content: string };
 
