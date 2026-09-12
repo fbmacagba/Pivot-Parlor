@@ -111,7 +111,7 @@ ai.post("/generate-theme", async (c) => {
   }
   const effort = parseTextEffort(body.effort);
   const modelId = body.model_id ?? DEFAULT_THEME_MODEL;
-  if (!(await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text"))) {
+  if (body.model_id && !(await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text"))) {
     return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
   }
 
