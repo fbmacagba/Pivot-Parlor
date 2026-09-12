@@ -58,8 +58,10 @@ export async function chatComplete(req: ChatRequest, keys: ProviderKeys, deps: C
   for (;;) {
     const { url, init } = adapter.buildRequest({ ...base, effort }, apiKey);
     let res: Response;
+    let raw: string;
     try {
       res = await doFetch(url, init);
+      raw = await res.text();
     } catch (err) {
       if (isAbort(err, req.signal)) throw abortedError(route, model);
       if (attempt < maxRetries) {
@@ -69,7 +71,6 @@ export async function chatComplete(req: ChatRequest, keys: ProviderKeys, deps: C
       throw networkError(route, model, err);
     }
 
-    const raw = await res.text();
     if (res.ok) {
       let parsed: unknown;
       try {

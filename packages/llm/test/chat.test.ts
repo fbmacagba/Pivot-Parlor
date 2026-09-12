@@ -300,3 +300,55 @@ describe("chatComplete failure handling", () => {
     });
   });
 });
+
+describe("chatComplete body read failures", () => {
+  it("retries when the response body cannot be read, then succeeds", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      () => ({ ok: true, status: 200, text: () => Promise.reject(new Error("socket hang up")) }) as unknown as Response,
+      openAiStyle("recovered"),
+    ]);
+    const s = sleeper();
+    const res = await chatComplete({ ...base, modelId: "openai/gpt-6-astra" }, KEYS, { fetch: fetchImpl, sleep: s.sleep });
+    expect(res.text).toBe("recovered");
+    expect(calls).toHaveLength(2);
+    expect(s.sleeps).toEqual([3000]);
+  });
+
+  it("body read failure after retries are exhausted is a retryable LlmError", async () => {
+    const { fetchImpl, calls } = makeFetch([
+      () => ({ ok: true, status: 200, text: () => Promise.reject(new Error("socket hang up")) }) as unknown as Response,
+      () => ({ ok: true, status: 200, text: () => Promise.reject(new Error("socket hang up")) }) as unknown as Response,
+    ]);
+    const s = sleeper();
+    await expect(
+      chatComplete({ ...base, modelId: "openai/gpt-6-astra", maxRetries: 1 }, KEYS, { fetch: fetchImpl, sleep: s.sleep }),
+    ).rejects.toMatchObject({
+      message: "openrouter: socket hang up",
+      retryable: true,
+      route: "openrouter",
+    });
+    expect(calls).toHaveLength(2);
+    expect(s.sleeps).toEqual([3000]);
+  });
+
+  it("abort while reading the body surfaces as aborted, not retried", async () => {
+    const controller = new AbortController();
+    const { fetchImpl, calls } = makeFetch([
+      () =>
+        ({
+          ok: true,
+          status: 200,
+          text: () => {
+            controller.abort();
+            return Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          },
+        }) as unknown as Response,
+    ]);
+    const s = sleeper();
+    await expect(
+      chatComplete({ ...base, modelId: "openai/gpt-6-astra", signal: controller.signal }, KEYS, { fetch: fetchImpl, sleep: s.sleep }),
+    ).rejects.toMatchObject({ message: "openrouter: aborted" });
+    expect(calls).toHaveLength(1);
+    expect(s.sleeps).toEqual([]);
+  });
+});
