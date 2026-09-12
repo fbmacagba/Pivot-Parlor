@@ -31,8 +31,8 @@ export const DEFAULT_THEME_MODEL = "anthropic/claude-sonnet-5";
 export const MODELS_KV_KEY = "ai:models:v3";
 /** Last successful build, no expiry: the per-group fallback when a vendor fetch fails. */
 export const MODELS_LAST_GOOD_KV_KEY = "ai:models:v3:last";
-const MODELS_KV_TTL = 3600; // 1h — pricing moves slowly; avoids hammering three catalogues
-const DEGRADED_KV_TTL = 60; // feed down: retry soon, but not on every request
+export const MODELS_KV_TTL = 3600; // 1h — pricing moves slowly; avoids hammering three catalogues
+export const DEGRADED_KV_TTL = 60; // feed down: retry soon, but not on every request
 const FETCH_TIMEOUT_MS = 10_000;
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
@@ -467,7 +467,17 @@ async function readModels(kv: KVNamespace, key: string): Promise<AIModel[] | nul
   }
 }
 
-/** The served list: KV cache first, else a fresh build (cached 1 h, or 60 s when the feed was down). */
+/**
+ * A source we were configured to fetch came back failed. A missing key is
+ * configuration, not an outage: it hides its group and must not shorten the
+ * cache or block the last-good write.
+ */
+function anyFeedDown(sources: RegistrySources): boolean {
+  const groups: Array<GroupSource<unknown>> = [sources.openrouter, sources.openai, sources.anthropic];
+  return groups.some((g) => !g.ok && g.reason !== "no-key");
+}
+
+/** The served list: KV cache first, else a fresh build (cached 1 h, or 60 s when any feed was down). */
 export async function getLiveModels(kv: KVNamespace, keys: ProviderKeys): Promise<AIModel[]> {
   const cached = await readModels(kv, MODELS_KV_KEY);
   if (cached) return cached;
@@ -478,8 +488,9 @@ export async function getLiveModels(kv: KVNamespace, keys: ProviderKeys): Promis
   for (const w of warnings) console.warn(`[model-registry] ${w}`);
 
   const json = JSON.stringify(models);
-  await kv.put(MODELS_KV_KEY, json, { expirationTtl: sources.openrouter.ok ? MODELS_KV_TTL : DEGRADED_KV_TTL });
-  if (sources.openrouter.ok) await kv.put(MODELS_LAST_GOOD_KV_KEY, json);
+  const feedDown = anyFeedDown(sources);
+  await kv.put(MODELS_KV_KEY, json, { expirationTtl: feedDown ? DEGRADED_KV_TTL : MODELS_KV_TTL });
+  if (!feedDown) await kv.put(MODELS_LAST_GOOD_KV_KEY, json);
   return models;
 }
 

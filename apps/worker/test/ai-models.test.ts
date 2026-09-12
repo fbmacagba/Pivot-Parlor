@@ -7,11 +7,18 @@
  * globalThis.fetch intercepts every outbound call. Each test deletes the KV
  * cache the setup file seeded so the refresh path actually runs.
  */
+import type { KVNamespace } from "@cloudflare/workers-types";
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { dispatch } from "./request";
 import { seedShop, seedUser, tokenFor, authHeaders } from "./helpers";
-import { getLiveModels, MODELS_KV_KEY, MODELS_LAST_GOOD_KV_KEY } from "../src/services/model-registry";
+import {
+  DEGRADED_KV_TTL,
+  getLiveModels,
+  MODELS_KV_KEY,
+  MODELS_KV_TTL,
+  MODELS_LAST_GOOD_KV_KEY,
+} from "../src/services/model-registry";
 import { feedResponses } from "./fixtures/model-feeds";
 
 const originalFetch = globalThis.fetch;
@@ -19,22 +26,48 @@ const originalFetch = globalThis.fetch;
 type FetchStub = (url: string, init?: RequestInit) => Promise<Response> | null;
 let stub: FetchStub | null = null;
 
-/** The three list endpoints from the recorded fixtures; `down` makes them all throw. */
-function listStub(opts: { down?: boolean } = {}): FetchStub {
+type ListVendor = "openrouter" | "openai" | "anthropic";
+
+/** Which vendor a list URL belongs to; null when the URL is not a list endpoint. */
+function listVendorOf(url: string): ListVendor | null {
+  if (url.startsWith("https://openrouter.ai/api/v1/models")) return "openrouter";
+  if (url.startsWith("https://api.openai.com/v1/models")) return "openai";
+  if (url.startsWith("https://api.anthropic.com/v1/models")) return "anthropic";
+  return null;
+}
+
+/**
+ * The three list endpoints from the recorded fixtures; `down` makes them all
+ * throw, `fail` makes just that one vendor answer 500 (a reachable API
+ * refusing, which is still a failed feed).
+ */
+function listStub(opts: { down?: boolean; fail?: ListVendor } = {}): FetchStub {
   return (url) => {
-    const isList =
-      url.startsWith("https://openrouter.ai/api/v1/models") ||
-      url.startsWith("https://api.openai.com/v1/models") ||
-      url.startsWith("https://api.anthropic.com/v1/models");
-    if (!isList) return null;
+    const vendor = listVendorOf(url);
+    if (!vendor) return null;
     // Throw synchronously: the async fetch wrapper turns this into its own
     // rejection, which the handler awaits — a detached Promise.reject()
     // here would trip workerd's unhandled-rejection detector.
     if (opts.down) throw new Error("network down");
-    if (url.startsWith("https://openrouter.ai/")) return Promise.resolve(feedResponses.openrouter());
-    if (url.startsWith("https://api.openai.com/")) return Promise.resolve(feedResponses.openai());
+    if (opts.fail === vendor) return Promise.resolve(new Response("nope", { status: 500 }));
+    if (vendor === "openrouter") return Promise.resolve(feedResponses.openrouter());
+    if (vendor === "openai") return Promise.resolve(feedResponses.openai());
     return Promise.resolve(feedResponses.anthropic());
   };
+}
+
+/** env.KV with every put recorded as [key, expirationTtl] so the cache policy is observable. */
+function recordingKv(): { kv: KVNamespace; puts: Array<[string, number | undefined]> } {
+  const puts: Array<[string, number | undefined]> = [];
+  const kv = {
+    get: (key: string) => env.KV.get(key),
+    put: (key: string, value: string, options?: { expirationTtl?: number }) => {
+      puts.push([key, options?.expirationTtl]);
+      return env.KV.put(key, value, options);
+    },
+    delete: (key: string) => env.KV.delete(key),
+  } as unknown as KVNamespace;
+  return { kv, puts };
 }
 
 function compose(...stubs: FetchStub[]): FetchStub {
@@ -140,10 +173,53 @@ describe("GET /api/ai/models", () => {
   it("serves the cached list without refetching", async () => {
     stub = listStub();
     await getLiveModels(env.KV, { openrouter: "k", openai: "k", anthropic: "k" });
-    stub = listStub({ down: true });
+
+    // Record every URL the second call reaches for. A refetch would rebuild a
+    // full 29 from last-good even with the lists down, so counting models
+    // cannot discriminate — only "no list was fetched" can.
+    const seen: string[] = [];
+    const inner = listStub({ down: true });
+    stub = (url, init) => {
+      seen.push(url);
+      return inner(url, init);
+    };
+
     const models = await getLiveModels(env.KV, { openrouter: "k", openai: "k", anthropic: "k" });
     expect(models).toHaveLength(29);
     expect(models.some((m) => m.livePricing)).toBe(true);
+    expect(seen.filter((u) => listVendorOf(u) !== null)).toEqual([]);
+  });
+
+  it("caches for the degraded TTL and skips last-good when a direct-vendor list fails", async () => {
+    stub = listStub({ fail: "openai" });
+    const { kv, puts } = recordingKv();
+
+    const models = await getLiveModels(kv, { openrouter: "k", openai: "k", anthropic: "k" });
+
+    // Degrade, not failure: the healthy groups are still served.
+    expect(models.some((m) => m.provider === "openrouter")).toBe(true);
+    expect(puts.find(([key]) => key === MODELS_KV_KEY)?.[1]).toBe(DEGRADED_KV_TTL);
+    expect(puts.some(([key]) => key === MODELS_LAST_GOOD_KV_KEY)).toBe(false);
+  });
+
+  it("caches for the full TTL and writes last-good when every feed is healthy", async () => {
+    stub = listStub();
+    const { kv, puts } = recordingKv();
+
+    await getLiveModels(kv, { openrouter: "k", openai: "k", anthropic: "k" });
+
+    expect(puts.find(([key]) => key === MODELS_KV_KEY)?.[1]).toBe(MODELS_KV_TTL);
+    expect(puts.some(([key]) => key === MODELS_LAST_GOOD_KV_KEY)).toBe(true);
+  });
+
+  it("a missing vendor key is not a feed failure", async () => {
+    stub = listStub();
+    const { kv, puts } = recordingKv();
+
+    await getLiveModels(kv, { openrouter: "k", anthropic: "k" });
+
+    expect(puts.find(([key]) => key === MODELS_KV_KEY)?.[1]).toBe(MODELS_KV_TTL);
+    expect(puts.some(([key]) => key === MODELS_LAST_GOOD_KV_KEY)).toBe(true);
   });
 });
 
