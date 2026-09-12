@@ -2,12 +2,16 @@
  * pivot-parlor-text — Consumes site-text-queue: OpenRouter copy → KV gen:{jobId}:text → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
+import { chatComplete, type ProviderKeys } from "@repo/llm";
 
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   SITE_ASSEMBLE_QUEUE: Queue;
   OPENROUTER_API_KEY: string;
+  /** Direct-vendor keys; optional. A chosen direct model with no key falls back to the default model. */
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
   ENVIRONMENT: string;
 }
 
@@ -70,13 +74,6 @@ const genTextKey = (jobId: string) => `gen:${jobId}:text`;
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 
-function maxTokensForOpenRouterModel(model: string): number {
-  const m = model.trim().toLowerCase();
-  if (m.startsWith("meta-llama/")) return 4096;
-  if (m.startsWith("google/gemini-3.1-flash-lite")) return 8000;
-  return 4096;
-}
-
 function parseStageMessage(body: unknown): StageMessage | null {
   if (!body || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
@@ -90,43 +87,32 @@ function parseStageMessage(body: unknown): StageMessage | null {
   return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, text_model, text_effort };
 }
 
-async function openRouterJson(
-  apiKey: string,
+/** One JSON-only completion through the shared client (HTTP retries and the
+ *  effort retry live there). */
+async function textJson(
+  jobId: string,
+  keys: ProviderKeys,
   model: string,
   system: string,
   user: string,
   effort?: TextEffort
 ): Promise<string> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://pivotparlor.com",
-      "X-Title": "Pivot Parlor Text",
+  const result = await chatComplete(
+    {
+      modelId: model,
+      system,
+      messages: [{ role: "user", content: user }],
+      effort,
+      maxTokens: 8000,
+      jsonOnly: true,
+      appTitle: "Pivot Parlor Text",
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokensForOpenRouterModel(model),
-      ...(effort ? { reasoning: { effort } } : {}),
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    // Some providers reject the reasoning parameter outright — retry once
-    // without effort instead of failing the copy pass over an optional knob.
-    if (effort && res.status === 400) {
-      console.warn(`[pivot-parlor-text] ${model} rejected reasoning effort, retrying without`);
-      return openRouterJson(apiKey, model, system, user, undefined);
-    }
-    throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
-  }
-  const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
-  return (data.choices[0]?.message?.content ?? "{}").trim().replace(/```json|```/g, "").trim();
+    keys
+  );
+  console.log(
+    `[${jobId}] [pivot-parlor-text] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
+  );
+  return result.text;
 }
 
 function wordCount(s: string): number {
@@ -221,6 +207,12 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
 
+  const keys: ProviderKeys = {
+    openrouter: apiKey,
+    openai: env.OPENAI_API_KEY || undefined,
+    anthropic: env.ANTHROPIC_API_KEY || undefined,
+  };
+
   const researchRaw = await env.KV.get(genResearchKey(jobId));
   if (!researchRaw) {
     console.error(`[${jobId}] [pivot-parlor-text] missing KV ${genResearchKey(jobId)}`);
@@ -272,23 +264,39 @@ If source services are missing or empty, invent exactly 3 plausible services for
   const textModel = msg.text_model?.trim() || research.text_model?.trim() || DEFAULT_TEXT_MODEL;
   const textEffort = msg.text_effort ?? research.text_effort;
   console.log(
-    `[${jobId}] [pivot-parlor-text] calling OpenRouter model=${textModel}${textEffort ? ` effort=${textEffort}` : ""}`
+    `[${jobId}] [pivot-parlor-text] calling model=${textModel}${textEffort ? ` effort=${textEffort}` : ""}`
   );
 
-  let payload: TextKvPayload;
-  try {
-    const raw = await openRouterJson(apiKey, textModel, system, user, textEffort);
-    const parsed: unknown = JSON.parse(raw);
-    if (validateTextOut(parsed)) {
-      parsed.services = padServices(research.shopType, parsed.services);
-      parsed.completedAt = new Date().toISOString();
-      payload = parsed;
-    } else {
-      console.warn(`[${jobId}] [pivot-parlor-text] model output invalid, using research fallback`);
-      payload = fallbackFromResearch(research);
+  // Chosen model first; if it fails outright (missing direct key, outage)
+  // rescue with the default model on OpenRouter before settling for the
+  // research-derived copy.
+  const attempts: { model: string; effort?: TextEffort }[] = [
+    { model: textModel, effort: textEffort },
+    ...(textModel !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
+  ];
+
+  let payload: TextKvPayload | null = null;
+  for (const { model, effort } of attempts) {
+    if (model !== textModel) {
+      console.warn(`[${jobId}] [pivot-parlor-text] ${textModel} failed, falling back to default model ${model}`);
     }
-  } catch (e) {
-    console.error(`[${jobId}] [pivot-parlor-text] OpenRouter failed`, e);
+    try {
+      const raw = await textJson(jobId, keys, model, system, user, effort);
+      const parsed: unknown = JSON.parse(raw);
+      if (validateTextOut(parsed)) {
+        parsed.services = padServices(research.shopType, parsed.services);
+        parsed.completedAt = new Date().toISOString();
+        payload = parsed;
+      } else {
+        console.warn(`[${jobId}] [pivot-parlor-text] model output invalid (model=${model})`);
+      }
+      break; // a reply came back; an invalid one is not retried on another model
+    } catch (e) {
+      console.error(`[${jobId}] [pivot-parlor-text] model call failed (model=${model})`, e);
+    }
+  }
+  if (!payload) {
+    console.warn(`[${jobId}] [pivot-parlor-text] using research fallback copy`);
     payload = fallbackFromResearch(research);
   }
 
