@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-12T16:42:52Z",
+  "title": "Design System: Pivot Parlor",
+  "extensions": {
+    "colorMeta": {
+      "parlor-gold": { "role": "primary", "displayName": "Parlor Gold", "canonical": "#C9A84C", "tonalRamp": ["#3B2F12", "#624E1E", "#896E2A", "#B08D36", "#C9A84C", "#D5BA76", "#E7D8B1", "#F7F1E4"] },
+      "champagne": { "role": "primary", "displayName": "Champagne", "canonical": "#E2C47A", "tonalRamp": ["#3B2F12", "#624E1E", "#896E2A", "#B08D36", "#C9A84C", "#E2C47A", "#E7D8B1", "#F7F1E4"] },
+      "antique-gold": { "role": "primary", "displayName": "Antique Gold", "canonical": "#A8872E", "tonalRamp": ["#3B2F12", "#624E1E", "#896E2A", "#A8872E", "#C9A84C", "#D5BA76", "#E7D8B1", "#F7F1E4"] },
+      "onyx": { "role": "neutral", "displayName": "Onyx", "canonical": "#0D0D0D", "tonalRamp": ["#0D0D0D", "#1a1a1a", "#2a2a2a", "#3a3a3a", "#5c5c5c", "#8a8a8a", "#bdbdbd", "#f2f2f2"] },
+      "charcoal": { "role": "neutral", "displayName": "Charcoal", "canonical": "#1a1a1a", "tonalRamp": ["#0D0D0D", "#1a1a1a", "#2a2a2a", "#3a3a3a", "#5c5c5c", "#8a8a8a", "#bdbdbd", "#f2f2f2"] },
+      "slate": { "role": "neutral", "displayName": "Slate", "canonical": "#2a2a2a", "tonalRamp": ["#0D0D0D", "#1a1a1a", "#2a2a2a", "#3a3a3a", "#5c5c5c", "#8a8a8a", "#bdbdbd", "#f2f2f2"] },
+      "slate-light": { "role": "neutral", "displayName": "Slate Light", "canonical": "#3a3a3a", "tonalRamp": ["#0D0D0D", "#1a1a1a", "#2a2a2a", "#3a3a3a", "#5c5c5c", "#8a8a8a", "#bdbdbd", "#f2f2f2"] },
+      "white": { "role": "neutral", "displayName": "White ink", "canonical": "#ffffff", "tonalRamp": ["rgba(255,255,255,0.25)", "rgba(255,255,255,0.40)", "rgba(255,255,255,0.50)", "rgba(255,255,255,0.60)", "rgba(255,255,255,0.70)", "rgba(255,255,255,0.80)", "rgba(255,255,255,0.90)", "#ffffff"] },
+      "ink-80": { "role": "neutral", "displayName": "Ink 80" },
+      "ink-70": { "role": "neutral", "displayName": "Ink 70" },
+      "ink-60": { "role": "neutral", "displayName": "Ink 60" },
+      "ink-40": { "role": "neutral", "displayName": "Ink 40" },
+      "line-10": { "role": "neutral", "displayName": "Hairline 10" },
+      "line-20": { "role": "neutral", "displayName": "Hairline 20" },
+      "line-40": { "role": "neutral", "displayName": "Hairline 40" },
+      "fill-5": { "role": "neutral", "displayName": "Fill 5" },
+      "fill-10": { "role": "neutral", "displayName": "Fill 10" },
+      "gold-tint-10": { "role": "primary", "displayName": "Gold tint 10" },
+      "gold-tint-20": { "role": "primary", "displayName": "Gold tint 20" },
+      "gold-tint-30": { "role": "primary", "displayName": "Gold tint 30" },
+      "success": { "role": "tertiary", "displayName": "Success (emerald)", "canonical": "#34d399", "tonalRamp": ["#064e3b", "#065f46", "#047857", "#059669", "#10b981", "#34d399", "#6ee7b7", "#d1fae5"] },
+      "success-tint": { "role": "tertiary", "displayName": "Success tint" },
+      "warning": { "role": "tertiary", "displayName": "Warning (amber)", "canonical": "#fbbf24", "tonalRamp": ["#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fbbf24", "#fcd34d", "#fef3c7"] },
+      "warning-tint": { "role": "tertiary", "displayName": "Warning tint" },
+      "danger": { "role": "tertiary", "displayName": "Danger (red)", "canonical": "#f87171", "tonalRamp": ["#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fca5a5", "#fee2e2"] },
+      "danger-tint": { "role": "tertiary", "displayName": "Danger tint" },
+      "danger-solid": { "role": "tertiary", "displayName": "Danger solid", "canonical": "#dc2626", "tonalRamp": ["#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fca5a5", "#fee2e2"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The marketing hero only; grows to 3.75rem from 640px and 4.5rem from 1024px, with one gold span." },
+      "headline": { "displayName": "Headline", "purpose": "Marketing section headings; dashboard page titles use the same face at 1.5rem." },
+      "title": { "displayName": "Title", "purpose": "Card and dialog titles; marketing feature headings at 1.125rem." },
+      "body": { "displayName": "Body", "purpose": "Default text; marketing lead copy at 1.125rem / 1.625 at 70 percent ink, capped at 65ch." },
+      "label": { "displayName": "Label", "purpose": "Buttons (600 when primary), nav items, field labels, row text, secondary copy at 60 percent ink." }
+    },
+    "shadows": [
+      { "name": "dialog", "value": "0 25px 50px -12px rgba(0,0,0,0.25)", "purpose": "Modal panels only." },
+      { "name": "floating-cta", "value": "0 10px 15px -3px rgba(201,168,76,0.25), 0 4px 6px -4px rgba(201,168,76,0.25)", "purpose": "The fixed marketing pill; the gold-tinted shadow is its glow." },
+      { "name": "showcase-card", "value": "0 20px 25px -5px rgba(0,0,0,0.2), 0 8px 10px -6px rgba(0,0,0,0.2)", "purpose": "The hero mockup and other marketing exhibits." },
+      { "name": "focus-ring", "value": "0 0 0 2px #C9A84C", "purpose": "Every focus-visible control; offset by 2px against Charcoal on dialog close buttons." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default easing for colour and transform transitions (Tailwind default)." },
+      { "name": "duration-control", "value": "150ms", "purpose": "Hover and focus colour changes on buttons, nav items and inputs." },
+      { "name": "duration-chrome", "value": "250ms", "purpose": "Bottom booking bar slide and chat launcher lift on shop sites, ease-out." },
+      { "name": "press-scale", "value": "scale(0.95)", "purpose": "Active state on marketing pills and shop-site tappables; dashboard buttons do not scale." },
+      { "name": "reveal-calm", "value": "500ms ease-out, 14px", "purpose": "Shop-site scroll reveal, calm intensity." },
+      { "name": "reveal-lively", "value": "650ms ease-out, 26px", "purpose": "Shop-site scroll reveal, lively intensity." },
+      { "name": "hero-fade", "value": "700ms ease-out", "purpose": "Shop-site hero load-in." },
+      { "name": "backdrop-blur-chrome", "value": "blur(12px)", "purpose": "Sticky navbars and shop headers over translucent Onyx." },
+      { "name": "backdrop-blur-overlay", "value": "blur(4px)", "purpose": "Dialog overlays at 70 percent black and the glass card variant." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one gold action per view. Champagne on hover, Antique Gold when pressed, gold focus ring.",
+      "html": "<div class='ds-stage'><button class='ds-btn-primary'>Book now</button></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:center;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;white-space:nowrap;height:2.5rem;padding:.5rem 1.25rem;border:0;border-radius:.5rem;background:#C9A84C;color:#0D0D0D;font-family:'DM Sans',system-ui,sans-serif;font-size:.875rem;line-height:1.25rem;font-weight:600;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1)}.ds-btn-primary:hover{background:#E2C47A}.ds-btn-primary:active{background:#A8872E}.ds-btn-primary:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-btn-primary:disabled{opacity:.5;pointer-events:none}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Gold hairline and gold text on nothing; a 10 percent gold fill on hover.",
+      "html": "<div class='ds-stage'><button class='ds-btn-outline'>View services</button></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:center;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;white-space:nowrap;height:2.5rem;padding:.5rem 1.25rem;border:1px solid #C9A84C;border-radius:.5rem;background:transparent;color:#C9A84C;font-family:'DM Sans',system-ui,sans-serif;font-size:.875rem;line-height:1.25rem;font-weight:500;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1)}.ds-btn-outline:hover{background:rgba(201,168,76,.1)}.ds-btn-outline:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-btn-outline:disabled{opacity:.5;pointer-events:none}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "White text on nothing; the quiet companion beside a primary. 10 percent white fill on hover.",
+      "html": "<div class='ds-stage'><button class='ds-btn-ghost'>See how it works</button></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:center;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-btn-ghost{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;white-space:nowrap;height:2.5rem;padding:.5rem 1.25rem;border:0;border-radius:.5rem;background:transparent;color:#fff;font-family:'DM Sans',system-ui,sans-serif;font-size:.875rem;line-height:1.25rem;font-weight:500;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1)}.ds-btn-ghost:hover{background:rgba(255,255,255,.1)}.ds-btn-ghost:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-btn-ghost:disabled{opacity:.5;pointer-events:none}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The back office's other action: Slate fill, white text, 10 percent hairline, Slate Light on hover.",
+      "html": "<div class='ds-stage'><button class='ds-btn-secondary'>Cancel</button></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:center;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-btn-secondary{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;white-space:nowrap;height:2.5rem;padding:.5rem 1.25rem;border:1px solid rgba(255,255,255,.1);border-radius:.5rem;background:#2a2a2a;color:#fff;font-family:'DM Sans',system-ui,sans-serif;font-size:.875rem;line-height:1.25rem;font-weight:500;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1)}.ds-btn-secondary:hover{background:#3a3a3a}.ds-btn-secondary:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-btn-secondary:disabled{opacity:.5;pointer-events:none}"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Solid red-600 for irreversible actions; red-700 on hover. The only solid red in the system.",
+      "html": "<div class='ds-stage'><button class='ds-btn-destructive'>Delete shop</button></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:center;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-btn-destructive{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;white-space:nowrap;height:2.5rem;padding:.5rem 1.25rem;border:0;border-radius:.5rem;background:#dc2626;color:#fff;font-family:'DM Sans',system-ui,sans-serif;font-size:.875rem;line-height:1.25rem;font-weight:500;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1)}.ds-btn-destructive:hover{background:#b91c1c}.ds-btn-destructive:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-btn-destructive:disabled{opacity:.5;pointer-events:none}"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Label above a 2.5rem field: 5 percent white fill, 40 percent hairline, gold border and ring on focus, red-500 with a red-400 helper on error.",
+      "html": "<div class='ds-stage'><div class='ds-field'><label class='ds-field-label' for='ds-input-name'>Shop name</label><input class='ds-input' id='ds-input-name' type='text' placeholder='e.g. Fade &amp; Blade'></div><div class='ds-field'><label class='ds-field-label' for='ds-input-email'>Email</label><input class='ds-input ds-input-error' id='ds-input-email' type='email' value='owner@'><p class='ds-field-error'>Enter a valid email address.</p></div></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:flex-start;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-field{display:flex;flex-direction:column;gap:.375rem;width:16rem;font-family:'DM Sans',system-ui,sans-serif}.ds-field-label{font-size:.875rem;line-height:1.25rem;font-weight:500;color:rgba(255,255,255,.8)}.ds-input{display:flex;height:2.5rem;width:100%;border-radius:.5rem;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.05);padding:.5rem .75rem;font-family:inherit;font-size:.875rem;line-height:1.25rem;color:#fff;color-scheme:dark;transition:border-color .15s,box-shadow .15s}.ds-input::placeholder{color:rgba(255,255,255,.6)}.ds-input:focus{outline:none;border-color:#C9A84C;box-shadow:0 0 0 2px #C9A84C}.ds-input:disabled{cursor:not-allowed;opacity:.5}.ds-input-error{border-color:#ef4444}.ds-input-error:focus{border-color:#ef4444;box-shadow:0 0 0 2px #ef4444}.ds-field-error{margin:0;font-size:.75rem;line-height:1rem;color:#f87171}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Charcoal on Onyx with a 10 percent hairline and a 0.75rem radius; Playfair title, 60 percent description, no shadow at rest.",
+      "html": "<div class='ds-stage'><div class='ds-card'><div class='ds-card-header'><h3 class='ds-card-title'>Today at a glance</h3><p class='ds-card-desc'>Bookings, walk-ins and revenue since opening.</p></div><div class='ds-card-content'><div class='ds-card-stat'><span class='ds-card-stat-label'>Bookings</span><span class='ds-card-stat-value'>18</span><span class='ds-card-stat-trend'>+3 vs last week</span></div></div></div></div>",
+      "css": ".ds-stage{display:inline-flex;gap:1rem;align-items:flex-start;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-card{width:20rem;border-radius:.75rem;border:1px solid rgba(255,255,255,.1);background:#1a1a1a;font-family:'DM Sans',system-ui,sans-serif;color:#fff}.ds-card-header{display:flex;flex-direction:column;gap:.375rem;padding:1.5rem}.ds-card-title{margin:0;font-family:'Playfair Display',Georgia,serif;font-size:1.25rem;font-weight:600;line-height:1;color:#fff}.ds-card-desc{margin:0;font-size:.875rem;line-height:1.25rem;color:rgba(255,255,255,.6)}.ds-card-content{padding:0 1.5rem 1.5rem}.ds-card-stat{display:flex;flex-direction:column;gap:.25rem}.ds-card-stat-label{font-size:.875rem;color:rgba(255,255,255,.6)}.ds-card-stat-value{font-family:'Playfair Display',Georgia,serif;font-size:1.875rem;line-height:2.25rem;font-weight:700;color:#fff}.ds-card-stat-trend{font-size:.75rem;color:#34d399}"
+    },
+    {
+      "name": "Status Badges",
+      "kind": "chip",
+      "refersTo": "badge-default",
+      "description": "Pills at 0.75rem / 500: default for completed, gold for the platform, success for confirmed, warning for pending, error for cancelled.",
+      "html": "<div class='ds-stage'><span class='ds-badge ds-badge-warning'>Pending</span><span class='ds-badge ds-badge-success'>Confirmed</span><span class='ds-badge ds-badge-default'>Completed</span><span class='ds-badge ds-badge-error'>Cancelled</span><span class='ds-badge ds-badge-gold'>Live</span><span class='ds-badge ds-badge-outline'>Draft</span></div>",
+      "css": ".ds-stage{display:inline-flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:1.5rem;background:#0D0D0D;border-radius:.75rem}.ds-badge{display:inline-flex;align-items:center;gap:.25rem;border-radius:9999px;padding:.125rem .625rem;font-family:'DM Sans',system-ui,sans-serif;font-size:.75rem;line-height:1rem;font-weight:500;border:1px solid transparent}.ds-badge-default{background:rgba(255,255,255,.1);color:rgba(255,255,255,.8)}.ds-badge-gold{background:rgba(201,168,76,.2);color:#C9A84C;border-color:rgba(201,168,76,.3)}.ds-badge-success{background:rgba(16,185,129,.2);color:#34d399;border-color:rgba(16,185,129,.3)}.ds-badge-warning{background:rgba(245,158,11,.2);color:#fbbf24;border-color:rgba(245,158,11,.3)}.ds-badge-error{background:rgba(239,68,68,.2);color:#f87171;border-color:rgba(239,68,68,.3)}.ds-badge-outline{background:transparent;color:rgba(255,255,255,.7);border-color:rgba(255,255,255,.2)}"
+    },
+    {
+      "name": "Dashboard Sidebar",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "The 15rem Onyx rail: logo lockup with the gold word, 0.5rem-radius items at 60 percent ink, 5 percent fill on hover, 10 percent gold fill with gold text when active.",
+      "html": "<div class='ds-stage'><nav class='ds-sidebar'><div class='ds-sidebar-logo'>Pivot <span>Parlor</span></div><ul class='ds-sidebar-list'><li><a class='ds-nav-item ds-nav-item-active' href='#'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='18' rx='2'/><path d='M16 2v4M8 2v4M3 10h18'/></svg>Bookings</a></li><li><a class='ds-nav-item' href='#'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/></svg>Staff</a></li><li><a class='ds-nav-item' href='#'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='6' cy='6' r='3'/><circle cx='6' cy='18' r='3'/><path d='M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12'/></svg>Services</a></li></ul></nav></div>",
+      "css": ".ds-stage{display:inline-flex;padding:0;background:#0D0D0D;border-radius:.75rem;overflow:hidden}.ds-sidebar{display:flex;flex-direction:column;width:15rem;height:16rem;background:#0D0D0D;border-right:1px solid rgba(255,255,255,.1);font-family:'DM Sans',system-ui,sans-serif}.ds-sidebar-logo{padding:1.25rem 1.5rem;font-family:'Playfair Display',Georgia,serif;font-size:1.125rem;font-weight:700;color:#fff;border-bottom:1px solid rgba(255,255,255,.1)}.ds-sidebar-logo span{color:#C9A84C}.ds-sidebar-list{list-style:none;margin:0;padding:.75rem;display:flex;flex-direction:column;gap:.25rem}.ds-nav-item{display:flex;align-items:center;gap:.75rem;border-radius:.5rem;padding:.5rem .75rem;font-size:.875rem;line-height:1.25rem;font-weight:500;color:rgba(255,255,255,.6);text-decoration:none;transition:color .15s,background-color .15s}.ds-nav-item svg{width:1rem;height:1rem;flex-shrink:0}.ds-nav-item:hover{background:rgba(255,255,255,.05);color:#fff}.ds-nav-item:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-nav-item-active,.ds-nav-item-active:hover{background:rgba(201,168,76,.1);color:#C9A84C}"
+    },
+    {
+      "name": "Dialog",
+      "kind": "custom",
+      "refersTo": "dialog",
+      "description": "The modal panel: Charcoal, 1rem radius, 1.5rem padding, hairline, dialog shadow, Playfair title, pill close button with an offset gold focus ring.",
+      "html": "<div class='ds-stage'><div class='ds-dialog' role='dialog' aria-labelledby='ds-dialog-title'><button class='ds-dialog-close' aria-label='Close'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M18 6 6 18'/><path d='m6 6 12 12'/></svg></button><div class='ds-dialog-header'><h2 class='ds-dialog-title' id='ds-dialog-title'>Cancel this booking?</h2><p class='ds-dialog-desc'>The customer will be emailed and any deposit refunded in full.</p></div><div class='ds-dialog-actions'><button class='ds-dialog-btn ds-dialog-btn-secondary'>Keep booking</button><button class='ds-dialog-btn ds-dialog-btn-destructive'>Cancel booking</button></div></div></div>",
+      "css": ".ds-stage{display:inline-flex;padding:2rem;background:#0D0D0D;border-radius:.75rem}.ds-dialog{position:relative;width:24rem;max-width:32rem;background:#1a1a1a;border:1px solid rgba(255,255,255,.1);border-radius:1rem;padding:1.5rem;box-shadow:0 25px 50px -12px rgba(0,0,0,.25);font-family:'DM Sans',system-ui,sans-serif;color:#fff}.ds-dialog-close{position:absolute;right:1rem;top:1rem;display:inline-flex;padding:.25rem;border:0;border-radius:9999px;background:transparent;color:rgba(255,255,255,.4);cursor:pointer;transition:color .15s}.ds-dialog-close svg{width:1rem;height:1rem}.ds-dialog-close:hover{color:#fff}.ds-dialog-close:focus-visible{outline:none;box-shadow:0 0 0 2px #1a1a1a,0 0 0 4px #C9A84C}.ds-dialog-header{display:flex;flex-direction:column;gap:.375rem;margin-bottom:1rem;padding-right:2rem}.ds-dialog-title{margin:0;font-family:'Playfair Display',Georgia,serif;font-size:1.25rem;font-weight:600;color:#fff}.ds-dialog-desc{margin:0;font-size:.875rem;line-height:1.25rem;color:rgba(255,255,255,.6)}.ds-dialog-actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.5rem}.ds-dialog-btn{display:inline-flex;align-items:center;justify-content:center;height:2.5rem;padding:.5rem 1.25rem;border-radius:.5rem;font-family:inherit;font-size:.875rem;line-height:1.25rem;font-weight:500;cursor:pointer;transition:all .15s cubic-bezier(.4,0,.2,1)}.ds-dialog-btn:focus-visible{outline:none;box-shadow:0 0 0 2px #C9A84C}.ds-dialog-btn-secondary{background:#2a2a2a;color:#fff;border:1px solid rgba(255,255,255,.1)}.ds-dialog-btn-secondary:hover{background:#3a3a3a}.ds-dialog-btn-destructive{background:#dc2626;color:#fff;border:0}.ds-dialog-btn-destructive:hover{background:#b91c1c}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Brass Nameplate",
+    "overview": "A small, well-made brass plate beside the door of a dark, quiet shop. That is the platform's whole visual attitude. Pivot Parlor's surfaces are near-black rooms lit by one warm metal: a single gold action, a gold word in the logo, a gold highlight on the active item, and otherwise white ink at measured opacities on Onyx and Charcoal. Playfair Display gives headings the hand-lettered confidence of a shopfront sign; DM Sans does the plain, quick work underneath. The platform never fills a room with gold, because the room belongs to the shop. Gold is a signature, not a paint.\n\nThe mood is discreet, warm and assured. Density is calm on marketing surfaces (generous clamp-based section padding, one idea per viewport) and compact in the back office (rows of 1.25rem by 1rem padding, stat cards, lists rather than tables). Depth is drawn with hairlines and tonal steps, not shadows, so everything sits flat and still until it needs to float. Controls respond to touch with a slight press and nothing more.\n\nTwo confirmed anti-references: the glossy black-and-gold of casinos and luxury-watch advertising (large gold areas, gradients, bevels), and the pastel marketplace look of Fresha and Treatwell (rounded pastel cards, blue call-to-actions, generic listing pages). Pivot Parlor is neither glamorous nor generic. It is a quiet, well-made fixture.",
+    "keyCharacteristics": [
+      "Fixed dark shell: Onyx page, Charcoal raised surfaces, white ink at 80/70/60/40 percent. There is no light mode and no user theme toggle.",
+      "One gold per view: the primary action, plus small signatures (logo word, active nav item, avatar chip, eyebrow labels).",
+      "Serif headings (Playfair Display 600 to 700), sans everything else (DM Sans 400 to 600), both self-hosted.",
+      "Flat with tonal layering; shadows only on things that float (dialogs, the floating CTA, chat panels).",
+      "0.5rem controls, 0.75rem cards, 1rem dialogs, pills for badges and chips. Never sharp, never bubbly.",
+      "Motion is hand-rolled CSS: colour transitions, a 95 percent press, and blur on sticky chrome. Reduced motion is honoured wherever animation exists.",
+      "Shop sites are a separate world: every colour, radius and font on a shop page comes from that shop's generated theme tokens, never from the platform palette."
+    ],
+    "rules": [
+      { "name": "The Nameplate Rule", "body": "Gold is a signature, never an area. One primary gold action per view, plus the small fixed signatures (logo word, active nav item, avatar chip, eyebrows, focus rings). Never a gold section background, never a gold panel, and the only gold gradient in the platform is the marketing chatbot's.", "section": "colors" },
+      { "name": "The No Blue Rule", "body": "Marketing pages, the marketing chatbot and every shop page contain no blue. In the back office, blue is retired as a status colour: pending is amber, confirmed is green, completed is neutral, cancelled is red, all through the shared Badge variants. Blue survives only as a third-party brand mark (Google, Facebook and LinkedIn sign-in buttons, the Google model badge in developer tooling) and as the one curated shop palette a shop may choose for itself (\"Midnight & Ice\"). Today's blue \"confirmed\" and \"completed\" states in the bookings timeline, calendar dots, analytics bars, inventory \"ordered\" and account \"in progress\" pills are drift, to be moved onto the Badge variants.", "section": "colors" },
+      { "name": "The Two Worlds Rule", "body": "Platform colours never appear on a shop's page. Shop components read only the shop's theme tokens (--st-*, --color-accent, --color-brand). The one crossover is deliberate: a shop with no generated site yet gets its booking journey rendered through the same token engine seeded with Parlor Gold on Onyx, so it looks like the platform without any component knowing it.", "section": "colors" },
+      { "name": "The One Serif Rule", "body": "Playfair Display appears only in headings, card and dialog titles, stat values and the logo lockup. It never sets body copy, buttons, labels, badges, inputs or data.", "section": "typography" },
+      { "name": "The Gold Phrase Rule", "body": "A heading may carry one gold span and no more. Gold is never used for an entire heading.", "section": "typography" },
+      { "name": "The Hairline Rule", "body": "A resting surface is separated by a 10 percent white line and a tonal step, never by a shadow. If a card needs a shadow to be seen, its background is wrong.", "section": "elevation" },
+      { "name": "The Floating-Only Shadow Rule", "body": "Shadows appear only on elements positioned above the page (fixed or modal). Cards, rows, inputs and buttons at rest cast none.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do build every platform surface from the shared Button, Input, Card, Badge and Dialog primitives, and every shop-page control from the Themed set.",
+      "Do keep one Parlor Gold primary action per view; use ghost or secondary for everything else.",
+      "Do write neutrals as white at 80 / 70 / 60 / 40 percent and hairlines at 10 / 20 / 40 percent, not as grey hex values.",
+      "Do separate surfaces with a tonal step (Onyx, Charcoal) and a 10 percent hairline; save shadows for dialogs and floating chrome.",
+      "Do use 0.5rem on controls, 0.75rem on cards, 1rem on dialogs and pills on chips, and read shop-page radii from --st-r-*.",
+      "Do set headings in Playfair Display 600 to 700 in white with at most one gold span, and everything else in DM Sans.",
+      "Do map back-office status to the Badge variants: pending warning, confirmed success, completed default, cancelled error.",
+      "Do keep motion to colour and transform transitions of 150 to 250ms and a 95 percent press, and disable every keyframe under prefers-reduced-motion.",
+      "Do pad fixed chrome with env(safe-area-inset-*) and keep sticky headers translucent Onyx with a 12px blur.",
+      "Do load fonts only from the self-hosted Fontsource registration."
+    ],
+    "donts": [
+      "Don't use blue anywhere except third-party brand marks and the Google model badge; never as a status colour.",
+      "Don't fill areas with gold, use gold gradients outside Pip, or set an entire heading in gold.",
+      "Don't put Playfair Display in body copy, buttons, labels, badges, inputs or data.",
+      "Don't put platform colours, fonts or radii on a shop page; shop components read theme tokens only.",
+      "Don't add shadows, glass or blur to resting cards, rows, inputs or buttons.",
+      "Don't hand-roll a per-screen status colour map or a per-screen field style; extend the shared primitive instead.",
+      "Don't use Tailwind dark: variants or a theme toggle; the platform shell is dark only and light appears only through a shop's own scheme.",
+      "Don't add a Google Fonts link, an animation library, or HTML tables to the back office.",
+      "Don't use em-dashes in interface text."
+    ]
+  }
+}
