@@ -1,5 +1,7 @@
 # Multi-provider LLM rollout
 
+Every command block below starts from the repository root.
+
 Spec: `docs/superpowers/specs/2026-09-12-multi-provider-llm-design.md` (section 8).
 Everything below is run by the operator by hand, in this order. The background
 workers never deploy from CI.
@@ -11,24 +13,23 @@ group (API worker) or falls back to the default model (background workers).
 
 ```bash
 # API worker: production and staging
-cd apps/worker
-npx wrangler secret put OPENAI_API_KEY
-npx wrangler secret put ANTHROPIC_API_KEY
-npx wrangler secret put OPENAI_API_KEY --env staging
-npx wrangler secret put ANTHROPIC_API_KEY --env staging
+(cd apps/worker && npx wrangler secret put OPENAI_API_KEY)
+(cd apps/worker && npx wrangler secret put ANTHROPIC_API_KEY)
+(cd apps/worker && npx wrangler secret put OPENAI_API_KEY --env staging)
+(cd apps/worker && npx wrangler secret put ANTHROPIC_API_KEY --env staging)
 
 # Background workers (production only; they have no staging deployment)
-cd ../workers/research && npx wrangler secret put OPENAI_API_KEY && npx wrangler secret put ANTHROPIC_API_KEY
-cd ../text && npx wrangler secret put OPENAI_API_KEY && npx wrangler secret put ANTHROPIC_API_KEY
-cd ../chatbot && npx wrangler secret put OPENAI_API_KEY && npx wrangler secret put ANTHROPIC_API_KEY
+(cd apps/workers/research && npx wrangler secret put OPENAI_API_KEY && npx wrangler secret put ANTHROPIC_API_KEY)
+(cd apps/workers/text && npx wrangler secret put OPENAI_API_KEY && npx wrangler secret put ANTHROPIC_API_KEY)
+(cd apps/workers/chatbot && npx wrangler secret put OPENAI_API_KEY && npx wrangler secret put ANTHROPIC_API_KEY)
 ```
 
 ## 2. Deploy the background workers, in order
 
 ```bash
-cd apps/workers/research && npx wrangler deploy
-cd ../text && npx wrangler deploy
-cd ../chatbot && npx wrangler deploy
+(cd apps/workers/research && npx wrangler deploy)
+(cd apps/workers/text && npx wrangler deploy)
+(cd apps/workers/chatbot && npx wrangler deploy)
 ```
 
 They keep working on OpenRouter ids before the API worker ships; direct ids
