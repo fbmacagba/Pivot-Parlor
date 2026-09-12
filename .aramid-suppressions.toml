@@ -1,0 +1,10 @@
+# Reasoned suppressions for aramid BLOCK-tier findings (aramid design doc
+# section 6). Each entry must say why the finding cannot be fixed and when to
+# re-check it. Reviewed and committed, never edited by tooling.
+
+[[suppress]]
+id = "63f1f5a89d201ca07cb823993d53f177da9024e90e1141232751e306830079dd"
+tool = "npm"
+rule = "GHSA-34x7-hfp2-rc4v"
+path = "package-lock.json"
+reason = "node-tar 6.2.1 is reachable only through @remix-run/dev -> cacache ^17 -> tar ^6 (build-time dev tooling, never shipped to Cloudflare Pages/Workers); no Remix 2.x release (latest 2.17.5) moves off cacache 17, so no in-range fix exists. Owner decision 2026-09-12; re-check when @remix-run/dev changes its cacache range."
