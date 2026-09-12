@@ -1,4 +1,4 @@
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useRevalidator, useSearchParams } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { useState } from "react";
@@ -53,6 +53,7 @@ type ThemeResult = { theme: BrandConfig; model: string; modelId: string } | null
 export default function DevAIDeploy() {
   const { shops, models, chatbotModel, apiUrl } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
+  const revalidator = useRevalidator();
 
   const textModels = pickerModelsFrom(models, "text");
   const recommendedId = textModels.find((m) => m.recommended)?.id ?? textModels[0]?.id ?? "";
@@ -167,7 +168,7 @@ export default function DevAIDeploy() {
       setResult({ theme: model_a.theme, model: selectedModel?.name ?? modelId, modelId });
       setResultB({
         theme: model_b.theme,
-        model: models.find((m) => m.id === modelBId)?.name ?? modelBId,
+        model: textModels.find((m) => m.id === modelBId)?.name ?? modelBId,
         modelId: modelBId,
       });
     } catch (e: unknown) {
@@ -330,6 +331,7 @@ export default function DevAIDeploy() {
             defaultModelId={DEFAULT_TEXT_MODEL_ID}
             onSave={async (id) => {
               await postJson("/api/ai/chatbot-model", { model_id: id });
+              revalidator.revalidate();
             }}
           />
 
