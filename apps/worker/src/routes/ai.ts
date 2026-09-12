@@ -13,6 +13,7 @@ import {
 import {
   DEFAULT_THEME_MODEL,
   getLiveModels,
+  getModel,
   parseTextEffort,
   providerKeysFromEnv,
 } from "../services/model-registry.js";
@@ -37,6 +38,42 @@ const ai = new Hono<{ Bindings: Bindings }>();
 // All AI routes require developer role
 ai.use("*", authMiddleware, requireRole("developer"));
 
+// ─── Read and settings routes: registered BEFORE the generation rate limiter ───
+// Hono runs handlers in registration order and stops at the first response,
+// so these cheap KV reads/writes never consume the 10/hour generation budget.
+
+// GET /api/ai/models — three provider groups with live pricing (KV-cached 1 h)
+ai.get("/models", async (c) => {
+  return c.json({ success: true, data: await getLiveModels(c.env.KV, providerKeysFromEnv(c.env)) });
+});
+
+/** Platform-wide chatbot model choice: `{ model_id, updated_at }`, no expiry. */
+export const CHATBOT_MODEL_KV_KEY = "platform:chatbot:model";
+
+// GET /api/ai/chatbot-model — current platform-wide chatbot model (nulls when unset)
+ai.get("/chatbot-model", async (c) => {
+  const stored = safeJsonParse<{ model_id?: unknown; updated_at?: unknown }>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+  return c.json({
+    success: true,
+    data: {
+      model_id: typeof stored?.model_id === "string" ? stored.model_id : null,
+      updated_at: typeof stored?.updated_at === "string" ? stored.updated_at : null,
+    },
+  });
+});
+
+// POST /api/ai/chatbot-model — body { model_id }; must be a listed text model
+ai.post("/chatbot-model", async (c) => {
+  const body = await c.req.json<{ model_id?: unknown }>().catch(() => ({}) as { model_id?: unknown });
+  const modelId = typeof body.model_id === "string" ? body.model_id.trim() : "";
+  if (!modelId) return c.json({ success: false, error: "model_id is required" }, 400);
+  const model = await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text");
+  if (!model) return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
+  const record = { model_id: modelId, updated_at: new Date().toISOString() };
+  await c.env.KV.put(CHATBOT_MODEL_KV_KEY, JSON.stringify(record));
+  return c.json({ success: true, data: record });
+});
+
 // AI generation is expensive — cap per user (cost abuse brake, NFR-S4)
 ai.use(
   "*",
@@ -47,12 +84,6 @@ ai.use(
     key: (c) => getUser(c)?.sub ?? clientIp(c),
   })
 );
-
-// ─── GET /api/ai/models — three provider groups with live pricing (KV-cached 1 h) ───
-
-ai.get("/models", async (c) => {
-  return c.json({ success: true, data: await getLiveModels(c.env.KV, providerKeysFromEnv(c.env)) });
-});
 
 // ─── POST /api/ai/generate-theme — generate brand theme for a shop ────────────
 // Body: { shop_id, model_id, style_keywords?, effort?, regenerate?,
