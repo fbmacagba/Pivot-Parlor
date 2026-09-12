@@ -11,6 +11,7 @@ import {
   type DesignSpec,
   type ComposerId,
 } from "./design-spec";
+import { chatComplete, type ProviderKeys } from "@repo/llm";
 
 export interface Env {
   DB: D1Database;
@@ -19,6 +20,9 @@ export interface Env {
   SITE_TEXT_QUEUE: Queue;
   SITE_ASSEMBLE_QUEUE: Queue;
   OPENROUTER_API_KEY: string;
+  /** Direct-vendor keys; optional. A chosen direct model with no key falls back to the default model. */
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
   ENVIRONMENT: string;
 }
 
@@ -303,59 +307,32 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
 You MUST include exactly ${msg.services.length} strings in image_prompts.catalog (same order as services listed above).`;
 }
 
-function maxTokensForOpenRouterModel(model: string): number {
-  const m = model.trim().toLowerCase();
-  if (m.startsWith("meta-llama/")) return 4096;
-  if (m.startsWith("google/gemini-3.1-flash-lite")) return 8000;
-  return 4096;
-}
-
-async function openRouterJson(
-  apiKey: string,
+/** One JSON-only completion through the shared client; HTTP retries and the
+ *  effort retry live in the client, output validity is judged by the caller. */
+async function researchJson(
+  jobId: string,
+  keys: ProviderKeys,
   model: string,
   system: string,
   user: string,
   effort?: TextEffort
 ): Promise<string> {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://pivotparlor.com",
-      "X-Title": "Pivot Parlor Research",
+  const result = await chatComplete(
+    {
+      modelId: model,
+      system,
+      messages: [{ role: "user", content: user }],
+      effort,
+      maxTokens: 8000,
+      jsonOnly: true,
+      appTitle: "Pivot Parlor Research",
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokensForOpenRouterModel(model),
-      ...(effort ? { reasoning: { effort } } : {}),
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    // Some providers reject the reasoning parameter outright — retry once
-    // without effort rather than burning the whole attempt budget on it.
-    if (effort && res.status === 400) {
-      console.warn(`[pivot-parlor-research] ${model} rejected reasoning effort, retrying without`);
-      return openRouterJson(apiKey, model, system, user, undefined);
-    }
-    throw new Error(`OpenRouter error ${res.status}: ${await res.text()}`);
-  }
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    error?: unknown;
-  };
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    // A 200 with no usable content (provider error, empty completion) must not
-    // be silently turned into "{}" — surface it so the caller can retry/log.
-    throw new Error(`OpenRouter returned no content: ${JSON.stringify(data).slice(0, 300)}`);
-  }
-  return content.trim().replace(/```json|```/g, "").trim();
+    keys
+  );
+  console.log(
+    `[${jobId}] [pivot-parlor-research] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
+  );
+  return result.text;
 }
 
 function isHexColor(s: unknown): s is string {
@@ -546,6 +523,12 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     return;
   }
 
+  const keys: ProviderKeys = {
+    openrouter: apiKey,
+    openai: env.OPENAI_API_KEY || undefined,
+    anthropic: env.ANTHROPIC_API_KEY || undefined,
+  };
+
   try {
     console.log(`[${jobId}] [pivot-parlor-research] start shopSlug=${input.shopSlug}`);
     await updateGenerationJob(env.DB, jobId, { status: "running", stage: "research", error: null });
@@ -554,12 +537,12 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     const userPrompt = buildUserPrompt(input);
     console.log(`[${jobId}] [pivot-parlor-research] text model=${input.text_model}`);
 
-    // Model output is non-deterministic and providers rate-limit ("retry
-    // shortly"), so: retry the chosen model with a growing pause between
-    // attempts, then rescue the job with the default model — a temporarily
-    // rate-limited upstream (e.g. a 429 on one vendor) must not sink the run.
+    // HTTP retries (429/5xx, 3 s / 6 s / 9 s) and the effort retry live in the
+    // shared client. This loop is for output validity (non-JSON, schema
+    // failures): two tries of the chosen model, then rescue the job with the
+    // default model on OpenRouter — a direct vendor with a missing key or an
+    // outage must not sink the run.
     const attempts: { model: string; effort?: TextEffort }[] = [
-      { model: input.text_model, effort: input.text_effort },
       { model: input.text_model, effort: input.text_effort },
       { model: input.text_model, effort: input.text_effort },
       ...(input.text_model !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
@@ -580,7 +563,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       }
       let rawText: string;
       try {
-        rawText = await openRouterJson(apiKey, model, SYSTEM_PROMPT, userPrompt, effort);
+        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort);
       } catch (e) {
         lastError = `model call failed: ${errorMessage(e)}`;
         console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${attempts.length} ${lastError}`);
