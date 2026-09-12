@@ -187,6 +187,7 @@ The Worker dev server runs on port `8787` (configured in `wrangler.toml`). The R
 
 - **Pages secrets**: `npx wrangler pages secret put SECRET_NAME --project-name pivot-parlor-web`
 - **Worker secrets**: `cd apps/worker && npx wrangler secret put SECRET_NAME`
+- **LLM vendor keys**: `OPENROUTER_API_KEY` (required), `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` (optional, direct routes) on the API worker (production and staging) and on the research, text and chatbot workers. Rollout steps: `docs/runbooks/multi-provider-llm-rollout.md`.
 - Do NOT use `wrangler secret put` (without `pages`) for the web project — it only works for Workers.
 
 ### Component & Design Conventions
@@ -223,6 +224,8 @@ The `apps/workers/` directory contains standalone Cloudflare Workers for:
 - `booking` — Booking-related background work
 
 These are deployed independently and communicate via queues.
+
+`research`, `text`, `chatbot` and `booking` are npm workspaces (root `workspaces`). Every LLM call goes through `@repo/llm` (`packages/llm`, `chatComplete`) with route-qualified model ids: `openai-api/<model>` and `anthropic-api/<model>` call the vendors directly, anything else is an OpenRouter slug. `/api/ai/models` is ranked live by `apps/worker/src/services/model-registry.ts` and cached in KV (`ai:models:v3`); `packages/utils/src/modelCatalog.ts` is the snapshot fallback and fallback price table (refresh it together with `apps/worker/test/fixtures/model-feeds.ts`). The chatbot's model is platform-wide (`platform:chatbot:model`, set on AI Deploy).
 
 <!-- graphite:managed version=14 -->
 ## Shared Graphite Instructions
