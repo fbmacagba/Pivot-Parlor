@@ -1,7 +1,7 @@
 /**
  * Explicit unknown/wrong-kind model ids submitted on the settings-save or
- * generate-site endpoints must be rejected (400) against the shared
- * MODEL_CATALOG. Model ids already stored in KV that have since fallen out
+ * generate-site endpoints must be rejected (400) against the live
+ * model registry (KV-seeded by test/setup-model-registry.ts). Model ids already stored in KV that have since fallen out
  * of the catalog (a catalog shrink) must silently degrade to the pipeline
  * defaults instead of 400ing, so legacy shops keep generating.
  */
@@ -74,6 +74,41 @@ describe("model id validation", () => {
       },
     });
     expect(res.status).toBe(200);
+  });
+
+  it("accepts direct OpenAI API and Anthropic API ids on settings save", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    const res = await dispatch("POST", `/api/shops/${shopId}/settings`, {
+      headers: devHeaders,
+      body: { text_model: "openai-api/gpt-6-astra" },
+    });
+    expect(res.status).toBe(200);
+    const res2 = await dispatch("POST", `/api/shops/${shopId}/settings`, {
+      headers: devHeaders,
+      body: { text_model: "anthropic-api/claude-fable-5.1" },
+    });
+    expect(res2.status).toBe(200);
+  });
+
+  it("rejects a malformed direct id (empty model part)", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    const res = await dispatch("POST", `/api/shops/${shopId}/settings`, {
+      headers: devHeaders,
+      body: { text_model: "openai-api/" },
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error?: string }).error).toContain("Unknown text model");
+  });
+
+  it("forwards a direct id unchanged into the research queue payload", async () => {
+    const { shopId, devHeaders } = await seedShopWithDev();
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
+      headers: devHeaders,
+      body: { skip_images: true, text_model: "anthropic-api/claude-opus-5", text_effort: "medium" },
+    });
+    expect(res.status).toBe(202);
+    expect(captured!.text_model).toBe("anthropic-api/claude-opus-5");
+    expect(captured!.text_effort).toBe("medium");
   });
 
   it("rejects an unknown text model submitted directly to generate-site", async () => {

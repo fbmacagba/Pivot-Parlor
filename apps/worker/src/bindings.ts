@@ -12,6 +12,9 @@ export type Bindings = {
   site_research_queue?: Queue;
   JWT_SECRET: string;
   OPENROUTER_API_KEY: string;
+  /** Direct-vendor keys (spec 2026-09-12 multi-provider LLM). Optional: a missing key hides that provider group. */
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
   GOOGLE_AI_API_KEY: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;

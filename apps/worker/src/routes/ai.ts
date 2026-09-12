@@ -14,6 +14,7 @@ import {
   DEFAULT_THEME_MODEL,
   getLiveModels,
   parseTextEffort,
+  providerKeysFromEnv,
 } from "../services/model-registry.js";
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
@@ -47,10 +48,10 @@ ai.use(
   })
 );
 
-// ─── GET /api/ai/models — curated top-10 catalogue with live OpenRouter pricing ───
+// ─── GET /api/ai/models — three provider groups with live pricing (KV-cached 1 h) ───
 
 ai.get("/models", async (c) => {
-  return c.json({ success: true, data: await getLiveModels(c.env.KV) });
+  return c.json({ success: true, data: await getLiveModels(c.env.KV, providerKeysFromEnv(c.env)) });
 });
 
 // ─── POST /api/ai/generate-theme — generate brand theme for a shop ────────────
@@ -110,7 +111,7 @@ ai.post("/generate-theme", async (c) => {
     effort,
     c.env.DB,
     c.env.KV,
-    c.env.OPENROUTER_API_KEY,
+    providerKeysFromEnv(c.env),
     { palette: parsePalette(body), persist: body.preview !== true }
   );
 
@@ -186,7 +187,7 @@ ai.post("/compare", async (c) => {
       effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY,
+      providerKeysFromEnv(c.env),
       options
     ),
     generateShopTheme(
@@ -198,7 +199,7 @@ ai.post("/compare", async (c) => {
       effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY,
+      providerKeysFromEnv(c.env),
       options
     ),
   ]);

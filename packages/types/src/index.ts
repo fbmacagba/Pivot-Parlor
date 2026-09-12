@@ -169,27 +169,34 @@ export interface BrandConfig {
   urgencyText: string;
 }
 
-/** Reasoning-effort level passed to OpenRouter for models that support it. */
+/** Reasoning-effort level for models that support it. */
 export type TextEffort = "low" | "medium" | "high";
 
+/** Which API the platform calls for a model: OpenRouter's gateway or a vendor directly. */
+export type ModelRoute = "openrouter" | "openai" | "anthropic";
+
 export interface AIModel {
-  /** OpenRouter model slug, e.g. "anthropic/claude-sonnet-5". */
+  /** Route-qualified id: an OpenRouter slug ("anthropic/claude-sonnet-5"), "openai-api/<model>" or "anthropic-api/<model>". */
   id: string;
   name: string;
   kind: "text" | "image";
-  /** OpenRouter vendor prefix, e.g. "anthropic". */
-  provider: string;
-  /** Display name for the provider, e.g. "Anthropic". */
+  /** Route the id is called through. */
+  provider: ModelRoute;
+  /** "OpenRouter", "OpenAI API" or "Anthropic API". */
   providerLabel: string;
+  /** Model maker: "google", "anthropic", "openai", "x-ai", "deepseek". */
+  vendor: string;
+  vendorLabel: string;
   description: string;
   /** USD per 1M input tokens. */
   costPer1MInput: number;
   /** USD per 1M output tokens. */
   costPer1MOutput: number;
-  /** Model accepts a reasoning-effort parameter via OpenRouter. */
   supportsEffort: boolean;
+  /** Effort levels the model accepts (subset of low/medium/high); empty when none. */
+  effortLevels: TextEffort[];
   recommended: boolean;
-  /** True when pricing was refreshed from the live OpenRouter catalogue. */
+  /** True when pricing came from the live OpenRouter feed on the last refresh. */
   livePricing: boolean;
 }
 

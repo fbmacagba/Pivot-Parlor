@@ -1,5 +1,6 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { getModel, type TextEffort } from "./model-registry.js";
+import type { ProviderKeys } from "@repo/llm";
 
 // ─── Brand config (full schema, with conversion-optimised copy fields) ────────
 
@@ -218,10 +219,10 @@ export async function generateShopTheme(
   effort: TextEffort | undefined,
   db: D1Database,
   kv: KVNamespace,
-  openrouterKey: string,
+  keys: ProviderKeys,
   options: ThemeGenerationOptions = {}
 ): Promise<BrandConfig> {
-  const model = getModel(modelId, "text");
+  const model = await getModel(kv, keys, modelId, "text");
   if (!model) throw new Error(`Unknown model: ${modelId}`);
 
   const prompt = buildPrompt(shopName, shopType, styleKeywords, options.palette);
@@ -232,7 +233,7 @@ export async function generateShopTheme(
     // Only forward effort to models that accept it — OpenRouter rejects the
     // reasoning parameter on some non-reasoning providers.
     const effectiveEffort = model.supportsEffort ? effort : undefined;
-    config = await callOpenRouter(modelId, prompt, openrouterKey, effectiveEffort);
+    config = await callOpenRouter(modelId, prompt, keys.openrouter ?? "", effectiveEffort);
   } catch (err) {
     console.error(`[AI Generator] ${model.provider} call failed, using fallback:`, err);
     config = defaultTheme(shopName, shopType);

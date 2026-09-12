@@ -30,7 +30,6 @@ import {
 } from "../services/visual-images.js";
 import {
   safeJsonParse,
-  findCatalogModel,
   DEFAULT_TEXT_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
   parseComposer,
@@ -41,7 +40,13 @@ import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
-import { parseTextEffort } from "../services/model-registry.js";
+import { getLiveModels, parseTextEffort, providerKeysFromEnv } from "../services/model-registry.js";
+
+/** `listed(id, kind)` against the live registry (KV-cached); one read per request. */
+async function modelLister(c: Context<{ Bindings: Bindings }>): Promise<(id: string, kind: "text" | "image") => boolean> {
+  const registry = await getLiveModels(c.env.KV, providerKeysFromEnv(c.env));
+  return (id, kind) => registry.some((m) => m.id === id && m.kind === kind);
+}
 
 const shops = new Hono<{ Bindings: Bindings }>();
 
@@ -699,12 +704,13 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
   };
   const body = await c.req.json<GenSettingsBody>().catch((): GenSettingsBody => ({}));
 
+  const listed = await modelLister(c);
   const textModelIn = typeof body.text_model === "string" ? body.text_model.trim() : "";
-  if (textModelIn && !findCatalogModel(textModelIn, "text")) {
+  if (textModelIn && !listed(textModelIn, "text")) {
     return c.json({ success: false, error: `Unknown text model: ${textModelIn}` }, 400);
   }
   const imageModelIn = typeof body.image_model === "string" ? body.image_model.trim() : "";
-  if (imageModelIn && !findCatalogModel(imageModelIn, "image")) {
+  if (imageModelIn && !listed(imageModelIn, "image")) {
     return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
   }
   const composerIn = typeof body.composer === "string" ? body.composer.trim() : "";
@@ -799,7 +805,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
 
   const imageModelRaw = body.image_model;
   const imageModelIn = typeof imageModelRaw === "string" ? imageModelRaw.trim() : "";
-  if (imageModelIn && !findCatalogModel(imageModelIn, "image")) {
+  if (imageModelIn && !(await modelLister(c))(imageModelIn, "image")) {
     return c.json({ success: false, error: `Unknown image model: ${imageModelIn}` }, 400);
   }
   const imageModel = imageModelIn || DEFAULT_OPENROUTER_IMAGE_MODEL;
@@ -1172,12 +1178,13 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
 
   // Validate explicit model ids before any job/KV state is created below —
   // an unknown or wrong-kind id must 400 without orphaning a queued job row.
+  const listed = await modelLister(c);
   const bodyText = typeof body.text_model === "string" ? body.text_model.trim() : "";
-  if (bodyText && !findCatalogModel(bodyText, "text")) {
+  if (bodyText && !listed(bodyText, "text")) {
     return c.json({ success: false, error: `Unknown text model: ${bodyText}` }, 400);
   }
   const bodyImage = typeof body.image_model === "string" ? body.image_model.trim() : "";
-  if (bodyImage && !findCatalogModel(bodyImage, "image")) {
+  if (bodyImage && !listed(bodyImage, "image")) {
     return c.json({ success: false, error: `Unknown image model: ${bodyImage}` }, 400);
   }
   const bodyComposerRaw = typeof body.composer === "string" ? body.composer.trim() : "";
@@ -1248,19 +1255,21 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     // shrink) silently degrades to the pipeline default instead of 400ing,
     // so legacy shops keep generating.
     const storedText = settingsKv.text_model?.trim() ?? "";
-    const text_model =
-      bodyText ||
-      (storedText && findCatalogModel(storedText, "text") ? storedText : DEFAULT_TEXT_MODEL_ID);
+    const storedTextListed = Boolean(storedText) && listed(storedText, "text");
+    if (!bodyText && storedText && !storedTextListed) {
+      console.warn(`[generate-site] stored text model ${storedText} is no longer listed; using ${DEFAULT_TEXT_MODEL_ID}`);
+    }
+    const text_model = bodyText || (storedTextListed ? storedText : DEFAULT_TEXT_MODEL_ID);
     // Reasoning effort for the text/research model. Request wins over saved
     // settings; anything but low/medium/high is dropped (pipeline default).
     const text_effort =
       parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
     const storedImage = settingsKv.image_model?.trim() ?? "";
-    const image_model =
-      bodyImage ||
-      (storedImage && findCatalogModel(storedImage, "image")
-        ? storedImage
-        : DEFAULT_IMAGE_MODEL_ID);
+    const storedImageListed = Boolean(storedImage) && listed(storedImage, "image");
+    if (!bodyImage && storedImage && !storedImageListed) {
+      console.warn(`[generate-site] stored image model ${storedImage} is no longer listed; using ${DEFAULT_IMAGE_MODEL_ID}`);
+    }
+    const image_model = bodyImage || (storedImageListed ? storedImage : DEFAULT_IMAGE_MODEL_ID);
     // Design Director composer: request wins over saved settings; anything
     // but ai/seed (incl. legacy junk in KV) silently defaults to "ai".
     const composer =
