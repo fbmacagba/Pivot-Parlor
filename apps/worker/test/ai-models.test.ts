@@ -275,3 +275,94 @@ describe("POST /api/ai/generate-theme effort", () => {
     expect(captured!.max_tokens).toBe(8192);
   });
 });
+
+describe("POST /api/ai/generate-theme via direct routes", () => {
+  const theme = {
+    primaryColor: "#1A1A1A",
+    accentColor: "#C9A84C",
+    fontHeading: "Playfair Display",
+    fontBody: "DM Sans",
+    tagline: "t",
+    heroHeadline: "h",
+    heroSubheadline: "s",
+    shortDescription: "d",
+    ctaText: "Book now",
+    aestheticKeywords: ["luxury"],
+    servicesIntro: "i",
+    trustStatement: "trust",
+    urgencyText: "u",
+  };
+
+  it("calls Anthropic directly for an anthropic-api id and records that id as the shop's ai_model", async () => {
+    const shopId = await seedShop("Direct Anthropic Shop");
+    let captured: { headers: Record<string, string>; body: Record<string, unknown> } | null = null;
+
+    stub = compose(listStub(), (url, init) => {
+      if (url === "https://api.anthropic.com/v1/messages") {
+        captured = {
+          headers: Object.fromEntries(new Headers(init?.headers).entries()),
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+        };
+        return Promise.resolve(
+          Response.json({ content: [{ type: "text", text: JSON.stringify(theme) }], usage: { input_tokens: 1, output_tokens: 2 } }),
+        );
+      }
+      return null;
+    });
+
+    const res = await dispatch("POST", "/api/ai/generate-theme", {
+      headers: authHeaders(await devToken()),
+      body: { shop_id: shopId, model_id: "anthropic-api/claude-sonnet-5", effort: "high", regenerate: true },
+    });
+    expect(res.status).toBe(200);
+    expect(captured).not.toBeNull();
+    expect(captured!.headers["x-api-key"]).toBe("test-anthropic-key");
+    expect(captured!.headers["anthropic-version"]).toBe("2023-06-01");
+    expect(captured!.body.model).toBe("claude-sonnet-5");
+    expect(captured!.body.output_config).toEqual({ effort: "high" });
+    expect(captured!.body.max_tokens).toBe(8192);
+
+    const row = await env.DB.prepare("SELECT ai_model FROM shops WHERE id = ?").bind(shopId).first<{ ai_model: string }>();
+    expect(row?.ai_model).toBe("anthropic-api/claude-sonnet-5");
+  });
+
+  it("calls OpenAI directly for an openai-api id with reasoning_effort and max_completion_tokens", async () => {
+    const shopId = await seedShop("Direct OpenAI Shop");
+    let captured: Record<string, unknown> | null = null;
+
+    stub = compose(listStub(), (url, init) => {
+      if (url === "https://api.openai.com/v1/chat/completions") {
+        captured = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return Promise.resolve(Response.json({ choices: [{ message: { content: JSON.stringify(theme) } }] }));
+      }
+      return null;
+    });
+
+    const res = await dispatch("POST", "/api/ai/generate-theme", {
+      headers: authHeaders(await devToken()),
+      body: { shop_id: shopId, model_id: "openai-api/gpt-6-astra", effort: "low", regenerate: true, preview: true },
+    });
+    expect(res.status).toBe(200);
+    expect(captured!.model).toBe("gpt-6-astra");
+    expect(captured!.reasoning_effort).toBe("low");
+    expect(captured!.max_completion_tokens).toBe(2048);
+    expect(captured!.response_format).toEqual({ type: "json_object" });
+  });
+
+  it("falls back to the default theme (HTTP 200) when the direct vendor errors", async () => {
+    const shopId = await seedShop("Direct Failure Shop");
+    stub = compose(listStub(), (url) => {
+      if (url === "https://api.openai.com/v1/chat/completions") {
+        return Promise.resolve(new Response("nope", { status: 401 }));
+      }
+      return null;
+    });
+    const res = await dispatch("POST", "/api/ai/generate-theme", {
+      headers: authHeaders(await devToken()),
+      body: { shop_id: shopId, model_id: "openai-api/gpt-5.6-luna", regenerate: true, preview: true },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { heroHeadline: string } };
+    expect(body.data.heroHeadline).toBe("Welcome to Direct Failure Shop");
+  });
+});
