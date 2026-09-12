@@ -110,9 +110,12 @@ ai.post("/generate-theme", async (c) => {
     return c.json({ success: false, error: "effort must be low, medium or high" }, 400);
   }
   const effort = parseTextEffort(body.effort);
-  const modelId = body.model_id ?? DEFAULT_THEME_MODEL;
-  if (body.model_id && !(await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text"))) {
-    return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
+  // A blank or whitespace model_id means "not chosen": fall back to the default
+  // instead of letting an empty id slip past validation into the generator.
+  const requestedModel = typeof body.model_id === "string" ? body.model_id.trim() : "";
+  const modelId = requestedModel || DEFAULT_THEME_MODEL;
+  if (requestedModel && !(await getModel(c.env.KV, providerKeysFromEnv(c.env), requestedModel, "text"))) {
+    return c.json({ success: false, error: `Unknown text model: ${requestedModel}` }, 400);
   }
 
   const shop = await c.env.DB.prepare(

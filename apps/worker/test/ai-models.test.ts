@@ -301,6 +301,46 @@ describe("POST /api/ai/generate-theme effort", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("Unknown text model: nobody/nothing");
   });
+
+  it("treats a blank model_id as not chosen and uses the default model", async () => {
+    const theme = {
+      primaryColor: "#1A1A1A",
+      accentColor: "#C9A84C",
+      fontHeading: "Playfair Display",
+      fontBody: "DM Sans",
+      tagline: "t",
+      heroHeadline: "h",
+      heroSubheadline: "s",
+      shortDescription: "d",
+      ctaText: "Book now",
+      aestheticKeywords: ["luxury"],
+      servicesIntro: "i",
+      trustStatement: "trust",
+      urgencyText: "u",
+    };
+
+    for (const blank of ["", "   "]) {
+      const shopId = await seedShop(`Blank Model Shop ${blank.length}`);
+      let captured: Record<string, unknown> | null = null;
+      stub = compose(listStub(), (url, init) => {
+        if (url.startsWith("https://openrouter.ai/api/v1/chat/completions")) {
+          captured = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+          return Promise.resolve(Response.json({ choices: [{ message: { content: JSON.stringify(theme) } }] }));
+        }
+        return null;
+      });
+
+      const res = await dispatch("POST", "/api/ai/generate-theme", {
+        headers: authHeaders(await devToken()),
+        body: { shop_id: shopId, model_id: blank, regenerate: true },
+      });
+
+      expect(res.status).toBe(200);
+      expect(captured).not.toBeNull();
+      // An empty id must never reach the generator; the default model is used.
+      expect(captured!.model).toBe("anthropic/claude-sonnet-5");
+    }
+  });
 });
 
 describe("POST /api/ai/generate-theme via direct routes", () => {
