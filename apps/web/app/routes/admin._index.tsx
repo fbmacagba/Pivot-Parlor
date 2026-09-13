@@ -229,7 +229,7 @@ export default function AdminOverview() {
                   return (
                     <div
                       key={b.id}
-                      className="flex items-center gap-4 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 transition-colors hover:border-white/15"
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 transition-colors hover:border-white/15"
                     >
                       {/* Time */}
                       <div className="w-16 shrink-0 text-center">
@@ -243,7 +243,7 @@ export default function AdminOverview() {
                       {/* Divider */}
                       <div className="h-10 w-px bg-white/10 shrink-0" />
                       {/* Info */}
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-[9rem] flex-1">
                         <p className="text-sm font-medium text-white truncate">
                           {b.customer_name}
                         </p>
@@ -251,16 +251,17 @@ export default function AdminOverview() {
                           {b.service_name}
                         </p>
                       </div>
-                      {/* Amount */}
-                      <p className="shrink-0 text-sm font-semibold text-gold">
-                        {formatPence(b.amount_pence)}
-                      </p>
-                      {/* Status badge */}
-                      <div
-                        className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${s.bg} ${s.text}`}
-                      >
-                        <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-                        {b.status.replace("_", " ")}
+                      {/* Amount + status: right-aligned, on their own line when a phone needs the room */}
+                      <div className="ml-auto flex shrink-0 items-center gap-4">
+                        <p className="text-sm font-semibold text-gold">
+                          {formatPence(b.amount_pence)}
+                        </p>
+                        <div
+                          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${s.bg} ${s.text}`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+                          {b.status.replace("_", " ")}
+                        </div>
                       </div>
                     </div>
                   );
@@ -280,7 +281,7 @@ export default function AdminOverview() {
                   {completed.map((b) => (
                     <div
                       key={b.id}
-                      className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-60"
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-60"
                     >
                       <div className="w-16 shrink-0 text-center">
                         <p className="text-sm font-semibold text-white/70">
@@ -288,7 +289,7 @@ export default function AdminOverview() {
                         </p>
                       </div>
                       <div className="h-10 w-px bg-white/5 shrink-0" />
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-[9rem] flex-1">
                         <p className="text-sm font-medium text-white/70 truncate">
                           {b.customer_name}
                         </p>
@@ -296,11 +297,13 @@ export default function AdminOverview() {
                           {b.service_name}
                         </p>
                       </div>
-                      <p className="shrink-0 text-sm text-white/50">
-                        {formatPence(b.amount_pence)}
-                      </p>
-                      <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                        <CheckCircle className="h-3 w-3" /> done
+                      <div className="ml-auto flex shrink-0 items-center gap-4">
+                        <p className="text-sm text-white/50">
+                          {formatPence(b.amount_pence)}
+                        </p>
+                        <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
+                          <CheckCircle className="h-3 w-3" /> done
+                        </div>
                       </div>
                     </div>
                   ))}

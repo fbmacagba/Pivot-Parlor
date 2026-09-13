@@ -110,7 +110,7 @@ export default function StaffBookingsAvailability() {
   return (
     <div className="space-y-6">
       {toast && (
-        <div className={`fixed bottom-6 right-6 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg ${
+        <div className={`fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg md:bottom-6 md:right-6 ${
           toast.type === "success" ? "border-emerald-500/40 bg-emerald-950/90 text-emerald-100" : "border-red-500/40 bg-red-950/90 text-red-100"
         }`} role="status">{toast.text}</div>
       )}
@@ -154,17 +154,17 @@ export default function StaffBookingsAvailability() {
             <div className="space-y-2">
               {bookings.map(b => (
                 <div key={b.id}
-                  className="flex items-center gap-4 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 hover:border-white/15 transition-colors">
+                  className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 hover:border-white/15 transition-colors">
                   <div className="w-16 shrink-0 text-center">
                     <p className="text-sm font-semibold text-white">{formatTime(b.start_time)}</p>
                     <p className="text-xs text-white/50">{formatDate(b.booking_date)}</p>
                   </div>
                   <div className="h-8 w-px bg-white/10 shrink-0" />
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-[9rem] flex-1">
                     <p className="text-sm font-medium text-white truncate">{b.customer_name}</p>
                     <p className="text-xs text-white/50 truncate">{b.service_name} · {b.duration_min}m</p>
                   </div>
-                  <Badge variant={STATUS_BADGE[b.status] ?? "default"}>{b.status.replace("_"," ")}</Badge>
+                  <Badge className="ml-auto shrink-0" variant={STATUS_BADGE[b.status] ?? "default"}>{b.status.replace("_"," ")}</Badge>
                 </div>
               ))}
             </div>

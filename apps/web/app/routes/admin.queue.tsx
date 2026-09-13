@@ -170,16 +170,16 @@ export default function AdminQueue() {
           <h2 className="text-xs font-semibold text-gold/70 uppercase tracking-wider mb-3">Now serving</h2>
           <div className="space-y-2">
             {serving.map(entry => (
-              <div key={entry.id} className="flex items-center gap-4 rounded-xl border border-gold/25 bg-gold/5 px-5 py-4">
+              <div key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gold/25 bg-gold/5 px-5 py-4">
                 <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center font-bold text-gold text-sm shrink-0">
                   {entry.name.charAt(0).toUpperCase()}
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="min-w-[9rem] flex-1">
                   <p className="font-semibold text-white">{entry.name}</p>
                   {entry.service && <p className="text-xs text-white/50">{entry.service}</p>}
                 </div>
                 <button onClick={() => updateStatus(entry.id, "served")}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition-colors">
+                  className="tap-target ml-auto px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition-colors">
                   Mark served ✓
                 </button>
               </div>
@@ -200,7 +200,7 @@ export default function AdminQueue() {
         ) : (
           <div className="rounded-xl border border-white/10 bg-dark-100 divide-y divide-white/5 overflow-hidden">
             {waiting.map((entry, i) => (
-              <div key={entry.id} className="flex items-center gap-4 px-5 py-4 hover:bg-white/[0.02] transition-colors">
+              <div key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-white/[0.02] transition-colors">
                 {/* Position */}
                 <div className="w-8 shrink-0 text-center">
                   <span className="text-lg font-bold text-white/50">{entry.position}</span>
@@ -210,7 +210,7 @@ export default function AdminQueue() {
                   {entry.name.charAt(0).toUpperCase()}
                 </div>
                 {/* Info */}
-                <div className="flex-1 min-w-0">
+                <div className="min-w-[9rem] flex-1">
                   <p className="font-medium text-white">{entry.name}</p>
                   <p className="text-xs text-white/60">
                     {entry.service ? `${entry.service} · ` : ""}{timeAgo(entry.created_at)}
@@ -218,19 +218,19 @@ export default function AdminQueue() {
                   </p>
                 </div>
                 {/* Actions */}
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="ml-auto flex shrink-0 items-center gap-2">
                   {i === 0 && (
                     <button onClick={() => updateStatus(entry.id, "serving")}
-                      className="px-3 py-1.5 rounded-lg bg-gold/20 text-gold text-xs font-semibold hover:bg-gold/30 transition-colors">
+                      className="tap-target px-3 py-1.5 rounded-lg bg-gold/20 text-gold text-xs font-semibold hover:bg-gold/30 transition-colors">
                       Call next
                     </button>
                   )}
                   <button onClick={() => updateStatus(entry.id, "skipped")}
-                    className="px-2 py-1.5 rounded-lg text-white/50 hover:text-white/60 hover:bg-white/5 text-xs transition-colors">
+                    className="tap-target px-2 py-1.5 rounded-lg text-white/50 hover:text-white/60 hover:bg-white/5 text-xs transition-colors">
                     Skip
                   </button>
                   <button onClick={() => updateStatus(entry.id, "removed")}
-                    className="px-2 py-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-red-500/10 text-xs transition-colors">
+                    className="tap-target px-2 py-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-red-500/10 text-xs transition-colors">
                     Remove
                   </button>
                 </div>
