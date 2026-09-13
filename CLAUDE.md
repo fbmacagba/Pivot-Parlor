@@ -187,6 +187,7 @@ The Worker dev server runs on port `8787` (configured in `wrangler.toml`). The R
 
 - **Pages secrets**: `npx wrangler pages secret put SECRET_NAME --project-name pivot-parlor-web`
 - **Worker secrets**: `cd apps/worker && npx wrangler secret put SECRET_NAME`
+- **LLM vendor keys**: `OPENROUTER_API_KEY` (required), `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` (optional, direct routes) on the API worker (production and staging) and on the research, text and chatbot workers. Rollout steps: `docs/runbooks/multi-provider-llm-rollout.md`.
 - Do NOT use `wrangler secret put` (without `pages`) for the web project — it only works for Workers.
 
 ### Component & Design Conventions
@@ -223,3 +224,27 @@ The `apps/workers/` directory contains standalone Cloudflare Workers for:
 - `booking` — Booking-related background work
 
 These are deployed independently and communicate via queues.
+
+`research`, `text`, `chatbot` and `booking` are npm workspaces (root `workspaces`). Text-model calls in the API worker's `/api/ai` routes and in the `research`, `text` and `chatbot` workers go through `@repo/llm` (`packages/llm`, `chatComplete`) with route-qualified model ids: `openai-api/<model>` and `anthropic-api/<model>` call the vendors directly, anything else is an OpenRouter slug. Two callers stay on OpenRouter directly and outside `@repo/llm`: the marketing chat widget (`apps/web/app/routes/api.chat.tsx`) and image generation (`apps/workers/images`, plus the API worker's image route), per the spec's non-goals. `/api/ai/models` is ranked live by `apps/worker/src/services/model-registry.ts` and cached in KV (`ai:models:v3`); `packages/utils/src/modelCatalog.ts` is the snapshot fallback and fallback price table (refresh it together with `apps/worker/test/fixtures/model-feeds.ts`). The chatbot's model is platform-wide (`platform:chatbot:model`, set on AI Deploy).
+
+<!-- graphite:managed version=14 -->
+## Shared Graphite Instructions
+
+Graphite-first is required in this repo. Follow `GRAPHITE.md` before making non-trivial code changes: for cross-file questions (who-calls, where-defined, impact, data flow, structure) run the Graphite commands first; grep/glob are for literal text and filename lookups only. Fall back to manual search only after a Graphite answer proved insufficient, and say so. Use the existing `graph-out/graph.json` as the shared project graph, and do not edit `graph-out/` manually.
+
+**Stay inside this repository.** Do not read, write, or run commands in any other repo, including its graph. Findings about another repo go to its agent as a recommendation through the shared `.agent-channel/` (see its `PROTOCOL.md`); that agent decides and acts. A tool doing its designed job is a separate question from an agent's boundary. See `GRAPHITE.md` section "Repository Isolation".
+<!-- graphite:managed-end -->
+
+<!-- aramid:begin -- managed by `aramid init`; hand-edits inside the fence are overwritten -->
+## Aramid (security & quality gate)
+
+This repo is gated by aramid. Read `ARAMID.md` before your first commit.
+
+- Before committing: run `aramid check --staged`. Read findings with
+  `aramid ledger filter --status open`.
+- NEVER pass `--no-verify` (or `-n`) to `git commit`, or `--no-verify` to
+  `git push` -- it disables secret scanning along with everything else.
+  Armed repos reject the call outright.
+- To suppress a WARN finding, use `aramid override <id> --reason "..."`
+  (ledger-logged); never edit findings away by hand.
+<!-- aramid:end -->

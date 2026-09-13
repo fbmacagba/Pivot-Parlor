@@ -6,28 +6,38 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   type ModelKind,
 } from "@repo/utils";
+import type { AIModel } from "@repo/types";
 import type { Shop } from "./types";
 import type { PickerModel } from "./modelPicker.helpers";
 
 export const DEFAULT_TEXT_MODEL = DEFAULT_TEXT_MODEL_ID;
 export const DEFAULT_IMAGE_MODEL = DEFAULT_IMAGE_MODEL_ID;
 
-/** Catalog entries with snapshot pricing, for pickers without a live-priced loader. */
+/** Snapshot entries with fallback pricing, for pickers without a live-priced loader. */
 export function staticPickerModels(kind: ModelKind): PickerModel[] {
   return catalogModels(kind).map((m) => ({
     id: m.id,
     name: m.name,
     provider: m.provider,
     providerLabel: m.providerLabel,
+    vendor: m.vendor,
+    vendorLabel: m.vendorLabel,
     costPer1MInput: m.fallbackInput,
     costPer1MOutput: m.fallbackOutput,
     supportsEffort: m.supportsEffort,
+    effortLevels: m.supportsEffort ? ["low", "medium", "high"] : [],
     recommended: m.recommended,
     livePricing: false,
   }));
 }
 
-/** Reasoning-effort choices for models that support the OpenRouter reasoning param. */
+/** Live registry entries of one kind, else the snapshot (API unreachable or empty). */
+export function pickerModelsFrom(live: AIModel[] | null | undefined, kind: ModelKind): PickerModel[] {
+  const fromLive = (live ?? []).filter((m) => m.kind === kind);
+  return fromLive.length > 0 ? fromLive : staticPickerModels(kind);
+}
+
+/** Reasoning-effort choices; the picker filters them to the levels a model reports. */
 export const EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Default (model decides)" },
   { value: "low", label: "Low - fastest, cheapest" },

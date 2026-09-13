@@ -63,3 +63,9 @@ backups/
 graph-out/
 **/.cache/graphite/
 .graphite-daemon/
+
+**/.graphite/
+.githooks/
+.aramid/
+.graphite*
+.cache/

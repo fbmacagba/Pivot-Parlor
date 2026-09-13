@@ -68,6 +68,8 @@ local_protocol = "http"
 # Secrets (set via `wrangler secret put`):
 #   JWT_SECRET
 #   OPENROUTER_API_KEY
+#   OPENAI_API_KEY        (direct OpenAI route; optional, hides the group when unset)
+#   ANTHROPIC_API_KEY     (direct Anthropic route; optional, hides the group when unset)
 #   GOOGLE_AI_API_KEY
 #   STRIPE_SECRET_KEY
 #   STRIPE_WEBHOOK_SECRET

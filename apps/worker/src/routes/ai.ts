@@ -13,7 +13,9 @@ import {
 import {
   DEFAULT_THEME_MODEL,
   getLiveModels,
+  getModel,
   parseTextEffort,
+  providerKeysFromEnv,
 } from "../services/model-registry.js";
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
@@ -36,6 +38,42 @@ const ai = new Hono<{ Bindings: Bindings }>();
 // All AI routes require developer role
 ai.use("*", authMiddleware, requireRole("developer"));
 
+// ─── Read and settings routes: registered BEFORE the generation rate limiter ───
+// Hono runs handlers in registration order and stops at the first response,
+// so these cheap KV reads/writes never consume the 10/hour generation budget.
+
+// GET /api/ai/models — three provider groups with live pricing (KV-cached 1 h)
+ai.get("/models", async (c) => {
+  return c.json({ success: true, data: await getLiveModels(c.env.KV, providerKeysFromEnv(c.env)) });
+});
+
+/** Platform-wide chatbot model choice: `{ model_id, updated_at }`, no expiry. */
+export const CHATBOT_MODEL_KV_KEY = "platform:chatbot:model";
+
+// GET /api/ai/chatbot-model — current platform-wide chatbot model (nulls when unset)
+ai.get("/chatbot-model", async (c) => {
+  const stored = safeJsonParse<{ model_id?: unknown; updated_at?: unknown }>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+  return c.json({
+    success: true,
+    data: {
+      model_id: typeof stored?.model_id === "string" ? stored.model_id : null,
+      updated_at: typeof stored?.updated_at === "string" ? stored.updated_at : null,
+    },
+  });
+});
+
+// POST /api/ai/chatbot-model — body { model_id }; must be a listed text model
+ai.post("/chatbot-model", async (c) => {
+  const body = await c.req.json<{ model_id?: unknown }>().catch(() => ({}) as { model_id?: unknown });
+  const modelId = typeof body.model_id === "string" ? body.model_id.trim() : "";
+  if (!modelId) return c.json({ success: false, error: "model_id is required" }, 400);
+  const model = await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text");
+  if (!model) return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
+  const record = { model_id: modelId, updated_at: new Date().toISOString() };
+  await c.env.KV.put(CHATBOT_MODEL_KV_KEY, JSON.stringify(record));
+  return c.json({ success: true, data: record });
+});
+
 // AI generation is expensive — cap per user (cost abuse brake, NFR-S4)
 ai.use(
   "*",
@@ -46,12 +84,6 @@ ai.use(
     key: (c) => getUser(c)?.sub ?? clientIp(c),
   })
 );
-
-// ─── GET /api/ai/models — curated top-10 catalogue with live OpenRouter pricing ───
-
-ai.get("/models", async (c) => {
-  return c.json({ success: true, data: await getLiveModels(c.env.KV) });
-});
 
 // ─── POST /api/ai/generate-theme — generate brand theme for a shop ────────────
 // Body: { shop_id, model_id, style_keywords?, effort?, regenerate?,
@@ -78,7 +110,13 @@ ai.post("/generate-theme", async (c) => {
     return c.json({ success: false, error: "effort must be low, medium or high" }, 400);
   }
   const effort = parseTextEffort(body.effort);
-  const modelId = body.model_id ?? DEFAULT_THEME_MODEL;
+  // A blank or whitespace model_id means "not chosen": fall back to the default
+  // instead of letting an empty id slip past validation into the generator.
+  const requestedModel = typeof body.model_id === "string" ? body.model_id.trim() : "";
+  const modelId = requestedModel || DEFAULT_THEME_MODEL;
+  if (requestedModel && !(await getModel(c.env.KV, providerKeysFromEnv(c.env), requestedModel, "text"))) {
+    return c.json({ success: false, error: `Unknown text model: ${requestedModel}` }, 400);
+  }
 
   const shop = await c.env.DB.prepare(
     "SELECT id, name, type, ai_theme FROM shops WHERE id = ?"
@@ -110,7 +148,7 @@ ai.post("/generate-theme", async (c) => {
     effort,
     c.env.DB,
     c.env.KV,
-    c.env.OPENROUTER_API_KEY,
+    providerKeysFromEnv(c.env),
     { palette: parsePalette(body), persist: body.preview !== true }
   );
 
@@ -186,7 +224,7 @@ ai.post("/compare", async (c) => {
       effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY,
+      providerKeysFromEnv(c.env),
       options
     ),
     generateShopTheme(
@@ -198,7 +236,7 @@ ai.post("/compare", async (c) => {
       effort,
       c.env.DB,
       c.env.KV,
-      c.env.OPENROUTER_API_KEY,
+      providerKeysFromEnv(c.env),
       options
     ),
   ]);

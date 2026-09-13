@@ -55,12 +55,12 @@ describe("generate-site model + effort forwarding", () => {
 
     const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
       headers: authHeaders(token),
-      body: { skip_images: true, text_model: "x-ai/grok-4.3", text_effort: "turbo" },
+      body: { skip_images: true, text_model: "x-ai/grok-4.6", text_effort: "turbo" },
     });
 
     expect(res.status).toBe(202);
     expect(captured).not.toBeNull();
-    expect(captured!.text_model).toBe("x-ai/grok-4.3");
+    expect(captured!.text_model).toBe("x-ai/grok-4.6");
     expect(captured!.text_effort).toBeUndefined();
   });
 

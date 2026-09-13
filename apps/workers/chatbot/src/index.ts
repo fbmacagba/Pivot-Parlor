@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { ChatMessage } from "./types.js";
 import type { Env } from "./types.js";
-import { OPENROUTER_MODEL } from "./types.js";
 import { assertChatbotSchema } from "./ensure-schema.js";
-import { callOpenRouter } from "./openrouter.js";
+import { generateReply } from "./llm.js";
+import { CHATBOT_MODEL_KV_KEY, resolveChatbotModel } from "./model.js";
 import { buildSystemPrompt, loadShopContext } from "./prompt.js";
 
 
@@ -200,38 +200,46 @@ chat.post("/", async (c) => {
     }
 
     let reply: string;
-    let usedOpenRouter = false;
-    let usageForLog: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null = null;
+    let answeredBy: { model: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } } | null = null;
 
     if (isPlatformQuestion(visitorMessage)) {
       reply = platformReferralReply(shopSlug);
     } else {
-      usedOpenRouter = true;
       const ctx = await loadShopContext(c.env.DB, shop.id, shopSlug, shop.name, shop.type);
       let systemPrompt = appendPromoAwareness(buildSystemPrompt(ctx, platformUrl), ctx.promoActive);
       if (ctx.promoActive && /\b(discount|offer|promo|deal|code)\b/i.test(visitorMessage)) {
         systemPrompt = `${systemPrompt}\nThe visitor is asking about offers — reference the active promo if applicable.`;
       }
 
-      const or = await callOpenRouter({
-        apiKey: c.env.OPENROUTER_API_KEY,
+      // Platform-wide model choice (set on the developer dashboard); the code
+      // default when unset or unreadable, logged once per request.
+      const choice = resolveChatbotModel(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+      if (choice.source === "default" && choice.reason !== "unset") {
+        console.warn(`[chatbot] platform model choice ignored (${choice.reason}); using ${choice.modelId}`);
+      }
+
+      const result = await generateReply({
+        keys: {
+          openrouter: c.env.OPENROUTER_API_KEY,
+          openai: c.env.OPENAI_API_KEY || undefined,
+          anthropic: c.env.ANTHROPIC_API_KEY || undefined,
+        },
+        modelId: choice.modelId,
         systemPrompt,
         history: priorMessages,
         userMessage: visitorMessage,
-        referer: "https://pivotparlor.com",
-        title: "Pivot Parlor Chatbot",
       });
 
-      if (or.ok) {
-        reply = or.content;
-        usageForLog = or.usage;
+      if (result.ok) {
+        reply = result.content;
+        answeredBy = { model: result.model, usage: result.usage };
       } else {
         reply = FALLBACK_REPLY;
       }
     }
 
-    if (usedOpenRouter && usageForLog) {
-      const total = usageForLog.total_tokens;
+    if (answeredBy) {
+      const total = answeredBy.usage.total_tokens;
       const cost = total * 0.000000075;
       const logId = crypto.randomUUID();
       const jobRef = `public-chat:${logId}`;
@@ -242,9 +250,9 @@ chat.post("/", async (c) => {
         .bind(
           logId,
           shop.id,
-          OPENROUTER_MODEL,
-          usageForLog.prompt_tokens,
-          usageForLog.completion_tokens,
+          answeredBy.model,
+          answeredBy.usage.prompt_tokens,
+          answeredBy.usage.completion_tokens,
           total,
           cost,
           jobRef

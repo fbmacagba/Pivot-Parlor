@@ -29,3 +29,5 @@ ENVIRONMENT = "production"
 
 # Secrets:
 #   OPENROUTER_API_KEY
+#   OPENAI_API_KEY      (optional: direct OpenAI route for openai-api/* text models)
+#   ANTHROPIC_API_KEY   (optional: direct Anthropic route for anthropic-api/* text models)

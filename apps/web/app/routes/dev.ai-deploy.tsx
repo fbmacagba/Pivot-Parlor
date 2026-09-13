@@ -1,4 +1,4 @@
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useRevalidator, useSearchParams } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { useState } from "react";
@@ -10,6 +10,9 @@ import { Input } from "~/components/ui/Input";
 import { Badge } from "~/components/ui/Badge";
 import { COLOR_PALETTES } from "~/lib/color-palettes";
 import { ModelPicker } from "~/components/dev-shops/ModelPicker";
+import { ChatbotModelCard } from "~/components/dev-shops/ChatbotModelCard";
+import { pickerModelsFrom } from "~/components/dev-shops/constants";
+import { DEFAULT_TEXT_MODEL_ID } from "@repo/utils";
 import type { AIModel, BrandConfig } from "@repo/types";
 
 interface Shop {
@@ -17,6 +20,8 @@ interface Shop {
   name: string;
   type: string;
 }
+
+type ChatbotModelRecord = { model_id: string | null; updated_at: string | null };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -33,16 +38,24 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   } catch {
     // silent
   }
-  return json({ shops, models, apiUrl: env.API_URL });
+  // Separate try: a failure here must not blank the model list.
+  let chatbotModel: ChatbotModelRecord = { model_id: null, updated_at: null };
+  try {
+    chatbotModel = await api.get<ChatbotModelRecord>("/api/ai/chatbot-model");
+  } catch {
+    // card shows the code default
+  }
+  return json({ shops, models, chatbotModel, apiUrl: env.API_URL });
 }
 
 type ThemeResult = { theme: BrandConfig; model: string; modelId: string } | null;
 
 export default function DevAIDeploy() {
-  const { shops, models, apiUrl } = useLoaderData<typeof loader>();
+  const { shops, models, chatbotModel, apiUrl } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
+  const revalidator = useRevalidator();
 
-  const textModels = models.filter((m) => m.kind === "text");
+  const textModels = pickerModelsFrom(models, "text");
   const recommendedId = textModels.find((m) => m.recommended)?.id ?? textModels[0]?.id ?? "";
 
   const [shopId, setShopId] = useState(params.get("shopId") ?? "");
@@ -62,7 +75,7 @@ export default function DevAIDeploy() {
   const selectedPalette = paletteId ? COLOR_PALETTES.find((p) => p.id === paletteId) ?? null : null;
 
   const modelId = modelChoice || recommendedId;
-  const selectedModel = models.find((m) => m.id === modelId);
+  const selectedModel = textModels.find((m) => m.id === modelId);
   const effortAvailable = selectedModel?.supportsEffort ?? false;
 
   /**
@@ -155,7 +168,7 @@ export default function DevAIDeploy() {
       setResult({ theme: model_a.theme, model: selectedModel?.name ?? modelId, modelId });
       setResultB({
         theme: model_b.theme,
-        model: models.find((m) => m.id === modelBId)?.name ?? modelBId,
+        model: textModels.find((m) => m.id === modelBId)?.name ?? modelBId,
         modelId: modelBId,
       });
     } catch (e: unknown) {
@@ -219,9 +232,9 @@ export default function DevAIDeploy() {
               onEffortChange={setEffort}
             />
             <p className="mt-1 text-xs text-white/50">
-              {models.some((m) => m.livePricing)
-                ? "Live pricing from the OpenRouter catalogue (refreshed hourly)."
-                : "OpenRouter catalogue unreachable — showing last-known pricing."}
+              {textModels.some((m) => m.livePricing)
+                ? "Live pricing, refreshed hourly."
+                : "Price feed unreachable, showing last-known pricing."}
             </p>
           </div>
 
@@ -310,6 +323,17 @@ export default function DevAIDeploy() {
               </Button>
             </div>
           )}
+
+          <ChatbotModelCard
+            models={textModels}
+            savedModelId={chatbotModel.model_id}
+            savedAt={chatbotModel.updated_at}
+            defaultModelId={DEFAULT_TEXT_MODEL_ID}
+            onSave={async (id) => {
+              await postJson("/api/ai/chatbot-model", { model_id: id });
+              revalidator.revalidate();
+            }}
+          />
 
           {error && (
             <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm text-red-400">

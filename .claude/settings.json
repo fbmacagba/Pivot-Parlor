@@ -1,0 +1,56 @@
+{
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "andrej-karpathy-skills@karpathy-skills": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -P -m aramid agent-hook pre-tool-use"
+          }
+        ]
+      },
+      {
+        "matcher": "Grep|Glob|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -P -m graphite agent-hook pre-tool-use --mode remind"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -P -m aramid agent-hook session-start"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -P -m graphite agent-hook session-start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -P -m graphite agent-hook stop"
+          }
+        ]
+      }
+    ]
+  }
+}

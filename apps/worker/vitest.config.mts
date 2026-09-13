@@ -14,6 +14,8 @@ export default defineConfig({
           JWT_SECRET: "test-secret",
           OPENROUTER_API_KEY: "test-openrouter-key",
           GOOGLE_AI_API_KEY: "test-google-key",
+          OPENAI_API_KEY: "test-openai-key",
+          ANTHROPIC_API_KEY: "test-anthropic-key",
           // Webhook signature tests sign payloads with this and dispatch
           // through the real route (the sync-crypto regression hid behind
           // handler-only tests).
@@ -47,6 +49,6 @@ export default defineConfig({
   ],
   test: {
     include: ["test/**/*.test.ts"],
-    setupFiles: ["./test/apply-schema.ts"],
+    setupFiles: ["./test/apply-schema.ts", "./test/setup-model-registry.ts"],
   },
 });

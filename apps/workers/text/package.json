@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "check-types": "tsc --noEmit",
     "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@repo/llm": "*"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",

@@ -22,4 +22,6 @@ PLATFORM_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 
 # Secrets:
 #   OPENROUTER_API_KEY
+#   OPENAI_API_KEY      (optional: direct OpenAI route when the platform chatbot model is openai-api/*)
+#   ANTHROPIC_API_KEY   (optional: direct Anthropic route when the platform chatbot model is anthropic-api/*)
 #   TURNSTILE_SECRET_KEY

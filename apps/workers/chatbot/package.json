@@ -5,14 +5,18 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@repo/llm": "*",
     "hono": "^4.6.12"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
     "typescript": "^5.9.2",
+    "vitest": "^4.1.8",
     "wrangler": "^4.76.0"
   }
 }

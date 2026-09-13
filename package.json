@@ -29,6 +29,9 @@
   "workspaces": [
     "apps/*",
     "apps/workers/booking",
+    "apps/workers/chatbot",
+    "apps/workers/research",
+    "apps/workers/text",
     "packages/*"
   ]
 }

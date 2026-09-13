@@ -16,11 +16,12 @@ import {
   DEFAULT_IMAGE_MODEL,
   DEFAULT_TEXT_MODEL,
   REGEN_STEP_LABELS,
-  staticPickerModels,
+  pickerModelsFrom,
 } from "~/components/dev-shops/constants";
 import { buildRegeneratePayload, decidePollAction, regenJobStepStates } from "~/components/dev-shops/helpers";
 import { VisualManager, type VisualsData } from "~/components/VisualManager";
 import type { Shop } from "~/components/dev-shops/types";
+import type { AIModel } from "@repo/types";
 import type { DevGenerationPrefs, DevShopOwnerDetails } from "./dev.shops.$shopId";
 
 type OutletCtx = {
@@ -29,10 +30,13 @@ type OutletCtx = {
   generationPrefs: DevGenerationPrefs;
   ownerDetails: DevShopOwnerDetails | null;
   visuals: VisualsData | null;
+  models: AIModel[] | null;
 };
 
 export default function DevShopDetailIndex() {
-  const { shop, apiUrl, generationPrefs, ownerDetails, visuals } = useOutletContext<OutletCtx>();
+  const { shop, apiUrl, generationPrefs, ownerDetails, visuals, models } = useOutletContext<OutletCtx>();
+  const textPickerModels = pickerModelsFrom(models, "text");
+  const imagePickerModels = pickerModelsFrom(models, "image");
   const revalidator = useRevalidator();
   const navigate = useNavigate();
 
@@ -288,16 +292,21 @@ export default function DevShopDetailIndex() {
 
           <ModelPicker
             label="Text & research"
-            models={staticPickerModels("text")}
+            models={textPickerModels}
             value={textModel}
             onChange={setTextModel}
             effort={textEffort}
             onEffortChange={setTextEffort}
             disabled={running}
           />
+          <p className="-mt-1 text-xs text-white/50">
+            {textPickerModels.some((m) => m.livePricing)
+              ? "Live pricing, refreshed hourly."
+              : "Price feed unreachable, showing last-known pricing."}
+          </p>
           <ModelPicker
             label="Image"
-            models={staticPickerModels("image")}
+            models={imagePickerModels}
             value={imageModel}
             onChange={setImageModel}
             disabled={running}

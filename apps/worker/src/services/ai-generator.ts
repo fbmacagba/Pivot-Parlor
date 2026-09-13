@@ -1,5 +1,6 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { getModel, type TextEffort } from "./model-registry.js";
+import { chatComplete, type ProviderKeys } from "@repo/llm";
 
 // ─── Brand config (full schema, with conversion-optimised copy fields) ────────
 
@@ -94,7 +95,7 @@ function defaultTheme(shopName: string, shopType: string): BrandConfig {
   };
 }
 
-// ─── OpenRouter API caller (all providers via the OpenAI-compatible API) ──────
+// ─── Model caller (OpenRouter, OpenAI API or Anthropic API by id prefix) ─────
 
 /** Reasoning tokens count against the completion budget on most providers, so
  *  give thinking models room to reason AND still emit the full JSON. */
@@ -105,46 +106,33 @@ function maxTokensForEffort(effort: TextEffort | undefined): number {
   return 1024;
 }
 
-async function callOpenRouter(
+const THEME_SYSTEM_PROMPT =
+  "You are a brand designer and direct response copywriter. Return ONLY valid JSON, no markdown, no explanation, no code fences.";
+
+async function callThemeModel(
   modelId: string,
   prompt: string,
-  apiKey: string,
+  keys: ProviderKeys,
   effort?: TextEffort
 ): Promise<BrandConfig> {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://pivotparlor.com",
-      "X-Title": "Pivot Parlor",
+  // A developer is waiting on this request: one retry, not three.
+  const result = await chatComplete(
+    {
+      modelId,
+      system: THEME_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: prompt }],
+      effort,
+      maxTokens: maxTokensForEffort(effort),
+      jsonOnly: true,
+      maxRetries: 1,
+      appTitle: "Pivot Parlor",
     },
-    body: JSON.stringify({
-      model: modelId,
-      max_tokens: maxTokensForEffort(effort),
-      ...(effort ? { reasoning: { effort } } : {}),
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a brand designer and direct response copywriter. Return ONLY valid JSON, no markdown, no explanation, no code fences.",
-        },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`OpenRouter API error ${response.status}: ${err}`);
-  }
-
-  const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
-  };
-  const rawText = (data.choices[0]?.message?.content ?? "{}").trim();
-  const clean = rawText.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean) as BrandConfig;
+    keys
+  );
+  console.log(
+    `[AI Generator] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
+  );
+  return JSON.parse(result.text) as BrandConfig;
 }
 
 // ─── Main generator ───────────────────────────────────────────────────────────
@@ -218,10 +206,10 @@ export async function generateShopTheme(
   effort: TextEffort | undefined,
   db: D1Database,
   kv: KVNamespace,
-  openrouterKey: string,
+  keys: ProviderKeys,
   options: ThemeGenerationOptions = {}
 ): Promise<BrandConfig> {
-  const model = getModel(modelId, "text");
+  const model = await getModel(kv, keys, modelId, "text");
   if (!model) throw new Error(`Unknown model: ${modelId}`);
 
   const prompt = buildPrompt(shopName, shopType, styleKeywords, options.palette);
@@ -232,7 +220,7 @@ export async function generateShopTheme(
     // Only forward effort to models that accept it — OpenRouter rejects the
     // reasoning parameter on some non-reasoning providers.
     const effectiveEffort = model.supportsEffort ? effort : undefined;
-    config = await callOpenRouter(modelId, prompt, openrouterKey, effectiveEffort);
+    config = await callThemeModel(modelId, prompt, keys, effectiveEffort);
   } catch (err) {
     console.error(`[AI Generator] ${model.provider} call failed, using fallback:`, err);
     config = defaultTheme(shopName, shopType);

@@ -1,40 +1,45 @@
 import { describe, it, expect } from "vitest";
 import {
-  MODEL_CATALOG,
+  MODEL_SNAPSHOT,
+  ROUTE_ORDER,
+  VENDOR_ORDER,
   catalogModels,
   findCatalogModel,
+  fallbackPriceFor,
+  vendorLabel,
   DEFAULT_TEXT_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
 } from "@repo/utils";
-import { mergeLiveModels, fallbackModels, getModel } from "../src/services/model-registry";
 
-describe("MODEL_CATALOG shape", () => {
-  it("carries exactly the top 5 providers in order", () => {
-    expect(MODEL_CATALOG.map((p) => p.id)).toEqual([
-      "google",
-      "anthropic",
-      "openai",
-      "x-ai",
-      "deepseek",
-    ]);
+describe("MODEL_SNAPSHOT shape", () => {
+  it("lists the three routes in picker order and only those", () => {
+    const seen = [...new Set(MODEL_SNAPSHOT.map((m) => m.provider))];
+    expect(seen).toEqual(ROUTE_ORDER);
   });
 
-  it("has globally unique model ids", () => {
-    const ids = catalogModels().map((m) => m.id);
+  it("has globally unique ids", () => {
+    const ids = MODEL_SNAPSHOT.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("prefixes every model id with its provider id", () => {
-    for (const m of catalogModels()) {
-      expect(m.id.startsWith(`${m.provider}/`)).toBe(true);
+  it("prefixes ids by route and vendor", () => {
+    for (const m of MODEL_SNAPSHOT) {
+      if (m.provider === "openrouter") expect(m.id.startsWith(`${m.vendor}/`)).toBe(true);
+      else {
+        expect(m.id.startsWith(`${m.provider}-api/`)).toBe(true);
+        expect(m.vendor).toBe(m.provider);
+      }
     }
   });
 
+  it("keeps OpenRouter vendors in catalogue order", () => {
+    const vendors = [...new Set(MODEL_SNAPSHOT.filter((m) => m.provider === "openrouter" && m.kind === "text").map((m) => m.vendor))];
+    expect(vendors).toEqual([...VENDOR_ORDER]);
+  });
+
   it("has exactly one default per kind, matching the exported constants", () => {
-    const textDefaults = catalogModels("text").filter((m) => m.isDefault);
-    const imageDefaults = catalogModels("image").filter((m) => m.isDefault);
-    expect(textDefaults.map((m) => m.id)).toEqual([DEFAULT_TEXT_MODEL_ID]);
-    expect(imageDefaults.map((m) => m.id)).toEqual([DEFAULT_IMAGE_MODEL_ID]);
+    expect(catalogModels("text").filter((m) => m.isDefault).map((m) => m.id)).toEqual([DEFAULT_TEXT_MODEL_ID]);
+    expect(catalogModels("image").filter((m) => m.isDefault).map((m) => m.id)).toEqual([DEFAULT_IMAGE_MODEL_ID]);
   });
 
   it("keeps the pipeline defaults unchanged", () => {
@@ -42,69 +47,50 @@ describe("MODEL_CATALOG shape", () => {
     expect(DEFAULT_IMAGE_MODEL_ID).toBe("google/gemini-3.1-flash-image");
   });
 
-  it("offers image models only from providers that have one (google, openai)", () => {
-    const providers = new Set(catalogModels("image").map((m) => m.provider));
-    expect([...providers].sort()).toEqual(["google", "openai"]);
+  it("offers the four direct tiers per vendor", () => {
+    expect(MODEL_SNAPSHOT.filter((m) => m.provider === "openai").map((m) => m.id)).toEqual([
+      "openai-api/gpt-6-astra",
+      "openai-api/gpt-5.6-sol",
+      "openai-api/gpt-5.6-terra",
+      "openai-api/gpt-5.6-luna",
+    ]);
+    expect(MODEL_SNAPSHOT.filter((m) => m.provider === "anthropic").map((m) => m.id)).toEqual([
+      "anthropic-api/claude-fable-5.1",
+      "anthropic-api/claude-opus-5",
+      "anthropic-api/claude-sonnet-5",
+      "anthropic-api/claude-haiku-4.5",
+    ]);
   });
 
-  it("gives every provider 2-3 text models", () => {
-    for (const p of MODEL_CATALOG) {
-      const texts = p.models.filter((m) => m.kind === "text");
-      expect(texts.length).toBeGreaterThanOrEqual(2);
-      expect(texts.length).toBeLessThanOrEqual(3);
-    }
-  });
-
-  it("marks image models as not supporting effort", () => {
-    for (const m of catalogModels("image")) {
+  it("keeps image models on OpenRouter only, from google and openai, without effort", () => {
+    const images = catalogModels("image");
+    expect(images).toHaveLength(5);
+    for (const m of images) {
+      expect(m.provider).toBe("openrouter");
       expect(m.supportsEffort).toBe(false);
     }
+    expect([...new Set(images.map((m) => m.vendor))].sort()).toEqual(["google", "openai"]);
   });
 
-  it("keeps Claude Sonnet 5 as the recommended text model", () => {
-    const rec = catalogModels("text").filter((m) => m.recommended);
-    expect(rec.map((m) => m.id)).toEqual(["anthropic/claude-sonnet-5"]);
+  it("keeps Claude Sonnet 5 via OpenRouter as the only recommended model", () => {
+    expect(MODEL_SNAPSHOT.filter((m) => m.recommended).map((m) => m.id)).toEqual(["anthropic/claude-sonnet-5"]);
+  });
+
+  it("labels routes and vendors", () => {
+    expect(findCatalogModel("openai-api/gpt-6-astra")?.providerLabel).toBe("OpenAI API");
+    expect(findCatalogModel("anthropic/claude-sonnet-5")?.providerLabel).toBe("OpenRouter");
+    expect(findCatalogModel("x-ai/grok-4.6")?.vendorLabel).toBe("xAI");
+    expect(vendorLabel("someone-new")).toBe("someone-new");
   });
 
   it("findCatalogModel resolves ids and enforces kind", () => {
-    expect(findCatalogModel("anthropic/claude-sonnet-5")?.providerLabel).toBe("Anthropic");
     expect(findCatalogModel("anthropic/claude-sonnet-5", "image")).toBeUndefined();
+    expect(findCatalogModel("google/gemini-3.1-flash-image", "image")?.kind).toBe("image");
     expect(findCatalogModel("black-forest-labs/flux-schnell")).toBeUndefined();
   });
-});
 
-describe("model-registry derives from the shared catalog", () => {
-  it("serves all catalog models (text + image) with kind", () => {
-    const all = fallbackModels();
-    expect(all.length).toBe(catalogModels().length);
-    expect(all.find((m) => m.id === "google/gemini-3.1-flash-image")?.kind).toBe("image");
-    expect(all.find((m) => m.id === "anthropic/claude-sonnet-5")?.kind).toBe("text");
-  });
-
-  it("drops removed legacy models", () => {
-    const ids = fallbackModels().map((m) => m.id);
-    expect(ids).not.toContain("meta-llama/llama-4-maverick");
-    expect(ids).not.toContain("black-forest-labs/flux-schnell");
-  });
-
-  it("merges live pricing by id and marks livePricing", () => {
-    const merged = mergeLiveModels([
-      {
-        id: "anthropic/claude-sonnet-5",
-        pricing: { prompt: "0.000002", completion: "0.00001" },
-        supported_parameters: ["reasoning"],
-      },
-    ]);
-    const sonnet = merged.find((m) => m.id === "anthropic/claude-sonnet-5");
-    expect(sonnet?.livePricing).toBe(true);
-    expect(sonnet?.costPer1MInput).toBe(2);
-    const other = merged.find((m) => m.id === "x-ai/grok-4.5");
-    expect(other?.livePricing).toBe(false);
-  });
-
-  it("getModel enforces kind when asked", () => {
-    expect(getModel("anthropic/claude-sonnet-5", "text")).toBeDefined();
-    expect(getModel("anthropic/claude-sonnet-5", "image")).toBeUndefined();
-    expect(getModel("google/gemini-3.1-flash-image", "image")).toBeDefined();
+  it("fallbackPriceFor returns the snapshot prices and undefined for strangers", () => {
+    expect(fallbackPriceFor("openai-api/gpt-6-astra")).toEqual({ input: 10, output: 50 });
+    expect(fallbackPriceFor("nobody/nothing")).toBeUndefined();
   });
 });
