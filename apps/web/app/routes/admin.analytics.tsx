@@ -95,9 +95,15 @@ function BarChart({
         const label = formatLabel ? formatLabel(d[labelKey]) : String(d[labelKey]);
         const valStr = formatValue ? formatValue(val) : String(val);
         return (
-          <div key={i} className="group relative flex flex-1 flex-col items-center gap-1">
-            {/* Tooltip */}
-            <div className="absolute bottom-full mb-1 hidden group-hover:flex flex-col items-center z-10">
+          <div
+            key={i}
+            role="img"
+            aria-label={`${label}: ${valStr}`}
+            tabIndex={0}
+            className="group relative flex flex-1 flex-col items-center gap-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-gold/60"
+          >
+            {/* Tooltip: hover on pointer devices, tap or keyboard focus elsewhere */}
+            <div className="absolute bottom-full mb-1 hidden group-hover:flex group-focus:flex group-active:flex flex-col items-center z-10">
               <div className="rounded bg-dark-100 border border-white/15 px-2 py-1 text-xs text-white whitespace-nowrap shadow-lg">
                 {label}: {valStr}
               </div>

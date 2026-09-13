@@ -198,22 +198,25 @@ export function PosScreen({
             ) : (
               <ul className="space-y-2">
                 {cart.map((l) => (
-                  <li key={l.key} className="flex items-center gap-2 text-sm">
-                    <span className="flex-1 truncate text-white">{l.name}</span>
-                    <button type="button" onClick={() => bump(l.key, -1)} aria-label={`Remove one ${l.name}`}
-                      className="rounded border border-white/10 p-1 text-white/60 hover:text-white">
-                      <Minus className="h-3 w-3" />
-                    </button>
-                    <span className="w-6 text-center text-white">{l.quantity}</span>
-                    <button type="button" onClick={() => bump(l.key, 1)} aria-label={`Add one ${l.name}`}
-                      className="rounded border border-white/10 p-1 text-white/60 hover:text-white">
-                      <Plus className="h-3 w-3" />
-                    </button>
-                    <span className="w-16 text-right text-gold">{formatPence(l.unit_pence * l.quantity)}</span>
-                    <button type="button" onClick={() => remove(l.key)} aria-label={`Remove ${l.name}`}
-                      className="rounded border border-red-500/20 p-1 text-red-400/80 hover:bg-red-500/10">
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+                  <li key={l.key} className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="min-w-[8rem] flex-1 truncate text-white">{l.name}</span>
+                    {/* Quantity and remove controls: 44px on touch, right-aligned on their own line when the name needs the room */}
+                    <div className="ml-auto flex items-center gap-2">
+                      <button type="button" onClick={() => bump(l.key, -1)} aria-label={`Remove one ${l.name}`}
+                        className="tap-target flex items-center justify-center rounded border border-white/10 p-1.5 text-white/60 hover:text-white">
+                        <Minus className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="w-6 text-center text-white">{l.quantity}</span>
+                      <button type="button" onClick={() => bump(l.key, 1)} aria-label={`Add one ${l.name}`}
+                        className="tap-target flex items-center justify-center rounded border border-white/10 p-1.5 text-white/60 hover:text-white">
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="w-16 text-right text-gold">{formatPence(l.unit_pence * l.quantity)}</span>
+                      <button type="button" onClick={() => remove(l.key)} aria-label={`Remove ${l.name}`}
+                        className="tap-target flex items-center justify-center rounded border border-red-500/20 p-1.5 text-red-400/80 hover:bg-red-500/10">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
