@@ -182,7 +182,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
 
       {/* Day panel */}
       <div className="lg:w-72 shrink-0">
-        <div className="rounded-xl border border-white/10 bg-dark-100 overflow-hidden sticky top-6">
+        <div className="rounded-xl border border-white/10 bg-dark-100 overflow-hidden lg:sticky lg:top-6">
           <div className="bg-white/5 px-5 py-4 border-b border-white/10">
             <h3 className="font-semibold text-white text-sm">
               {selectedDate
