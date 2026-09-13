@@ -4,8 +4,10 @@ import { VisualManager, uploadVisual, type VisualsData } from "./VisualManager";
 
 // VisualManager calls useRevalidator(); provide it without a Router but keep
 // every other @remix-run/react export real so nothing transitive breaks.
-vi.mock("@remix-run/react", async (importActual) => ({
-  ...(await importActual<typeof import("@remix-run/react")>()),
+// The component only uses useRevalidator, so the whole module is stubbed: loading
+// the real Remix runtime here would require React from the monorepo root, where
+// there is none (React 18 lives in this app's own node_modules).
+vi.mock("@remix-run/react", () => ({
   useRevalidator: () => ({ revalidate: () => {}, state: "idle" as const }),
 }));
 

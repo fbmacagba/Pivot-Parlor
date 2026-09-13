@@ -80,11 +80,10 @@ apps/
   worker/     Hono API on Cloudflare Workers (auth, shops, bookings, payments, AI)
   workers/    Standalone background Workers, deployed independently:
               builder (AI site gen), images, research, chatbot, audit, text, booking
-  docs/       Internal docs app
 packages/
   types/      Shared TypeScript types (@repo/types)
   utils/      Shared utilities (@repo/utils)
-  ui/         Shared React components (@repo/ui)
+  llm/        Shared LLM client, OpenRouter + direct vendors (@repo/llm)
   eslint-config/, typescript-config/
 tests/e2e/    Playwright end-to-end tests
 scripts/      Operational scripts (live verification, dev password reset)
