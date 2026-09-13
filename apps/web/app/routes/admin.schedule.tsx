@@ -204,7 +204,7 @@ export default function AdminSchedule() {
                             <select
                               value={cell.start}
                               onChange={e => setCell(member.id, d, { start: e.target.value })}
-                              className="flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
+                              className="tap-target flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
                             >
                               {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
                             </select>
@@ -212,7 +212,7 @@ export default function AdminSchedule() {
                             <select
                               value={cell.end}
                               onChange={e => setCell(member.id, d, { end: e.target.value })}
-                              className="flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
+                              className="tap-target flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
                             >
                               {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
                             </select>

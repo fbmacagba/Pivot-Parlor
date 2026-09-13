@@ -124,7 +124,7 @@ export function PosScreen({
               <button
                 type="button"
                 onClick={() => setTab("services")}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                className={`tap-target flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
                   tab === "services" ? "border-gold text-gold" : "border-white/10 text-white/60 hover:text-white"
                 }`}
               >
@@ -133,7 +133,7 @@ export function PosScreen({
               <button
                 type="button"
                 onClick={() => setTab("products")}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                className={`tap-target flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
                   tab === "products" ? "border-gold text-gold" : "border-white/10 text-white/60 hover:text-white"
                 }`}
               >
@@ -253,7 +253,7 @@ export function PosScreen({
                     key={t.value}
                     type="button"
                     onClick={() => setTender(t.value)}
-                    className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                    className={`tap-target flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${
                       tender === t.value ? "border-gold text-gold" : "border-white/10 text-white/60 hover:text-white"
                     }`}
                   >
