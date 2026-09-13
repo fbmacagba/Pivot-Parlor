@@ -152,19 +152,21 @@ export default function AdminSchedule() {
         }`} role="status">{toast.text}</div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Schedule</h1>
           <p className="mt-0.5 text-sm text-white/60">Set weekly working hours per staff member</p>
         </div>
-        <Button size="sm" onClick={save} disabled={fetcher.state !== "idle"}>
+        <Button size="sm" className="shrink-0" onClick={save} disabled={fetcher.state !== "idle"}>
           {fetcher.state !== "idle" ? "Saving…" : "Save schedule"}
         </Button>
       </div>
 
+      {/* Below md the table reads as one card per staff member (day label in each cell);
+          from md up it is the staff x day grid. One DOM, so the controlled inputs stay in sync. */}
       <div className="rounded-xl border border-white/10 bg-dark-100 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
+        <table className="block w-full text-sm md:table">
+          <thead className="hidden md:table-header-group">
             <tr className="border-b border-white/10">
               <th className="px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider w-36">Staff</th>
               {DAY_LABELS.map(d => (
@@ -172,34 +174,37 @@ export default function AdminSchedule() {
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="block divide-y divide-white/5 md:table-row-group">
             {staff.map(member => (
-              <tr key={member.id} className="hover:bg-white/[0.02]">
-                <td className="px-4 py-3">
-                  <p className="font-medium text-white truncate max-w-[8rem]">{member.display_name}</p>
+              <tr key={member.id} className="block pb-2 md:table-row md:pb-0 hover:bg-white/[0.02]">
+                <td className="block px-4 pt-3 pb-1 md:table-cell md:py-3">
+                  <p className="font-medium text-white truncate md:max-w-[8rem]">{member.display_name}</p>
                 </td>
                 {Array.from({ length: 7 }, (_, d) => {
                   const cell = grid[member.id]?.[d] ?? { open: false, start: "09:00", end: "17:00" };
                   return (
-                    <td key={d} className="px-2 py-2">
-                      <div className="flex flex-col gap-1 min-w-[7rem]">
-                        <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <td key={d} className="flex items-center gap-3 px-4 py-1 md:table-cell md:px-2 md:py-2">
+                      <span className="w-9 shrink-0 text-xs font-semibold uppercase tracking-wider text-white/60 md:hidden">
+                        {DAY_LABELS[d].slice(0, 3)}
+                      </span>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 md:min-w-[7rem] md:flex-col md:items-stretch md:gap-1">
+                        <label className="tap-target flex items-center gap-1.5 text-xs cursor-pointer">
                           <input
                             type="checkbox"
                             checked={cell.open}
                             onChange={e => setCell(member.id, d, { open: e.target.checked })}
-                            className="h-3.5 w-3.5 rounded border-white/30 bg-white/5 text-gold focus:ring-gold"
+                            className="h-4 w-4 rounded border-white/30 bg-white/5 text-gold focus:ring-gold md:h-3.5 md:w-3.5"
                           />
                           <span className={cell.open ? "text-white/80" : "text-white/50"}>
                             {cell.open ? "Open" : "Off"}
                           </span>
                         </label>
                         {cell.open && (
-                          <div className="flex gap-1 items-center">
+                          <div className="flex min-w-[10rem] flex-1 items-center gap-1">
                             <select
                               value={cell.start}
                               onChange={e => setCell(member.id, d, { start: e.target.value })}
-                              className="flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-white focus:border-gold focus:outline-none"
+                              className="flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
                             >
                               {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
                             </select>
@@ -207,7 +212,7 @@ export default function AdminSchedule() {
                             <select
                               value={cell.end}
                               onChange={e => setCell(member.id, d, { end: e.target.value })}
-                              className="flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-xs text-white focus:border-gold focus:outline-none"
+                              className="flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
                             >
                               {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
                             </select>

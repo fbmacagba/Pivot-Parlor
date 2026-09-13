@@ -78,6 +78,7 @@ function BarChart({
   formatLabel,
   formatValue,
   color = "bg-gold",
+  compactLabelStep = 1,
 }: {
   data: Record<string, unknown>[];
   labelKey: string;
@@ -85,10 +86,12 @@ function BarChart({
   formatLabel?: (v: unknown) => string;
   formatValue?: (v: number) => string;
   color?: string;
+  /** Below sm, show only every Nth axis label so dense charts (24 hours) stay legible on a phone. */
+  compactLabelStep?: number;
 }) {
   const max = Math.max(...data.map(d => Number(d[valueKey])), 1);
   return (
-    <div className="flex items-end gap-1 h-28">
+    <div className="flex h-28 gap-1">
       {data.map((d, i) => {
         const val = Number(d[valueKey]);
         const pct = (val / max) * 100;
@@ -100,7 +103,7 @@ function BarChart({
             role="img"
             aria-label={`${label}: ${valStr}`}
             tabIndex={0}
-            className="group relative flex flex-1 flex-col items-center gap-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-gold/60"
+            className="group relative flex h-full min-w-0 flex-1 flex-col items-center gap-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-gold/60"
           >
             {/* Tooltip: hover on pointer devices, tap or keyboard focus elsewhere */}
             <div className="absolute bottom-full mb-1 hidden group-hover:flex group-focus:flex group-active:flex flex-col items-center z-10">
@@ -108,11 +111,14 @@ function BarChart({
                 {label}: {valStr}
               </div>
             </div>
-            <div
-              className={`w-full rounded-t ${color} opacity-80 hover:opacity-100 transition-opacity`}
-              style={{ height: `${Math.max(pct, 2)}%` }}
-            />
-            <span className="text-[9px] text-white/50 leading-none">{label}</span>
+            {/* The wrapper is the bar's definite height reference; the bar grows up from its bottom edge */}
+            <div className="flex w-full flex-1 items-end">
+              <div
+                className={`w-full rounded-t ${color} opacity-80 hover:opacity-100 transition-opacity`}
+                style={{ height: `${Math.max(pct, 2)}%` }}
+              />
+            </div>
+            <span className={`text-[9px] text-white/50 leading-none ${i % compactLabelStep === 0 ? "" : "invisible sm:visible"}`}>{label}</span>
           </div>
         );
       })}
@@ -182,7 +188,7 @@ export default function AdminAnalytics() {
       </div>
 
       {/* Monthly trend */}
-      <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+      <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-base font-semibold text-white mb-1">Monthly bookings</h2>
         <p className="text-xs text-white/60 mb-5">Completed bookings over the last 12 months</p>
         <BarChart
@@ -195,7 +201,7 @@ export default function AdminAnalytics() {
       </div>
 
       {/* Revenue trend */}
-      <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+      <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-base font-semibold text-white mb-1">Monthly revenue</h2>
         <p className="text-xs text-white/60 mb-5">Gross revenue (£) over the last 12 months</p>
         <BarChart
@@ -211,7 +217,7 @@ export default function AdminAnalytics() {
       <div className="grid gap-6 lg:grid-cols-2">
 
         {/* Peak hours */}
-        <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-1">Peak hours</h2>
           <p className="text-xs text-white/60 mb-5">When customers book most (all time)</p>
           <BarChart
@@ -223,11 +229,12 @@ export default function AdminAnalytics() {
               return h === 0 ? "12a" : h < 12 ? `${h}a` : h === 12 ? "12p" : `${h-12}p`;
             }}
             color="bg-blue-500"
+            compactLabelStep={3}
           />
         </div>
 
         {/* Peak days */}
-        <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-1">Peak days</h2>
           <p className="text-xs text-white/60 mb-5">Busiest days of the week (all time)</p>
           <BarChart
@@ -244,7 +251,7 @@ export default function AdminAnalytics() {
       <div className="grid gap-6 lg:grid-cols-3">
 
         {/* Status breakdown */}
-        <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Booking status</h2>
           <div className="space-y-3">
             {status_breakdown.sort((a,b) => b.count - a.count).map(s => {
@@ -268,7 +275,7 @@ export default function AdminAnalytics() {
         </div>
 
         {/* Top services */}
-        <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Top services</h2>
           {top_services.length === 0 ? (
             <p className="text-sm text-white/50">No data yet.</p>
@@ -289,7 +296,7 @@ export default function AdminAnalytics() {
         </div>
 
         {/* Top staff */}
-        <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Top staff</h2>
           {top_staff.length === 0 ? (
             <p className="text-sm text-white/50">No data yet.</p>
