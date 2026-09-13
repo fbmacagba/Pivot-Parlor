@@ -189,10 +189,17 @@ function EditStaffModal({
           <label className="block text-sm font-medium text-white/80 mb-2">Assigned services</label>
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
             {activeServices.map((svc) => (
-              <label key={svc.id} className="flex items-center gap-3 cursor-pointer group">
+              <label key={svc.id} className="tap-target flex items-center gap-3 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  className="peer sr-only"
+                  checked={selectedServices.has(svc.id)}
+                  onChange={() => toggleService(svc.id)}
+                  aria-label={svc.name}
+                />
                 <div
-                  onClick={() => toggleService(svc.id)}
-                  className={`w-5 h-5 rounded flex items-center justify-center border transition-all shrink-0 cursor-pointer ${
+                  aria-hidden="true"
+                  className={`w-5 h-5 rounded flex items-center justify-center border transition-all shrink-0 peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-dark ${
                     selectedServices.has(svc.id)
                       ? "bg-gold border-gold"
                       : "border-white/20 bg-white/5 group-hover:border-white/40"
@@ -274,7 +281,7 @@ function AvatarUpload({ member, shopId }: { member: Staff; shopId: string }) {
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={isUploading}
-        className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity [@media(pointer:coarse)]:bg-black/35 [@media(pointer:coarse)]:opacity-100"
         title="Upload photo"
       >
         {isUploading
@@ -328,7 +335,7 @@ function StaffCard({
           {/* Edit */}
           <Dialog open={editOpen} onOpenChange={setEditOpen}>
             <DialogTrigger asChild>
-              <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors">
+              <button aria-label="Edit" className="tap-target w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             </DialogTrigger>
@@ -354,7 +361,7 @@ function StaffCard({
               type="submit"
               disabled={isDeactivating}
               onClick={(e) => { if (!confirm(`Deactivate ${member.display_name}?`)) e.preventDefault(); }}
-              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-500/10 text-white/40 hover:text-red-400 transition-colors"
+              className="tap-target w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-500/10 text-white/40 hover:text-red-400 transition-colors"
               title="Deactivate"
             >
               <UserX className="w-3.5 h-3.5" />

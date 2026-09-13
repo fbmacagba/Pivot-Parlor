@@ -500,8 +500,8 @@ function PurchaseOrdersSection({
       ) : (
         <div className="space-y-2">
           {purchaseOrders.map((po) => (
-            <div key={po.id} className="flex items-center gap-4 rounded-xl border border-white/10 bg-dark-100 p-4">
-              <div className="flex-1 min-w-0">
+            <div key={po.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/10 bg-dark-100 p-4">
+              <div className="min-w-[9rem] flex-1">
                 <p className="truncate text-sm font-medium text-white">
                   {po.supplier_name ?? "No supplier"}
                   <span className="ml-2 text-xs text-white/50">{new Date(po.created_at).toLocaleDateString("en-GB")}</span>
@@ -511,17 +511,17 @@ function PurchaseOrdersSection({
                   {po.notes && ` · ${po.notes}`}
                 </p>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PO_STATUS_PILL[po.status]}`}>
+              <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${PO_STATUS_PILL[po.status]}`}>
                 {po.status}
               </span>
-              <div className="flex shrink-0 items-center gap-2">
+              <div className="ml-auto flex shrink-0 items-center gap-2">
                 {po.status === "draft" && (
                   <Form method="post">
                     <input type="hidden" name="intent" value="po-order" />
                     <input type="hidden" name="poId" value={po.id} />
                     {shopId && <input type="hidden" name="shopId" value={shopId} />}
                     <button type="submit" disabled={isSubmitting}
-                      className="rounded-lg border border-blue-500/30 px-3 py-1.5 text-xs text-blue-300 hover:bg-blue-500/10 disabled:opacity-50">
+                      className="tap-target rounded-lg border border-blue-500/30 px-3 py-1.5 text-xs text-blue-300 hover:bg-blue-500/10 disabled:opacity-50">
                       Mark ordered
                     </button>
                   </Form>
@@ -529,7 +529,7 @@ function PurchaseOrdersSection({
                 {(po.status === "ordered" || po.status === "partial") && (
                   <Link
                     to={`/admin/inventory${shopQuery}${shopQuery ? "&" : "?"}po=${po.id}`}
-                    className="rounded-lg border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/10"
+                    className="tap-target flex items-center rounded-lg border border-emerald-500/30 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/10"
                   >
                     Receive
                   </Link>
@@ -540,7 +540,7 @@ function PurchaseOrdersSection({
                     <input type="hidden" name="poId" value={po.id} />
                     {shopId && <input type="hidden" name="shopId" value={shopId} />}
                     <button type="submit" disabled={isSubmitting}
-                      className="rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400/80 hover:bg-red-500/10 disabled:opacity-50">
+                      className="tap-target rounded-lg border border-red-500/20 px-3 py-1.5 text-xs text-red-400/80 hover:bg-red-500/10 disabled:opacity-50">
                       Cancel
                     </button>
                   </Form>

@@ -36,16 +36,17 @@ export default function AccountLayout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-dark">
-      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-dark px-6">
+      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-dark px-4 sm:px-6">
         <Link to="/account" className="font-heading text-lg font-bold text-white">
           Pivot <span className="text-gold">Parlor</span>
         </Link>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-3 sm:gap-4">
           {isDeveloper ? (
-            <label className="hidden items-center gap-2 sm:flex">
-              <span className="shrink-0 text-xs text-white/60">Switch View</span>
+            <label className="flex min-w-0 items-center gap-2">
+              <span className="hidden shrink-0 text-xs text-white/60 sm:inline">Switch View</span>
               <select
-                className="max-w-[11rem] rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/40"
+                aria-label="Switch view"
+                className="tap-target max-w-[8.5rem] rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/40 sm:max-w-[11rem]"
                 value={developerViewSelectValue(pathname)}
                 onChange={(e) => navigate(e.target.value)}
               >
@@ -68,7 +69,7 @@ export default function AccountLayout() {
           <Form method="post" action="/logout">
             <button
               type="submit"
-              className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-white/10"
+              className="tap-target rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-white/10"
             >
               Log out
             </button>
@@ -76,7 +77,7 @@ export default function AccountLayout() {
         </div>
       </header>
       {isDeveloper ? (
-        <div className="border-b border-amber-500/35 bg-amber-500/10 px-6 py-3 text-sm text-amber-100">
+        <div className="border-b border-amber-500/35 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 sm:px-6">
           <span className="font-medium text-amber-200">Developer View</span>
           {": "}
           you are viewing this as <strong className="text-white">customer</strong> dashboard.{" "}
@@ -85,7 +86,7 @@ export default function AccountLayout() {
           </Link>
         </div>
       ) : null}
-      <main className="flex-1 overflow-y-auto px-6 py-8">
+      <main className="flex-1 px-4 py-6 sm:px-6 sm:py-8">
         <Outlet context={{ me }} />
       </main>
     </div>

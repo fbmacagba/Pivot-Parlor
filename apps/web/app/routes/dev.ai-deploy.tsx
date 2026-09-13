@@ -343,7 +343,7 @@ export default function DevAIDeploy() {
         </div>
 
         {/* Right: Preview */}
-        <div className={`flex-1 ${compareMode && result && resultB ? "grid grid-cols-2 gap-4" : ""}`}>
+        <div className={`flex-1 ${compareMode && result && resultB ? "grid grid-cols-1 gap-4 lg:grid-cols-2" : ""}`}>
           {result ? (
             <BrandPreview
               theme={result.theme}

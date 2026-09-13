@@ -277,7 +277,7 @@ export default function AdminSettings() {
       {toast ? (
         <div
           className={clsx(
-            "fixed bottom-6 right-6 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm shadow-lg",
+            "fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm shadow-lg md:bottom-6 md:right-6",
             toast.type === "success"
               ? "border-emerald-500/40 bg-emerald-950/90 text-emerald-100"
               : "border-red-500/40 bg-red-950/90 text-red-100"

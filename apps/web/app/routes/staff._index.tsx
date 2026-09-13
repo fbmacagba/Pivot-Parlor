@@ -104,7 +104,7 @@ export default function StaffToday() {
         </div>
         <Link
           to="/staff/bookings"
-          className="flex items-center gap-1.5 text-sm text-gold hover:text-gold/80"
+          className="tap-target flex items-center gap-1.5 text-sm text-gold hover:text-gold/80"
         >
           All bookings <ArrowRight className="h-3.5 w-3.5" />
         </Link>
@@ -173,7 +173,7 @@ export default function StaffToday() {
             {upcoming.map((b, i) => (
               <div
                 key={b.id}
-                className={`flex items-center gap-4 rounded-xl border px-4 py-3 transition-colors ${
+                className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3 transition-colors ${
                   i === 0
                     ? "border-gold/20 bg-gold/5"
                     : "border-white/8 bg-dark-100 hover:border-white/15"
@@ -186,7 +186,7 @@ export default function StaffToday() {
                   <p className="text-xs text-white/50">{b.duration_min}m</p>
                 </div>
                 <div className="h-8 w-px bg-white/10 shrink-0" />
-                <div className="flex-1 min-w-0">
+                <div className="min-w-[9rem] flex-1">
                   <p className="text-sm font-medium text-white truncate">
                     {b.customer_name}
                   </p>
@@ -195,6 +195,7 @@ export default function StaffToday() {
                   </p>
                 </div>
                 <Badge
+                  className="ml-auto shrink-0"
                   variant={
                     b.status === "in_progress"
                       ? "gold"

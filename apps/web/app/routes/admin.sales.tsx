@@ -195,9 +195,9 @@ export default function AdminSales() {
       ) : (
         <div className="space-y-2">
           {sales.map((sale) => (
-            <div key={sale.id} className="flex items-center gap-4 rounded-xl border border-white/10 bg-dark-100 px-4 py-3">
+            <div key={sale.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/10 bg-dark-100 px-4 py-3">
               <Receipt className="h-4 w-4 shrink-0 text-white/40" />
-              <div className="flex-1 min-w-0">
+              <div className="min-w-[9rem] flex-1">
                 <p className="truncate text-sm text-white">
                   {sale.customer_name || (sale.booking_id ? "Appointment checkout" : "Counter sale")}
                   <span className="ml-2 text-xs text-white/50">
@@ -206,20 +206,23 @@ export default function AdminSales() {
                   </span>
                 </p>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[sale.status] ?? "bg-white/10 text-white/50"}`}>
-                {sale.status}
-              </span>
-              <span className="w-20 shrink-0 text-right text-sm font-semibold text-gold">
-                {formatPence(sale.total_pence)}
-              </span>
-              {(sale.status === "completed" || sale.status === "refunded") && (
-                <Link
-                  to={`/admin/sales${baseQuery}${baseQuery ? "&" : "?"}sale=${sale.id}`}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 transition-colors hover:bg-white/5 hover:text-white"
-                >
-                  <Undo2 className="h-3 w-3" /> Refund
-                </Link>
-              )}
+              {/* Status, amount, refund: right-aligned, on their own line when a phone needs the room */}
+              <div className="ml-auto flex shrink-0 items-center gap-4">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[sale.status] ?? "bg-white/10 text-white/50"}`}>
+                  {sale.status}
+                </span>
+                <span className="w-20 text-right text-sm font-semibold text-gold">
+                  {formatPence(sale.total_pence)}
+                </span>
+                {(sale.status === "completed" || sale.status === "refunded") && (
+                  <Link
+                    to={`/admin/sales${baseQuery}${baseQuery ? "&" : "?"}sale=${sale.id}`}
+                    className="tap-target flex items-center gap-1 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 transition-colors hover:bg-white/5 hover:text-white"
+                  >
+                    <Undo2 className="h-3 w-3" /> Refund
+                  </Link>
+                )}
+              </div>
             </div>
           ))}
         </div>

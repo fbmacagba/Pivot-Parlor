@@ -110,7 +110,7 @@ function UpcomingBookingCard({
         <div className="flex flex-wrap items-center gap-2">
           <Link
             to={bookUrl}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors"
+            className="tap-target inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 hover:bg-white/10 transition-colors"
           >
             {cancelAllowed ? "Change time" : "Look for another time"}
             <ArrowRight className="h-3 w-3 opacity-70" />
@@ -120,7 +120,7 @@ function UpcomingBookingCard({
               type="button"
               onClick={cancelBooking}
               disabled={cancelling}
-              className="inline-flex items-center rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+              className="tap-target inline-flex items-center rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/20 transition-colors disabled:opacity-50"
             >
               {cancelling ? "Cancelling…" : "Cancel booking"}
             </button>
@@ -183,7 +183,7 @@ function VerifyEmailBanner({ email }: { email: string }) {
               type="button"
               onClick={resend}
               disabled={state === "sending"}
-              className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
+              className="tap-target mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-500/20 disabled:opacity-50"
             >
               {state === "sending" ? "Sending…" : "Resend verification email"}
             </button>
@@ -232,7 +232,7 @@ function ProfileCard({ me }: { me: Me }) {
         <h2 className="font-heading text-base font-semibold text-white">Profile</h2>
         {!editing && (
           <button onClick={() => setEditing(true)}
-            className="text-xs text-gold hover:text-gold/80 transition-colors font-medium">
+            className="tap-target text-xs text-gold hover:text-gold/80 transition-colors font-medium">
             Edit
           </button>
         )}
@@ -259,11 +259,11 @@ function ProfileCard({ me }: { me: Me }) {
           {err && <p className="text-xs text-red-400">{err}</p>}
           <div className="flex gap-2 pt-1">
             <button onClick={() => { setEditing(false); setName(me.name ?? ""); setPhone(me.phone ?? ""); }}
-              className="flex-1 py-2 rounded-lg border border-white/20 text-sm text-white/60 hover:bg-white/5 transition-colors">
+              className="tap-target flex-1 py-2 rounded-lg border border-white/20 text-sm text-white/60 hover:bg-white/5 transition-colors">
               Cancel
             </button>
             <button onClick={save} disabled={saving}
-              className="flex-1 py-2 rounded-lg bg-gold text-dark text-sm font-semibold hover:bg-gold/90 transition-colors disabled:opacity-60">
+              className="tap-target flex-1 py-2 rounded-lg bg-gold text-dark text-sm font-semibold hover:bg-gold/90 transition-colors disabled:opacity-60">
               {saving ? "Saving…" : "Save"}
             </button>
           </div>
@@ -285,7 +285,7 @@ function ProfileCard({ me }: { me: Me }) {
           </div>
           <div className="flex gap-3">
             <dt className="w-16 shrink-0 text-white/60">Email</dt>
-            <dd className="text-white">{me.email}</dd>
+            <dd className="min-w-0 break-words text-white">{me.email}</dd>
           </div>
           {me.phone && (
             <div className="flex gap-3">
@@ -389,7 +389,7 @@ export default function AccountIndex() {
         ) : upcoming.length === 0 ? (
           <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
             <p className="text-white/60 text-sm">You have no bookings to show.</p>
-            <a href="/" className="mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:text-gold/80">
+            <a href="/" className="tap-target mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:text-gold/80">
               Browse shops <ArrowRight className="h-3.5 w-3.5" />
             </a>
           </div>
@@ -410,19 +410,19 @@ export default function AccountIndex() {
           </h2>
           <div className="space-y-2">
             {past.map(b => (
-              <div key={b.id} className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-70">
-                <div className="flex-1 min-w-0">
+              <div key={b.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-70">
+                <div className="min-w-[9rem] flex-1">
                   <p className="text-sm font-medium text-white truncate">{b.service_name}</p>
                   <p className="text-xs text-white/60">{b.shop_name} · {formatBookingWhen(b)}</p>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="ml-auto flex shrink-0 items-center gap-3">
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[b.status] ?? "bg-white/5 text-white/60"}`}>
                     {b.status.replace("_"," ")}
                   </span>
                   {/* Rebook link — takes them to the shop booking page */}
                   <Link
                     to={`/${b.shop_slug}`}
-                    className="flex items-center gap-1 text-xs text-gold/70 hover:text-gold transition-colors"
+                    className="tap-target flex items-center gap-1 text-xs text-gold/70 hover:text-gold transition-colors"
                     title="Book again"
                   >
                     <RefreshCw className="h-3 w-3" /> Rebook

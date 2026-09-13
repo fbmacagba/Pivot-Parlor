@@ -302,7 +302,7 @@ export default function AdminServices() {
         <button
           type="button"
           onClick={() => setShowInactive((v) => !v)}
-          className="mb-4 text-xs text-white/60 hover:text-gold transition-colors"
+          className="tap-target mb-4 inline-flex items-center text-xs text-white/60 hover:text-gold transition-colors"
         >
           {showInactive ? "Hide inactive" : `Show ${inactive.length} inactive`}
         </button>
@@ -357,14 +357,14 @@ function ServiceRow({
 
   return (
     <div
-      className={`flex items-center gap-4 rounded-xl border p-4 transition-colors ${
+      className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border p-4 transition-colors ${
         inactive
           ? "border-white/5 bg-white/3 opacity-50"
           : "border-white/10 bg-dark-100 hover:border-white/20"
       }`}
     >
       {/* Info */}
-      <div className="flex-1 min-w-0">
+      <div className="min-w-[9rem] flex-1">
         <p className="truncate text-sm font-medium text-white">
           {service.name}
           {inactive && (
@@ -387,11 +387,11 @@ function ServiceRow({
       </div>
 
       {/* Actions */}
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={onEdit}
-          className="flex items-center gap-1 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 hover:text-white transition-colors"
+          className="tap-target flex items-center gap-1 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 hover:text-white transition-colors"
         >
           <Pencil className="h-3 w-3" /> Edit
         </button>
@@ -407,7 +407,7 @@ function ServiceRow({
           <button
             type="submit"
             disabled={isSubmitting}
-            className={`flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
+            className={`tap-target flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
               inactive
                 ? "border-green-500/30 text-green-400 hover:bg-green-500/10"
                 : "border-red-500/20 text-red-400/80 hover:bg-red-500/10"

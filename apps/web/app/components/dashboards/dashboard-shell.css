@@ -1,0 +1,47 @@
+/* Dashboard shell (phone adaptation). Imported by DashboardLayout.tsx, so it
+   is only on the page when a dashboard is. */
+
+/* The drawer's one authored moment: it slides in from the left while the
+   scrim fades. Both settle with an exponential ease-out from an off-canvas
+   start; there is no exit animation because the drawer unmounts on close. */
+@keyframes pp-dash-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes pp-dash-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.pp-dash-drawer {
+  animation: pp-dash-drawer-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.pp-dash-scrim {
+  animation: pp-dash-scrim-in 200ms ease-out both;
+}
+
+/* Installed (standalone) mode: the sticky top bar and the fixed tab bar pad
+   themselves by the safe-area insets, so the body must not add the top and
+   bottom insets as well (tailwind.css does that for every other page). Same
+   trade as the shop chrome; see shop-chrome.css. Left and right stay on the
+   body. A browser without :has() keeps the body padding, nothing worse. */
+@media all and (display-mode: standalone) {
+  body:has(.pp-dashboard) {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pp-dash-drawer,
+  .pp-dash-scrim {
+    animation: none;
+  }
+}

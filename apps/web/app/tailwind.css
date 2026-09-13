@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer utilities {
+  /* Touch devices get a 44px hit area on small controls (row actions, icon
+     buttons) without changing the pointer layout: the box grows only where a
+     finger, not a cursor, is doing the tapping. */
+  @media (pointer: coarse) {
+    .tap-target {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
+  }
+}
+
 @layer base {
   html {
     scroll-behavior: smooth;
