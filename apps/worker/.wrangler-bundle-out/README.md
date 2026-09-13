@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "pivot-parlor-api" generated at 2026-03-22T09:41:28.087Z.
