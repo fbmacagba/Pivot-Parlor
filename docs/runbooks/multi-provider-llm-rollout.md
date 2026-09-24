@@ -43,10 +43,12 @@ list (three fetches, up to 10 s each).
 
 A vendor key added or removed after `ai:models:v3` already exists takes
 effect only when that cache entry expires (up to 1 h). To force an immediate
-refresh, delete it (run from `apps/worker`):
+refresh, delete it (run from `apps/worker`). Every `wrangler kv` command in
+this runbook needs `--remote`: wrangler 4 otherwise reads and writes a local
+store and reports "Value not found" for keys that exist in production.
 
 ```bash
-npx wrangler kv key delete --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:models:v3
+npx wrangler kv key delete --remote --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:models:v3
 ```
 
 ## 4. Verify on a test shop
@@ -67,7 +69,7 @@ npx wrangler kv key delete --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:mo
    being rescued on every request (a 150-token reply budget can starve
    reasoning-heavy models); pick another model.
 4. Registry contents:
-   `npx wrangler kv key get --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:models:v3 | head -c 600`
+   `npx wrangler kv key get --remote --namespace-id 12eca802e7ff47c2a5358da0f985eecd ai:models:v3 | head -c 600`
    shows entries with `"provider":"openai"` and `"provider":"anthropic"`.
 
 ## 5. Watch billing
