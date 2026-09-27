@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import { AuditWriteError, createAuditRecorder, entryHash, type AuditRow } from "@repo/audit";
 import { seedShop, seedUser } from "./helpers";
 
-const recorder = (userId: string | null, ip: string | null = "203.0.113.7") =>
+const recorder = (userId: string | null, ip: string | null = "203.0.113.7", onWrite?: () => void) =>
   createAuditRecorder({
     db: env.DB as never,
     worker: "test",
     via: "api",
     actor: userId ? { type: "developer", userId, role: "developer", ip } : { type: "anonymous", ip },
     requestId: "req-1",
+    onWrite,
   });
 
 describe("audit recorder", () => {
@@ -89,5 +90,28 @@ describe("audit recorder", () => {
 
   it("rejects an unknown action", async () => {
     await expect(recorder(null).write({ action: "nope" as never, outcome: "succeeded" })).rejects.toBeInstanceOf(AuditWriteError);
+  });
+
+  it("statements() alone never triggers onWrite — a prepared-but-uncommitted entry is not a written one", async () => {
+    let written = false;
+    const stmts = await recorder(null, null, () => { written = true; }).statements({ action: "audit.gap", outcome: "succeeded" });
+    expect(stmts.length).toBeGreaterThan(0);
+    expect(written).toBe(false);
+  });
+
+  it("batch() triggers onWrite only once the combined batch has committed", async () => {
+    let written = false;
+    await recorder(null, null, () => { written = true; }).batch([], { action: "audit.gap", outcome: "succeeded" });
+    expect(written).toBe(true);
+  });
+
+  it("batch() does not trigger onWrite when the batch fails, and propagates the original (unwrapped) error", async () => {
+    let written = false;
+    const badChange = env.DB.prepare("INSERT INTO no_such_table (id) VALUES (?)").bind("x");
+    const rec = recorder(null, null, () => { written = true; });
+    await expect(rec.batch([badChange as never], { action: "audit.gap", outcome: "succeeded" })).rejects.not.toBeInstanceOf(
+      AuditWriteError
+    );
+    expect(written).toBe(false);
   });
 });

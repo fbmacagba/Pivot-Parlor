@@ -63,19 +63,21 @@ export function auditRefused(c: Ctx): Response {
 }
 
 /** Commit `changes` and the audit entry in ONE batch (all-or-nothing).
- *  Returns a 503 Response when the entry cannot be prepared, else null. */
+ *  Returns a 503 Response when the entry cannot be prepared, else null.
+ *  A batch (commit) failure is NOT caught here — it propagates as the
+ *  original error, since the caller's whole operation failed, not merely
+ *  the audit write (Plan ruling 9). `auditWritten` only becomes true once
+ *  this batch actually commits (Plan ruling 8). */
 export async function batchWithAudit(
   c: Ctx,
   changes: D1PreparedStatement[],
   input: AuditEntryInput
 ): Promise<Response | null> {
-  let audit: D1PreparedStatement[];
   try {
-    audit = await auditFor(c).statements(input);
+    await auditFor(c).batch(changes, input);
   } catch (err) {
     if (err instanceof AuditWriteError) return auditRefused(c);
     throw err;
   }
-  await c.env.DB.batch([...changes, ...audit]);
   return null;
 }

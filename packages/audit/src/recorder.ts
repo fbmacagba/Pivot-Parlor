@@ -17,7 +17,12 @@ export interface RecorderBase {
   via: Via;
   actor: AuditActor;
   requestId: string | null;
-  /** Called when statements are handed out; the API worker's gap guard uses it. */
+  /**
+   * Called once the audit entry — and any `changes` batched alongside it via
+   * `batch()` — have actually COMMITTED, never merely prepared or attempted.
+   * The API worker's gap guard reads this as "this request produced a
+   * committed audit entry," so `statements()` alone must never trigger it.
+   */
   onWrite?: () => void;
   now?: () => Date;
 }
@@ -33,6 +38,14 @@ export interface AuditRunResult {
 export interface AuditRecorder {
   statements(input: AuditEntryInput): Promise<D1PreparedStatement[]>;
   write(input: AuditEntryInput): Promise<string>;
+  /**
+   * Commit `changes` and the audit entry in ONE batch (all-or-nothing). A
+   * prepare failure throws AuditWriteError (unchanged semantics); a batch
+   * failure propagates the original, unwrapped error — the caller's whole
+   * operation failed, not merely the audit write. `onWrite` fires only once
+   * the batch has committed.
+   */
+  batch(changes: D1PreparedStatement[], input: AuditEntryInput): Promise<void>;
   run<T>(
     input: Omit<AuditEntryInput, "outcome" | "phase">,
     fn: () => Promise<T>,
@@ -161,7 +174,6 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
           `INSERT INTO audit_log (${AUDIT_COLUMNS.join(", ")}) VALUES (${AUDIT_COLUMNS.map(() => "?").join(", ")})`
         )
         .bind(...AUDIT_COLUMNS.map((c) => sanitized[c]));
-      base.onWrite?.();
       return { id: sanitized.id, stmts: [...refs.stmts, insert] };
     } catch (err) {
       throw err instanceof AuditWriteError ? err : new AuditWriteError("Audit entry could not be prepared", err);
@@ -175,7 +187,20 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
     } catch (err) {
       throw new AuditWriteError("Audit entry could not be written", err);
     }
+    base.onWrite?.();
     return id;
+  }
+
+  /**
+   * Commit `changes` and the audit entry in ONE batch. Unlike `write()`, a
+   * batch failure here propagates the ORIGINAL error, unwrapped: the
+   * caller's whole operation failed (not just the audit write), so the API
+   * worker should see a generic error, not an audit-refusal 503.
+   */
+  async function batch(changes: D1PreparedStatement[], input: AuditEntryInput): Promise<void> {
+    const { stmts } = await prepare(input);
+    await base.db.batch([...changes, ...stmts]);
+    base.onWrite?.();
   }
 
   async function writeOutcome(input: AuditEntryInput): Promise<void> {
@@ -199,6 +224,7 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
       return (await prepare(input)).stmts;
     },
     write,
+    batch,
     async run<T>(
       input: Omit<AuditEntryInput, "outcome" | "phase">,
       fn: () => Promise<T>,

@@ -54,7 +54,7 @@ const app = new Hono<{ Bindings: Bindings }>();
  * or non-JSON responses before the handler runs. This app only mounts the webhook router.
  */
 const stripeWebhookApp = new Hono<{ Bindings: Bindings }>();
-stripeWebhookApp.use("*", requestId, auditGapGuard);
+stripeWebhookApp.use("*", requestId, auditGapGuard("webhook"));
 stripeWebhookApp.route("/api/webhooks", webhooksRouter);
 
 // ─── Global middleware ────────────────────────────────────────────────────────
@@ -107,9 +107,11 @@ app.use(
   })
 );
 
-// Audit trail: every request gets a server-generated id; state-changing
-// requests that write no audit entry of their own leave an audit.gap floor entry.
-app.use("*", requestId, auditGapGuard);
+// Audit trail: every request that reaches this point gets a server-generated
+// id (CORS preflight OPTIONS requests are answered by cors() above and never
+// reach here); state-changing requests that write no audit entry of their
+// own leave an audit.gap floor entry.
+app.use("*", requestId, auditGapGuard("api"));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 
