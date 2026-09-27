@@ -80,9 +80,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PUT /api/shops/:shopId/suppliers/:supplierId": "pending",
   "PUT /api/staff/me/bookings/:bookingId/status": "pending",
 
-  // Proxy routes registered with .all() (sales/connect forward every method
-  // to the booking worker): audit ownership (proxy hop vs booking worker) is
-  // decided in Plan 3.
+  // .all() proxies: audit ownership (proxy hop vs booking worker) is decided in Plan 3.
   "ALL /api/shops/:shopId/connect/:action": "pending",
   "ALL /api/shops/:shopId/sales": "pending",
   "ALL /api/shops/:shopId/sales/:saleId": "pending",

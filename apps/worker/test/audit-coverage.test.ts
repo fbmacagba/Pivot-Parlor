@@ -9,19 +9,22 @@ const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE", "ALL"]);
 // Hono records every `app.use("*", ...)` / sub-router `.use("*", ...)` middleware
 // registration in `.routes` as method "ALL" too (composed with its mount prefix
 // for a nested router, e.g. "/api/shops/:shopId/staff/*"), alongside genuine
-// `.all()` route handlers like the sales/connect proxies. No real endpoint path
-// ends in a literal "*" segment, so excluding any "ALL" entry whose path is "*"
-// or ends with "/*" removes exactly the middleware (measured: 26 such entries
-// across app + stripeWebhookApp today) and none of the 5 real proxy routes.
-function isWildcardMiddleware(path: string): boolean {
-  return path === "*" || path.endsWith("/*");
+// `.all()` route handlers like the sales/connect proxies. Today no "ALL" entry
+// whose path is "*" or ends with "/*" is a real route (measured: 26 such
+// entries across app + stripeWebhookApp, all middleware), so this scoped to
+// "ALL" only is the narrowest exclusion: it never touches a POST/PUT/PATCH/
+// DELETE route, even one that happens to end in "/*".
+function isWildcardMiddleware(method: string, path: string): boolean {
+  return method === "ALL" && (path === "*" || path.endsWith("/*"));
 }
 
 function mutatingRoutes(): string[] {
   const all = [...app.routes, ...stripeWebhookApp.routes];
   return [
     ...new Set(
-      all.filter((r) => MUTATING.has(r.method) && !isWildcardMiddleware(r.path)).map((r) => `${r.method} ${r.path}`)
+      all
+        .filter((r) => MUTATING.has(r.method) && !isWildcardMiddleware(r.method, r.path))
+        .map((r) => `${r.method} ${r.path}`)
     ),
   ].sort();
 }
