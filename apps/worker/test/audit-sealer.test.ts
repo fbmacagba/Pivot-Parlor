@@ -119,5 +119,19 @@ describe("sealer", () => {
     expect(sealedAlert!.sealed_at).not.toBeNull();
     expect(sealedAlert!.chain_hash).not.toBeNull();
     expect(sealedAlert!.archived_at).not.toBeNull();
+
+    // Skipping the tampered row must never break the chain for everything
+    // sealed around it: every sealed row (this file's whole database, since
+    // expired_through_seq is 0) still forms one unbroken GENESIS-rooted
+    // sequence, the victim never joined it, and the alert did.
+    const all = await rows();
+    expect(all.map((r) => r.seq)).toEqual(all.map((_, i) => i + 1));
+    let chain = GENESIS;
+    for (const r of all) {
+      chain = await chainHash(chain, r.entry_hash);
+      expect(r.chain_hash, `row ${r.id} chain_hash`).toBe(chain);
+    }
+    expect(all.map((r) => r.id)).not.toContain(victimId);
+    expect(all.map((r) => r.id)).toContain(alert.id);
   });
 });
