@@ -62,37 +62,47 @@ test.describe("Audit trail — staging", () => {
 
     const pauseRes = await page.request.post(`/api/shops/${E2E_SHOP_SLUG}/pause`);
     expect(pauseRes.ok(), `pause failed: ${pauseRes.status()} ${await pauseRes.text()}`).toBeTruthy();
-    const activateRes = await page.request.post(`/api/shops/${E2E_SHOP_SLUG}/activate`);
-    expect(activateRes.ok(), `activate failed: ${activateRes.status()} ${await activateRes.text()}`).toBeTruthy();
 
-    // e2e.yml serializes every staging E2E run (concurrency group
-    // "e2e-staging", cancel-in-progress: false) and site.pause/site.activate
-    // are rare, deliberate developer actions that nothing else on this
-    // shared staging environment writes concurrently, so newest-first
-    // ordering + .first() reliably picks out the entry this test just made.
-    //
-    // Audit entries are append-only and survive cleanup-e2e-shops (it only
-    // deletes shops, never audit_log rows), and this same fixture shop gets
-    // paused/activated on every gate run, so every earlier run's "Site
-    // paused" entries are still here on this filtered view, already
-    // Archived. A page-wide `getByText("Archived").first()` would therefore
-    // match one of THOSE straight away, regardless of whether this run's
-    // own entry ever seals — so the Archived check below is scoped to the
-    // SAME <li> as this run's own "Site paused" entry, not to the page.
-    await page.goto("/dev/activity?action=site.");
-    // Locators are live queries, not snapshots, so this same reference is
-    // safe to re-check across the reloads below.
-    const pauseEntry = page.locator("ol > li").filter({ hasText: "Site paused" }).first();
-    await expect(pauseEntry).toBeVisible();
+    // /activate always runs in `finally`, even if an assertion below throws
+    // (e.g. the archived-wait times out) -- otherwise a failed run would
+    // leave this shared fixture shop stuck "paused" going into the next
+    // gate run, instead of just failing this one test.
+    try {
+      // Own-entry `.first()` scoping below relies on e2e.yml running this
+      // spec serialized: the "e2e-staging" concurrency group
+      // (cancel-in-progress: false) means only one staging E2E run exists
+      // at a time, and that run's own `--workers=1` means its specs (and
+      // this file's own tests) never execute concurrently with each other
+      // either, so nothing else can be writing a competing site.pause
+      // entry while this test runs.
+      //
+      // Audit entries are append-only and survive cleanup-e2e-shops (it
+      // only deletes shops, never audit_log rows), and this same fixture
+      // shop gets paused/activated on every gate run, so every earlier
+      // run's "Site paused" entries are still here on this filtered view,
+      // already Archived. A page-wide `getByText("Archived").first()`
+      // would therefore match one of THOSE straight away, regardless of
+      // whether this run's own entry ever seals -- so the Archived check
+      // below is scoped to the SAME <li> as this run's own "Site paused"
+      // entry, not to the page.
+      await page.goto("/dev/activity?action=site.");
+      // Locators are live queries, not snapshots, so this same reference
+      // is safe to re-check across the reloads below.
+      const pauseEntry = page.locator("ol > li").filter({ hasText: "Site paused" }).first();
+      await expect(pauseEntry).toBeVisible();
 
-    // Sealing runs every minute on staging.
-    await expect(async () => {
-      await page.reload();
-      await expect(pauseEntry.getByText("Archived", { exact: true })).toBeVisible();
-    }).toPass({ timeout: 150_000, intervals: [15_000] });
+      // Sealing runs every minute on staging.
+      await expect(async () => {
+        await page.reload();
+        await expect(pauseEntry.getByText("Archived", { exact: true })).toBeVisible();
+      }).toPass({ timeout: 150_000, intervals: [15_000] });
 
-    await page.getByRole("button", { name: "Check now" }).click();
-    await expect(page.getByRole("status")).toContainText("intact");
+      await page.getByRole("button", { name: "Check now" }).click();
+      await expect(page.getByRole("status")).toContainText("intact");
+    } finally {
+      const activateRes = await page.request.post(`/api/shops/${E2E_SHOP_SLUG}/activate`);
+      expect(activateRes.ok(), `activate failed: ${activateRes.status()} ${await activateRes.text()}`).toBeTruthy();
+    }
   });
 
   test("erasure confirmation dialog: Cancel does not submit", async ({ page }) => {

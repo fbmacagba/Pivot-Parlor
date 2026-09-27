@@ -11,8 +11,8 @@ support, or the alert email secret are missing when the PR is opened, that autom
 deploy fails before anyone reviews anything.
 
 Standing rule for every command below and for anything else in this repo: any `wrangler kv` or
-`wrangler d1` command aimed at production must carry `--remote`, or it silently talks to a local
-simulator instead of the real thing.
+`wrangler d1` command aimed at a real database, **staging or production**, must carry `--remote`,
+or it silently talks to a local simulator instead of the real thing.
 
 ## 0. Prove the database accepts triggers (owner-gated, before opening the pull request)
 
@@ -152,8 +152,14 @@ Confirm both workflow runs finish green before treating either environment as do
 5. To look at what actually got written to the archive: click **Export proof** (next to Export
    CSV, top of the Activity page). The downloaded JSON has an `archive_objects` array of keys
    like `2026/09/27/000000000123-000000000124.jsonl`. Copy one of those as `<archive_key>` below
-   (the Activity page itself does not show this key anywhere):
+   (the Activity page itself does not show this key anywhere). Use whichever bucket matches the
+   environment you're actually verifying, the two buckets are separate and a key from one will
+   not be found in the other:
    ```bash
+   # Staging:
+   npx wrangler r2 object get pivot-parlor-audit-staging/<archive_key> --remote --pipe | head -c 400
+
+   # Production:
    npx wrangler r2 object get pivot-parlor-audit/<archive_key> --remote --pipe | head -c 400
    ```
    This should print raw JSON lines: the entries themselves.
@@ -189,6 +195,12 @@ first rollout.
   anchor" email as a durable, independent record. Properly closing this gap needs its own
   follow-up (an R2-side index that's reconciled against the database independently); it is not
   part of this rollout.
+- **The nightly check only re-reads and compares the last 2 days' stored anchors.** It's not a
+  standing guarantee that a stored anchor from further back hasn't been altered or deleted, only
+  a check on the most recent one or two. The **emailed** copy of each daily anchor is what
+  actually gives you an unlimited, tamper-proof history to fall back on, because it left this
+  system the moment it was sent; the stored copy did not. This is the same reason Step 1 above
+  says to keep every "Audit anchor" email.
 - **Most of the app still isn't being watched.** This rollout (Plan 1) only instruments a first
   slice of actions. As of this branch, **66 API routes are still pending** (61 ordinary routes
   plus 5 proxy routes that forward payments/refunds/Connect-onboarding calls), plus **3 scheduled

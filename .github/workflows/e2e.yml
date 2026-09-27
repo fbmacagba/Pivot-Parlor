@@ -51,7 +51,7 @@ jobs:
         id: specs
         run: |
           SMOKE="tests/e2e/dev-login.spec.ts tests/e2e/booking.spec.ts"
-          FULL="tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts tests/e2e/booking.spec.ts tests/e2e/site-generation.spec.ts tests/e2e/dev-shop-delete-repro.spec.ts"
+          FULL="tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts tests/e2e/booking.spec.ts tests/e2e/site-generation.spec.ts tests/e2e/dev-shop-delete-repro.spec.ts tests/e2e/audit-trail.spec.ts"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}" = "true" ]; then
             echo "tier=full" >> "$GITHUB_OUTPUT"
             echo "specs=$FULL" >> "$GITHUB_OUTPUT"
