@@ -1,0 +1,210 @@
+import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { json } from "@remix-run/cloudflare";
+import { getSessionToken } from "~/lib/auth";
+import { createApiClient } from "~/lib/api";
+import { Badge } from "~/components/ui/Badge";
+import { Button } from "~/components/ui/Button";
+import { Input } from "~/components/ui/Input";
+import { ACTION_GROUPS, actionLabel, auditQuery, entryStatus } from "~/lib/audit";
+
+interface Entry {
+  id: string;
+  occurred_at: string;
+  seq: number | null;
+  sealed_at: string | null;
+  archived_at: string | null;
+  action: string;
+  phase: string;
+  outcome: string | null;
+  reason: string | null;
+  actor_type: string;
+  actor_ref: string | null;
+  actor_name: string | null;
+  actor_email: string | null;
+  redacted: boolean;
+  ip: string | null;
+  shop_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  changes_json: string | null;
+  details_json: string | null;
+  request_id: string | null;
+  historical: number;
+}
+
+interface VerifyResult { ok: boolean; checked: number; fromSeq: number; toSeq: number; firstBadSeq: number | null; problem: string | null }
+
+export async function loader({ request, context }: LoaderFunctionArgs) {
+  const env = context.env as { API_URL: string };
+  const api = createApiClient(env.API_URL, getSessionToken(request));
+  const qs = auditQuery(new URL(request.url).searchParams);
+  try {
+    const data = await api.get<{ entries: Entry[]; next_cursor: string | null }>(`/api/audit${qs ? `?${qs}` : ""}`);
+    return json({ ...data, error: null as string | null });
+  } catch (e) {
+    return json({ entries: [] as Entry[], next_cursor: null, error: e instanceof Error ? e.message : "Could not load activity" });
+  }
+}
+
+export async function action({ request, context }: ActionFunctionArgs) {
+  const env = context.env as { API_URL: string };
+  const api = createApiClient(env.API_URL, getSessionToken(request));
+  const form = await request.formData();
+  const intent = form.get("intent");
+  try {
+    if (intent === "verify") {
+      const from = Number(form.get("from_seq")) || undefined;
+      const to = Number(form.get("to_seq")) || undefined;
+      return json({ verify: await api.post<VerifyResult>("/api/audit/verify", { from_seq: from, to_seq: to }), error: null });
+    }
+    if (intent === "import") {
+      const r = await api.post<{ imported: number; more: boolean }>("/api/audit/import-historical");
+      return json({ imported: r, error: null });
+    }
+    if (intent === "erase") {
+      const userId = String(form.get("user_id") ?? "");
+      return json({ erased: await api.post<{ redact_after: string }>(`/api/audit/subjects/${encodeURIComponent(userId)}/erase`), error: null });
+    }
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : "Request failed" });
+  }
+  return json({ error: "Unknown request" });
+}
+
+function Changes({ json: raw }: { json: string | null }) {
+  if (!raw) return null;
+  const changes = JSON.parse(raw) as Record<string, [unknown, unknown]>;
+  return (
+    <ul className="mt-2 space-y-1 text-sm">
+      {Object.entries(changes).map(([k, [before, after]]) => (
+        <li key={k} className="break-words">
+          <span className="text-white/50">{k}:</span> <span className="text-white/60 line-through">{String(before ?? "none")}</span>{" "}
+          <span className="text-white">{String(after ?? "none")}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default function DevActivity() {
+  const { entries, next_cursor, error } = useLoaderData<typeof loader>();
+  const result = useActionData<typeof action>();
+  const [params] = useSearchParams();
+  const nav = useNavigation();
+  const sealed = entries.filter((e) => e.seq !== null).map((e) => e.seq as number);
+  const qs = auditQuery(params);
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-heading text-2xl text-white">Activity</h1>
+          <p className="text-sm text-white/60">Every recorded change, AI call and data access. Entries can be added, never edited.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <a className="tap-target inline-flex items-center rounded-md border border-white/20 px-3 py-2 text-sm text-white/80" href={`/dev/activity/export?part=csv${qs ? `&${qs}` : ""}`}>
+            Export CSV
+          </a>
+          <a className="tap-target inline-flex items-center rounded-md border border-white/20 px-3 py-2 text-sm text-white/80" href={`/dev/activity/export?part=proof${qs ? `&${qs}` : ""}`}>
+            Export proof
+          </a>
+          <Form method="post">
+            <input type="hidden" name="intent" value="verify" />
+            {sealed.length > 0 && (
+              <>
+                <input type="hidden" name="from_seq" value={Math.min(...sealed)} />
+                <input type="hidden" name="to_seq" value={Math.max(...sealed)} />
+              </>
+            )}
+            <Button type="submit" className="tap-target" disabled={nav.state !== "idle"}>Check now</Button>
+          </Form>
+        </div>
+      </header>
+
+      {result && "verify" in result && result.verify && (
+        <p role="status" className={result.verify.ok ? "text-emerald-400" : "text-red-400"}>
+          {result.verify.ok
+            ? `Checked ${result.verify.checked} entries (${result.verify.fromSeq} to ${result.verify.toSeq}): the trail is intact.`
+            : `Problem at entry ${result.verify.firstBadSeq}: ${result.verify.problem}`}
+        </p>
+      )}
+      {result && "imported" in result && result.imported && (
+        <p role="status" className="text-white/80">Imported {result.imported.imported} AI usage rows{result.imported.more ? "; run again for more." : "."}</p>
+      )}
+      {result && "erased" in result && result.erased && (
+        <p role="status" className="text-white/80">Erasure recorded. Personal details will be blanked on {result.erased.redact_after.slice(0, 10)}.</p>
+      )}
+      {(error || (result && result.error)) && <p role="alert" className="text-red-400">{error ?? result?.error}</p>}
+
+      <Form method="get" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Input name="shop_id" placeholder="Shop id" defaultValue={params.get("shop_id") ?? ""} aria-label="Shop id" />
+        <Input name="actor" placeholder="Person (user id)" defaultValue={params.get("actor") ?? ""} aria-label="Person" />
+        <select name="action" defaultValue={params.get("action") ?? ""} aria-label="Action" className="tap-target rounded-md border border-white/20 bg-transparent px-3 py-2 text-white">
+          {ACTION_GROUPS.map((g) => <option key={g.value} value={g.value} className="bg-[#0D0D0D]">{g.label}</option>)}
+        </select>
+        <select name="outcome" defaultValue={params.get("outcome") ?? ""} aria-label="Outcome" className="tap-target rounded-md border border-white/20 bg-transparent px-3 py-2 text-white">
+          <option value="" className="bg-[#0D0D0D]">Any outcome</option>
+          <option value="succeeded" className="bg-[#0D0D0D]">Succeeded</option>
+          <option value="failed" className="bg-[#0D0D0D]">Failed</option>
+          <option value="refused" className="bg-[#0D0D0D]">Refused</option>
+          <option value="unknown" className="bg-[#0D0D0D]">Unknown</option>
+        </select>
+        <Button type="submit" className="tap-target">Filter</Button>
+      </Form>
+
+      <ol className="space-y-2">
+        {entries.length === 0 && <li className="text-white/60">No activity matches these filters.</li>}
+        {entries.map((e) => {
+          const status = entryStatus(e);
+          const who = e.redacted ? "Redacted" : e.actor_name ?? e.actor_email ?? (e.actor_type === "system" ? "System" : e.actor_type === "anonymous" ? "Visitor" : e.actor_type);
+          return (
+            <li key={e.id} className="rounded-lg border border-white/10 bg-white/[0.02]">
+              <details>
+                <summary className="tap-target flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
+                  <time className="text-xs text-white/50" dateTime={e.occurred_at}>{new Date(e.occurred_at).toLocaleString("en-GB")}</time>
+                  <span className="min-w-[9rem] flex-1 font-medium text-white">{actionLabel(e.action)}{e.phase === "started" ? " (started)" : ""}</span>
+                  <span className="text-sm text-white/70">{who}</span>
+                  {e.outcome && <Badge variant={e.outcome === "succeeded" ? "success" : e.outcome === "unknown" ? "warning" : "error"}>{e.outcome}</Badge>}
+                  <Badge variant={status.variant} className="ml-auto">{status.label}</Badge>
+                  {e.historical === 1 && <Badge variant="outline">Historical</Badge>}
+                </summary>
+                <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm text-white/70">
+                  {e.reason && <p>Reason: {e.reason}</p>}
+                  {e.shop_id && <p>Shop: <a className="underline" href={`/dev/activity?shop_id=${encodeURIComponent(e.shop_id)}`}>{e.shop_id}</a></p>}
+                  {e.entity_type && <p>Item: {e.entity_type} {e.entity_id}</p>}
+                  <Changes json={e.changes_json} />
+                  {e.details_json && <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-black/30 p-2 text-xs">{JSON.stringify(JSON.parse(e.details_json), null, 2)}</pre>}
+                  {e.request_id && <p><a className="tap-target inline-flex items-center underline" href={`/dev/activity?request_id=${encodeURIComponent(e.request_id)}`}>Everything from this request</a></p>}
+                  {e.ip && !e.redacted && <p>IP: {e.ip}</p>}
+                  {e.seq !== null && <p>Entry number {e.seq}</p>}
+                  {e.actor_ref?.startsWith("subj_user_") && !e.redacted && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <a className="tap-target underline" href={`/dev/activity?actor=${encodeURIComponent(e.actor_ref)}`}>All activity by this person</a>
+                      <a className="tap-target underline" href={`/dev/activity/export?subject=${encodeURIComponent(e.actor_ref)}`}>Export their data</a>
+                      <Form method="post">
+                        <input type="hidden" name="intent" value="erase" />
+                        <input type="hidden" name="user_id" value={e.actor_ref.slice("subj_user_".length)} />
+                        <Button type="submit" variant="ghost" className="tap-target">Record erasure request</Button>
+                      </Form>
+                    </div>
+                  )}
+                </div>
+              </details>
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="flex flex-wrap justify-between gap-3">
+        {next_cursor ? (
+          <a className="tap-target underline" href={`/dev/activity?${auditQuery(new URLSearchParams({ ...Object.fromEntries(params), cursor: next_cursor }))}`}>Older entries</a>
+        ) : <span />}
+        <Form method="post">
+          <input type="hidden" name="intent" value="import" />
+          <Button type="submit" variant="ghost" className="tap-target">Import AI usage history</Button>
+        </Form>
+      </div>
+    </div>
+  );
+}

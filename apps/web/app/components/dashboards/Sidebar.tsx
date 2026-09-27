@@ -16,6 +16,7 @@ import {
   Package,
   Receipt,
   Scissors,
+  ScrollText,
   Settings,
   ShoppingBag,
   ShoppingCart,
@@ -39,6 +40,7 @@ const DEV_NAV: NavItem[] = [
   { href: "/dev/revenue", label: "Revenue", icon: BarChart3 },
   { href: "/dev/ai-deploy", label: "AI Deploy", icon: Bot },
   { href: "/dev/enquiries", label: "Enquiries", icon: MessageSquare },
+  { href: "/dev/activity", label: "Activity", icon: ScrollText },
 ];
 
 const ADMIN_NAV: NavItem[] = [

@@ -41,6 +41,7 @@ vi.mock("lucide-react", () => {
     Package: Icon,
     Receipt: Icon,
     Scissors: Icon,
+    ScrollText: Icon,
     Settings: Icon,
     ShoppingBag: Icon,
     ShoppingCart: Icon,
@@ -100,12 +101,18 @@ describe("DashboardLayout: server markup", () => {
     expect(bar).not.toContain('aria-current="page"');
   });
 
-  it("developer: all five destinations are tabs and there is no More", () => {
+  // Developer gained a 6th destination (Activity, Task 12) and has no
+  // curated priority list like ADMIN_TAB_HREFS, so it now falls through
+  // mobileTabsFor's generic overflow path: the first MAX_TABS - 1 items
+  // (in Sidebar's DEV_NAV order) become tabs and the rest — Enquiries and
+  // Activity — move behind More, same as any other role past the five-tab
+  // cap. Nothing is hidden: More still opens the drawer with every item.
+  it("developer: four tabs (in nav order) plus More once a sixth destination exists", () => {
     pathname = "/dev/shops";
     const bar = tabBar(ssr({ role: "developer", topBarTitle: "Pivot Parlor Platform" }));
-    expect(bar.match(/<a /g)).toHaveLength(5);
+    expect(bar.match(/<a /g)).toHaveLength(4);
     expect(bar).toContain('href="/dev/shops" aria-current="page"');
-    expect(bar).not.toContain("More");
+    expect(bar).toContain(">More<");
   });
 });
 
@@ -116,9 +123,14 @@ describe("mobileTabsFor", () => {
     expect(more).toBe(true);
   });
 
+  it("developer: no curated priority list, so overflow keeps the first four nav items and flags More", () => {
+    const { tabs, more } = mobileTabsFor("developer");
+    expect(tabs.map((t) => t.href)).toEqual(["/dev", "/dev/shops", "/dev/revenue", "/dev/ai-deploy"]);
+    expect(more).toBe(true);
+  });
+
   it("gives small roles every destination and no More", () => {
     expect(mobileTabsFor("staff").more).toBe(false);
-    expect(mobileTabsFor("developer").tabs).toHaveLength(5);
     expect(mobileTabsFor("customer").tabs).toHaveLength(0);
   });
 });
