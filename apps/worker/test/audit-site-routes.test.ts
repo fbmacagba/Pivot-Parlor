@@ -120,6 +120,35 @@ describe("site routes are audited", () => {
     expect(shopSubj!.redact_after).toBeNull();
   });
 
+  it("delete rolls back the redact schedule when the shop delete itself fails (Ruling 15)", async () => {
+    const { token } = await devToken();
+    const shopId = await seedShop("Trigger Blocked Shop");
+    // Force only the DELETE FROM shops statement to fail, scoped to this
+    // shop's id, so the earlier getShopById/getShopBySlug lookup and every
+    // other statement in the handler are unaffected. SQLite trigger bodies
+    // cannot use bound parameters ("trigger cannot use variables"), so the
+    // id (test-generated, alphanumeric + hyphens only, never user input) is
+    // inlined as a literal rather than bound.
+    const triggerName = `block_shop_delete_${shopId.replace(/-/g, "_")}`;
+    await env.DB.prepare(
+      `CREATE TRIGGER ${triggerName} BEFORE DELETE ON shops WHEN OLD.id = '${shopId}'
+       BEGIN SELECT RAISE(ABORT, 'blocked for test'); END`
+    ).run();
+    try {
+      const res = await dispatch("POST", `/api/shops/${shopId}/delete`, { headers: authHeaders(token) });
+      expect(res.status).toBe(500);
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER ${triggerName}`).run();
+    }
+    const shop = await env.DB.prepare("SELECT id FROM shops WHERE id = ?").bind(shopId).first<{ id: string }>();
+    expect(shop).not.toBeNull();
+    const shopSubj = await env.DB.prepare("SELECT redact_after FROM audit_subjects WHERE id = ?")
+      .bind(`subj_shop_${shopId}`).first<{ redact_after: string | null }>();
+    expect(shopSubj!.redact_after).toBeNull();
+    const rows = await entriesFor(shopId, "shop.delete");
+    expect(rows.map((r) => [r.phase, r.outcome])).toEqual([["started", null], ["outcome", "failed"]]);
+  });
+
   it("generate-site records failed with the status when it returns an error Response", async () => {
     const { token } = await devToken();
     const shopId = await seedShop("Regen Shop");
