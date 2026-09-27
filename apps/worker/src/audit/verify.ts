@@ -10,11 +10,31 @@ export interface VerifyResult {
   problem: string | null;
 }
 
+export interface VerifyOptions {
+  /** Ruling 28: fail any row that is sealed but not yet fully archived
+   *  (archived_at NULL, or archive_key NULL — the latter would otherwise
+   *  silently skip the archive comparison below and hide a recomputed
+   *  chain). The nightly check passes true; other callers default to
+   *  false so a row that simply hasn't been archived yet (normal lag) is
+   *  not itself treated as tampering. */
+  requireArchived?: boolean;
+}
+
 const PAGE = 500;
 
-export async function verifyRange(db: D1Database, bucket: R2Bucket, fromSeq: number, toSeq: number): Promise<VerifyResult> {
+export async function verifyRange(
+  db: D1Database,
+  bucket: R2Bucket,
+  fromSeq: number,
+  toSeq: number,
+  opts: VerifyOptions = {}
+): Promise<VerifyResult> {
   const fail = (checked: number, seq: number, problem: string): VerifyResult =>
     ({ ok: false, fromSeq, toSeq, checked, firstBadSeq: seq, problem });
+
+  // Minor: a caller-supplied range that is empty or backwards is a caller
+  // bug, not something to silently treat as "nothing to check."
+  if (fromSeq <= 0 || fromSeq > toSeq) return fail(0, fromSeq, "invalid range");
 
   let prev: string;
   if (fromSeq <= 1) {
@@ -37,8 +57,16 @@ export async function verifyRange(db: D1Database, bucket: R2Bucket, fromSeq: num
     const text = obj ? await obj.text() : "";
     for (const line of text.split("\n")) {
       if (!line) continue;
-      const id = (JSON.parse(line) as { id: string }).id;
-      m.set(id, line);
+      // Ruling 30: a corrupt archive line must not throw and abort every
+      // row's lookup against this object — skip just this line. Whatever
+      // row's own copy this was becomes "missing from archive" below,
+      // which is exactly the failure it should be.
+      try {
+        const id = (JSON.parse(line) as { id: string }).id;
+        m.set(id, line);
+      } catch {
+        continue;
+      }
     }
     archives.set(key, m);
     return m;
@@ -58,6 +86,9 @@ export async function verifyRange(db: D1Database, bucket: R2Bucket, fromSeq: num
       if ((await entryHash(row)) !== row.entry_hash) return fail(checked, expected, "entry_hash does not match the entry");
       prev = await chainHash(prev, row.entry_hash);
       if (prev !== row.chain_hash) return fail(checked, expected, "chain_hash breaks the chain");
+      if (opts.requireArchived && (row.archived_at == null || row.archive_key == null)) {
+        return fail(checked, expected, "row is sealed but not archived");
+      }
       if (row.archive_key) {
         const copy = (await archived(row.archive_key)).get(row.id);
         if (copy === undefined) return fail(checked, expected, `entry missing from archive ${row.archive_key}`);
