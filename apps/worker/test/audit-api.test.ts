@@ -89,10 +89,15 @@ describe("/api/audit", () => {
     expect(written).toEqual([]);
   });
 
-  it("treats empty filter values as absent, not invalid (minor)", async () => {
+  it("treats empty filter values as absent, not invalid, in both validation and filters() (minor)", async () => {
     const { token } = await dev();
     const res = await dispatch("GET", "/api/audit?shop_id=&action=&outcome=&from=&to=&cursor=", { headers: authHeaders(token) });
     expect(res.status).toBe(200);
+    // Not just "didn't 400": no empty value reached filters() or its echo,
+    // and an empty cursor did not mark the view "paged".
+    const [entry] = await auditEntriesFor(requestIdOf(res), "audit.view");
+    expect(entry).toBeTruthy();
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ filters: {} });
   });
 
   it("writes its own audit.view for a fabricated (but well-shaped) cursor, marked paged (Ruling 43)", async () => {
@@ -256,8 +261,14 @@ describe("/api/audit", () => {
     const adminId = await seedUser("admin", shopId);
     const adminToken = await tokenFor(adminId, "admin", shopId);
 
-    const noAuth = await dispatch("GET", "/api/audit/export?part=csv");
-    expect(noAuth.status).toBe(401);
+    const noAuthExport = await dispatch("GET", "/api/audit/export?part=csv");
+    expect(noAuthExport.status).toBe(401);
+
+    const noAuthSubject = await dispatch("GET", "/api/audit/subjects/subj_shop_does-not-exist/export");
+    expect(noAuthSubject.status).toBe(401);
+
+    const noAuthPost = await dispatch("POST", "/api/audit/verify", { body: {} });
+    expect(noAuthPost.status).toBe(401);
 
     const exportRes = await dispatch("GET", "/api/audit/export?part=csv", { headers: authHeaders(adminToken) });
     expect(exportRes.status).toBe(403);
