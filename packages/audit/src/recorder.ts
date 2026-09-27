@@ -1,7 +1,7 @@
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { isAuditAction } from "./actions";
 import { filterChanges } from "./allowlist";
-import { entryHash } from "./canonical";
+import { entryHash, wellFormed } from "./canonical";
 import { AUDIT_COLUMNS, type AuditActor, type AuditEntryInput, type AuditRow, type Outcome, type Via } from "./types";
 
 export class AuditWriteError extends Error {
@@ -45,8 +45,35 @@ export const userSubjectId = (userId: string): string => `subj_user_${userId}`;
 const REASON_MAX = 500;
 const DAY_MS = 24 * 3600 * 1000;
 
-function errorMessage(err: unknown): string {
-  return (err instanceof Error ? err.message : String(err)).slice(0, REASON_MAX);
+/** Truncate by Unicode code point, never mid-surrogate-pair (unlike String.slice). */
+function truncateCodePoints(s: string, max: number): string {
+  const chars = Array.from(s);
+  return chars.length > max ? chars.slice(0, max).join("") : s;
+}
+
+/** Every string column, well-formed, so the hash computed now matches what D1 stores. */
+function sanitizeRow(row: AuditRow): AuditRow {
+  const out: Record<string, unknown> = { ...row };
+  for (const k of Object.keys(out)) {
+    const v = out[k];
+    if (typeof v === "string") out[k] = wellFormed(v);
+  }
+  return out as unknown as AuditRow;
+}
+
+/**
+ * Structured, not the thrown error's message: reason is hashed into
+ * entry_hash and locked by the audit_log trigger for 6 years, and vendor
+ * error messages (e.g. LlmError) can carry response/request text that must
+ * never be stored permanently.
+ */
+function errorReason(err: unknown): string {
+  const name = err instanceof Error ? err.name : "Error";
+  const status =
+    err && typeof err === "object" && "status" in err && typeof (err as { status?: unknown }).status === "number"
+      ? (err as { status: number }).status
+      : undefined;
+  return status !== undefined ? `${name} (HTTP ${status})` : name;
 }
 
 export function createAuditRecorder(base: RecorderBase): AuditRecorder {
@@ -115,7 +142,7 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
         action: input.action,
         phase,
         outcome: phase === "started" ? null : input.outcome!,
-        reason: input.reason ? input.reason.slice(0, REASON_MAX) : null,
+        reason: input.reason ? truncateCodePoints(input.reason, REASON_MAX) : null,
         shop_id: input.shopId ?? null,
         entity_type: input.entityType ?? null,
         entity_id: input.entityId ?? null,
@@ -127,14 +154,15 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
         ip_ref: refs.ipRef,
         historical: input.historical ? 1 : 0,
       };
-      row.entry_hash = await entryHash(row);
+      const sanitized = sanitizeRow(row);
+      sanitized.entry_hash = await entryHash(sanitized);
       const insert = base.db
         .prepare(
           `INSERT INTO audit_log (${AUDIT_COLUMNS.join(", ")}) VALUES (${AUDIT_COLUMNS.map(() => "?").join(", ")})`
         )
-        .bind(...AUDIT_COLUMNS.map((c) => row[c]));
+        .bind(...AUDIT_COLUMNS.map((c) => sanitized[c]));
       base.onWrite?.();
-      return { id: row.id, stmts: [...refs.stmts, insert] };
+      return { id: sanitized.id, stmts: [...refs.stmts, insert] };
     } catch (err) {
       throw err instanceof AuditWriteError ? err : new AuditWriteError("Audit entry could not be prepared", err);
     }
@@ -157,7 +185,9 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
         return;
       } catch (err) {
         if (attempt === 1) {
-          // The action already happened; the sealer marks the started row "unknown".
+          // The action already happened; audit_log forbids updating an existing
+          // row's outcome, so a later process (the sealer) inserts a separate
+          // outcome row with outcome "unknown" once the started row ages out.
           console.error("[audit] outcome entry could not be written", input.action, input.parentId, err);
         }
       }
@@ -179,7 +209,7 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
       try {
         result = await fn();
       } catch (err) {
-        await writeOutcome({ ...input, phase: "outcome", outcome: "failed", reason: errorMessage(err), parentId: startedId });
+        await writeOutcome({ ...input, phase: "outcome", outcome: "failed", reason: errorReason(err), parentId: startedId });
         throw err;
       }
       const extra = describe ? describe(result) : {};

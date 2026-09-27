@@ -17,12 +17,22 @@ export interface AuditEntryInput {
   action: AuditAction;
   /** Required for phase "done"/"outcome"; must be omitted for "started". */
   outcome?: Outcome;
+  /**
+   * Permanent: hashed into entry_hash and locked by the audit_log trigger for
+   * 6 years, never blanked. Never put personal data, secrets, tokens, or
+   * request/response bodies here.
+   */
   reason?: string | null;
   shopId?: string | null;
   entityType?: string | null;
   entityId?: string | null;
   /** {field: [before, after]}; filtered through CHANGE_ALLOWLIST[entityType]. */
   changes?: Record<string, [unknown, unknown]> | null;
+  /**
+   * Permanent: hashed into entry_hash and locked by the audit_log trigger for
+   * 6 years, never blanked. Never put personal data, secrets, tokens, or
+   * request/response bodies here.
+   */
   details?: Record<string, unknown> | null;
   parentId?: string | null;
   phase?: Phase;

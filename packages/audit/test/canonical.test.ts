@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canonicalJson, chainHash, entryHash, GENESIS, sha256Hex } from "../src/canonical";
+import { canonicalJson, chainHash, entryHash, GENESIS, HASHED, sha256Hex, wellFormed } from "../src/canonical";
+import { AUDIT_COLUMNS } from "../src/types";
 import type { AuditRow } from "../src/types";
 
 const row: AuditRow = {
@@ -27,5 +28,29 @@ describe("canonical hashing", () => {
   it("chains from GENESIS with SHA-256", async () => {
     expect(await sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     expect(await chainHash(GENESIS, "e")).toBe(await sha256Hex(`${GENESIS}e`));
+  });
+
+  it("hashes every audit_log column except entry_hash itself", () => {
+    expect(new Set(HASHED)).toEqual(new Set(AUDIT_COLUMNS.filter((c) => c !== "entry_hash")));
+  });
+});
+
+describe("wellFormed", () => {
+  it("leaves ordinary text and valid surrogate pairs untouched", () => {
+    expect(wellFormed("plain text")).toBe("plain text");
+    expect(wellFormed("emoji: 😀!")).toBe("emoji: 😀!");
+  });
+
+  it("replaces a lone high surrogate with U+FFFD", () => {
+    expect(wellFormed("a\ud800b")).toBe("a�b");
+    expect(wellFormed("a\ud800")).toBe("a�");
+  });
+
+  it("replaces a lone low surrogate with U+FFFD", () => {
+    expect(wellFormed("a\udc00b")).toBe("a�b");
+  });
+
+  it("does not disturb a valid pair adjacent to a lone surrogate", () => {
+    expect(wellFormed("\ud800😀")).toBe("�😀");
   });
 });

@@ -34,18 +34,46 @@ describe("audit recorder", () => {
   it("reuses one IP subject per day", async () => {
     const a = await recorder(null, "198.51.100.1").write({ action: "audit.gap", outcome: "succeeded" });
     const b = await recorder(null, "198.51.100.1").write({ action: "audit.gap", outcome: "succeeded" });
-    const refs = await env.DB.prepare("SELECT DISTINCT ip_ref FROM audit_log WHERE id IN (?, ?)").bind(a, b).all();
+    const refs = await env.DB.prepare("SELECT DISTINCT ip_ref FROM audit_log WHERE id IN (?, ?)").bind(a, b).all<{ ip_ref: string | null }>();
     expect(refs.results).toHaveLength(1);
+    expect(refs.results![0]!.ip_ref).not.toBeNull();
   });
 
-  it("run() writes started and outcome rows, and failed on throw", async () => {
+  it("run() writes started and outcome rows, and a structured reason (never the message) on throw", async () => {
     const rec = recorder(null);
-    await expect(rec.run({ action: "ai.call" }, async () => { throw new Error("vendor 401"); })).rejects.toThrow("vendor 401");
+    class VendorError extends Error {
+      status = 401;
+      constructor() {
+        super("vendor rejected key sk-live-do-not-store-this");
+        this.name = "VendorError";
+      }
+    }
+    await expect(rec.run({ action: "ai.call" }, async () => { throw new VendorError(); })).rejects.toThrow(
+      "vendor rejected key sk-live-do-not-store-this"
+    );
     const rows = await env.DB.prepare("SELECT phase, outcome, reason, parent_id, id FROM audit_log WHERE action = 'ai.call' ORDER BY occurred_at, phase DESC").all<{ phase: string; outcome: string | null; reason: string | null; parent_id: string | null; id: string }>();
     const started = rows.results!.find((r) => r.phase === "started")!;
     const outcome = rows.results!.find((r) => r.parent_id === started.id)!;
     expect(started.outcome).toBeNull();
-    expect(outcome).toMatchObject({ phase: "outcome", outcome: "failed", reason: "vendor 401" });
+    expect(outcome).toMatchObject({ phase: "outcome", outcome: "failed", reason: "VendorError (HTTP 401)" });
+    expect(outcome.reason).not.toContain("sk-live");
+  });
+
+  it("stores a reason whose truncation boundary lands on a surrogate pair without splitting it, and hashes to match", async () => {
+    const reason = "a".repeat(499) + "😀"; // 500 code points; naive UTF-16 .slice(0,500) would split the emoji
+    const id = await recorder(null).write({ action: "audit.gap", outcome: "succeeded", reason });
+    const row = await env.DB.prepare("SELECT * FROM audit_log WHERE id = ?").bind(id).first<AuditRow>();
+    expect(row!.reason).toBe(reason);
+    expect(row!.entry_hash).toBe(await entryHash(row!));
+  });
+
+  it("stores an entityId containing a lone surrogate as U+FFFD and hashes to match after the D1 round-trip", async () => {
+    const id = await recorder(null).write({
+      action: "audit.gap", outcome: "succeeded", entityType: "shop_site", entityId: "shop-\ud800-weird",
+    });
+    const row = await env.DB.prepare("SELECT * FROM audit_log WHERE id = ?").bind(id).first<AuditRow>();
+    expect(row!.entity_id).toBe("shop-�-weird");
+    expect(row!.entry_hash).toBe(await entryHash(row!));
   });
 
   it("run() refuses the action when the started entry cannot be written", async () => {
