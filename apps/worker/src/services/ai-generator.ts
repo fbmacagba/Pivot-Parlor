@@ -149,7 +149,9 @@ async function callThemeModel(
 
 export interface ThemeAudit {
   recorder: AuditRecorder;
-  fallback: boolean;
+  /** null when the caller cannot know (e.g. /apply-theme persisting a
+   *  client-supplied preview whose own generation this server never saw). */
+  fallback: boolean | null;
 }
 
 const THEME_AUDIT_KEYS = ["primaryColor", "accentColor", "fontHeading", "fontBody", "heroHeadline", "tagline"] as const;

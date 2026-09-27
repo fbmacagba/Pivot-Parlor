@@ -22,6 +22,8 @@ import {
 } from "../services/model-registry.js";
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
+/** Shape guard for an /apply-theme model_id: bounded length, no registry check (Ruling 18). */
+const MODEL_ID_SHAPE = /^[A-Za-z0-9._:\/@-]+$/;
 
 /** Owner palette from a request body — honoured only as a complete, valid pair. */
 function parsePalette(body: { color_primary?: unknown; color_accent?: unknown }): ThemePalette | undefined {
@@ -188,9 +190,19 @@ ai.post("/apply-theme", async (c) => {
     .first<{ id: string }>();
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  const modelId = typeof body.model_id === "string" && body.model_id.trim() ? body.model_id.trim() : "manual";
+  const rawModelId = typeof body.model_id === "string" && body.model_id.trim() ? body.model_id.trim() : "";
+  // Shape-only, never a registry check (Ruling 18): a delisted model must
+  // still be re-appliable, so this only guards against arbitrary/unbounded
+  // input being locked into the 6-year audit trail, not against an id the
+  // live registry no longer lists.
+  if (rawModelId && (rawModelId.length > 100 || !MODEL_ID_SHAPE.test(rawModelId))) {
+    return c.json({ success: false, error: "model_id is invalid" }, 400);
+  }
+  const modelId = rawModelId || "manual";
   try {
-    await persistShopTheme(c.env.DB, c.env.KV, shop.id, modelId, theme, { recorder: auditFor(c), fallback: false });
+    // The server cannot know whether the client's previewed theme was itself
+    // a fallback (Ruling 19) — say so honestly rather than claim false.
+    await persistShopTheme(c.env.DB, c.env.KV, shop.id, modelId, theme, { recorder: auditFor(c), fallback: null });
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
     throw e;
