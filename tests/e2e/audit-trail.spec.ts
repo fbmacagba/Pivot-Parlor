@@ -69,14 +69,26 @@ test.describe("Audit trail — staging", () => {
     // "e2e-staging", cancel-in-progress: false) and site.pause/site.activate
     // are rare, deliberate developer actions that nothing else on this
     // shared staging environment writes concurrently, so newest-first
-    // ordering + .first() safely means "the entry this test just made".
+    // ordering + .first() reliably picks out the entry this test just made.
+    //
+    // Audit entries are append-only and survive cleanup-e2e-shops (it only
+    // deletes shops, never audit_log rows), and this same fixture shop gets
+    // paused/activated on every gate run, so every earlier run's "Site
+    // paused" entries are still here on this filtered view, already
+    // Archived. A page-wide `getByText("Archived").first()` would therefore
+    // match one of THOSE straight away, regardless of whether this run's
+    // own entry ever seals — so the Archived check below is scoped to the
+    // SAME <li> as this run's own "Site paused" entry, not to the page.
     await page.goto("/dev/activity?action=site.");
-    await expect(page.getByText("Site paused").first()).toBeVisible();
+    // Locators are live queries, not snapshots, so this same reference is
+    // safe to re-check across the reloads below.
+    const pauseEntry = page.locator("ol > li").filter({ hasText: "Site paused" }).first();
+    await expect(pauseEntry).toBeVisible();
 
     // Sealing runs every minute on staging.
     await expect(async () => {
       await page.reload();
-      await expect(page.getByText("Archived").first()).toBeVisible();
+      await expect(pauseEntry.getByText("Archived", { exact: true })).toBeVisible();
     }).toPass({ timeout: 150_000, intervals: [15_000] });
 
     await page.getByRole("button", { name: "Check now" }).click();
@@ -86,15 +98,6 @@ test.describe("Audit trail — staging", () => {
   test("erasure confirmation dialog: Cancel does not submit", async ({ page }) => {
     await acknowledgePlatformCookieNotice(page);
     await login(page);
-
-    // This must stay empty for the whole test — the point of this test is
-    // that pressing Cancel never sends the erase request.
-    const eraseRequests: string[] = [];
-    page.on("request", (req) => {
-      if (req.method() === "POST" && (req.postData() ?? "").includes("intent=erase")) {
-        eraseRequests.push(req.url());
-      }
-    });
 
     // Opening Activity writes its own "Activity viewed" entry (audit.view)
     // attributed to the signed-in developer BEFORE the page's own list
@@ -121,8 +124,17 @@ test.describe("Audit trail — staging", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("heading", { name: "Record erasure request" })).toBeVisible();
 
+    // Only start listening once the dialog is open: from here on, Cancel
+    // must cause absolutely no POST request of any kind (not just no
+    // erase-shaped one — Cancel has no submit path to any <Form> at all,
+    // so nothing should fire).
+    const postsAfterOpen: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST") postsAfterOpen.push(req.url());
+    });
+
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
-    expect(eraseRequests, "an erase request must never be sent when Cancel is pressed").toHaveLength(0);
+    expect(postsAfterOpen, "Cancel must never send any POST request").toHaveLength(0);
   });
 });
