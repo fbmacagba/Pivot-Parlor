@@ -1,7 +1,7 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { getModel, type TextEffort } from "./model-registry.js";
 import { chatComplete, type ProviderKeys } from "@repo/llm";
-import type { AuditRecorder } from "@repo/audit";
+import { AuditWriteError, type AuditRecorder } from "@repo/audit";
 import { safeJsonParse } from "@repo/utils";
 
 // ─── Brand config (full schema, with conversion-optimised copy fields) ────────
@@ -110,6 +110,12 @@ function maxTokensForEffort(effort: TextEffort | undefined): number {
   return 1024;
 }
 
+/** estimated_cost_usd is permanent (details_json); round rather than carry
+ *  floating-point noise into a hashed, 6-year-locked column. */
+function round6(n: number): number {
+  return Math.round(n * 1_000_000) / 1_000_000;
+}
+
 const THEME_SYSTEM_PROMPT =
   "You are a brand designer and direct response copywriter. Return ONLY valid JSON, no markdown, no explanation, no code fences.";
 
@@ -154,7 +160,19 @@ export interface ThemeAudit {
   fallback: boolean | null;
 }
 
-const THEME_AUDIT_KEYS = ["primaryColor", "accentColor", "fontHeading", "fontBody", "heroHeadline", "tagline"] as const;
+// heroHeadline and tagline are excluded (Ruling 20): generated copy routinely
+// contains the shop name (personal data, Ruling 17) and, via /apply-theme, is
+// unbounded client text (Ruling 14) — and changes_json/details_json are
+// hashed and locked for 6 years, never blanked. `copy_changed` below records
+// only WHETHER that copy changed, never the words.
+const THEME_AUDIT_KEYS = ["primaryColor", "accentColor", "fontHeading", "fontBody"] as const;
+const FONT_LOG_KEYS = new Set<(typeof THEME_AUDIT_KEYS)[number]>(["fontHeading", "fontBody"]);
+/** A font name is free text too; only log it when it looks like one. */
+const FONT_LOG_SHAPE = /^[A-Za-z0-9 ,'"-]{1,64}$/;
+
+function loggableFont(value: string | undefined): string | null {
+  return typeof value === "string" && FONT_LOG_SHAPE.test(value) ? value : null;
+}
 
 /** Write a theme to the shop row and the KV cache — the single "apply" path.
  *  With `audit`, the row update and its theme.apply entry commit together. */
@@ -177,7 +195,12 @@ export async function persistShopTheme(
       .first<{ ai_theme: string | null; ai_model: string | null }>();
     const before = (safeJsonParse(prev?.ai_theme ?? null) ?? {}) as Partial<BrandConfig>;
     const changes: Record<string, [unknown, unknown]> = { ai_model: [prev?.ai_model ?? null, modelId] };
-    for (const k of THEME_AUDIT_KEYS) changes[k] = [before[k] ?? null, config[k] ?? null];
+    for (const k of THEME_AUDIT_KEYS) {
+      changes[k] = FONT_LOG_KEYS.has(k)
+        ? [loggableFont(before[k]), loggableFont(config[k])]
+        : [before[k] ?? null, config[k] ?? null];
+    }
+    const copyChanged = before.heroHeadline !== config.heroHeadline || before.tagline !== config.tagline;
     // Commits the row update and the audit entry in ONE batch (Plan ruling 8):
     // `statements()` alone never flips the gap guard's `auditWritten` flag, so
     // batching through the recorder is required for the guard to see this as
@@ -189,7 +212,7 @@ export async function persistShopTheme(
       entityType: "theme",
       entityId: shopId,
       changes,
-      details: { model: modelId, fallback: audit.fallback },
+      details: { model: modelId, fallback: audit.fallback, copy_changed: copyChanged },
     });
   } else {
     await update.run();
@@ -279,8 +302,8 @@ export async function generateShopTheme(
               input_tokens: r.inputTokens,
               output_tokens: r.outputTokens,
               estimated_cost_usd:
-                r.inputTokens !== null && r.outputTokens !== null
-                  ? (r.inputTokens * model.costPer1MInput + r.outputTokens * model.costPer1MOutput) / 1_000_000
+                r.inputTokens !== null && r.outputTokens !== null && (model.costPer1MInput !== 0 || model.costPer1MOutput !== 0)
+                  ? round6((r.inputTokens * model.costPer1MInput + r.outputTokens * model.costPer1MOutput) / 1_000_000)
                   : null,
             },
           })
@@ -288,7 +311,7 @@ export async function generateShopTheme(
       : await call();
     config = result.config;
   } catch (err) {
-    if (err instanceof Error && err.name === "AuditWriteError") throw err;
+    if (err instanceof AuditWriteError) throw err;
     console.error(`[AI Generator] ${model.provider} call failed, using fallback:`, err);
     config = defaultTheme(shopName, shopType);
     fallback = true;
