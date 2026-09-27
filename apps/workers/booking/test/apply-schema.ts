@@ -8,24 +8,13 @@
 import { env } from "cloudflare:test";
 import { beforeAll } from "vitest";
 import schemaSql from "../../../worker/src/db/schema.sql?raw";
+import { statements } from "../../../../scripts/sql-statements.mjs";
 
 const migrationModules = import.meta.glob("../../../worker/src/db/migrations/*.sql", {
   query: "?raw",
   import: "default",
   eager: true,
 }) as Record<string, string>;
-
-function statements(sql: string): string[] {
-  // Strip comment lines FIRST — a ';' inside a comment would otherwise split
-  // the file mid-comment and corrupt the following statement.
-  return sql
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 const BENIGN = /duplicate column name|already exists/i;
 
