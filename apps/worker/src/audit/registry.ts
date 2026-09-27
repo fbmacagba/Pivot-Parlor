@@ -15,7 +15,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/ai/chatbot-model": "ai.chatbot_model.set",
   "POST /api/ai/compare": "theme.compare",
   "POST /api/ai/generate-theme": "theme.generate",
-  // Task 11 adds the three /api/audit POST routes here.
+  "POST /api/audit/verify": "audit.verify",
+  "POST /api/audit/import-historical": "audit.import.historical",
+  "POST /api/audit/subjects/:userId/erase": "subject.erase_request",
 
   // Plan 2
   "DELETE /api/shops/:shopId/products/:productId": "pending",

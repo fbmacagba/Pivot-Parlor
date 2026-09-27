@@ -45,6 +45,7 @@ import { requestId } from "./audit/request-id.js";
 import { auditGapGuard } from "./audit/gap-guard.js";
 import { runSealer } from "./audit/sealer.js";
 import { runAuditNightly } from "./audit/nightly.js";
+import auditRouter from "./routes/audit.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -208,6 +209,9 @@ app.route("/api/waitlist", waitlistRouter);
 
 // Developer: AI theme generation + model management
 app.route("/api/ai", aiRouter);
+
+// Developer: audit trail viewer, checks and exports
+app.route("/api/audit", auditRouter);
 
 // Public: contact form + developer enquiry list
 // Primary path when the Worker is mounted at the domain root:
