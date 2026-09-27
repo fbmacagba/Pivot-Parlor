@@ -44,6 +44,7 @@ import {
 import { requestId } from "./audit/request-id.js";
 import { auditGapGuard } from "./audit/gap-guard.js";
 import { runSealer } from "./audit/sealer.js";
+import { runAuditNightly } from "./audit/nightly.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -258,13 +259,30 @@ export default {
       return;
     }
 
-    // 03:00 UTC — LEG-6 retention: bounded, idempotent sweeps (WS-8 phase 2).
+    // 03:00 UTC — LEG-6 retention: bounded, idempotent sweeps (WS-8 phase 2),
+    // then the audit nightly check (spec 5.3, 5.4). Each step has its OWN
+    // try/catch, so neither a retention failure nor a nightly failure can
+    // ever abort the other — runRetentionSweep already catches per-table
+    // errors internally, but that alone would not stop an error thrown
+    // earlier (e.g. from its own setup) from skipping the nightly check
+    // below; the outer catch here closes that gap regardless of what
+    // runRetentionSweep does internally.
     if (cron === "0 3 * * *") {
-      console.log("[Cron 03:00] Running retention sweep...");
-      const { counts, errors } = await runRetentionSweep(env.DB);
-      console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
-      for (const e of errors) {
-        console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);
+      try {
+        console.log("[Cron 03:00] Running retention sweep...");
+        const { counts, errors } = await runRetentionSweep(env.DB);
+        console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
+        for (const e of errors) {
+          console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);
+        }
+      } catch (err) {
+        console.error("[Cron 03:00] Retention sweep failed:", err);
+      }
+
+      try {
+        await runAuditNightly(env);
+      } catch (err) {
+        console.error("[Cron 03:00] Audit nightly check failed:", err);
       }
       return;
     }
