@@ -1,5 +1,6 @@
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
 import { systemAudit } from "./context.js";
+import { verifyRange } from "./verify.js";
 
 export const AUDIT_RETENTION_DAYS = 2192;
 
@@ -43,14 +44,23 @@ export async function redactDueSubjects(db: D1Database, now: Date, max: number):
  *
  * Ruling 38: a row is only a candidate once it is at or below
  * audit_seal_state.last_verified_seq — the nightly verifier's own high-water
- * mark. However old or archived a row is, it can never be expired ahead of
- * proof that the chain up to it is intact; the gate is applied to both the
- * firstKeep boundary and the candidate select itself.
+ * mark. The gate is applied to both the firstKeep boundary and the candidate
+ * select itself.
+ *
+ * Ruling 40: `last_verified_seq` alone is not proof of an intact chain —
+ * Ruling 31's `advanceCursor` (nightly.ts) deliberately moves it past a row
+ * that FAILED verification too, so the incremental scan doesn't stall
+ * forever behind one persistently-bad row. So immediately before deleting,
+ * the exact candidate range is re-verified with `requireArchived: true`; only
+ * the rows before any failure are ever deleted. Expiry now deletes only rows
+ * it has just proven intact, not merely rows the verifier's cursor reached.
  *
  * Ruling 39: commits through the recorder's batch API, alongside the
- * deletes and the audit_seal_state update, in one all-or-nothing D1 batch.
+ * deletes and the audit_seal_state update, in one all-or-nothing D1 batch —
+ * except the pre-expiry-check-failed-and-nothing-deletable path, which has no
+ * changes to batch and uses `recorder.write` instead.
  */
-export async function expireOldEntries(db: D1Database, now: Date, max: number): Promise<number> {
+export async function expireOldEntries(db: D1Database, bucket: R2Bucket, now: Date, max: number): Promise<number> {
   const cutoff = new Date(now.getTime() - AUDIT_RETENTION_DAYS * 24 * 3600 * 1000).toISOString();
   const sealState = await db
     .prepare("SELECT last_verified_seq FROM audit_seal_state WHERE id = 1")
@@ -72,18 +82,48 @@ export async function expireOldEntries(db: D1Database, now: Date, max: number): 
     )
     .bind(cutoff, lastVerifiedSeq, firstKeep?.s ?? null, firstKeep?.s ?? null, max)
     .all<{ id: string; seq: number; chain_hash: string }>();
-  const list = rows.results ?? [];
-  if (!list.length) return 0;
+  const candidates = rows.results ?? [];
+  if (!candidates.length) return 0;
 
-  const last = list[list.length - 1]!;
-  const del = list.map((r) => db.prepare("DELETE FROM audit_log WHERE id = ?").bind(r.id));
+  const firstSeq = candidates[0]!.seq;
+  const lastSeq = candidates[candidates.length - 1]!.seq;
+
+  // Ruling 40: re-verify the exact candidate range right before deleting.
+  let verifyFailedAt: number | null;
+  let failReason: string | null;
+  try {
+    const check = await verifyRange(db, bucket, firstSeq, lastSeq, { requireArchived: true });
+    verifyFailedAt = check.ok ? null : check.firstBadSeq;
+    failReason = check.ok ? null : "pre-expiry verification failed";
+  } catch (err) {
+    // Never err.message (Ruling 5) — a thrown verify is treated as a failure
+    // at the very first candidate, since nothing in the range has now been
+    // proven intact.
+    verifyFailedAt = firstSeq;
+    failReason = `pre-expiry verification error: ${err instanceof Error ? err.name : "Error"}`;
+  }
+
+  const usable = verifyFailedAt == null ? candidates : candidates.filter((r) => r.seq < verifyFailedAt!);
+
+  if (!usable.length) {
+    await systemAudit(db, "cron").write({
+      action: "audit.expire",
+      outcome: "failed",
+      reason: failReason,
+      details: { verify_failed_at: verifyFailedAt, from_seq: firstSeq, to_seq: lastSeq },
+    });
+    return 0;
+  }
+
+  const lastUsable = usable[usable.length - 1]!;
+  const del = usable.map((r) => db.prepare("DELETE FROM audit_log WHERE id = ?").bind(r.id));
   const stateUpdate = db
     .prepare("UPDATE audit_seal_state SET expired_through_seq = ?, expired_chain_hash = ? WHERE id = 1")
-    .bind(last.seq, last.chain_hash);
+    .bind(lastUsable.seq, lastUsable.chain_hash);
   await systemAudit(db, "cron").batch([...del, stateUpdate], {
     action: "audit.expire",
     outcome: "succeeded",
-    details: { from_seq: list[0]!.seq, to_seq: last.seq, count: list.length },
+    details: { from_seq: usable[0]!.seq, to_seq: lastUsable.seq, count: usable.length, verify_failed_at: verifyFailedAt },
   });
-  return list.length;
+  return usable.length;
 }

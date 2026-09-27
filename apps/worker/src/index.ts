@@ -270,7 +270,7 @@ export default {
     if (cron === "0 3 * * *") {
       try {
         console.log("[Cron 03:00] Running retention sweep...");
-        const { counts, errors } = await runRetentionSweep(env.DB);
+        const { counts, errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
         console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
         for (const e of errors) {
           console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);

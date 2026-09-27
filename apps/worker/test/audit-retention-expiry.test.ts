@@ -45,7 +45,7 @@ describe("audit expiry", () => {
     const before = await E.DB.prepare("SELECT last_verified_seq FROM audit_seal_state WHERE id = 1").first<{ last_verified_seq: number }>();
     expect(before!.last_verified_seq).toBe(0); // nothing has verified it yet
 
-    const deleted = await expireOldEntries(E.DB, new Date(), 500);
+    const deleted = await expireOldEntries(E.DB, E.AUDIT_ARCHIVE, new Date(), 500);
     expect(deleted).toBe(0);
 
     const row = await E.DB.prepare("SELECT seq FROM audit_log WHERE seq = 1").first();
@@ -69,7 +69,7 @@ describe("audit expiry", () => {
     expect((await verifyRange(E.DB, E.AUDIT_ARCHIVE, 1, max0)).ok).toBe(true);
     await E.DB.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(max0).run();
 
-    const deleted = await expireOldEntries(E.DB, new Date(), 500);
+    const deleted = await expireOldEntries(E.DB, E.AUDIT_ARCHIVE, new Date(), 500);
     expect(deleted).toBe(1);
 
     await runSealer(E);

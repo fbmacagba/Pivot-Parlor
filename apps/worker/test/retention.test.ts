@@ -71,7 +71,7 @@ describe("retention sweep (LEG-6)", () => {
     const oldId = await seedChatSession(shopId, daysAgo(RETENTION_POLICY.chatSessionsDays + 5));
     const freshId = await seedChatSession(shopId, daysAgo(5));
 
-    const { counts, errors } = await runRetentionSweep(env.DB);
+    const { counts, errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
     expect(errors).toEqual([]);
     expect(counts.chat_sessions).toBeGreaterThanOrEqual(1);
 
@@ -93,7 +93,7 @@ describe("retention sweep (LEG-6)", () => {
     );
     const freshId = await seedBooking(shopId, staffId, serviceId, dateDaysAgo(30));
 
-    const { errors } = await runRetentionSweep(env.DB);
+    const { errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
     expect(errors).toEqual([]);
 
     const old = await env.DB.prepare("SELECT * FROM bookings WHERE id = ?").bind(oldId).first<{
@@ -127,8 +127,8 @@ describe("retention sweep (LEG-6)", () => {
     const serviceId = await seedService(shopId);
     await seedBooking(shopId, staffId, serviceId, dateDaysAgo(800));
 
-    await runRetentionSweep(env.DB);
-    const second = await runRetentionSweep(env.DB);
+    await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
+    const second = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
     expect(second.errors).toEqual([]);
     expect(second.counts.bookings_anonymised).toBe(0);
   });
@@ -167,7 +167,7 @@ describe("retention sweep (LEG-6)", () => {
       .bind(keptContact, daysAgo(RETENTION_POLICY.contactsMonths * 31 + 10), shopId)
       .run();
 
-    const { errors } = await runRetentionSweep(env.DB);
+    const { errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
     expect(errors).toEqual([]);
 
     const wait = await env.DB.prepare("SELECT id FROM waitlist WHERE id = ?").bind(oldWait).first();
@@ -185,9 +185,9 @@ describe("retention sweep (LEG-6)", () => {
     const old = daysAgo(RETENTION_POLICY.chatSessionsDays + 30);
     for (let i = 0; i < 5; i++) await seedChatSession(shopId, old);
 
-    const first = await runRetentionSweep(env.DB, 2);
+    const first = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE, 2);
     expect(first.counts.chat_sessions).toBe(2);
-    const second = await runRetentionSweep(env.DB, 2);
+    const second = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE, 2);
     expect(second.counts.chat_sessions).toBe(2);
 
     const left = await env.DB.prepare(
@@ -214,7 +214,7 @@ describe("retention sweep (LEG-6)", () => {
       .bind(freshId)
       .run();
 
-    const { errors } = await runRetentionSweep(env.DB);
+    const { errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
     expect(errors).toEqual([]);
     expect(await env.DB.prepare("SELECT id FROM ai_usage_log WHERE id = ?").bind(oldId).first()).toBeNull();
     expect(await env.DB.prepare("SELECT id FROM ai_usage_log WHERE id = ?").bind(freshId).first()).not.toBeNull();
