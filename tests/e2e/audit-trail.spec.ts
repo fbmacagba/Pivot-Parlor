@@ -63,10 +63,14 @@ test.describe("Audit trail — staging", () => {
     const pauseRes = await page.request.post(`/api/shops/${E2E_SHOP_SLUG}/pause`);
     expect(pauseRes.ok(), `pause failed: ${pauseRes.status()} ${await pauseRes.text()}`).toBeTruthy();
 
-    // /activate always runs in `finally`, even if an assertion below throws
-    // (e.g. the archived-wait times out) -- otherwise a failed run would
-    // leave this shared fixture shop stuck "paused" going into the next
-    // gate run, instead of just failing this one test.
+    // /activate always runs in `finally`, even if an assertion below
+    // throws (e.g. the archived-wait times out): this fixture has no
+    // shop_sites row (see the header comment), so a failed pause here
+    // isn't leaving a real site "stuck paused" -- the point is to still
+    // emit the matching site.activate audit entry and leave the shared
+    // fixture shop in a clean, symmetrical state for the next gate run
+    // (cleanup-e2e-shops.mjs recreates e2e-* shops fresh each run anyway,
+    // but that's a separate safety net, not a reason to skip this).
     try {
       // Own-entry `.first()` scoping below relies on e2e.yml running this
       // spec serialized: the "e2e-staging" concurrency group
@@ -100,8 +104,22 @@ test.describe("Audit trail — staging", () => {
       await page.getByRole("button", { name: "Check now" }).click();
       await expect(page.getByRole("status")).toContainText("intact");
     } finally {
-      const activateRes = await page.request.post(`/api/shops/${E2E_SHOP_SLUG}/activate`);
-      expect(activateRes.ok(), `activate failed: ${activateRes.status()} ${await activateRes.text()}`).toBeTruthy();
+      // Nothing in this block may throw, or it would replace (mask) a
+      // pending failure from the try block above -- that's plain JS
+      // finally semantics, not a Playwright quirk. Both the request itself
+      // (which could reject, e.g. on a network error) and the outcome
+      // check use expect.soft, which records a failure without throwing:
+      // Playwright still fails the test once it finishes running if any
+      // soft assertion failed (confirmed against this repo's installed
+      // playwright/types/test.d.ts: `Expect.soft` returns normal matchers,
+      // and Playwright's own docs describe soft assertions as continuing
+      // the test and reporting all failures once it has finished).
+      try {
+        const activateRes = await page.request.post(`/api/shops/${E2E_SHOP_SLUG}/activate`);
+        expect.soft(activateRes.ok(), `activate failed: ${activateRes.status()} ${await activateRes.text()}`).toBeTruthy();
+      } catch (err) {
+        expect.soft(false, `activate request threw: ${err instanceof Error ? err.message : String(err)}`).toBeTruthy();
+      }
     }
   });
 
