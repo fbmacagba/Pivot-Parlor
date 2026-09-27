@@ -60,10 +60,50 @@ export function chainHash(prevChain: string, entry: string): Promise<string> {
   return sha256Hex(`${prevChain}${entry}`);
 }
 
-/** The archived form of a sealed row: every column except archive bookkeeping. */
-export function archiveLine(row: AuditRow): string {
-  const { archived_at: _a, archive_key: _k, ...rest } = row;
-  const sorted: Record<string, unknown> = {};
-  for (const k of Object.keys(rest).sort()) sorted[k] = (rest as Record<string, unknown>)[k] ?? null;
-  return JSON.stringify(sorted);
+/** Ruling 58: the current archive line format, recorded in every line. */
+export const ARCHIVE_FORMAT = 1;
+
+/**
+ * Ruling 58: the columns each archive line format holds, in line order.
+ * Archive objects live in a locked bucket for 6 years, so a format's list
+ * must never change once anything has been archived with it: a new audit_log
+ * column means a NEW format number with its own list, while objects already
+ * written keep verifying against the list their lines name. (Before this,
+ * lines were built from whatever keys `SELECT *` returned, so any ADD COLUMN
+ * would have made every archived comparison fail.)
+ */
+export const ARCHIVE_COLUMNS: Readonly<Record<number, readonly (keyof AuditRow)[]>> = {
+  1: [
+    "action", "actor_ref", "actor_role", "actor_type", "chain_hash", "changes_json", "details_json",
+    "entity_id", "entity_type", "entry_hash", "historical", "id", "ip_ref", "occurred_at", "outcome",
+    "parent_id", "phase", "reason", "request_id", "seq", "sealed_at", "shop_id", "via", "worker",
+  ],
+};
+
+/** The archived form of a sealed row in the given format (default: current):
+ *  `archive_format` first, then that format's columns in its fixed order.
+ *  Keys the row carries beyond that list are ignored. */
+export function archiveLine(row: AuditRow, format: number = ARCHIVE_FORMAT): string {
+  const cols = ARCHIVE_COLUMNS[format];
+  if (!cols) throw new Error(`unknown archive format ${format}`);
+  const out: Record<string, unknown> = { archive_format: format };
+  for (const k of cols) out[k] = row[k] ?? null;
+  return JSON.stringify(out);
+}
+
+/** Reads an archive line's entry id and format. `format` is null when the
+ *  line names no format this code knows; null overall when the line is not
+ *  a JSON object with a string id. */
+export function parseArchiveLine(line: string): { id: string; format: number | null } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const { id, archive_format } = parsed as { id?: unknown; archive_format?: unknown };
+  if (typeof id !== "string") return null;
+  const format = typeof archive_format === "number" && ARCHIVE_COLUMNS[archive_format] ? archive_format : null;
+  return { id, format };
 }

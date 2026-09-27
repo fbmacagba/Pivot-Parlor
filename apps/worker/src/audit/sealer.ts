@@ -4,6 +4,8 @@ import { systemAudit } from "./context.js";
 
 export const SEAL_BATCH = 500;
 export const ARCHIVE_BATCH = 500;
+/** Ruling 59: seal batches archived per sealer run (one object each). */
+export const ARCHIVE_BATCHES_PER_RUN = 5;
 export const LEASE_MS = 50_000;
 export const STALE_STARTED_MS = 15 * 60_000;
 /** Ruling 26: bound the stale-started scan's lower edge so it never becomes
@@ -212,14 +214,31 @@ async function alertTampered(db: D1Database, tampered: string[]): Promise<void> 
 }
 
 /**
- * Ruling 24: archives exactly ONE seal batch (one shared sealed_at value)
- * per call, so the object key - built from that batch's first/last seq and
+ * Ruling 24: each object holds exactly ONE seal batch (one shared sealed_at
+ * value), so the object key - built from that batch's first/last seq and
  * its own sealed_at - is deterministic and reproducible on retry. Archiving
  * rows from more than one sealed_at value under a single key broke that: a
  * retry after a growing backlog would recompute a wider key than the one
  * already written to a locked (overwrite-refusing) bucket.
  */
 export async function archivePending(db: D1Database, bucket: R2Bucket, nowIso: string): Promise<number> {
+  // Ruling 59: up to ARCHIVE_BATCHES_PER_RUN batches per run, so a backlog
+  // (an R2 outage, a burst of small batches) drains in minutes rather than
+  // one batch per minute. Each batch is still its own object with its own
+  // deterministic key (Ruling 24). An error stops the loop and propagates
+  // (runSealer records it as archiveError; that run then reports archived
+  // 0 even if earlier batches in it succeeded -- they are durably marked,
+  // only the count in that one SealResult is understated).
+  let total = 0;
+  for (let i = 0; i < ARCHIVE_BATCHES_PER_RUN; i++) {
+    const n = await archiveOneBatch(db, bucket, nowIso);
+    if (!n) break;
+    total += n;
+  }
+  return total;
+}
+
+async function archiveOneBatch(db: D1Database, bucket: R2Bucket, nowIso: string): Promise<number> {
   const res = await db
     .prepare(
       `SELECT * FROM audit_log
@@ -235,7 +254,9 @@ export async function archivePending(db: D1Database, bucket: R2Bucket, nowIso: s
   const last = rows[rows.length - 1]!.seq!;
   const sealedAt = rows[0]!.sealed_at!;
   const key = archiveKey(first, last, sealedAt);
-  const body = rows.map(archiveLine).join("\n") + "\n";
+  // Not `rows.map(archiveLine)`: map's index argument would be read as the
+  // archive format (Ruling 58).
+  const body = rows.map((r) => archiveLine(r)).join("\n") + "\n";
   if (await bucket.head(key)) {
     // Locked buckets refuse overwrites: accept an identical earlier upload.
     const existing = await bucket.get(key);

@@ -5,6 +5,18 @@ import { verifyRange, type VerifyResult } from "./verify.js";
 
 export const WALK_ROWS_PER_NIGHT = 20_000;
 
+/** Ruling 54: archive objects (one R2 GET each) the nightly may read across
+ *  BOTH ranges combined. Workers Paid allows 10,000 subrequests per
+ *  invocation by default; 2,000 leaves ample headroom for the D1 pages,
+ *  cursor updates, the audit.verify/audit.anchor writes and the emails. The
+ *  incremental range is served first and the walk gets what is left, so new
+ *  entries are never starved by the history re-walk. */
+export const NIGHTLY_ARCHIVE_OBJECTS = 2000;
+
+export interface NightlyLimits {
+  archiveObjects: number;
+}
+
 type NightlyEnv = {
   DB: D1Database;
   AUDIT_ARCHIVE: R2Bucket;
@@ -35,13 +47,19 @@ async function safeVerify(
   bucket: R2Bucket,
   fromSeq: number,
   toSeq: number,
-  opts: { requireArchived?: boolean }
+  opts: { requireArchived?: boolean; maxArchiveObjects: number }
 ): Promise<VerifyResult> {
   try {
     return await verifyRange(db, bucket, fromSeq, toSeq, opts);
   } catch (err) {
     const name = err instanceof Error ? err.name : "Error";
-    return { ok: false, fromSeq, toSeq, checked: 0, firstBadSeq: fromSeq, problem: `verify error: ${name}` };
+    // Ruling 54: how many GETs ran before the throw is unknown, so count the
+    // whole budget as spent (conservative: the walk then does not run on a
+    // night whose incremental range threw, and the problem line alerts).
+    return {
+      ok: false, fromSeq, toSeq, checked: 0, firstBadSeq: fromSeq, problem: `verify error: ${name}`,
+      capped: false, archiveObjects: opts.maxArchiveObjects,
+    };
   }
 }
 
@@ -67,9 +85,14 @@ function advanceCursor(r: VerifyResult): number {
 // escape uncaught, silently skipping both the audit.verify record and the
 // alert email for the whole night. One top-level catch here is the backstop
 // for anything the per-step guards don't cover, not a replacement for them.
-export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: Send = sendAuditEmail): Promise<void> {
+export async function runAuditNightly(
+  env: NightlyEnv,
+  now = new Date(),
+  send: Send = sendAuditEmail,
+  limits: NightlyLimits = { archiveObjects: NIGHTLY_ARCHIVE_OBJECTS }
+): Promise<void> {
   try {
-    await runAuditNightlyBody(env, now, send);
+    await runAuditNightlyBody(env, now, send, limits);
   } catch (err) {
     const name = err instanceof Error ? err.name : "Error"; // never err.message (Ruling 5)
     // Ruling 32: recipient from env, never D1 -- same rule as the body's own
@@ -102,7 +125,7 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
   }
 }
 
-async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Promise<void> {
+async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send, limits: NightlyLimits): Promise<void> {
   const db = env.DB;
   const state = await db.prepare("SELECT last_verified_seq, walk_cursor_seq, expired_through_seq FROM audit_seal_state WHERE id = 1")
     .first<{ last_verified_seq: number; walk_cursor_seq: number; expired_through_seq: number }>();
@@ -155,7 +178,14 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
   const incFrom = Math.max(floor, lastVerifiedSeq + 1);
   const incTentativeTo = Math.min(maxSeq, incFrom + WALK_ROWS_PER_NIGHT - 1);
   const incTo = await archivedCeiling(incFrom, incTentativeTo);
-  const incremental: VerifyResult | null = incTo >= incFrom ? await safeVerify(db, env.AUDIT_ARCHIVE, incFrom, incTo, { requireArchived: true }) : null;
+  // Ruling 54: a capped range reports toSeq = its last fully verified seq,
+  // so advanceCursor below moves the cursor exactly that far and the next
+  // night resumes right after it.
+  const incremental: VerifyResult | null =
+    incTo >= incFrom
+      ? await safeVerify(db, env.AUDIT_ARCHIVE, incFrom, incTo, { requireArchived: true, maxArchiveObjects: limits.archiveObjects })
+      : null;
+  const walkBudget = limits.archiveObjects - (incremental?.archiveObjects ?? 0);
   let newLastVerifiedSeq = lastVerifiedSeq;
   if (incremental) {
     newLastVerifiedSeq = advanceCursor(incremental);
@@ -195,7 +225,11 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
   if (walkFrom > lastVerifiedSeq) walkFrom = floor;
   const walkTentativeTo = Math.min(newLastVerifiedSeq, walkFrom + WALK_ROWS_PER_NIGHT - 1);
   const walkTo = await archivedCeiling(walkFrom, walkTentativeTo);
-  const walk: VerifyResult | null = walkTo >= walkFrom ? await safeVerify(db, env.AUDIT_ARCHIVE, walkFrom, walkTo, { requireArchived: true }) : null;
+  // Ruling 54: no budget left = no walk tonight (cursor untouched).
+  const walk: VerifyResult | null =
+    walkTo >= walkFrom && walkBudget >= 1
+      ? await safeVerify(db, env.AUDIT_ARCHIVE, walkFrom, walkTo, { requireArchived: true, maxArchiveObjects: walkBudget })
+      : null;
   if (walk) await db.prepare("UPDATE audit_seal_state SET walk_cursor_seq = ? WHERE id = 1").bind(advanceCursor(walk)).run();
 
   // 3. Health counts. (`iso` is defined above, ahead of the Ruling 33 check.)
@@ -220,6 +254,18 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
   // reported separately from "unsealed" (above) since sealing will never
   // resolve them on its own.
   const sealAlerts = await count("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.seal.alert' AND occurred_at >= ?", iso(24 * 3600_000));
+  // Ruling 56: the 24 h line above goes quiet a day after the alert, and the
+  // alerted row is excluded from "unsealed" -- so a tamper would alarm once
+  // and then read green forever. This count has no time window: every row
+  // still unsealed because it failed its integrity check is reported every
+  // night for as long as it stays in the trail.
+  const alertedUnsealed = await count(
+    `SELECT COUNT(*) AS n FROM audit_log al WHERE al.sealed_at IS NULL
+     AND EXISTS (
+       SELECT 1 FROM audit_log a
+       WHERE a.action = 'audit.seal.alert' AND a.entity_type = 'audit_log' AND a.entity_id = al.id
+     )`
+  );
 
   // Ruling 35: timestamp-free invariants -- states a legitimate row can
   // never reach through the normal seal/archive/expire code paths, so a
@@ -307,6 +353,25 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
   const recipient = env.AUDIT_OPERATOR_EMAIL;
   const alertingConfigured = Boolean(recipient && env.RESEND_API_KEY);
 
+  // Ruling 57: a send that failed last night is only on record in last
+  // night's audit.anchor entry; raise it tonight. Read BEFORE tonight's own
+  // audit.anchor is written below, so it is always the previous night's.
+  let previousSendProblems: string[] = [];
+  try {
+    const prev = await db
+      .prepare("SELECT outcome, details_json FROM audit_log WHERE action = 'audit.anchor' ORDER BY occurred_at DESC, id DESC LIMIT 1")
+      .first<{ outcome: string; details_json: string | null }>();
+    if (prev?.outcome === "failed") {
+      const d = JSON.parse(prev.details_json ?? "{}") as Partial<Record<"alert" | "anchor", SendRecord>>;
+      previousSendProblems = (["alert", "anchor"] as const)
+        .filter((k) => d[k]?.outcome === "failed")
+        .map((k) => `previous night's ${k} email could not be sent (${d[k]?.error ?? "Error"})`);
+      if (!previousSendProblems.length) previousSendProblems = ["previous night's email could not be sent"];
+    }
+  } catch (err) {
+    previousSendProblems = [`could not read the previous night's email record: ${err instanceof Error ? err.name : "Error"}`];
+  }
+
   const problems = [
     incremental && !incremental.ok ? `Check failed at seq ${incremental.firstBadSeq}: ${incremental.problem}` : null,
     walk && !walk.ok ? `History re-walk failed at seq ${walk.firstBadSeq}: ${walk.problem}` : null,
@@ -316,6 +381,7 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
     blockedAtSeq != null ? `verification blocked at seq ${blockedAtSeq}: sealed but not archived` : null,
     unknown ? `${unknown} actions in the last 24 hours have no recorded outcome` : null,
     sealAlerts ? `${sealAlerts} entries failed their integrity check when sealing` : null,
+    alertedUnsealed ? `${alertedUnsealed} entries are permanently unsealed after failing their integrity check` : null,
     impossibleSealed ? `${impossibleSealed} entries are in an impossible state (sealed without a seal time)` : null,
     impossibleVerifiedUnarchived ? `${impossibleVerifiedUnarchived} entries are in an impossible state (verified but not fully archived)` : null,
     impossibleArchivedNoKey ? `${impossibleArchivedNoKey} entries are in an impossible state (archived without an archive key)` : null,
@@ -323,6 +389,7 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
     anchorWriteProblem,
     latestAnchor.problem,
     priorAnchor.problem,
+    ...previousSendProblems,
     alertingConfigured ? null : "alert email not configured",
   ].filter((x): x is string => x !== null);
 
@@ -335,9 +402,10 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
       reason: problems.length ? problems.join("; ").slice(0, 500) : null,
       details: {
         checked: (incremental?.checked ?? 0) + (walk?.checked ?? 0),
-        incremental: incremental && { from: incremental.fromSeq, to: incremental.toSeq, ok: incremental.ok, firstBadSeq: incremental.firstBadSeq },
-        walk: walk && { from: walk.fromSeq, to: walk.toSeq, ok: walk.ok, firstBadSeq: walk.firstBadSeq },
-        unsealed, unarchived, unknown, sealAlerts,
+        incremental: incremental && { from: incremental.fromSeq, to: incremental.toSeq, ok: incremental.ok, firstBadSeq: incremental.firstBadSeq, capped: incremental.capped },
+        walk: walk && { from: walk.fromSeq, to: walk.toSeq, ok: walk.ok, firstBadSeq: walk.firstBadSeq, capped: walk.capped },
+        archiveObjects: (incremental?.archiveObjects ?? 0) + (walk?.archiveObjects ?? 0),
+        unsealed, unarchived, unknown, sealAlerts, alertedUnsealed,
         blockedAtSeq,
         impossibleSealed, impossibleVerifiedUnarchived, impossibleArchivedNoKey, impossibleExpiry,
         anchor: anchorRow ? { date: yesterday, seq: anchorRow.seq } : null,
@@ -347,15 +415,23 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
     console.error("[audit] nightly check entry could not be written:", err instanceof Error ? err.name : err);
   }
 
+  // Ruling 57 decision: with alerting not configured nothing is sent and no
+  // audit.anchor entry is written; the audit.verify entry above already
+  // carries "alert email not configured".
   if (!alertingConfigured) return;
 
   // Minor: alert before anchor, each isolated so one send failing does not
   // suppress the other.
+  const errorName = (err: unknown) => (err instanceof Error ? err.name : "Error"); // never err.message (Ruling 5)
+  let alertSend: SendRecord = null;
+  let anchorSend: SendRecord = null;
   if (problems.length) {
     try {
       await send(env.RESEND_API_KEY!, recipient!, "Audit trail needs attention", problems);
+      alertSend = { outcome: "succeeded" };
     } catch (err) {
-      console.error("[audit] alert email failed:", err instanceof Error ? err.name : err);
+      console.error("[audit] alert email failed:", errorName(err));
+      alertSend = { outcome: "failed", error: errorName(err) };
     }
   }
   if (latestAnchor.anchor) {
@@ -366,8 +442,26 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
         `Chain fingerprint: ${latestAnchor.anchor.chain_hash}`,
         "Keep this email. It proves what the audit trail said on this date.",
       ]);
+      anchorSend = { outcome: "succeeded", date: latestAnchor.anchor.date };
     } catch (err) {
-      console.error("[audit] anchor email failed:", err instanceof Error ? err.name : err);
+      console.error("[audit] anchor email failed:", errorName(err));
+      anchorSend = { outcome: "failed", error: errorName(err), date: latestAnchor.anchor.date };
     }
   }
+
+  // Ruling 57: the delivery itself goes on record (null = nothing to send).
+  const anyFailed = alertSend?.outcome === "failed" || anchorSend?.outcome === "failed";
+  try {
+    await systemAudit(db, "cron").write({
+      action: "audit.anchor",
+      outcome: anyFailed ? "failed" : "succeeded",
+      reason: anyFailed ? "email send failed" : null,
+      details: { alert: alertSend, anchor: anchorSend },
+    });
+  } catch (err) {
+    console.error("[audit] audit.anchor entry could not be written:", errorName(err));
+  }
 }
+
+/** Ruling 57: one email send's outcome; `error` is the error's name only. */
+type SendRecord = { outcome: "succeeded" | "failed"; error?: string; date?: string } | null;

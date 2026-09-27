@@ -4,6 +4,12 @@ import { verifyRange } from "./verify.js";
 
 export const AUDIT_RETENTION_DAYS = 2192;
 
+/** Ruling 54: archive objects (one R2 GET each) the pre-expiry re-verify may
+ *  read in one sweep. The sweep shares its invocation with the other
+ *  retention sweeps; a candidate range needing more objects is expired in
+ *  prefixes over successive nights. */
+export const EXPIRY_ARCHIVE_OBJECTS = 1000;
+
 /**
  * Blank name/email/IP for subjects whose redact_after has passed (spec 6.2).
  * The column set blanked is the same regardless of `kind` ('user',
@@ -60,7 +66,13 @@ export async function redactDueSubjects(db: D1Database, now: Date, max: number):
  * except the pre-expiry-check-failed-and-nothing-deletable path, which has no
  * changes to batch and uses `recorder.write` instead.
  */
-export async function expireOldEntries(db: D1Database, bucket: R2Bucket, now: Date, max: number): Promise<number> {
+export async function expireOldEntries(
+  db: D1Database,
+  bucket: R2Bucket,
+  now: Date,
+  max: number,
+  maxArchiveObjects = EXPIRY_ARCHIVE_OBJECTS
+): Promise<number> {
   const cutoff = new Date(now.getTime() - AUDIT_RETENTION_DAYS * 24 * 3600 * 1000).toISOString();
   const sealState = await db
     .prepare("SELECT last_verified_seq FROM audit_seal_state WHERE id = 1")
@@ -91,10 +103,18 @@ export async function expireOldEntries(db: D1Database, bucket: R2Bucket, now: Da
   // Ruling 40: re-verify the exact candidate range right before deleting.
   let verifyFailedAt: number | null;
   let failReason: string | null;
+  // Ruling 54: a capped check proved only rows up to its toSeq; everything
+  // after that is unverified and must not be deleted this sweep.
+  let verifiedThrough = lastSeq;
+  let verifyCapped = false;
   try {
-    const check = await verifyRange(db, bucket, firstSeq, lastSeq, { requireArchived: true });
+    const check = await verifyRange(db, bucket, firstSeq, lastSeq, { requireArchived: true, maxArchiveObjects });
     verifyFailedAt = check.ok ? null : check.firstBadSeq;
     failReason = check.ok ? null : "pre-expiry verification failed";
+    if (check.ok && check.capped) {
+      verifiedThrough = check.toSeq;
+      verifyCapped = true;
+    }
   } catch (err) {
     // Never err.message (Ruling 5) — a thrown verify is treated as a failure
     // at the very first candidate, since nothing in the range has now been
@@ -103,7 +123,7 @@ export async function expireOldEntries(db: D1Database, bucket: R2Bucket, now: Da
     failReason = `pre-expiry verification error: ${err instanceof Error ? err.name : "Error"}`;
   }
 
-  const usable = verifyFailedAt == null ? candidates : candidates.filter((r) => r.seq < verifyFailedAt!);
+  const usable = candidates.filter((r) => r.seq <= verifiedThrough && (verifyFailedAt == null || r.seq < verifyFailedAt));
 
   if (!usable.length) {
     await systemAudit(db, "cron").write({
@@ -123,7 +143,7 @@ export async function expireOldEntries(db: D1Database, bucket: R2Bucket, now: Da
   await systemAudit(db, "cron").batch([...del, stateUpdate], {
     action: "audit.expire",
     outcome: "succeeded",
-    details: { from_seq: usable[0]!.seq, to_seq: lastUsable.seq, count: usable.length, verify_failed_at: verifyFailedAt },
+    details: { from_seq: usable[0]!.seq, to_seq: lastUsable.seq, count: usable.length, verify_failed_at: verifyFailedAt, verify_capped: verifyCapped },
   });
   return usable.length;
 }

@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { chainHash, GENESIS, type AuditRow } from "@repo/audit";
-import { runSealer } from "../src/audit/sealer";
+import { archiveKey, runSealer } from "../src/audit/sealer";
 import { systemAudit } from "../src/audit/context";
 
 const E = env as unknown as { DB: D1Database; AUDIT_ARCHIVE: R2Bucket };
@@ -74,7 +74,7 @@ describe("sealer", () => {
     await runSealer({ DB: E.DB, AUDIT_ARCHIVE: { head: async () => null, get: async () => null, put: async () => { throw new Error("down"); } } as unknown as R2Bucket });
     const pending = (await E.DB.prepare("SELECT * FROM audit_log WHERE sealed_at IS NOT NULL AND archived_at IS NULL ORDER BY seq").all<AuditRow>()).results!;
     const { archiveLine } = await import("@repo/audit");
-    const body = pending.map(archiveLine).join("\n") + "\n";
+    const body = pending.map((r) => archiveLine(r)).join("\n") + "\n";
     const key = archiveKey(pending[0]!.seq!, pending[pending.length - 1]!.seq!, pending[0]!.sealed_at!);
     await E.AUDIT_ARCHIVE.put(key, body);
     expect(await archivePending(E.DB, E.AUDIT_ARCHIVE, new Date().toISOString())).toBe(pending.length);
@@ -84,7 +84,7 @@ describe("sealer", () => {
   // sealed_at) per call, with a key deterministic from that batch alone, so
   // a lost archived_at update recovers without ever writing a second object
   // - and without pulling a later, still-unarchived batch's rows into it.
-  it("recovers a lost archived_at update without writing a second object, and leaves a later batch for its own run", async () => {
+  it("recovers a lost archived_at update without writing a second object, and archives a later batch under its own key", async () => {
     for (let i = 0; i < 3; i++) await systemAudit(E.DB, "cron").write({ action: "audit.verify", outcome: "succeeded", details: { batch: 1, i } });
     const firstRun = await runSealer(E);
     expect(firstRun).toMatchObject({ sealed: 3, archived: 3 });
@@ -119,10 +119,21 @@ describe("sealer", () => {
     await systemAudit(E.DB, "cron").write({ action: "audit.verify", outcome: "succeeded", details: { batch: 2 } });
     const secondRun = await runSealer(E);
     expect(secondRun.sealed).toBe(1); // only the fresh row
-    expect(secondRun.archived).toBe(3); // the recovered batch, not the fresh row's batch
+    // Ruling 59: one run now archives up to 5 seal batches, so the recovered
+    // batch (3) AND the fresh row's own batch (1) are both archived -- each
+    // under its own deterministic key, never folded together.
+    expect(secondRun.archived).toBe(4);
 
     const keysAfterRecovery = (await E.AUDIT_ARCHIVE.list()).objects.map((o) => o.key).sort();
-    expect(keysAfterRecovery).toEqual(keysBeforeRecovery); // no second object written
+    const freshRow = await E.DB.prepare("SELECT seq, sealed_at, archive_key FROM audit_log WHERE seq IS NOT NULL ORDER BY seq DESC LIMIT 1")
+      .first<{ seq: number; sealed_at: string; archive_key: string | null }>();
+    const freshKey = archiveKey(freshRow!.seq, freshRow!.seq, freshRow!.sealed_at);
+    expect(freshRow!.archive_key).toBe(freshKey);
+    expect(freshKey).not.toBe(key1);
+    // No second object for batch 1: the only object added is the fresh row's own.
+    expect(keysAfterRecovery).toEqual([...keysBeforeRecovery, freshKey].sort());
+    const freshBody = await (await E.AUDIT_ARCHIVE.get(freshKey))!.text();
+    expect(freshBody.trim().split("\n")).toHaveLength(1); // only the fresh row
 
     const bodyAfter = await (await E.AUDIT_ARCHIVE.get(key1))!.text();
     expect(bodyAfter).toBe(bodyBefore); // identical content, not re-uploaded with the new row folded in
@@ -131,10 +142,36 @@ describe("sealer", () => {
       .bind(batch1[0]!.id, batch1[1]!.id, batch1[2]!.id)
       .all<{ archived_at: string | null }>();
     for (const r of recovered.results ?? []) expect(r.archived_at).not.toBeNull();
+  });
 
-    const freshRow = await E.DB.prepare("SELECT archived_at FROM audit_log WHERE seq IS NOT NULL ORDER BY seq DESC LIMIT 1")
-      .first<{ archived_at: string | null }>();
-    expect(freshRow!.archived_at).toBeNull(); // its own batch, left for the next run
+  // Ruling 59: a backlog of several seal batches drains in one run (up to 5
+  // batches per run), each batch still its own object (Ruling 24).
+  it("drains a 3-batch archive backlog in a single run", async () => {
+    // Clear whatever earlier tests left pending.
+    for (let guard = 0; guard < 10; guard++) {
+      const p = await E.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE sealed_at IS NOT NULL AND archived_at IS NULL").first<{ n: number }>();
+      if (!p!.n) break;
+      await runSealer(E);
+    }
+    const failingArchive = { head: async () => null, get: async () => null, put: async () => { throw new Error("archive down"); } } as unknown as R2Bucket;
+    const base = Date.now();
+    for (let b = 0; b < 3; b++) {
+      await systemAudit(E.DB, "cron").write({ action: "audit.verify", outcome: "succeeded", details: { backlog: b } });
+      await runSealer({ DB: E.DB, AUDIT_ARCHIVE: failingArchive }, new Date(base + b * 1000)); // sealed, archive fails
+    }
+    const pending = await E.DB.prepare(
+      "SELECT COUNT(*) AS n, COUNT(DISTINCT sealed_at) AS batches FROM audit_log WHERE sealed_at IS NOT NULL AND archived_at IS NULL"
+    ).first<{ n: number; batches: number }>();
+    expect(pending).toMatchObject({ n: 3, batches: 3 });
+
+    const res = await runSealer(E, new Date(base + 5000));
+    expect(res.archived).toBe(3);
+    const left = await E.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE sealed_at IS NOT NULL AND archived_at IS NULL").first<{ n: number }>();
+    expect(left!.n).toBe(0);
+    const keys = await E.DB.prepare(
+      "SELECT COUNT(DISTINCT archive_key) AS n FROM audit_log WHERE json_extract(details_json, '$.backlog') IS NOT NULL"
+    ).first<{ n: number }>();
+    expect(keys!.n).toBe(3); // one object per seal batch
   });
 
   // Ruling 25: a sealBatch failure must not skip archiving a backlog left

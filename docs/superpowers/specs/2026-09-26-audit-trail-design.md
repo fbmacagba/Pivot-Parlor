@@ -263,7 +263,11 @@ A new cron `* * * * *` on the API worker (production and staging):
 - New R2 bucket `pivot-parlor-audit` (staging: `pivot-parlor-audit-staging`), bound to the
   API worker as `AUDIT_ARCHIVE`.
 - Each sealed batch is written as `YYYY/MM/DD/<first_seq>-<last_seq>.jsonl`: one line per
-  entry with every `audit_log` column (no `audit_subjects` data).
+  entry (no `audit_subjects` data). Each line records an `archive_format` number and holds
+  exactly that format's fixed column list (`ARCHIVE_COLUMNS` in `@repo/audit`; format 1 is
+  every `audit_log` column except `archived_at` and `archive_key`). A later `audit_log`
+  column means a new format; lines already archived keep verifying against the list they
+  name (plan Ruling 58).
 - `archived_at` is set only after `put` succeeds. The next run re-archives any sealed but
   unarchived rows first. Object names are deterministic, so a retry after a partial failure
   is idempotent.

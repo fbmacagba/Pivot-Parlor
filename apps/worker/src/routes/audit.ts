@@ -166,7 +166,7 @@ audit.post("/verify", async (c) => {
   // exist to keep truthful. Deviation from the brief, which returned early.
   const result =
     to < from
-      ? { ok: true, fromSeq: from, toSeq: to, checked: 0, firstBadSeq: null, problem: null }
+      ? { ok: true, fromSeq: from, toSeq: to, checked: 0, firstBadSeq: null, problem: null, capped: false, archiveObjects: 0 }
       : await verifyRange(c.env.DB, c.env.AUDIT_ARCHIVE, from, to);
   const refused = await guarded(c, () =>
     auditFor(c).write({ action: "audit.verify", outcome: result.ok ? "succeeded" : "failed", reason: result.problem, details: { ...result } })
@@ -237,7 +237,7 @@ audit.get("/export", async (c) => {
       archive_objects: archives,
       anchors: [day(first), day(last)].filter(Boolean).map((d) => `anchors/${d}.json`),
       how_to_verify:
-        "Recompute each entry's SHA-256 from its copy in the archive objects listed here (not from this CSV), chain from the value before 'first', and compare the resulting chain_hash values against the emailed daily anchors.",
+        "Recompute each entry's SHA-256 from its copy in the archive objects listed here (not from this CSV; each archive line is a JSON object naming its archive_format and holding that format's columns), chain from the value before 'first', and compare the resulting chain_hash values against the emailed daily anchors.",
     },
   });
 });

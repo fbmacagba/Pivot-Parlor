@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalJson, chainHash, entryHash, GENESIS, HASHED, sha256Hex, wellFormed } from "../src/canonical";
+import { ARCHIVE_COLUMNS, ARCHIVE_FORMAT, archiveLine, canonicalJson, chainHash, entryHash, GENESIS, HASHED, parseArchiveLine, sha256Hex, wellFormed } from "../src/canonical";
 import { AUDIT_COLUMNS } from "../src/types";
 import type { AuditRow } from "../src/types";
 
@@ -32,6 +32,44 @@ describe("canonical hashing", () => {
 
   it("hashes every audit_log column except entry_hash itself", () => {
     expect(new Set(HASHED)).toEqual(new Set(AUDIT_COLUMNS.filter((c) => c !== "entry_hash")));
+  });
+});
+
+// Ruling 58: archive lines come from a fixed, versioned column list, never
+// from whatever keys the row object happens to carry (SELECT * would pick
+// up any future ADD COLUMN and break every comparison against objects
+// already in the locked bucket).
+describe("archiveLine", () => {
+  it("records the format version in each line", () => {
+    expect(ARCHIVE_FORMAT).toBe(1);
+    expect(JSON.parse(archiveLine(row)).archive_format).toBe(1);
+  });
+
+  it("format 1 holds every audit_log column except the archive bookkeeping", () => {
+    const expected = new Set<string>([...HASHED, "seq", "sealed_at", "entry_hash", "chain_hash"]);
+    expect(new Set(ARCHIVE_COLUMNS[1])).toEqual(expected);
+    const line = JSON.parse(archiveLine({ ...row, archived_at: "a", archive_key: "k" })) as Record<string, unknown>;
+    expect(Object.keys(line).sort()).toEqual([...expected, "archive_format"].sort());
+  });
+
+  it("ignores a column the row carries but the format does not list", () => {
+    const withExtra = { ...row, added_later: "x" } as AuditRow;
+    expect(archiveLine(withExtra)).toBe(archiveLine(row));
+  });
+
+  it("is independent of the row object's key order", () => {
+    const reordered = Object.fromEntries(Object.entries(row).reverse()) as AuditRow;
+    expect(archiveLine(reordered)).toBe(archiveLine(row));
+  });
+
+  it("parses a line back to its id and format, and rejects lines without a known one", () => {
+    expect(parseArchiveLine(archiveLine(row))).toEqual({ id: "e1", format: 1 });
+    expect(parseArchiveLine(JSON.stringify({ id: "e1" }))).toEqual({ id: "e1", format: null });
+    expect(parseArchiveLine("not json")).toBeNull();
+  });
+
+  it("refuses an unknown format rather than guessing", () => {
+    expect(() => archiveLine(row, 99)).toThrow(/unknown archive format/);
   });
 });
 
