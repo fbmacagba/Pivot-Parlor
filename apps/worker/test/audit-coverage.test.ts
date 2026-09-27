@@ -57,6 +57,11 @@ describe("audit coverage", () => {
     expect(queues.filter((q) => !(q in QUEUE_AUDIT))).toEqual([]);
   });
 
+  it("every declared cron and queue key exists in wrangler.toml (no stale registry entries)", () => {
+    expect(Object.keys(CRON_AUDIT).filter((c) => !crons.includes(c))).toEqual([]);
+    expect(Object.keys(QUEUE_AUDIT).filter((q) => !queues.includes(q))).toEqual([]);
+  });
+
   it("every declaration is a catalogue action, pending, or a reasoned exemption", () => {
     const bad = Object.entries({ ...ROUTE_AUDIT, ...CRON_AUDIT, ...QUEUE_AUDIT }).filter(([, d]) => !valid(d));
     expect(bad).toEqual([]);

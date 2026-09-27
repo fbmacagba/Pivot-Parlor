@@ -43,6 +43,7 @@ import {
 } from "./routes/dashboard.js";
 import { requestId } from "./audit/request-id.js";
 import { auditGapGuard } from "./audit/gap-guard.js";
+import { runSealer } from "./audit/sealer.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -249,6 +250,13 @@ export default {
    */
   async scheduled(event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
     const cron = event.cron;
+
+    // Every minute — audit sealer (spec 5.1). Quiet unless something is wrong.
+    if (cron === "* * * * *") {
+      const r = await runSealer(env);
+      if (r.tampered.length || r.archiveError) console.error("[Cron audit-seal]", JSON.stringify(r));
+      return;
+    }
 
     // 03:00 UTC — LEG-6 retention: bounded, idempotent sweeps (WS-8 phase 2).
     if (cron === "0 3 * * *") {

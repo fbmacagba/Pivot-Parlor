@@ -4,6 +4,8 @@ export type Bindings = {
   DB: D1Database;
   KV: KVNamespace;
   ASSETS: R2Bucket;
+  /** Append-only audit archive (retention-locked bucket, spec 5.2). */
+  AUDIT_ARCHIVE: R2Bucket;
   /** Service binding to pivot-parlor-booking — the canonical booking system (WS-1).
    *  Public /api/bookings and /api/shops/:shopId/slots proxy through it. */
   BOOKING: Fetcher;
