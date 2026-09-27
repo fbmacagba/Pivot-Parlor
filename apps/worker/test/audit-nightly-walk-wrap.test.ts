@@ -78,3 +78,27 @@ describe("runAuditNightly walk wrap (Ruling 34)", () => {
     expect(froms.slice(1)).toContain(floor);
   });
 });
+
+describe("runAuditNightly walk resume (Task 10 carried minor c)", () => {
+  // Mid-cycle: the walk has NOT yet caught up to last_verified_seq (unlike
+  // the wrap scenario above), so the next run must resume right where it
+  // left off, not restart from the floor.
+  it("resumes the walk at walk_cursor_seq + 1 mid-cycle, not at the floor", async () => {
+    await sealedTrail(6);
+    await drainSealer();
+    const maxSeq = (await E.DB.prepare("SELECT MAX(seq) AS m FROM audit_log").first<{ m: number }>())!.m;
+    const state0 = await sealState();
+    const floor = (state0!.expired_through_seq ?? 0) + 1;
+    const midCursor = maxSeq - 2; // strictly below last_verified_seq below, and not at it
+    await E.DB.prepare("UPDATE audit_seal_state SET last_verified_seq = ?, walk_cursor_seq = ? WHERE id = 1")
+      .bind(maxSeq, midCursor)
+      .run();
+
+    await runAuditNightly(withEnv(), new Date(), async () => {});
+
+    const entry = await latestVerifyEntry();
+    const details = JSON.parse(entry!.details_json) as { walk: { from: number } | null };
+    expect(details.walk?.from).toBe(midCursor + 1);
+    expect(details.walk?.from).not.toBe(floor);
+  });
+});

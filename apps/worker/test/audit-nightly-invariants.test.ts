@@ -192,4 +192,28 @@ describe("runAuditNightly top-level crash guard (Ruling 36)", () => {
       await E.DB.prepare("ALTER TABLE audit_seal_state_renamed_for_test RENAME TO audit_seal_state").run();
     }
   });
+
+  // Carried Task 9 minor (b): the crash entry's own reason names WHY no
+  // alert was sent, same as the body's normal problem list already does for
+  // every other path.
+  it("appends '; alert email not configured' to the crash entry's reason when alerting isn't configured", async () => {
+    await drainSealer();
+    await E.DB.prepare("ALTER TABLE audit_seal_state RENAME TO audit_seal_state_renamed_for_test").run();
+
+    const calls: string[] = [];
+    const send = async (_k: string, _to: string, subject: string) => { calls.push(subject); };
+
+    try {
+      await runAuditNightly({ ...E, RESEND_API_KEY: undefined, AUDIT_OPERATOR_EMAIL: undefined }, new Date(), send);
+
+      const entry = await E.DB.prepare(
+        "SELECT outcome, reason FROM audit_log WHERE action = 'audit.verify' ORDER BY occurred_at DESC LIMIT 1"
+      ).first<{ outcome: string; reason: string | null }>();
+      expect(entry!.outcome).toBe("failed");
+      expect(entry!.reason).toMatch(/^nightly check crashed: .+; alert email not configured$/);
+      expect(calls.length).toBe(0);
+    } finally {
+      await E.DB.prepare("ALTER TABLE audit_seal_state_renamed_for_test RENAME TO audit_seal_state").run();
+    }
+  });
 });

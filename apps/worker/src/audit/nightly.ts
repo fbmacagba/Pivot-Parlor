@@ -72,23 +72,29 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
     await runAuditNightlyBody(env, now, send);
   } catch (err) {
     const name = err instanceof Error ? err.name : "Error"; // never err.message (Ruling 5)
-    try {
-      await systemAudit(env.DB, "cron").write({
-        action: "audit.verify",
-        outcome: "failed",
-        reason: `nightly check crashed: ${name}`,
-      });
-    } catch (writeErr) {
-      console.error("[audit] nightly crash entry could not be written:", writeErr instanceof Error ? writeErr.name : writeErr);
-    }
     // Ruling 32: recipient from env, never D1 -- same rule as the body's own
     // alert path, duplicated here rather than shared because the body's
     // `recipient`/`alertingConfigured` locals may not exist if whatever threw
     // did so before they were computed.
     const recipient = env.AUDIT_OPERATOR_EMAIL;
-    if (recipient && env.RESEND_API_KEY) {
+    const alertingConfigured = Boolean(recipient && env.RESEND_API_KEY);
+    // Carried Task 9 minor (b): the crash entry's own reason should say so
+    // too when alerting isn't configured, same as the body's normal problem
+    // list already does -- otherwise a crash with no alert email leaves no
+    // trace in the audit_log reason of WHY no one was notified.
+    const reason = `nightly check crashed: ${name}${alertingConfigured ? "" : "; alert email not configured"}`;
+    try {
+      await systemAudit(env.DB, "cron").write({
+        action: "audit.verify",
+        outcome: "failed",
+        reason,
+      });
+    } catch (writeErr) {
+      console.error("[audit] nightly crash entry could not be written:", writeErr instanceof Error ? writeErr.name : writeErr);
+    }
+    if (alertingConfigured) {
       try {
-        await send(env.RESEND_API_KEY, recipient, "Audit trail needs attention", [`nightly check crashed: ${name}`]);
+        await send(env.RESEND_API_KEY!, recipient!, "Audit trail needs attention", [`nightly check crashed: ${name}`]);
       } catch (sendErr) {
         console.error("[audit] crash alert email failed:", sendErr instanceof Error ? sendErr.name : sendErr);
       }
@@ -242,9 +248,12 @@ async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Prom
   // (d): two distinct ways the retention boundary can be wrong, combined
   // into one count/line -- a row that should already have been purged but
   // is still present at or below the expiry boundary, or the boundary
-  // itself having been moved past what has actually been verified (nothing
-  // legitimate ever does that; Task 10's retention sweep only ever advances
-  // expired_through_seq to a point at or behind last_verified_seq).
+  // itself having been moved past what has actually been verified. Task 10's
+  // expireOldEntries itself reads audit_seal_state.last_verified_seq and
+  // gates its candidate rows on seq <= last_verified_seq (Ruling 38), so
+  // expired_through_seq can never legitimately land above it through that
+  // path -- a nonzero second term here means something moved the boundary
+  // outside it (direct tampering, not ordinary sweep behaviour).
   const expiredThroughSeq = state?.expired_through_seq ?? 0;
   const impossibleExpiry =
     (await count("SELECT COUNT(*) AS n FROM audit_log WHERE seq <= ?", expiredThroughSeq)) +
