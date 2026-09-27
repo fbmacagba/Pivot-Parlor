@@ -57,10 +57,10 @@ function filters(c: Ctx): Filters {
   const where: string[] = [];
   const binds: unknown[] = [];
   const echo: Record<string, string> = {};
-  const add = (key: string, sql: string, value: unknown) => {
+  const add = (key: string, sql: string, value: unknown, echoValue: unknown = value) => {
     where.push(sql);
     binds.push(value);
-    echo[key] = String(value);
+    echo[key] = String(echoValue);
   };
   if (q.shop_id) add("shop_id", "l.shop_id = ?", q.shop_id);
   if (q.actor) add("actor", "l.actor_ref = ?", q.actor.startsWith("subj_") ? q.actor : userSubjectId(q.actor));
@@ -69,15 +69,22 @@ function filters(c: Ctx): Filters {
       // Ruling 41's action regex allows "_" (needed for real actions like
       // "ai.chatbot_model.set"), but "_" is also a LIKE single-character
       // wildcard — escape it so a prefix filter can't match extra actions
-      // it didn't ask for. Deviation from the brief's plain `LIKE ?`.
-      add("action", "l.action LIKE ? ESCAPE '\\'", `${q.action.replace(/_/g, "\\_")}%`);
+      // it didn't ask for. Deviation from the brief's plain `LIKE ?`. Echo
+      // the validated prefix itself, not the escaped LIKE pattern.
+      add("action", "l.action LIKE ? ESCAPE '\\'", `${q.action.replace(/_/g, "\\_")}%`, q.action);
     } else {
       add("action", "l.action = ?", q.action);
     }
   }
   if (q.outcome) add("outcome", "l.outcome = ?", q.outcome);
-  if (q.from) add("from", "l.occurred_at >= ?", q.from);
-  if (q.to) add("to", "l.occurred_at <= ?", q.to);
+  // Canonicalize to ISO before binding or echoing: badDate() only requires
+  // Date.parse-able, which V8 accepts for arbitrary loose text (e.g. a name
+  // alongside a date) — echoing the RAW string into details_json (permanent,
+  // hashed, never blanked) could leak personal data through this filter.
+  // new Date(...).toISOString() is safe here because invalidFilterKey()
+  // already rejected anything Date.parse can't handle.
+  if (q.from) add("from", "l.occurred_at >= ?", new Date(q.from).toISOString());
+  if (q.to) add("to", "l.occurred_at <= ?", new Date(q.to).toISOString());
   if (q.request_id) add("request_id", "l.request_id = ?", q.request_id);
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", binds, echo };
 }
@@ -244,7 +251,9 @@ audit.post("/subjects/:userId/erase", async (c) => {
   const advances = current.redacted_at === null && (current.redact_after === null || current.redact_after > candidate);
 
   if (!advances) {
-    const existing = current.redact_after ?? candidate;
+    // Never fabricate a date: report the subject's real (possibly null)
+    // redact_after rather than substituting the just-computed candidate.
+    const existing = current.redact_after;
     const refused = await guarded(c, () =>
       auditFor(c).write({
         action: "subject.erase_request",

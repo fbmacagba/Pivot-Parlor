@@ -90,6 +90,32 @@ describe("/api/audit", () => {
     expect(await proof.json()).toHaveProperty("data.first");
   });
 
+  it("filters by an action prefix without over-matching (LIKE escaping)", async () => {
+    const { token } = await dev();
+    const shopId = await seedShop("Prefix Shop");
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
+    const res = await dispatch("GET", "/api/audit?action=site.", { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { entries: { action: string }[] } };
+    expect(body.data.entries.length).toBeGreaterThan(0);
+    for (const e of body.data.entries) expect(e.action.startsWith("site.")).toBe(true);
+  });
+
+  it("canonicalizes from/to to ISO instead of echoing raw free text into the permanent entry", async () => {
+    const { token } = await dev();
+    // Date.parse (and so badDate()'s shape check) is lenient enough to accept
+    // this, but the RAW string must never reach details_json (permanent,
+    // hashed, never blanked) — that would be a personal-data leak through a
+    // filter value.
+    const from = encodeURIComponent("2020-01-01 (Jane Smith)");
+    const res = await dispatch("GET", `/api/audit?from=${from}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const [entry] = await auditEntriesFor(requestIdOf(res), "audit.view");
+    expect(entry).toBeTruthy();
+    expect(String(entry!.details_json)).not.toContain("Jane");
+    expect(String(entry!.details_json)).toContain("2020-01-01T00:00:00.000Z");
+  });
+
   it("rejects a malformed export filter with 400", async () => {
     const { token } = await dev();
     // outcome must be one of the recorder's real enum values.
