@@ -1076,6 +1076,30 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
     (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
+  // Ruling 17: shop name and slug are personal data (sole traders trade under
+  // their own name) and must never enter the permanent, unblankable
+  // details_json. They live only in this redactable audit_subjects row,
+  // referenced from the entry by id.
+  const shopSubjectRef = `subj_shop_${shop.id}`;
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at)
+       VALUES (?, 'shop', ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, shop_id = excluded.shop_id
+       WHERE audit_subjects.redacted_at IS NULL`
+    )
+      .bind(shopSubjectRef, shop.id, `${shop.name} (${shop.slug})`, new Date().toISOString())
+      .run();
+  } catch (e) {
+    console.error("[shops.delete] subject upsert failed", e);
+    return auditRefused(c);
+  }
+
+  const [userCountRow, bookingCountRow] = await Promise.all([
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM platform_users WHERE shop_id = ?").bind(shop.id).first<{ n: number }>(),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM bookings WHERE shop_id = ?").bind(shop.id).first<{ n: number }>(),
+  ]);
+
   try {
     await auditFor(c).run(
       {
@@ -1083,17 +1107,15 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
         shopId: shop.id,
         entityType: "shop",
         entityId: shop.id,
-        details: { slug: shop.slug, name: shop.name },
+        details: {
+          shop_subject: shopSubjectRef,
+          type: shop.type,
+          created_at: shop.created_at,
+          users: userCountRow?.n ?? 0,
+          bookings: bookingCountRow?.n ?? 0,
+        },
       },
       async () => {
-        // Spec 6.2: personal details of this shop's people are blanked 30 days after it leaves.
-        const redactAfter = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
-        await c.env.DB.prepare(
-          "UPDATE audit_subjects SET redact_after = ? WHERE shop_id = ? AND redacted_at IS NULL"
-        )
-          .bind(redactAfter, shop.id)
-          .run();
-
         await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
         await c.env.DB
           .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
@@ -1115,7 +1137,20 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
         await c.env.KV.delete(`gen:settings:${shop.id}`);
         await c.env.KV.delete(`walkin:queue:${shop.id}`);
 
-        await c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id).run();
+        // Ruling 15: the redact schedule and the shop's removal commit
+        // together in one batch — a failed delete must never schedule
+        // blanking a live shop's people. Ruling 16: the date may only move
+        // forward, never back.
+        // Spec 6.2: personal details of this shop's people are blanked 30 days after it leaves.
+        const redactAfter = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        await c.env.DB.batch([
+          c.env.DB
+            .prepare(
+              "UPDATE audit_subjects SET redact_after = ? WHERE shop_id = ? AND redacted_at IS NULL AND (redact_after IS NULL OR redact_after > ?)"
+            )
+            .bind(redactAfter, shop.id, redactAfter),
+          c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id),
+        ]);
       }
     );
     return c.json({ success: true, data: { id: shop.id } });
@@ -1150,7 +1185,7 @@ async function changeWebsiteStatus(
     shopId: shop.id,
     entityType: "shop_site",
     entityId: shop.id,
-    changes: { website_status: [site?.website_status ?? null, status] },
+    changes: site ? { website_status: [site.website_status ?? null, status] } : null,
     details: site ? null : { no_site_row: true },
   });
   if (refused) return refused;
@@ -1253,6 +1288,17 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
 
   const skip_images = body.skip_images === true;
 
+  // Owner-chosen template (WS-6): forwarded to the research worker, which
+  // pins layout_mood to it. Anything outside the known set — including the
+  // "auto" / "Let AI decide" value — leaves the choice to the model.
+  // Ruling 14: validated BEFORE the audit entry is built, since details_json
+  // is hashed and locked for 6 years — never the raw, unbounded request string.
+  const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
+  const ownerTemplate =
+    typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
+      ? body.template.trim().toLowerCase()
+      : undefined;
+
   let jobId: string | null = null;
   const nowKv = () =>
     JSON.stringify({
@@ -1273,7 +1319,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
           image_model: bodyImage || null,
           skip_images: body.skip_images === true,
           composer: bodyComposerRaw || null,
-          template: typeof body.template === "string" ? body.template : null,
+          template: ownerTemplate ?? null,
         },
       },
       async (): Promise<Response> => {
@@ -1336,15 +1382,6 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
           const ownerColorPrimary = isHex6(body.color_primary) ? body.color_primary.trim() : undefined;
           const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
           const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
-
-          // Owner-chosen template (WS-6): forwarded to the research worker, which
-          // pins layout_mood to it. Anything outside the known set — including the
-          // "auto" / "Let AI decide" value — leaves the choice to the model.
-          const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
-          const ownerTemplate =
-            typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
-              ? body.template.trim().toLowerCase()
-              : undefined;
 
           const queuePayload = {
             jobId,

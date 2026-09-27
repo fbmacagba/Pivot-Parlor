@@ -31,16 +31,16 @@ afterEach(() => {
   envAny.site_research_queue = originalQueue;
 });
 
-async function devTokenForShop(): Promise<{ shopId: string; token: string }> {
+async function devTokenForShop(): Promise<{ shopId: string; userId: string; token: string }> {
   const shopId = await seedShop("Palette Test Shop");
   const userId = await seedUser("developer", null);
   const token = await tokenFor(userId, "developer", null);
-  return { shopId, token };
+  return { shopId, userId, token };
 }
 
 describe("generate-site palette override", () => {
   it("forwards a valid hex pair into the queue payload", async () => {
-    const { shopId, token } = await devTokenForShop();
+    const { shopId, userId, token } = await devTokenForShop();
 
     const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
       headers: authHeaders(token),
@@ -51,6 +51,7 @@ describe("generate-site palette override", () => {
     expect(captured).not.toBeNull();
     expect(captured!.color_primary).toBe("#0D0D0D");
     expect(captured!.color_accent).toBe("#C9A84C");
+    expect(captured!.origin_actor_ref).toBe(`subj_user_${userId}`);
   });
 
   it("omits colours when only one of the pair is supplied", async () => {
