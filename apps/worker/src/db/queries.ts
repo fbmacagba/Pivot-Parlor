@@ -256,6 +256,16 @@ export function getShopById(db: D1Database, id: string) {
     .first<DBShop>();
 }
 
+/** A shop's id from either its id or its slug (both uniquely indexed); null
+ *  when neither matches. */
+export async function getShopIdByIdOrSlug(db: D1Database, idOrSlug: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT id FROM shops WHERE id = ?1 OR slug = ?1 LIMIT 1")
+    .bind(idOrSlug)
+    .first<{ id: string }>();
+  return row?.id ?? null;
+}
+
 export function getShopBySlug(db: D1Database, slug: string) {
   return db
     .prepare("SELECT * FROM shops WHERE slug = ? LIMIT 1")

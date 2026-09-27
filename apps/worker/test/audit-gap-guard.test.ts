@@ -145,7 +145,9 @@ describe("audit gap guard", () => {
   });
 
   it("sets shopId from a :shopId route param when the matched pattern has one", async () => {
-    const shopId = "11111111-1111-1111-1111-111111111111";
+    // Ruling 55: only an EXISTING shop's id is recorded (was a made-up id
+    // before Ruling 55, which is now recorded as null + "unresolved").
+    const shopId = await seedShop("Gap ShopId Shop");
     const res = await dispatch("DELETE", `/api/shops/${shopId}/walkin`);
     // No auth header. adminWalkin's own auth guard (registered `.use("*", authMiddleware, ...)`
     // inside that sub-router) is what actually responds 401 here — before the leaf DELETE "/"
@@ -157,6 +159,40 @@ describe("audit gap guard", () => {
     ).first<{ shop_id: string | null; details_json: string }>();
     expect(row!.shop_id).toBe(shopId);
     expect(JSON.parse(row!.details_json).route).toBe("/api/shops/:shopId/walkin/*");
+    expect(JSON.parse(row!.details_json)).not.toHaveProperty("shop_param");
+  });
+
+  // Ruling 55: the :shopId param is caller-supplied. It is hashed into a
+  // 6-year entry only once it has been resolved to a real shops.id.
+  async function latestGap() {
+    return env.DB.prepare(
+      "SELECT shop_id, details_json FROM audit_log WHERE action = 'audit.gap' ORDER BY occurred_at DESC, rowid DESC LIMIT 1"
+    ).first<{ shop_id: string | null; details_json: string }>();
+  }
+
+  it("records the shop's id when :shopId is the shop's slug", async () => {
+    const shopId = await seedShop("Gap Slug Shop");
+    const { slug } = (await env.DB.prepare("SELECT slug FROM shops WHERE id = ?").bind(shopId).first<{ slug: string }>())!;
+    const res = await dispatch("DELETE", `/api/shops/${slug}/walkin`);
+    expect(res.status).toBe(401);
+    const row = await latestGap();
+    expect(row!.shop_id).toBe(shopId);
+    expect(row!.details_json).not.toContain(slug);
+  });
+
+  it.each([
+    ["markup", "<script>alert(1)</script>"],
+    ["300 characters", "a".repeat(300)],
+    ["an id-shaped value with no such shop", "no-such-shop-00000000"],
+  ])("records shop_id null and shop_param \"unresolved\" for a hostile :shopId (%s)", async (_label, param) => {
+    const res = await dispatch("DELETE", `/api/shops/${encodeURIComponent(param)}/walkin`);
+    expect(res.status).toBe(401);
+    const row = await latestGap();
+    expect(row!.shop_id).toBeNull();
+    const details = JSON.parse(row!.details_json) as Record<string, unknown>;
+    expect(details.shop_param).toBe("unresolved");
+    expect(details.route).toBe("/api/shops/:shopId/walkin/*");
+    expect(row!.details_json).not.toContain(param);
   });
 
   it("writes a failed audit.gap entry when a handler throws", async () => {
