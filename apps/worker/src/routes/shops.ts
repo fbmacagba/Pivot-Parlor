@@ -20,6 +20,7 @@ import {
   getServiceById,
   getShopSiteImages,
   updateShopSiteWebsiteStatus,
+  shopSiteWebsiteStatusStatement,
   type DBService,
 } from "../db/queries.js";
 import {
@@ -35,6 +36,8 @@ import {
   parseComposer,
   buildServiceImagePrompt,
 } from "@repo/utils";
+import { AuditWriteError, userSubjectId } from "@repo/audit";
+import { auditFor, auditRefused, batchWithAudit } from "../audit/context.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
@@ -1074,30 +1077,50 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
   try {
-    await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
-    await c.env.DB
-      .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
-      .bind(shop.id)
-      .run()
-      .catch(() => {
-        /* table may not exist in older DB snapshots */
-      });
-    await c.env.DB
-      .prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?")
-      .bind(shop.id)
-      .run()
-      .catch(() => {
-        /* best effort */
-      });
+    await auditFor(c).run(
+      {
+        action: "shop.delete",
+        shopId: shop.id,
+        entityType: "shop",
+        entityId: shop.id,
+        details: { slug: shop.slug, name: shop.name },
+      },
+      async () => {
+        // Spec 6.2: personal details of this shop's people are blanked 30 days after it leaves.
+        const redactAfter = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        await c.env.DB.prepare(
+          "UPDATE audit_subjects SET redact_after = ? WHERE shop_id = ? AND redacted_at IS NULL"
+        )
+          .bind(redactAfter, shop.id)
+          .run();
 
-    await c.env.KV.delete(`site:${shop.slug}`);
-    await c.env.KV.delete(`shop:theme:${shop.id}`);
-    await c.env.KV.delete(`gen:settings:${shop.id}`);
-    await c.env.KV.delete(`walkin:queue:${shop.id}`);
+        await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
+        await c.env.DB
+          .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
+          .bind(shop.id)
+          .run()
+          .catch(() => {
+            /* table may not exist in older DB snapshots */
+          });
+        await c.env.DB
+          .prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?")
+          .bind(shop.id)
+          .run()
+          .catch(() => {
+            /* best effort */
+          });
 
-    await c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id).run();
+        await c.env.KV.delete(`site:${shop.slug}`);
+        await c.env.KV.delete(`shop:theme:${shop.id}`);
+        await c.env.KV.delete(`gen:settings:${shop.id}`);
+        await c.env.KV.delete(`walkin:queue:${shop.id}`);
+
+        await c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id).run();
+      }
+    );
     return c.json({ success: true, data: { id: shop.id } });
   } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
     console.error("[shops.delete]", e);
     const msg = e instanceof Error ? e.message : "Delete failed";
     return c.json({ success: false, error: msg }, 500);
@@ -1107,27 +1130,42 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
 shops.delete("/:shopId", authMiddleware, requireRole("developer"), deleteShopDeveloper);
 shops.post("/:shopId/delete", authMiddleware, requireRole("developer"), deleteShopDeveloper);
 
-// ─── POST /api/shops/:shopId/activate — developer only ───
-
-shops.post("/:shopId/activate", authMiddleware, requireRole("developer"), async (c) => {
+async function changeWebsiteStatus(
+  c: Context<{ Bindings: Bindings }>,
+  status: "live" | "paused",
+  action: "site.activate" | "site.pause"
+) {
   const param = c.req.param("shopId");
-  const shop =
-    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!param) return c.json({ success: false, error: "Missing shop id" }, 400);
+  const shop = (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
-  await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "live");
+  const site = await c.env.DB.prepare(
+    "SELECT website_status FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+  )
+    .bind(shop.id)
+    .first<{ website_status: string | null }>();
+  const refused = await batchWithAudit(c, [shopSiteWebsiteStatusStatement(c.env.DB, shop.id, status)], {
+    action,
+    outcome: "succeeded",
+    shopId: shop.id,
+    entityType: "shop_site",
+    entityId: shop.id,
+    changes: { website_status: [site?.website_status ?? null, status] },
+    details: site ? null : { no_site_row: true },
+  });
+  if (refused) return refused;
   return c.json({ ok: true });
-});
+}
+
+// ─── POST /api/shops/:shopId/activate — developer only ───
+shops.post("/:shopId/activate", authMiddleware, requireRole("developer"), (c) =>
+  changeWebsiteStatus(c, "live", "site.activate")
+);
 
 // ─── POST /api/shops/:shopId/pause — developer only ───
-
-shops.post("/:shopId/pause", authMiddleware, requireRole("developer"), async (c) => {
-  const param = c.req.param("shopId");
-  const shop =
-    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
-  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
-  await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "paused");
-  return c.json({ ok: true });
-});
+shops.post("/:shopId/pause", authMiddleware, requireRole("developer"), (c) =>
+  changeWebsiteStatus(c, "paused", "site.pause")
+);
 
 // ─── POST /api/shops/:shopId/generate-site — AI site generation (developer or admin) ───
 
@@ -1224,138 +1262,166 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     });
 
   try {
-    jobId = crypto.randomUUID();
-    await insertGenerationJob(c.env.DB, {
-      id: jobId,
-      shop_id: shop.id,
-      status: "queued",
-      stage: "research",
-    });
-    await c.env.KV.put(`job:${jobId}`, nowKv(), { expirationTtl: 60 * 60 * 48 });
-
-    if (body.logo_file && body.logo_file.size > 0) {
-      const buf = await body.logo_file.arrayBuffer();
-      const ext = body.logo_file.name.match(/\.(png|jpg|jpeg|svg|webp)$/i)?.[1] ?? "png";
-      const contentType =
-        body.logo_file.type ||
-        (ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
-      await c.env.ASSETS.put(`shops/${shop.slug}/logo-upload`, buf, {
-        httpMetadata: { contentType },
-      });
-    }
-
-    const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
-
-    const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
-    const hasLogoFile =
-      Boolean(body.logo_file && body.logo_file.size > 0) || logoUploadHead !== null;
-
-    // bodyText/bodyImage are already validated (400'd above if unknown). A
-    // stored KV value that no longer resolves in the catalog (a catalog
-    // shrink) silently degrades to the pipeline default instead of 400ing,
-    // so legacy shops keep generating.
-    const storedText = settingsKv.text_model?.trim() ?? "";
-    const storedTextListed = Boolean(storedText) && listed(storedText, "text");
-    if (!bodyText && storedText && !storedTextListed) {
-      console.warn(`[generate-site] stored text model ${storedText} is no longer listed; using ${DEFAULT_TEXT_MODEL_ID}`);
-    }
-    const text_model = bodyText || (storedTextListed ? storedText : DEFAULT_TEXT_MODEL_ID);
-    // Reasoning effort for the text/research model. Request wins over saved
-    // settings; anything but low/medium/high is dropped (pipeline default).
-    const text_effort =
-      parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
-    const storedImage = settingsKv.image_model?.trim() ?? "";
-    const storedImageListed = Boolean(storedImage) && listed(storedImage, "image");
-    if (!bodyImage && storedImage && !storedImageListed) {
-      console.warn(`[generate-site] stored image model ${storedImage} is no longer listed; using ${DEFAULT_IMAGE_MODEL_ID}`);
-    }
-    const image_model = bodyImage || (storedImageListed ? storedImage : DEFAULT_IMAGE_MODEL_ID);
-    // Design Director composer: request wins over saved settings; anything
-    // but ai/seed (incl. legacy junk in KV) silently defaults to "ai".
-    const composer =
-      parseComposer(bodyComposerRaw) ?? parseComposer(settingsKv.composer) ?? "ai";
-
-    // Optional owner-chosen palette. Only honour a complete, valid pair so a
-    // partial/garbage value can never override the AI-generated palette.
-    const isHex6 = (v: unknown): v is string =>
-      typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v.trim());
-    const ownerColorPrimary = isHex6(body.color_primary) ? body.color_primary.trim() : undefined;
-    const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
-    const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
-
-    // Owner-chosen template (WS-6): forwarded to the research worker, which
-    // pins layout_mood to it. Anything outside the known set — including the
-    // "auto" / "Let AI decide" value — leaves the choice to the model.
-    const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
-    const ownerTemplate =
-      typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
-        ? body.template.trim().toLowerCase()
-        : undefined;
-
-    const queuePayload = {
-      jobId,
-      shopId: shop.id,
-      shopName: shop.name,
-      shopSlug: shop.slug,
-      shopType: shop.type as "barber_shop" | "beauty_parlor" | "both",
-      styleNotes: styleNotesMerged,
-      hasLogoFile,
-      services: researchServices,
-      text_model,
-      ...(text_effort ? { text_effort } : {}),
-      image_model,
-      composer,
-      skip_images,
-      ...(hasColorOverride
-        ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
-        : {}),
-      ...(ownerTemplate ? { template: ownerTemplate } : {}),
-    };
-
-    if (!c.env.site_research_queue) {
-      await updateGenerationJob(c.env.DB, jobId, {
-        status: "failed",
-        error: "site_research_queue binding not configured",
-      });
-      await c.env.KV.put(
-        `job:${jobId}`,
-        JSON.stringify({
-          status: "failed",
-          stage: "research",
-          shopSlug: shop.slug,
-          error: "site_research_queue binding not configured",
-        }),
-        { expirationTtl: 60 * 60 * 48 }
-      );
-      return c.json({ success: false, error: "Site generation queue is not configured" }, 503);
-    }
-
-    await c.env.site_research_queue.send(queuePayload);
-    await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "draft");
-    return c.json(
-      { success: true, data: { jobId, message: "Site generation started" } },
-      202
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Site generation failed";
-    if (jobId) {
-      try {
-        await updateGenerationJob(c.env.DB, jobId, { status: "failed", error: msg });
-        await c.env.KV.put(
-          `job:${jobId}`,
-          JSON.stringify({
-            status: "failed",
+    return await auditFor(c).run(
+      {
+        action: "site.regenerate.request",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: {
+          text_model: bodyText || null,
+          image_model: bodyImage || null,
+          skip_images: body.skip_images === true,
+          composer: bodyComposerRaw || null,
+          template: typeof body.template === "string" ? body.template : null,
+        },
+      },
+      async (): Promise<Response> => {
+        try {
+          jobId = crypto.randomUUID();
+          await insertGenerationJob(c.env.DB, {
+            id: jobId,
+            shop_id: shop.id,
+            status: "queued",
             stage: "research",
+          });
+          await c.env.KV.put(`job:${jobId}`, nowKv(), { expirationTtl: 60 * 60 * 48 });
+
+          if (body.logo_file && body.logo_file.size > 0) {
+            const buf = await body.logo_file.arrayBuffer();
+            const ext = body.logo_file.name.match(/\.(png|jpg|jpeg|svg|webp)$/i)?.[1] ?? "png";
+            const contentType =
+              body.logo_file.type ||
+              (ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
+            await c.env.ASSETS.put(`shops/${shop.slug}/logo-upload`, buf, {
+              httpMetadata: { contentType },
+            });
+          }
+
+          const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
+
+          const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
+          const hasLogoFile =
+            Boolean(body.logo_file && body.logo_file.size > 0) || logoUploadHead !== null;
+
+          // bodyText/bodyImage are already validated (400'd above if unknown). A
+          // stored KV value that no longer resolves in the catalog (a catalog
+          // shrink) silently degrades to the pipeline default instead of 400ing,
+          // so legacy shops keep generating.
+          const storedText = settingsKv.text_model?.trim() ?? "";
+          const storedTextListed = Boolean(storedText) && listed(storedText, "text");
+          if (!bodyText && storedText && !storedTextListed) {
+            console.warn(`[generate-site] stored text model ${storedText} is no longer listed; using ${DEFAULT_TEXT_MODEL_ID}`);
+          }
+          const text_model = bodyText || (storedTextListed ? storedText : DEFAULT_TEXT_MODEL_ID);
+          // Reasoning effort for the text/research model. Request wins over saved
+          // settings; anything but low/medium/high is dropped (pipeline default).
+          const text_effort =
+            parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
+          const storedImage = settingsKv.image_model?.trim() ?? "";
+          const storedImageListed = Boolean(storedImage) && listed(storedImage, "image");
+          if (!bodyImage && storedImage && !storedImageListed) {
+            console.warn(`[generate-site] stored image model ${storedImage} is no longer listed; using ${DEFAULT_IMAGE_MODEL_ID}`);
+          }
+          const image_model = bodyImage || (storedImageListed ? storedImage : DEFAULT_IMAGE_MODEL_ID);
+          // Design Director composer: request wins over saved settings; anything
+          // but ai/seed (incl. legacy junk in KV) silently defaults to "ai".
+          const composer =
+            parseComposer(bodyComposerRaw) ?? parseComposer(settingsKv.composer) ?? "ai";
+
+          // Optional owner-chosen palette. Only honour a complete, valid pair so a
+          // partial/garbage value can never override the AI-generated palette.
+          const isHex6 = (v: unknown): v is string =>
+            typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v.trim());
+          const ownerColorPrimary = isHex6(body.color_primary) ? body.color_primary.trim() : undefined;
+          const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
+          const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
+
+          // Owner-chosen template (WS-6): forwarded to the research worker, which
+          // pins layout_mood to it. Anything outside the known set — including the
+          // "auto" / "Let AI decide" value — leaves the choice to the model.
+          const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
+          const ownerTemplate =
+            typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
+              ? body.template.trim().toLowerCase()
+              : undefined;
+
+          const queuePayload = {
+            jobId,
+            shopId: shop.id,
+            shopName: shop.name,
             shopSlug: shop.slug,
-            error: msg,
-          }),
-          { expirationTtl: 60 * 60 * 48 }
-        );
-      } catch {
-        /* best effort */
-      }
-    }
-    return c.json({ success: false, error: msg }, 400);
+            shopType: shop.type as "barber_shop" | "beauty_parlor" | "both",
+            styleNotes: styleNotesMerged,
+            hasLogoFile,
+            services: researchServices,
+            text_model,
+            ...(text_effort ? { text_effort } : {}),
+            image_model,
+            composer,
+            origin_actor_ref: user.sub ? userSubjectId(user.sub) : null,
+            skip_images,
+            ...(hasColorOverride
+              ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
+              : {}),
+            ...(ownerTemplate ? { template: ownerTemplate } : {}),
+          };
+
+          if (!c.env.site_research_queue) {
+            await updateGenerationJob(c.env.DB, jobId, {
+              status: "failed",
+              error: "site_research_queue binding not configured",
+            });
+            await c.env.KV.put(
+              `job:${jobId}`,
+              JSON.stringify({
+                status: "failed",
+                stage: "research",
+                shopSlug: shop.slug,
+                error: "site_research_queue binding not configured",
+              }),
+              { expirationTtl: 60 * 60 * 48 }
+            );
+            return c.json({ success: false, error: "Site generation queue is not configured" }, 503);
+          }
+
+          await c.env.site_research_queue.send(queuePayload);
+          await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "draft");
+          return c.json(
+            { success: true, data: { jobId, message: "Site generation started" } },
+            202
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Site generation failed";
+          if (jobId) {
+            try {
+              await updateGenerationJob(c.env.DB, jobId, { status: "failed", error: msg });
+              await c.env.KV.put(
+                `job:${jobId}`,
+                JSON.stringify({
+                  status: "failed",
+                  stage: "research",
+                  shopSlug: shop.slug,
+                  error: msg,
+                }),
+                { expirationTtl: 60 * 60 * 48 }
+              );
+            } catch {
+              /* best effort */
+            }
+          }
+          return c.json({ success: false, error: msg }, 400);
+        }
+      },
+      (res) => ({
+        outcome: res.status < 400 ? "succeeded" : "failed",
+        reason: res.status < 400 ? null : `HTTP ${res.status}`,
+        details: { job_id: jobId },
+      })
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
 });
 

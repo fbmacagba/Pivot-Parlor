@@ -680,17 +680,15 @@ export function createShopSite(
     .run();
 }
 
-export function updateShopSiteWebsiteStatus(
-  db: D1Database,
-  shopId: string,
-  websiteStatus: string,
-) {
+/** Prepared (unexecuted) website_status update, for batching with an audit entry. */
+export function shopSiteWebsiteStatusStatement(db: D1Database, shopId: string, websiteStatus: string) {
   return db
-    .prepare(
-      "UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'",
-    )
-    .bind(websiteStatus, shopId)
-    .run();
+    .prepare("UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'")
+    .bind(websiteStatus, shopId);
+}
+
+export function updateShopSiteWebsiteStatus(db: D1Database, shopId: string, websiteStatus: string) {
+  return shopSiteWebsiteStatusStatement(db, shopId, websiteStatus).run();
 }
 
 /** Ensure the shop has a shop_sites row to write image URLs onto, creating a
