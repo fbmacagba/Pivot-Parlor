@@ -9,14 +9,23 @@
 // submits through its own `useFetcher` straight to a resource route, so it
 // can show a fetcher-scoped loading/error state inside the dialog. The
 // Activity page's erase intent instead goes through dev.activity.tsx's own
-// route action (Form method="post", intent=erase) so the existing
-// post-erase banner (useActionData's `result.erased`/`result.error`,
-// already rendered above the list) keeps working unchanged. The confirm
-// button here is a native submit button inside that same Form; clicking it
-// both submits and closes the dialog immediately, and the page's existing
-// banner reports the outcome once the action resolves — there is no
-// separate in-dialog error/loading state to keep in sync with a fetcher
-// this dialog doesn't have.
+// route action (Form method="post", intent=erase), so this dialog is
+// closed/errored by the PARENT reading its own `useNavigation()`/
+// `useActionData()` once the submission settles (see dev.activity.tsx) and
+// passing that down as `error`/`busy` — not by a fetcher this dialog
+// doesn't have.
+//
+// Fix round 2 re-review (progress.md, Ruling 51 follow-up — CRITICAL
+// regression): the confirm button used to carry `onClick={onClose}`
+// alongside `type="submit"`. That immediately set the state that gates
+// this dialog's own conditional render, unmounting the <form> the button
+// was inside of, before the browser's native "submit" step could run on
+// it — a real Chrome + React 18.3.1 browser cancels that submission ("Form
+// submission canceled because the form is not connected") and `onSubmit`
+// never fires, so the erase action was silently unreachable from the UI.
+// The submit button now carries NO onClick at all — closing happens only
+// from the outcome, driven by the parent.
+import { Loader2 } from "lucide-react";
 import { Form } from "@remix-run/react";
 import { Button } from "~/components/ui/Button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "~/components/ui/Dialog";
@@ -34,13 +43,18 @@ export function ErasureRequestDialog({
   target,
   onClose,
   busy = false,
+  error = null,
 }: {
   target: ErasureTarget | null;
   onClose: () => void;
-  /** True while any request on the page is in flight (mirrors the page's
-   *  own `useNavigation()` gate on its other buttons); disables the
-   *  confirm button so it can't be double-submitted. */
+  /** True while the erase submission is in flight (the parent's
+   *  `useNavigation()` gated to this dialog's own submission); disables
+   *  the confirm button so it can't be double-submitted. */
   busy?: boolean;
+  /** Set by the parent once a submission made from THIS dialog settles
+   *  with an error — kept open and shown here (DeleteShopDialog's own
+   *  pattern) rather than silently closing on failure. */
+  error?: string | null;
 }) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
@@ -57,6 +71,11 @@ export function ErasureRequestDialog({
               days. Recording this request is itself added to the activity trail, and it
               cannot be undone.
             </p>
+            {error && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                {error}
+              </div>
+            )}
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" size="sm" onClick={onClose}>
                 Cancel
@@ -69,9 +88,15 @@ export function ErasureRequestDialog({
                   size="sm"
                   className="bg-red-600 hover:bg-red-500"
                   disabled={busy}
-                  onClick={onClose}
                 >
-                  Confirm erasure request
+                  {busy ? (
+                    <>
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      Recording…
+                    </>
+                  ) : (
+                    "Confirm erasure request"
+                  )}
                 </Button>
               </Form>
             </div>

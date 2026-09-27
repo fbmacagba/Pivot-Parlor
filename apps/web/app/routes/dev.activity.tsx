@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
@@ -100,10 +100,42 @@ export default function DevActivity() {
   const [params] = useSearchParams();
   const nav = useNavigation();
   // Ruling 51: erasure needs an explicit confirmation step (ErasureRequestDialog)
-  // rather than firing straight from a list-row button — this only tracks
-  // WHICH person the dialog is confirming for; the dialog itself does the
+  // rather than firing straight from a list-row button — this tracks WHICH
+  // person the dialog is confirming for; the dialog's own Form does the
   // actual submit once the developer confirms.
   const [confirmErase, setConfirmErase] = useState<ErasureTarget | null>(null);
+  // Fix round 2 re-review (CRITICAL regression on Ruling 51): the dialog
+  // must NOT close itself from the click that submits it (that unmounts
+  // its own <form> before the browser's native submit step runs — see
+  // ErasureRequestDialog.tsx's header comment for the full story). It
+  // closes from the submission's OUTCOME instead, read here from this
+  // page's own useNavigation()/useActionData(): `erasingRef` remembers
+  // that the in-flight submission was specifically an erase (the modal
+  // makes any OTHER submission impossible while it's open, but this is
+  // still the precise signal rather than an inference from "is the dialog
+  // open"), and once nav.state returns to "idle" this closes the dialog on
+  // success or surfaces the error INSIDE it (DeleteShopDialog's own
+  // pattern) on failure — never both silently.
+  const [eraseError, setEraseError] = useState<string | null>(null);
+  const erasingRef = useRef(false);
+  useEffect(() => {
+    if (nav.state !== "idle") {
+      if (nav.formData?.get("intent") === "erase") erasingRef.current = true;
+      return;
+    }
+    if (!erasingRef.current) return;
+    erasingRef.current = false;
+    if (result && "erased" in result && result.erased) {
+      setConfirmErase(null);
+      setEraseError(null);
+    } else {
+      setEraseError((result && "error" in result && result.error) || "Request failed");
+    }
+  }, [nav.state, nav.formData, result]);
+  const closeEraseDialog = () => {
+    setConfirmErase(null);
+    setEraseError(null);
+  };
   const sealed = entries.filter((e) => e.seq !== null).map((e) => e.seq as number);
   const qs = auditQuery(params);
   // The subject export takes only from/to, not the full filter set (see
@@ -216,7 +248,10 @@ export default function DevActivity() {
                         type="button"
                         variant="ghost"
                         className="tap-target"
-                        onClick={() => setConfirmErase({ userId: e.actor_ref!.slice("subj_user_".length), who })}
+                        onClick={() => {
+                          setEraseError(null);
+                          setConfirmErase({ userId: e.actor_ref!.slice("subj_user_".length), who });
+                        }}
                       >
                         Record erasure request
                       </Button>
@@ -254,8 +289,9 @@ export default function DevActivity() {
 
       <ErasureRequestDialog
         target={confirmErase}
-        onClose={() => setConfirmErase(null)}
+        onClose={closeEraseDialog}
         busy={nav.state !== "idle"}
+        error={eraseError}
       />
     </div>
   );
