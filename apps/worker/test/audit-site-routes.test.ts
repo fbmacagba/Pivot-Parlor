@@ -123,22 +123,21 @@ describe("site routes are audited", () => {
   it("delete rolls back the redact schedule when the shop delete itself fails (Ruling 15)", async () => {
     const { token } = await devToken();
     const shopId = await seedShop("Trigger Blocked Shop");
-    // Force only the DELETE FROM shops statement to fail, scoped to this
-    // shop's id, so the earlier getShopById/getShopBySlug lookup and every
-    // other statement in the handler are unaffected. SQLite trigger bodies
-    // cannot use bound parameters ("trigger cannot use variables"), so the
-    // id (test-generated, alphanumeric + hyphens only, never user input) is
-    // inlined as a literal rather than bound.
-    const triggerName = `block_shop_delete_${shopId.replace(/-/g, "_")}`;
+    // Force only the DELETE FROM shops statement to fail. No WHEN clause (and
+    // no bound parameter — SQLite trigger bodies reject them: "trigger
+    // cannot use variables") is needed: this file's tests run sequentially
+    // (no it.concurrent/describe.concurrent here), so a static, unscoped
+    // trigger created and dropped within this one test's try/finally never
+    // overlaps another test's delete. getShopById/getShopBySlug and every
+    // earlier statement in the handler are unaffected either way.
     await env.DB.prepare(
-      `CREATE TRIGGER ${triggerName} BEFORE DELETE ON shops WHEN OLD.id = '${shopId}'
-       BEGIN SELECT RAISE(ABORT, 'blocked for test'); END`
+      "CREATE TRIGGER test_block_shop_delete BEFORE DELETE ON shops BEGIN SELECT RAISE(ABORT, 'blocked for test'); END"
     ).run();
     try {
       const res = await dispatch("POST", `/api/shops/${shopId}/delete`, { headers: authHeaders(token) });
       expect(res.status).toBe(500);
     } finally {
-      await env.DB.prepare(`DROP TRIGGER ${triggerName}`).run();
+      await env.DB.prepare("DROP TRIGGER test_block_shop_delete").run();
     }
     const shop = await env.DB.prepare("SELECT id FROM shops WHERE id = ?").bind(shopId).first<{ id: string }>();
     expect(shop).not.toBeNull();
