@@ -430,3 +430,6 @@ WHEN NOT (
 BEGIN
   SELECT RAISE(ABORT, 'audit_log is append-only');
 END;
+
+-- 047_audit_started_index
+CREATE INDEX IF NOT EXISTS idx_audit_log_started ON audit_log (occurred_at) WHERE phase = 'started';
