@@ -71,6 +71,9 @@ landed after the incident. On a live database, forward-fixing is usually the
 better call; restore when the schema/data damage is worse than losing the
 interim writes.
 
+A restore also rewinds the audit trail; see section 8 ("Audit trail and
+restores") before you start.
+
 1. **Stop the bleeding.** If a bad deploy is writing garbage, roll back the
    worker deploy first (`gh` revert PR / `npx wrangler rollback`), so the
    restored database isn't immediately re-corrupted.
@@ -162,6 +165,11 @@ Options at that point, in preference order:
 3. **D1 read replicas / Sessions API** if the pressure is read-side only.
 
 ## 8. Related
+
+- **Audit trail and restores:** a Time Travel restore rewinds the audit trail too, but not its
+  locked R2 archive or the emailed daily anchors, so the nightly check will raise alerts
+  afterwards. Read the "Restoring the database" section of
+  `docs/runbooks/audit-trail-rollout.md` before restoring.
 
 - Migration mechanics and replay-guard directive: `CLAUDE.md` → Database migrations.
 - Bounded cron sweeps (reminder, deposit): `apps/worker/src/services/reminder.ts`,

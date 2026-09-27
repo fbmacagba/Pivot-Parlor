@@ -35,12 +35,9 @@ export function entryStatus(e: { sealed_at: string | null; archived_at: string |
 // "Instrumented in Plan 1" section, plus the audit trail's own internal
 // actions written outside that HTTP-route registry: audit.view/export,
 // audit.gap, audit.expire, audit.seal.alert, ai.call, subject.redact,
-// data.export) can actually produce today. Anything else falls back to the
-// raw action string below. "audit.anchor" is in the fixed catalogue
-// (packages/audit/src/actions.ts) but is not emitted by any code yet
-// (confirmed: no `action: "audit.anchor"` write site exists) — left out
-// rather than labelling something that can't occur, per the brief's own
-// "if emitted" condition; it will fall back to its raw name if that changes.
+// data.export, and audit.anchor, which the nightly writes after its emails
+// per Ruling 57) can actually produce today. Anything else falls back to the
+// raw action string below.
 const LABELS: Record<string, string> = {
   "site.activate": "Site made live",
   "site.pause": "Site paused",
@@ -57,6 +54,7 @@ const LABELS: Record<string, string> = {
   "audit.gap": "Unlabelled change",
   "audit.expire": "Old entries expired",
   "audit.seal.alert": "Integrity alert",
+  "audit.anchor": "Daily fingerprint emailed",
   "audit.import.historical": "AI history imported",
   "subject.redact": "Personal details blanked",
   "subject.erase_request": "Erasure requested",
@@ -65,6 +63,19 @@ const LABELS: Record<string, string> = {
 
 export function actionLabel(action: string): string {
   return LABELS[action] ?? action;
+}
+
+/** The trail is a UK business record: show its times in UK time (GMT/BST)
+ *  whatever zone the server rendering the page, or the viewer's browser, is
+ *  in, so the server render and the browser agree (M6). */
+const UK_TIME_ZONE = "Europe/London";
+
+export function formatAuditDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-GB", { timeZone: UK_TIME_ZONE });
+}
+
+export function formatAuditDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-GB", { timeZone: UK_TIME_ZONE });
 }
 
 /** Escapes the five HTML-significant characters. The audit export error page

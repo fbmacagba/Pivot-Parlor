@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { actionLabel, auditExportErrorHtml, auditQuery, dateOnlyQuery, entryStatus, escapeHtml } from "./audit";
+import {
+  actionLabel,
+  auditExportErrorHtml,
+  auditQuery,
+  dateOnlyQuery,
+  entryStatus,
+  escapeHtml,
+  formatAuditDate,
+  formatAuditDateTime,
+} from "./audit";
 
 describe("audit page helpers", () => {
   it("keeps only known filters", () => {
@@ -19,6 +28,15 @@ describe("audit page helpers", () => {
   it("labels actions in plain words", () => {
     expect(actionLabel("site.pause")).toBe("Site paused");
     expect(actionLabel("brand.new")).toBe("brand.new");
+    // Ruling 57: the nightly now writes audit.anchor after its emails.
+    expect(actionLabel("audit.anchor")).toBe("Daily fingerprint emailed");
+  });
+  it("renders dates in UK time, not the server's or browser's zone (M6)", () => {
+    // 23:30 UTC in British Summer Time is 00:30 the next day in London.
+    expect(formatAuditDate("2026-07-01T23:30:00.000Z")).toBe("02/07/2026");
+    expect(formatAuditDateTime("2026-07-01T23:30:00.000Z")).toMatch(/^02\/07\/2026,? 00:30:00$/);
+    // Winter: London is UTC.
+    expect(formatAuditDateTime("2026-01-15T09:05:00.000Z")).toMatch(/^15\/01\/2026,? 09:05:00$/);
   });
   it("escapes HTML-significant characters", () => {
     expect(escapeHtml(`<script>alert(1)</script> & "quoted" 'single'`)).toBe(

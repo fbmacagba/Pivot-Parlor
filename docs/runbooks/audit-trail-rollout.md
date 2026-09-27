@@ -34,17 +34,15 @@ npx wrangler d1 execute pivot-parlor-db-staging --remote --command "DELETE FROM 
 npx wrangler d1 execute pivot-parlor-db-staging --remote --command "DROP TABLE zz_trigger_probe"
 ```
 
-Expected: the DELETE fails with `probe blocked`; DROP TABLE removes the trigger with the table.
-**If CREATE TRIGGER is rejected**, stop and report: Task 2 then ships without the two triggers
-(spec 6.1 fallback), and Task 2's trigger tests are replaced by a test that `audit_log` has no
-UPDATE/DELETE code path outside `packages/audit` and `apps/worker/src/audit` (grep-based). Record
-the outcome in the task report either way.
+Expected: the `DELETE` command fails and prints `probe blocked`; that's the trigger doing its
+job. `DROP TABLE` should then succeed and remove everything cleanly.
 
-In plain words: the `DELETE` command above should fail and print `probe blocked`; that's the
-trigger doing its job. `DROP TABLE` should then succeed and remove everything cleanly. If instead
-`CREATE TRIGGER` itself fails or errors, stop here and do not proceed to Step 1. Say so wherever
-you're tracking this rollout, so someone can decide whether the two protective triggers ship at
-all for this database.
+**If `CREATE TRIGGER` itself fails or errors**, stop here: do not go on to Step 1 and do not
+open the pull request. Tell the developer, with the exact error text. The branch as written
+cannot be deployed to that database: a developer has to change the code first so the two
+protective triggers are left out (the spec's section 6.1 fallback), and then this rollout starts
+again from Step 0. Either way, write down what happened (it worked, or the error text) wherever
+you're tracking this rollout.
 
 ## 1. Create and lock the archive buckets (before opening the pull request)
 
@@ -130,6 +128,14 @@ Once Steps 0-2 are done, open the pull request as normal.
 
 Confirm both workflow runs finish green before treating either environment as done.
 
+**The audit trail's own end-to-end test only runs if you ask for it.** On every pull request,
+`e2e.yml` runs only its quick SMOKE tier (sign-in and public booking). The audit-trail test
+(`tests/e2e/audit-trail.spec.ts`) is in the FULL tier, which runs only when the pull request has
+the **`e2e` label** (or when someone runs the workflow by hand). Add that label to run it. Be
+aware that FULL also runs the site-generation test, which drives the AI pipeline on staging and
+**spends AI credits**, and the audit-trail test alone waits about two and a half minutes for
+sealing and archiving.
+
 ## 4. Verify
 
 1. Sign in as developer and open **Activity** (the page at `/dev/activity`). Opening it writes
@@ -142,9 +148,10 @@ Confirm both workflow runs finish green before treating either environment as do
    Activity: "Site paused" and "Site made live", each showing the website status before and
    after under the entry when you expand it.
 3. Watch the badge on each of those two entries change over the next couple of minutes: it
-   starts **Pending**, then **Sealed**, then **Archived**. (On staging this can take up to about
-   two minutes; production seals every minute too but archives in its own batches, so allow a
-   similar window.)
+   starts **Pending**, then **Sealed**, then **Archived**. You may never see **Sealed**: the
+   same once-a-minute run that seals an entry usually archives it straight away, so going
+   directly from Pending to Archived is normal. (Allow up to about two minutes on either
+   environment, and refresh the page to see the badge change.)
 4. Press **Check now** (top of the Activity page). A message appears below the buttons; once
    something has actually been sealed, it reads "Checked N entries (X to Y): the trail is
    intact." (If nothing has sealed yet, e.g. you check within the first minute, it instead
@@ -163,17 +170,21 @@ Confirm both workflow runs finish green before treating either environment as do
    npx wrangler r2 object get pivot-parlor-audit/<archive_key> --remote --pipe | head -c 400
    ```
    This should print raw JSON lines: the entries themselves.
-6. The next morning, two things should have happened automatically (the nightly check runs at
-   03:00 UTC, which is 04:00 during British Summer Time): an email arrives with the subject
-   **"Audit anchor \<date\>"**, and the Activity page shows a new **"Trail checked"** entry timed
-   to match.
+6. The next morning, three things should have happened automatically (the nightly check runs
+   at 03:00 UTC, which is 04:00 during British Summer Time): an email arrives with the subject
+   **"Audit anchor \<date\>"**, and the Activity page shows a new **"Trail checked"** entry and a
+   **"Daily fingerprint emailed"** entry timed to match. From then on, the "Audit anchor" email
+   should arrive every morning; see "If you get an alert email" below for what to do when it
+   doesn't.
 
 One more thing worth knowing before you use this page for real: clicking **Record erasure
 request** on any person's entry does **not** erase anything immediately. It opens a
-confirmation dialog first, naming the person and explaining that their personal details will be
-blanked in 30 days and that this request itself is recorded and cannot be undone. Nothing happens
-unless you click **Confirm erasure request** in that dialog; **Cancel** (or closing the dialog)
-leaves everything exactly as it was.
+confirmation dialog first, naming the person and explaining that their name and email will be
+blanked in the activity trail in 30 days, and that this request itself is recorded and cannot be
+undone. It only changes the activity trail: the person's account, bookings and other records are
+not touched. IP addresses in the trail need no request; they blank on their own 30 days after
+each visit. Nothing happens unless you click **Confirm erasure request** in that dialog;
+**Cancel** (or closing the dialog) leaves everything exactly as it was.
 
 ## 5. Import AI usage history (once)
 
@@ -184,11 +195,82 @@ suffix (or reports none at all).** Imported entries are labelled **Historical** 
 distinguishable from entries recorded live going forward. This only ever needs doing once, on
 first rollout.
 
+## If you get an alert email
+
+The nightly check emails **"Audit trail needs attention"** with one line per problem it found.
+The same lines are on the Activity page, in that night's **"Trail checked"** entry (expand it).
+Do not delete the email. Forward it to the developer and keep a copy.
+
+**No "Audit anchor" email by mid-morning (UK time) counts as an alert too.** The check runs at
+03:00 UTC and sends that email every night. If it is missing, open Activity and look for last
+night's "Trail checked" and "Daily fingerprint emailed" entries: missing entries mean the check
+did not run; a "Daily fingerprint emailed" entry marked failed means the email could not be sent
+(the next night's alert then also says "previous night's ... email could not be sent"). Either
+way, tell the developer the same day.
+
+What the lines mean, grouped by how seriously to take them:
+
+**Treat as possible tampering (tell the developer straight away, change nothing yourself):**
+
+- "Check failed at seq N: ..." or "History re-walk failed at seq N: ..." followed by
+  "entry_hash does not match the entry", "chain_hash breaks the chain", "missing seq N",
+  "entry missing from archive ...", "entry differs from archive ..." or "unknown archive
+  format ...". An entry no longer matches its sealed or archived copy, or has gone.
+- "newest entries missing". Entries that were already checked have disappeared.
+- "N entries failed their integrity check when sealing" and "N entries are permanently unsealed
+  after failing their integrity check". An entry was changed before it could be sealed. The
+  second line repeats every night for as long as that entry stays in the trail; that is
+  deliberate, not a stuck alarm.
+- "N entries are in an impossible state (...)". The trail's bookkeeping was edited directly.
+- "stored anchor for DATE no longer matches the chain at seq N". Compare with the "Audit anchor"
+  email for that date in your mailbox; the email is the trustworthy copy.
+
+**Something is stuck (usually infrastructure, still tell the developer the same day):**
+
+- "N entries unsealed for more than 10 minutes", "N sealed entries unarchived for more than 1
+  hour" or "verification blocked at seq N: sealed but not archived". The once-a-minute sealer
+  or the archive bucket is not keeping up or is failing.
+- "N actions in the last 24 hours have no recorded outcome". Something started and never
+  reported whether it worked (for example a worker was stopped mid-way).
+- "... verify error: ...", "could not write anchor for DATE: ...", "could not verify stored
+  anchor for DATE: ...". The check could not read or write the archive bucket.
+- "nightly check crashed: ...". The check stopped part-way; nothing was verified that night.
+
+**Email delivery:**
+
+- "previous night's alert email could not be sent (...)" or "previous night's anchor email
+  could not be sent (...)". Last night's email failed; check your spam folder and ask the
+  developer to check the email provider. "could not read the previous night's email record"
+  means the check could not tell whether last night's email went out; treat it the same way.
+- "alert email not configured". This one is never emailed (there is nowhere to send it); you
+  will only see it on the Activity page. Redo Step 2.
+
+## Restoring the database
+
+**Read this before any D1 Time Travel restore** (`docs/DR-RUNBOOK.md` section 4). A restore
+rewinds the audit trail along with everything else, but the archive bucket and your mailbox are
+not rewound, and the locked bucket cannot be edited to match. Expect this afterwards:
+
+- Every activity entry recorded after the restore point disappears from the Activity page. The
+  archived copies of any that were already archived stay in the bucket, and the "Audit anchor"
+  emails stay in your mailbox; those are now the only record of that window, so keep them.
+- New entries reuse the sequence numbers the lost entries had. The nightly check will then
+  report "stored anchor for DATE no longer matches the chain at seq N" for any recent anchor
+  past the restore point.
+- If a new batch gets exactly the same archive name as one already in the bucket (same day,
+  same sequence numbers), the bucket refuses to overwrite it, archiving stops at that batch,
+  and the nightly reports "sealed entries unarchived for more than 1 hour" and "verification
+  blocked at seq N". This needs a developer; do not try to remove the lock.
+
+So: before restoring, note the restore point and tell the developer that the audit trail will
+need follow-up. After restoring, expect alert emails the next morning and forward them.
+
 ## Known limits (report these to the owner; they are not blockers, they are follow-up work)
 
 - **A person with direct database access is not fully locked out.** Someone who can write to the
   production database directly could, in principle, get a forged copy of an entry archived, or
-  could delete entries from the last few hours (before the next nightly check catches it);
+  could delete the newest entries, anything recorded since the last nightly check (so up to
+  about 24 hours' worth), before that check runs;
   R2 objects for the affected window would then be orphaned or replaced. The daily anchor emails
   are exactly the backstop for this: because they land in your mailbox, outside this system, an
   attacker with database access alone cannot also rewrite or delete them, so keep every "Audit

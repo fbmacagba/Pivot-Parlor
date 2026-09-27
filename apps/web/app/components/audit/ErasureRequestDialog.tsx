@@ -93,12 +93,24 @@ export function ErasureRequestDialog({
         </DialogHeader>
         {target && (
           <>
+            {/* Ruling 60 (M1, M8): say exactly what this does and does not
+                touch. It blanks the user subject's name and email in the
+                activity trail only; IP addresses are separate visitor
+                records that blank on their own 30 days after each visit. */}
             <p className="text-sm text-white/70">
               This will record a request to erase{" "}
               <span className="font-medium text-white">{target.who}</span>&apos;s personal
-              details. Their name, email and IP address will be permanently blanked in 30
-              days. Recording this request is itself added to the activity trail, and it
-              cannot be undone.
+              details from the activity trail. In 30 days their name and email will be
+              permanently blanked in the activity trail.
+            </p>
+            <p className="text-sm text-white/70">
+              This only changes the activity trail. Their account, bookings and any other
+              records are not changed. IP addresses in the trail are blanked on their own 30
+              days after each visit, so they need no request.
+            </p>
+            <p className="text-sm text-white/70">
+              Recording this request is itself added to the activity trail, and it cannot be
+              undone.
             </p>
             {error && (
               <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">

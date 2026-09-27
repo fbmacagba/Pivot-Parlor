@@ -8,7 +8,15 @@ import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { ErasureRequestDialog, type ErasureTarget } from "~/components/audit/ErasureRequestDialog";
-import { ACTION_GROUPS, actionLabel, auditQuery, dateOnlyQuery, entryStatus } from "~/lib/audit";
+import {
+  ACTION_GROUPS,
+  actionLabel,
+  auditQuery,
+  dateOnlyQuery,
+  entryStatus,
+  formatAuditDate,
+  formatAuditDateTime,
+} from "~/lib/audit";
 
 interface Entry {
   id: string;
@@ -222,7 +230,7 @@ export default function DevActivity() {
       {result && "erased" in result && result.erased && (
         <p role="status" className="text-white/80">
           {result.erased.redact_after
-            ? `Erasure recorded. Personal details will be blanked on ${new Date(result.erased.redact_after).toLocaleDateString("en-GB")}.`
+            ? `Erasure recorded. Personal details will be blanked on ${formatAuditDate(result.erased.redact_after)}.`
             : "Erasure recorded. This person's details are already scheduled to be blanked."}
         </p>
       )}
@@ -255,7 +263,7 @@ export default function DevActivity() {
             <li key={e.id} className="rounded-lg border border-white/10 bg-white/[0.02]">
               <details>
                 <summary className="tap-target flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
-                  <time className="text-xs text-white/50" dateTime={e.occurred_at}>{new Date(e.occurred_at).toLocaleString("en-GB")}</time>
+                  <time className="text-xs text-white/50" dateTime={e.occurred_at}>{formatAuditDateTime(e.occurred_at)}</time>
                   <span className="min-w-[9rem] flex-1 font-medium text-white">{actionLabel(e.action)}{e.phase === "started" ? " (started)" : ""}</span>
                   <span className="text-sm text-white/70">{who}</span>
                   {e.outcome && <Badge variant={e.outcome === "succeeded" ? "success" : e.outcome === "unknown" ? "warning" : "error"}>{e.outcome}</Badge>}

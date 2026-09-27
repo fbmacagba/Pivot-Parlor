@@ -76,7 +76,9 @@ describe("runAuditNightly walk wrap (Ruling 34)", () => {
     // question is whether the walk EVER returns to the floor again after
     // that, once it has caught up once.
     expect(froms.slice(1)).toContain(floor);
-  });
+    // Ruling 60 (M7): four nightly runs plus sealer drains once hit the
+    // 5 s default in a full parallel run; 20 s removes that flake.
+  }, 20_000);
 });
 
 describe("runAuditNightly walk resume (Task 10 carried minor c)", () => {
