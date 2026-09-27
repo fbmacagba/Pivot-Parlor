@@ -33,6 +33,21 @@ async function dropTriggers() {
   await E.DB.prepare("DROP TRIGGER IF EXISTS audit_log_seal_only").run();
 }
 
+// archivePending (Ruling 24) archives only the globally OLDEST unarchived
+// seal batch per call. runAuditNightly's own audit.verify write is itself an
+// unsealed row when it lands, so a single runSealer(E) call after a
+// deliberately-backdated row often just seals THAT trailing entry (giving it
+// its own fresh, distinct sealed_at) without also archiving it -- one call
+// resolves one stage of a two-stage lag (seal, then archive), not both. Loop
+// until nothing is left pending, so a test using this to clean up after
+// itself leaves a genuinely empty backlog for the next test.
+async function drainSealer() {
+  for (let i = 0; i < 5; i++) {
+    const r = await runSealer(E);
+    if (!r.sealed && !r.archived) break;
+  }
+}
+
 async function latestVerifyEntry() {
   return E.DB.prepare(
     "SELECT outcome, reason, details_json FROM audit_log WHERE action = 'audit.verify' AND via = 'cron' AND details_json LIKE '%checked%' ORDER BY occurred_at DESC LIMIT 1"
@@ -344,6 +359,64 @@ describe("runAuditNightly", () => {
     expect(alertMail!.lines.some((l) => l.includes("verify error: Error"))).toBe(true);
     expect(alertMail!.lines.some((l) => l.includes("could not write anchor"))).toBe(true);
     expect(alertMail!.lines.some((l) => l.includes("could not verify stored anchor"))).toBe(true);
+  });
+
+  // Ruling 33: archivedCeiling (Ruling 28, above) can silently stop BOTH the
+  // incremental scan and the rotating walk well short of MAX(seq) when one
+  // row never finishes archiving -- name the seq once it has been stuck
+  // long enough to rule out ordinary archiver lag. Both tests below
+  // construct that DB state directly (dropTriggers + raw UPDATE), the same
+  // way the interior-gap and NULL-archive_key tests in audit-verify.test.ts
+  // do, rather than through the sealer: archivePending always retries the
+  // globally OLDEST unarchived batch first (Ruling 24's one-batch-per-call
+  // design), so there is no way to make the real sealer leave an OLD row
+  // stuck while a NEWER one archives fine in the same run -- the very next
+  // real runSealer(E) call would just archive the old one instead. Each
+  // test drains the sealer for real in a `finally` (proper key, proper
+  // content, and past both stages of the seal-then-archive lag described
+  // above on drainSealer) so nothing leaks into the tests that follow.
+  it("names the seq where verification is blocked by a row stuck unarchived for over an hour (Ruling 33)", async () => {
+    await drainSealer(); // start from a genuinely empty backlog
+    const max = await sealedTrail(4);
+    const blockedSeq = max - 2; // leaves 2 already-archived rows sealed after it
+    await dropTriggers();
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600_000).toISOString();
+    await E.DB.prepare("UPDATE audit_log SET archived_at = NULL, archive_key = NULL, sealed_at = ? WHERE seq = ?")
+      .bind(twoHoursAgo, blockedSeq).run();
+
+    try {
+      await runAuditNightly(withEnv(), new Date(), async () => {});
+
+      const entry = await latestVerifyEntry();
+      const details = JSON.parse(entry!.details_json) as { blockedAtSeq: number | null };
+      expect(details.blockedAtSeq).toBe(blockedSeq);
+      expect(entry!.reason).toMatch(new RegExp(`verification blocked at seq ${blockedSeq}: sealed but not archived`));
+    } finally {
+      // Archive the row for real so it -- and the cursor capped just below
+      // it -- do not leak into later tests in this file.
+      await drainSealer();
+    }
+  });
+
+  it("does not raise a blocked line for a row unarchived only 5 minutes (ordinary archiver lag)", async () => {
+    await drainSealer(); // start from a genuinely empty backlog
+    const max = await sealedTrail(4);
+    const recentSeq = max - 2;
+    await dropTriggers();
+    const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+    await E.DB.prepare("UPDATE audit_log SET archived_at = NULL, archive_key = NULL, sealed_at = ? WHERE seq = ?")
+      .bind(fiveMinAgo, recentSeq).run();
+
+    try {
+      await runAuditNightly(withEnv(), new Date(), async () => {});
+
+      const entry = await latestVerifyEntry();
+      const details = JSON.parse(entry!.details_json) as { blockedAtSeq: number | null };
+      expect(details.blockedAtSeq).toBeNull();
+      expect(entry!.reason ?? "").not.toMatch(/verification blocked/);
+    } finally {
+      await drainSealer();
+    }
   });
 
   // Ruling 28. Placed immediately before the Ruling 27 test below on purpose:

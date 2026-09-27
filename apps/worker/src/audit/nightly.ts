@@ -88,6 +88,26 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
     return row?.m != null ? row.m - 1 : tentativeTo;
   }
 
+  // Moved up from the health-counts section below so it is available to the
+  // Ruling 33 computation immediately following it as well.
+  const iso = (msAgo: number) => new Date(now.getTime() - msAgo).toISOString();
+
+  // Ruling 33: archivedCeiling above can silently stop BOTH the incremental
+  // scan and the rotating walk well short of MAX(seq) when a single row
+  // never finishes archiving — the cap just makes incremental/walk both
+  // null forever, with no problem line naming why. Name the seq once it has
+  // been stuck long enough to rule out ordinary archiver lag (same 1-hour
+  // threshold as the "unarchived" count below). Computed ONCE for the whole
+  // run, from the first unarchived sealed seq above last_verified_seq — NOT
+  // per scan range, unlike archivedCeiling (a range-scoped cap is right for
+  // "don't verify this yet"; the blocked-seq report is about the trail as a
+  // whole, so computing it twice would just duplicate the same answer).
+  const blockedRow = await db
+    .prepare("SELECT seq, sealed_at FROM audit_log WHERE seq > ? AND sealed_at IS NOT NULL AND archived_at IS NULL ORDER BY seq LIMIT 1")
+    .bind(lastVerifiedSeq)
+    .first<{ seq: number; sealed_at: string }>();
+  const blockedAtSeq = blockedRow && blockedRow.sealed_at < iso(3600_000) ? blockedRow.seq : null;
+
   // 1. New entries since the last successful check.
   const incFrom = Math.max(floor, lastVerifiedSeq + 1);
   const incTentativeTo = Math.min(maxSeq, incFrom + WALK_ROWS_PER_NIGHT - 1);
@@ -105,8 +125,7 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
   const walk: VerifyResult | null = walkTo >= walkFrom ? await safeVerify(db, env.AUDIT_ARCHIVE, walkFrom, walkTo, { requireArchived: true }) : null;
   if (walk) await db.prepare("UPDATE audit_seal_state SET walk_cursor_seq = ? WHERE id = 1").bind(advanceCursor(walk)).run();
 
-  // 3. Health counts.
-  const iso = (msAgo: number) => new Date(now.getTime() - msAgo).toISOString();
+  // 3. Health counts. (`iso` is defined above, ahead of the Ruling 33 check.)
   const count = async (sql: string, ...binds: unknown[]) =>
     (await db.prepare(sql).bind(...binds).first<{ n: number }>())?.n ?? 0;
   // Ruling 27: a row that already carries an audit.seal.alert is excluded
@@ -183,6 +202,7 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
     newestMissing ? "newest entries missing" : null,
     unsealed ? `${unsealed} entries unsealed for more than 10 minutes` : null,
     unarchived ? `${unarchived} sealed entries unarchived for more than 1 hour` : null,
+    blockedAtSeq != null ? `verification blocked at seq ${blockedAtSeq}: sealed but not archived` : null,
     unknown ? `${unknown} actions in the last 24 hours have no recorded outcome` : null,
     sealAlerts ? `${sealAlerts} entries failed their integrity check when sealing` : null,
     anchorWriteProblem,
@@ -203,6 +223,7 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
         incremental: incremental && { from: incremental.fromSeq, to: incremental.toSeq, ok: incremental.ok, firstBadSeq: incremental.firstBadSeq },
         walk: walk && { from: walk.fromSeq, to: walk.toSeq, ok: walk.ok, firstBadSeq: walk.firstBadSeq },
         unsealed, unarchived, unknown, sealAlerts,
+        blockedAtSeq,
         anchor: anchorRow ? { date: yesterday, seq: anchorRow.seq } : null,
       },
     });
