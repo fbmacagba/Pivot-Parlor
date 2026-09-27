@@ -12,7 +12,8 @@ audit.use("*", authMiddleware, requireRole("developer"));
 
 type Ctx = Context<{ Bindings: Bindings }>;
 const PAGE = 50;
-const EXPORT_MAX = 10_000;
+// Mutable so tests can lower it without inserting thousands of rows (Ruling 45).
+export const EXPORT_LIMITS = { max: 10_000 };
 
 // ─── Ruling 41: shape-validate every list/export filter ────────────────────
 // Every value below is used in SQL and echoed into an audit.view / audit.export
@@ -22,6 +23,7 @@ const RE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const RE_ACTOR = /^[A-Za-z0-9_-]{1,80}$/;
 const RE_ACTION = /^[a-z_.]{1,64}$/;
 const RE_CURSOR_ID = /^[A-Za-z0-9_-]{1,80}$/;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const OUTCOMES: readonly Outcome[] = ["succeeded", "refused", "failed", "unknown"];
 const OUTCOME_SET = new Set<string>(OUTCOMES);
 
@@ -30,16 +32,18 @@ function badDate(s: string): boolean {
 }
 
 /** Returns the name of the first invalid filter/cursor key, or null when every
- *  present value has a valid shape. */
+ *  present value has a valid shape. An empty value (e.g. `?shop_id=`) is
+ *  treated as absent, not invalid — matching filters()'s own truthy checks,
+ *  so a blank field left in a GET form doesn't 400. */
 function invalidFilterKey(q: Record<string, string>, cursor: string | undefined): string | null {
-  if (q.shop_id !== undefined && !RE_ID.test(q.shop_id)) return "shop_id";
-  if (q.request_id !== undefined && !RE_ID.test(q.request_id)) return "request_id";
-  if (q.actor !== undefined && !RE_ACTOR.test(q.actor)) return "actor";
-  if (q.action !== undefined && !RE_ACTION.test(q.action)) return "action";
-  if (q.outcome !== undefined && !OUTCOME_SET.has(q.outcome)) return "outcome";
-  if (q.from !== undefined && badDate(q.from)) return "from";
-  if (q.to !== undefined && badDate(q.to)) return "to";
-  if (cursor !== undefined) {
+  if (q.shop_id && !RE_ID.test(q.shop_id)) return "shop_id";
+  if (q.request_id && !RE_ID.test(q.request_id)) return "request_id";
+  if (q.actor && !RE_ACTOR.test(q.actor)) return "actor";
+  if (q.action && !RE_ACTION.test(q.action)) return "action";
+  if (q.outcome && !OUTCOME_SET.has(q.outcome)) return "outcome";
+  if (q.from && badDate(q.from)) return "from";
+  if (q.to && badDate(q.to)) return "to";
+  if (cursor) {
     const parts = cursor.split("|");
     if (parts.length !== 2 || Number.isNaN(Date.parse(parts[0]!)) || !RE_CURSOR_ID.test(parts[1]!)) return "cursor";
   }
@@ -84,7 +88,10 @@ function filters(c: Ctx): Filters {
   // new Date(...).toISOString() is safe here because invalidFilterKey()
   // already rejected anything Date.parse can't handle.
   if (q.from) add("from", "l.occurred_at >= ?", new Date(q.from).toISOString());
-  if (q.to) add("to", "l.occurred_at <= ?", new Date(q.to).toISOString());
+  // A date-only `to` (e.g. "2026-01-01") parses as that day's UTC midnight —
+  // the START of the day, not the end — which would silently exclude every
+  // entry from later that same day. Bump a date-only value to 23:59:59.999.
+  if (q.to) add("to", "l.occurred_at <= ?", DATE_ONLY.test(q.to) ? `${q.to}T23:59:59.999Z` : new Date(q.to).toISOString());
   if (q.request_id) add("request_id", "l.request_id = ?", q.request_id);
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", binds, echo };
 }
@@ -106,7 +113,7 @@ async function guarded<T>(c: Ctx, fn: () => Promise<T>): Promise<T | Response> {
 // GET /api/audit — filtered, newest first, cursor = "<occurred_at>|<id>"
 audit.get("/", async (c) => {
   const q = c.req.query();
-  const cursor = c.req.query("cursor");
+  const cursor = q.cursor || undefined;
   const bad = invalidFilterKey(q, cursor);
   if (bad) return badRequest(c, bad);
   const f = filters(c);
@@ -117,10 +124,13 @@ audit.get("/", async (c) => {
     where = `${where ? `${where} AND` : "WHERE"} (l.occurred_at < ? OR (l.occurred_at = ? AND l.id < ?))`;
     binds.push(at, at, id);
   }
-  if (!cursor) {
-    const refused = await guarded(c, () => auditFor(c).write({ action: "audit.view", outcome: "succeeded", details: { filters: f.echo } }));
-    if (refused instanceof Response) return refused;
-  }
+  // Ruling 43: EVERY page writes its own audit.view, not just the first — a
+  // syntactically valid but fabricated cursor must not read a page of
+  // personal data unlogged. `paged: true` marks a scroll versus page one in
+  // the permanent record.
+  const details = cursor ? { filters: f.echo, paged: true } : { filters: f.echo };
+  const refused = await guarded(c, () => auditFor(c).write({ action: "audit.view", outcome: "succeeded", details }));
+  if (refused instanceof Response) return refused;
   const rows = await c.env.DB.prepare(`${SELECT} ${where} ORDER BY l.occurred_at DESC, l.id DESC LIMIT ?`)
     .bind(...binds, PAGE + 1)
     .all<Record<string, unknown>>();
@@ -146,7 +156,10 @@ audit.post("/verify", async (c) => {
   const max = (await c.env.DB.prepare("SELECT MAX(seq) AS m FROM audit_log").first<{ m: number | null }>())?.m ?? 0;
   const floor = ((await c.env.DB.prepare("SELECT expired_through_seq AS e FROM audit_seal_state WHERE id = 1").first<{ e: number }>())?.e ?? 0) + 1;
   const to = Math.min(Number.isInteger(body.to_seq) ? body.to_seq! : max, max);
-  const from = Math.max(Number.isInteger(body.from_seq) ? body.from_seq! : to - 999, floor);
+  const rawFrom = Math.max(Number.isInteger(body.from_seq) ? body.from_seq! : to - 999, floor);
+  // Never verify more than 5000 entries in one manual call, regardless of an
+  // explicit from_seq/to_seq spread.
+  const from = Math.max(rawFrom, to - 4999);
   // An empty/backwards effective range (e.g. a fresh DB with nothing sealed
   // yet) still gets its own audit.verify entry — skipping the write here
   // would leave this POST with no audit entry of its own, and the gap guard
@@ -164,9 +177,14 @@ audit.post("/verify", async (c) => {
 });
 
 const CSV_HEADER = "occurred_at,seq,action,outcome,actor,actor_email,shop_id,entity_type,entity_id,changes,details,request_id,sealed,archived";
+// Ruling 44: a cell starting with one of these can be interpreted as a
+// formula by Excel/Sheets when the CSV is opened (CSV injection) — user-set
+// names/emails reach this export meant for third parties' spreadsheets.
+const CSV_FORMULA_LEAD = /^[=+\-@\t\r]/;
 const csvCell = (v: unknown) => {
-  const s = v === null || v === undefined ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = v === null || v === undefined ? "" : String(v);
+  if (CSV_FORMULA_LEAD.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
 // GET /api/audit/export?...&part=csv|proof
@@ -176,11 +194,19 @@ audit.get("/export", async (c) => {
   if (bad) return badRequest(c, bad);
   const f = filters(c);
   const part = c.req.query("part") === "proof" ? "proof" : "csv";
+  // Ruling 45: fetch one row past the cap so an over-large export is
+  // refused rather than silently truncated (same query, both parts). Checked
+  // BEFORE writing any audit entry — a refused export did not "succeed".
+  const rows = (
+    await c.env.DB.prepare(`${SELECT} ${f.where} ORDER BY l.occurred_at, l.id LIMIT ?`)
+      .bind(...f.binds, EXPORT_LIMITS.max + 1)
+      .all<Record<string, unknown>>()
+  ).results ?? [];
+  if (rows.length > EXPORT_LIMITS.max) {
+    return c.json({ success: false, error: "Too many entries; narrow the filters" }, 400);
+  }
   const refused = await guarded(c, () => auditFor(c).write({ action: "audit.export", outcome: "succeeded", details: { part, filters: f.echo } }));
   if (refused instanceof Response) return refused;
-  const rows = (
-    await c.env.DB.prepare(`${SELECT} ${f.where} ORDER BY l.occurred_at, l.id LIMIT ?`).bind(...f.binds, EXPORT_MAX).all<Record<string, unknown>>()
-  ).results ?? [];
   if (part === "csv") {
     const lines = rows.map((r) =>
       [r.occurred_at, r.seq, r.action, r.outcome, r.actor_name ?? r.actor_type, r.actor_email, r.shop_id, r.entity_type, r.entity_id,
@@ -193,6 +219,9 @@ audit.get("/export", async (c) => {
   const sealed = rows.filter((r) => typeof r.seq === "number").sort((a, b) => (a.seq as number) - (b.seq as number));
   const first = sealed[0] ?? null;
   const last = sealed[sealed.length - 1] ?? null;
+  // Ruling 45: the last row of the WHOLE result (sealed or not), so a caller
+  // can pin this CSV/proof pair to it and detect whether new rows appeared.
+  const lastRow = rows[rows.length - 1] ?? null;
   const archives = [...new Set(sealed.map((r) => r.archive_key).filter(Boolean))];
   const day = (r: Record<string, unknown> | null) => (r ? String(r.sealed_at).slice(0, 10) : null);
   return c.json({
@@ -201,33 +230,44 @@ audit.get("/export", async (c) => {
       generated_at: new Date().toISOString(),
       filters: f.echo,
       entries: rows.length,
+      sealed_entries: sealed.length,
+      unsealed_entries: rows.length - sealed.length,
+      last_row: lastRow && { occurred_at: lastRow.occurred_at, id: lastRow.id },
       first: first && { seq: first.seq, chain_hash: first.chain_hash },
       last: last && { seq: last.seq, chain_hash: last.chain_hash },
       archive_objects: archives,
       anchors: [day(first), day(last)].filter(Boolean).map((d) => `anchors/${d}.json`),
       how_to_verify:
-        "Recompute each entry's SHA-256 over its canonical fields, chain from the value before 'first', and compare with the archive objects and the emailed daily anchors.",
+        "Recompute each entry's SHA-256 from its copy in the archive objects listed here (not from this CSV), chain from the value before 'first', and compare the resulting chain_hash values against the emailed daily anchors.",
     },
   });
 });
 
 // GET /api/audit/subjects/:subjectId/export — subject access export. Works
-// for any existing subject id/kind ('user', 'visitor_ip', 'shop'); entries
-// are matched by actor_ref/ip_ref, so a 'shop' subject (referenced only from
-// inside details_json.shop_subject, per Task 6) legitimately returns zero
-// entries alongside its subject row — see the report for why that is not
-// widened here.
+// for any existing subject kind ('user', 'visitor_ip', 'shop').
 audit.get("/subjects/:subjectId/export", async (c) => {
   const subjectId = c.req.param("subjectId");
-  const subject = await c.env.DB.prepare("SELECT * FROM audit_subjects WHERE id = ?").bind(subjectId).first();
+  const subject = await c.env.DB.prepare("SELECT * FROM audit_subjects WHERE id = ?")
+    .bind(subjectId)
+    .first<{ id: string; kind: string; shop_id: string | null }>();
   if (!subject) return c.json({ success: false, error: "Subject not found" }, 404);
   const refused = await guarded(c, () =>
     auditFor(c).write({ action: "data.export", outcome: "succeeded", entityType: "audit_subject", entityId: subjectId })
   );
   if (refused instanceof Response) return refused;
+  // Ruling 46: pick the WHERE by kind instead of an unindexed OR across two
+  // columns. A 'shop' subject is never referenced from actor_ref/ip_ref (Task
+  // 6 puts it only inside details_json.shop_subject) — shop_id is its real,
+  // indexed key (idx_audit_log_shop_time).
+  const [column, value] =
+    subject.kind === "shop"
+      ? (["shop_id", subject.shop_id ?? subjectId] as const)
+      : subject.kind === "visitor_ip"
+        ? (["ip_ref", subjectId] as const)
+        : (["actor_ref", subjectId] as const);
   const entries = (
-    await c.env.DB.prepare("SELECT * FROM audit_log WHERE actor_ref = ? OR ip_ref = ? ORDER BY occurred_at LIMIT ?")
-      .bind(subjectId, subjectId, EXPORT_MAX)
+    await c.env.DB.prepare(`SELECT * FROM audit_log WHERE ${column} = ? ORDER BY occurred_at LIMIT ?`)
+      .bind(value, EXPORT_LIMITS.max)
       .all()
   ).results ?? [];
   return c.json({ success: true, data: { subject, entries } });
@@ -282,6 +322,17 @@ audit.post("/subjects/:userId/erase", async (c) => {
   return c.json({ success: true, data: { redact_after: candidate } });
 });
 
+const round6 = (n: number): number => Math.round(n * 1e6) / 1e6;
+
+/** Returns the ISO instant for an ai_usage_log.created_at value, or null if
+ *  it can't be parsed at all (rather than throwing new Date(NaN)). */
+function historicalIso(createdAt: unknown): string | null {
+  const s = String(createdAt);
+  const iso = s.includes("T") ? s : `${s.replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 // POST /api/audit/import-historical — one-off, idempotent: ai_usage_log
 // predates the audit trail, so this backfills each row once as a historical
 // ai.call entry attributed to the system (not the developer who happens to
@@ -292,10 +343,27 @@ audit.post("/import-historical", async (c) => {
       `SELECT u.* FROM ai_usage_log u WHERE NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.id = 'hist_' || u.id) ORDER BY u.created_at LIMIT 500`
     ).all<Record<string, unknown>>()
   ).results ?? [];
-  const system = systemAudit(c.env.DB, "api", c.get("requestId") ?? null);
+  const candidates: { row: Record<string, unknown>; iso: string }[] = [];
+  let skipped = 0;
   for (const r of rows) {
-    const created = String(r.created_at);
-    const iso = created.includes("T") ? new Date(created).toISOString() : new Date(`${created.replace(" ", "T")}Z`).toISOString();
+    const iso = historicalIso(r.created_at);
+    if (iso === null) {
+      skipped++;
+      continue;
+    }
+    candidates.push({ row: r, iso });
+  }
+  // Ruling 47: write the summary entry FIRST and refuse before any hist_ row
+  // is written (spec 4.4, entry-before-acting) — the old order wrote every
+  // hist_ row unconditionally and only attempted this entry at the end, so a
+  // refusal there falsely claimed "nothing was changed" after hundreds of
+  // rows already had been.
+  const refused = await guarded(c, () =>
+    auditFor(c).write({ action: "audit.import.historical", outcome: "succeeded", details: { candidates: rows.length, skipped } })
+  );
+  if (refused instanceof Response) return refused;
+  const system = systemAudit(c.env.DB, "api", c.get("requestId") ?? null);
+  for (const { row: r, iso } of candidates) {
     await system.write({
       id: `hist_${r.id}`,
       occurredAt: iso,
@@ -305,16 +373,12 @@ audit.post("/import-historical", async (c) => {
       shopId: (r.shop_id as string) ?? null,
       details: {
         worker: r.worker_name, model: r.model, usage_type: r.usage_type, input_tokens: r.input_tokens,
-        output_tokens: r.output_tokens, estimated_cost_usd: r.estimated_cost_usd, job_id: r.job_id ?? null,
+        output_tokens: r.output_tokens, estimated_cost_usd: round6(r.estimated_cost_usd as number), job_id: r.job_id ?? null,
         note: "historical, not recorded at the time",
       },
     });
   }
-  const refused = await guarded(c, () =>
-    auditFor(c).write({ action: "audit.import.historical", outcome: "succeeded", details: { imported: rows.length } })
-  );
-  if (refused instanceof Response) return refused;
-  return c.json({ success: true, data: { imported: rows.length, more: rows.length === 500 } });
+  return c.json({ success: true, data: { imported: candidates.length, skipped, more: rows.length === 500 } });
 });
 
 export default audit;

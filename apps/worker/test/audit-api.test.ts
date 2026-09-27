@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { authHeaders, seedShop, seedUser, tokenFor } from "./helpers";
 import { dispatch } from "./request";
 import { runSealer } from "../src/audit/sealer";
+import { AUDIT_REFUSED_MESSAGE } from "../src/audit/context";
+import { EXPORT_LIMITS } from "../src/routes/audit";
 
 const E = env as unknown as { DB: D1Database; AUDIT_ARCHIVE: R2Bucket };
 
@@ -26,6 +28,19 @@ async function auditEntriesFor(requestId: string, action: string) {
       .bind(requestId, action)
       .all<Record<string, unknown>>()
   ).results ?? [];
+}
+
+/** Bypasses the recorder (which validates every action against the fixed
+ *  catalogue) to seed a minimal, raw audit_log row — the same technique
+ *  test/audit-triggers.test.ts already uses — for tests that only care about
+ *  SQL filtering behavior, not the write path itself. */
+async function rawAuditRow(action: string): Promise<void> {
+  await E.DB.prepare(
+    `INSERT INTO audit_log (id, occurred_at, entry_hash, actor_type, via, action, phase, outcome, worker, historical)
+     VALUES (?, ?, 'x', 'system', 'api', ?, 'done', 'succeeded', 'test', 0)`
+  )
+    .bind(crypto.randomUUID(), new Date().toISOString(), action)
+    .run();
 }
 
 describe("/api/audit", () => {
@@ -74,6 +89,36 @@ describe("/api/audit", () => {
     expect(written).toEqual([]);
   });
 
+  it("treats empty filter values as absent, not invalid (minor)", async () => {
+    const { token } = await dev();
+    const res = await dispatch("GET", "/api/audit?shop_id=&action=&outcome=&from=&to=&cursor=", { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+  });
+
+  it("writes its own audit.view for a fabricated (but well-shaped) cursor, marked paged (Ruling 43)", async () => {
+    const { token } = await dev();
+    // Well-shaped per Ruling 41 (splits into "<iso>|<id>") but references
+    // nothing real — this must not read a page of personal data unlogged.
+    const cursor = `${new Date().toISOString()}|${crypto.randomUUID()}`;
+    const res = await dispatch("GET", `/api/audit?cursor=${encodeURIComponent(cursor)}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const [entry] = await auditEntriesFor(requestIdOf(res), "audit.view");
+    expect(entry).toBeTruthy();
+    expect(JSON.parse(entry!.details_json as string)).toMatchObject({ paged: true });
+  });
+
+  it("refuses (503) a read route when the audit entry cannot be written, and returns no data (minor)", async () => {
+    const { token } = await dev();
+    await E.DB.prepare("ALTER TABLE audit_log RENAME TO audit_log_off").run();
+    try {
+      const res = await dispatch("GET", "/api/audit", { headers: authHeaders(token) });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ success: false, error: AUDIT_REFUSED_MESSAGE });
+    } finally {
+      await E.DB.prepare("ALTER TABLE audit_log_off RENAME TO audit_log").run();
+    }
+  });
+
   it("verifies a range", async () => {
     const { token } = await dev();
     await runSealer(E);
@@ -81,24 +126,76 @@ describe("/api/audit", () => {
     expect(((await res.json()) as { data: { ok: boolean } }).data.ok).toBe(true);
   });
 
-  it("exports CSV with a header row and a proof file", async () => {
+  it("exports CSV with a header row and a proof file with sealed/unsealed counts and a last_row", async () => {
     const { token } = await dev();
     const csv = await dispatch("GET", "/api/audit/export?part=csv", { headers: authHeaders(token) });
     expect(csv.headers.get("Content-Type")).toMatch(/text\/csv/);
     expect((await csv.text()).split("\n")[0]).toBe("occurred_at,seq,action,outcome,actor,actor_email,shop_id,entity_type,entity_id,changes,details,request_id,sealed,archived");
     const proof = await dispatch("GET", "/api/audit/export?part=proof", { headers: authHeaders(token) });
-    expect(await proof.json()).toHaveProperty("data.first");
+    const body = (await proof.json()) as {
+      data: {
+        first: unknown;
+        sealed_entries: number;
+        unsealed_entries: number;
+        last_row: { occurred_at: string; id: string } | null;
+        how_to_verify: string;
+      };
+    };
+    expect(body).toHaveProperty("data.first");
+    expect(typeof body.data.sealed_entries).toBe("number");
+    expect(typeof body.data.unsealed_entries).toBe("number");
+    expect(body.data.last_row).toHaveProperty("occurred_at");
+    expect(body.data.last_row).toHaveProperty("id");
+    expect(body.data.how_to_verify).toMatch(/archive/i);
+    expect(body.data.how_to_verify).toMatch(/not from this csv/i);
   });
 
-  it("filters by an action prefix without over-matching (LIKE escaping)", async () => {
+  it("writes an audit.export entry for a CSV export", async () => {
     const { token } = await dev();
-    const shopId = await seedShop("Prefix Shop");
-    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
-    const res = await dispatch("GET", "/api/audit?action=site.", { headers: authHeaders(token) });
+    const res = await dispatch("GET", "/api/audit/export?part=csv", { headers: authHeaders(token) });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { entries: { action: string }[] } };
-    expect(body.data.entries.length).toBeGreaterThan(0);
-    for (const e of body.data.entries) expect(e.action.startsWith("site.")).toBe(true);
+    const [entry] = await auditEntriesFor(requestIdOf(res), "audit.export");
+    expect(entry).toBeTruthy();
+  });
+
+  it("refuses an export that would silently truncate, for both parts (Ruling 45)", async () => {
+    const { token } = await dev();
+    const shopId = await seedShop("Overflow Shop");
+    // Three entries scoped to this one shop, independent of whatever else the
+    // rest of the file has written to the shared audit_log.
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
+    await dispatch("POST", `/api/shops/${shopId}/activate`, { headers: authHeaders(token) });
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
+    const originalMax = EXPORT_LIMITS.max;
+    EXPORT_LIMITS.max = 2;
+    try {
+      const csv = await dispatch("GET", `/api/audit/export?shop_id=${shopId}&part=csv`, { headers: authHeaders(token) });
+      expect(csv.status).toBe(400);
+      expect(((await csv.json()) as { error: string }).error).toBe("Too many entries; narrow the filters");
+      const proof = await dispatch("GET", `/api/audit/export?shop_id=${shopId}&part=proof`, { headers: authHeaders(token) });
+      expect(proof.status).toBe(400);
+      // No audit.export entry for a refused export.
+      const written = await auditEntriesFor(requestIdOf(csv), "audit.export");
+      expect(written).toEqual([]);
+    } finally {
+      EXPORT_LIMITS.max = originalMax;
+    }
+  });
+
+  it("filters by an action prefix without over-matching (LIKE escaping, minor)", async () => {
+    const { token } = await dev();
+    // Deliberately chosen to contain the "_" that Ruling 41's action regex
+    // allows (real actions need it, e.g. "ai.chatbot_model.set") but that is
+    // also a LIKE single-character wildcard. "axb.c" differs from "a_b.c"
+    // ONLY at that wildcard position, so an unescaped LIKE '%a_b.%' would
+    // wrongly match it too.
+    await rawAuditRow("a_b.c");
+    await rawAuditRow("axb.c");
+    const res = await dispatch("GET", `/api/audit?action=${encodeURIComponent("a_b.")}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const actions = ((await res.json()) as { data: { entries: { action: string }[] } }).data.entries.map((e) => e.action);
+    expect(actions).toContain("a_b.c");
+    expect(actions).not.toContain("axb.c");
   });
 
   it("canonicalizes from/to to ISO instead of echoing raw free text into the permanent entry", async () => {
@@ -116,11 +213,60 @@ describe("/api/audit", () => {
     expect(String(entry!.details_json)).toContain("2020-01-01T00:00:00.000Z");
   });
 
+  it("treats a date-only `to` as the end of that day (minor)", async () => {
+    const { token } = await dev();
+    const shopId = await seedShop("EndOfDay Shop");
+    // occurred_at is "now" — almost certainly after that UTC day's midnight,
+    // so a `to` that (wrongly) meant start-of-day would exclude it.
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await dispatch("GET", `/api/audit?shop_id=${shopId}&to=${today}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { entries: { action: string }[] } };
+    expect(body.data.entries.some((e) => e.action === "site.pause")).toBe(true);
+  });
+
   it("rejects a malformed export filter with 400", async () => {
     const { token } = await dev();
     // outcome must be one of the recorder's real enum values.
     const res = await dispatch("GET", "/api/audit/export?outcome=maybe", { headers: authHeaders(token) });
     expect(res.status).toBe(400);
+  });
+
+  it("prefixes a formula-leading CSV cell so it can't execute in a spreadsheet (Ruling 44)", async () => {
+    const { id, token } = await dev();
+    const injection = '=HYPERLINK("http://evil.com","click")';
+    await E.DB.prepare("UPDATE platform_users SET name = ? WHERE id = ?").bind(injection, id).run();
+    // Any auditable action by this developer upserts audit_subjects.display_name
+    // from platform_users.name at write time (packages/audit/src/recorder.ts).
+    await dispatch("GET", "/api/audit", { headers: authHeaders(token) });
+    const csv = await dispatch("GET", "/api/audit/export?part=csv", { headers: authHeaders(token) });
+    const text = await csv.text();
+    // Prefixed with "'" AND quoted (the prefixed string still contains a
+    // comma and quotes), matching csvCell()'s own transform — the raw
+    // formula text must never appear un-guarded.
+    const prefixed = `'${injection}`;
+    const expectedCell = `"${prefixed.replace(/"/g, '""')}"`;
+    expect(text).toContain(expectedCell);
+    expect(text).not.toContain(`,${injection},`);
+  });
+
+  it("requires auth (401) and the developer role (403) on export, a subject route and a POST route (minor)", async () => {
+    const shopId = await seedShop("RBAC Shop");
+    const adminId = await seedUser("admin", shopId);
+    const adminToken = await tokenFor(adminId, "admin", shopId);
+
+    const noAuth = await dispatch("GET", "/api/audit/export?part=csv");
+    expect(noAuth.status).toBe(401);
+
+    const exportRes = await dispatch("GET", "/api/audit/export?part=csv", { headers: authHeaders(adminToken) });
+    expect(exportRes.status).toBe(403);
+
+    const subjectRes = await dispatch("GET", "/api/audit/subjects/subj_shop_does-not-exist/export", { headers: authHeaders(adminToken) });
+    expect(subjectRes.status).toBe(403);
+
+    const postRes = await dispatch("POST", "/api/audit/verify", { headers: authHeaders(adminToken), body: {} });
+    expect(postRes.status).toBe(403);
   });
 
   it("records an erasure request 30 days out", async () => {
@@ -168,18 +314,25 @@ describe("/api/audit", () => {
     expect(entry!.changes_json).toBeNull();
   });
 
-  it("exports a shop subject's data alongside its (possibly empty) entries", async () => {
+  it("exports a shop subject's actual entries via shop_id, and logs data.export (Ruling 46)", async () => {
     const { token } = await dev();
     const shopId = await seedShop("Subject Shop");
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
     const subjectId = `subj_shop_${shopId}`;
-    await E.DB.prepare("INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at) VALUES (?, 'shop', ?, ?, ?)")
+    // shops.ts's own delete/pause flow upserts this row; insert it directly
+    // here since this test only pauses (no delete).
+    await E.DB.prepare(
+      "INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at) VALUES (?, 'shop', ?, ?, ?) ON CONFLICT(id) DO NOTHING"
+    )
       .bind(subjectId, shopId, "Subject Shop (subject-shop)", new Date().toISOString())
       .run();
     const res = await dispatch("GET", `/api/audit/subjects/${subjectId}/export`, { headers: authHeaders(token) });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { subject: { kind: string }; entries: unknown[] } };
+    const body = (await res.json()) as { data: { subject: { kind: string }; entries: { action: string; shop_id: string }[] } };
     expect(body.data.subject.kind).toBe("shop");
-    expect(Array.isArray(body.data.entries)).toBe(true);
+    expect(body.data.entries.some((e) => e.action === "site.pause" && e.shop_id === shopId)).toBe(true);
+    const [dataExportEntry] = await auditEntriesFor(requestIdOf(res), "data.export");
+    expect(dataExportEntry).toBeTruthy();
   });
 
   it("imports ai_usage_log once, as historical ai.call entries", async () => {
@@ -192,5 +345,53 @@ describe("/api/audit", () => {
     await dispatch("POST", "/api/audit/import-historical", { headers: authHeaders(token) });
     const rows = await E.DB.prepare("SELECT historical, occurred_at FROM audit_log WHERE id = 'hist_u-1'").all();
     expect(rows.results).toEqual([{ historical: 1, occurred_at: "2026-03-24T21:40:44.000Z" }]);
+  });
+
+  it("skips a row with an unparsable created_at (counted in details) and rounds cost to 6dp (minor)", async () => {
+    const { token } = await dev();
+    const shopId = await seedShop("Import Edge Shop");
+    await E.DB.prepare(
+      "INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, created_at) VALUES ('u-good', ?, 'w', 'm', 'chatbot', 1, 1, 2, 0.0000005006, '2026-04-01 00:00:00')"
+    ).bind(shopId).run();
+    await E.DB.prepare(
+      "INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, created_at) VALUES ('u-bad', ?, 'w', 'm', 'chatbot', 1, 1, 2, 0.001, 'not-a-real-date')"
+    ).bind(shopId).run();
+    const res = await dispatch("POST", "/api/audit/import-historical", { headers: authHeaders(token) });
+    const body = (await res.json()) as { data: { imported: number; skipped: number } };
+    expect(body.data.skipped).toBeGreaterThanOrEqual(1);
+    const [summary] = await auditEntriesFor(requestIdOf(res), "audit.import.historical");
+    expect(JSON.parse(summary!.details_json as string)).toMatchObject({ skipped: body.data.skipped });
+    const goodRow = await E.DB.prepare("SELECT details_json FROM audit_log WHERE id = 'hist_u-good'").first<{ details_json: string }>();
+    expect(JSON.parse(goodRow!.details_json).estimated_cost_usd).toBe(0.000001);
+    const badRow = await E.DB.prepare("SELECT id FROM audit_log WHERE id = 'hist_u-bad'").first();
+    expect(badRow).toBeNull();
+  });
+
+  it("refuses (503) and writes no hist_ row when the summary entry cannot be written (Ruling 47)", async () => {
+    const { token } = await dev();
+    const shopId = await seedShop("Import Refusal Shop");
+    await E.DB.prepare(
+      "INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, created_at) VALUES ('u-refuse', ?, 'w', 'm', 'chatbot', 1, 1, 2, 0.001, '2026-05-01 00:00:00')"
+    ).bind(shopId).run();
+    // Renaming the whole audit_log table (the usual refusal-simulation
+    // technique elsewhere in this suite) also breaks the route's own
+    // candidate-selection SELECT, which reads audit_log too — that would
+    // 500 before ever reaching a write. Instead, block ONLY the summary
+    // entry's INSERT with a targeted trigger: this is exactly the scenario
+    // Ruling 47 is about — under the OLD write-it-last order, every hist_
+    // row (action 'ai.call', unaffected by this trigger) would already have
+    // committed by the time this specific insert failed.
+    await E.DB.prepare(
+      "CREATE TRIGGER test_block_import_summary BEFORE INSERT ON audit_log WHEN NEW.action = 'audit.import.historical' BEGIN SELECT RAISE(ABORT, 'test forced refusal'); END"
+    ).run();
+    try {
+      const res = await dispatch("POST", "/api/audit/import-historical", { headers: authHeaders(token) });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ success: false, error: AUDIT_REFUSED_MESSAGE });
+    } finally {
+      await E.DB.prepare("DROP TRIGGER test_block_import_summary").run();
+    }
+    const hist = await E.DB.prepare("SELECT id FROM audit_log WHERE id = 'hist_u-refuse'").first();
+    expect(hist).toBeNull();
   });
 });
