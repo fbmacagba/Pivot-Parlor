@@ -59,7 +59,44 @@ function advanceCursor(r: VerifyResult): number {
   return r.ok ? r.toSeq : Math.max(r.firstBadSeq ?? r.fromSeq, r.fromSeq);
 }
 
+// Ruling 36: every individual step inside runAuditNightlyBody already
+// guards its own failure into a problem line (Ruling 30), but that only
+// covers throws INSIDE the guarded steps -- a throw from something that
+// runs before or between them (the very first state SELECT, MAX(seq) query,
+// or any future addition that forgets its own try/catch) would otherwise
+// escape uncaught, silently skipping both the audit.verify record and the
+// alert email for the whole night. One top-level catch here is the backstop
+// for anything the per-step guards don't cover, not a replacement for them.
 export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: Send = sendAuditEmail): Promise<void> {
+  try {
+    await runAuditNightlyBody(env, now, send);
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "Error"; // never err.message (Ruling 5)
+    try {
+      await systemAudit(env.DB, "cron").write({
+        action: "audit.verify",
+        outcome: "failed",
+        reason: `nightly check crashed: ${name}`,
+      });
+    } catch (writeErr) {
+      console.error("[audit] nightly crash entry could not be written:", writeErr instanceof Error ? writeErr.name : writeErr);
+    }
+    // Ruling 32: recipient from env, never D1 -- same rule as the body's own
+    // alert path, duplicated here rather than shared because the body's
+    // `recipient`/`alertingConfigured` locals may not exist if whatever threw
+    // did so before they were computed.
+    const recipient = env.AUDIT_OPERATOR_EMAIL;
+    if (recipient && env.RESEND_API_KEY) {
+      try {
+        await send(env.RESEND_API_KEY, recipient, "Audit trail needs attention", [`nightly check crashed: ${name}`]);
+      } catch (sendErr) {
+        console.error("[audit] crash alert email failed:", sendErr instanceof Error ? sendErr.name : sendErr);
+      }
+    }
+  }
+}
+
+async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send): Promise<void> {
   const db = env.DB;
   const state = await db.prepare("SELECT last_verified_seq, walk_cursor_seq, expired_through_seq FROM audit_seal_state WHERE id = 1")
     .first<{ last_verified_seq: number; walk_cursor_seq: number; expired_through_seq: number }>();
@@ -113,14 +150,44 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
   const incTentativeTo = Math.min(maxSeq, incFrom + WALK_ROWS_PER_NIGHT - 1);
   const incTo = await archivedCeiling(incFrom, incTentativeTo);
   const incremental: VerifyResult | null = incTo >= incFrom ? await safeVerify(db, env.AUDIT_ARCHIVE, incFrom, incTo, { requireArchived: true }) : null;
+  let newLastVerifiedSeq = lastVerifiedSeq;
   if (incremental) {
-    await db.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(advanceCursor(incremental)).run();
+    newLastVerifiedSeq = advanceCursor(incremental);
+    await db.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(newLastVerifiedSeq).run();
   }
 
   // 2. Rotating re-walk of older history (Plan 1 decision 9).
+  //
+  // Ruling 34: every nightly itself writes an audit.verify row that the
+  // sealer seals (and archives) before the next run, so MAX(seq) always
+  // grows and `walkFrom > maxSeq` never fires in production -- the walk
+  // never wraps. The literal ruling text says to compare against
+  // last_verified_seq "using the value after this night's incremental
+  // update" (i.e. newLastVerifiedSeq). Measured (three variants, one new
+  // seal+archive between each of 4 nights, apps/worker/test/
+  // audit-nightly-walk-wrap.test.ts): that literal reading reproduces the
+  // EXACT SAME bug it's meant to fix. Once one full backlog has been
+  // walked, walk_cursor_seq == newLastVerifiedSeq from that same night,
+  // so tomorrow's walkFrom (= walk_cursor_seq + 1) is always exactly one
+  // more than TOMORROW's own newLastVerifiedSeq too (both grow by the same
+  // one row between nights), so `walkFrom > newLastVerifiedSeq` is never
+  // true either -- it shadows the incremental one row at a time, just
+  // like the old maxSeq condition did. Comparing against `lastVerifiedSeq`
+  // instead -- the START-of-run value captured at the top of this
+  // function, before tonight's OWN incremental update -- is NOT stale in
+  // the way that sounds: it is exactly last night's ending
+  // last_verified_seq, which does not move between nights except when a
+  // nightly run itself advances it. So walkFrom (= last night's walk
+  // ending + 1) does legitimately exceed it once the walk has fully
+  // caught up, wrapping for real. The upper bound below still uses
+  // newLastVerifiedSeq (tonight's, post-incremental value) so the walk
+  // still only ever covers rows at or below last_verified_seq, per the
+  // ruling's own stated invariant -- only the WRAP DECISION differs from
+  // the literal text. Flagged to the coordinator as a deviation, not
+  // applied silently; see task-9-report.md for the three measured runs.
   let walkFrom = Math.max(floor, (state?.walk_cursor_seq ?? 0) + 1);
-  if (walkFrom > maxSeq) walkFrom = floor;
-  const walkTentativeTo = Math.min(maxSeq, walkFrom + WALK_ROWS_PER_NIGHT - 1);
+  if (walkFrom > lastVerifiedSeq) walkFrom = floor;
+  const walkTentativeTo = Math.min(newLastVerifiedSeq, walkFrom + WALK_ROWS_PER_NIGHT - 1);
   const walkTo = await archivedCeiling(walkFrom, walkTentativeTo);
   const walk: VerifyResult | null = walkTo >= walkFrom ? await safeVerify(db, env.AUDIT_ARCHIVE, walkFrom, walkTo, { requireArchived: true }) : null;
   if (walk) await db.prepare("UPDATE audit_seal_state SET walk_cursor_seq = ? WHERE id = 1").bind(advanceCursor(walk)).run();
@@ -147,6 +214,41 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
   // reported separately from "unsealed" (above) since sealing will never
   // resolve them on its own.
   const sealAlerts = await count("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.seal.alert' AND occurred_at >= ?", iso(24 * 3600_000));
+
+  // Ruling 35: timestamp-free invariants -- states a legitimate row can
+  // never reach through the normal seal/archive/expire code paths, so a
+  // nonzero count here means something wrote to audit_log or
+  // audit_seal_state directly, bypassing the code that keeps these columns
+  // in sync. Unlike every other health count above, these do not depend on
+  // `now`, sealed_at or expired_through_seq being trustworthy AT ALL -- they
+  // ARE the check on whether those very values still make sense, so a
+  // D1-write attacker who also rewrites the timestamps every other gate
+  // above reads cannot talk their way out of these.
+  const impossibleSealed = await count("SELECT COUNT(*) AS n FROM audit_log WHERE seq IS NOT NULL AND sealed_at IS NULL");
+  // (b): a row at or below last_verified_seq is CLAIMED as already verified,
+  // and verifyRange's own requireArchived gate (Ruling 28) would have
+  // refused to advance last_verified_seq past a row that wasn't archived --
+  // so finding one here means it was un-archived AFTER being verified
+  // (direct tampering), not ordinary archiver lag. This is Ruling 33's
+  // "blocked" scenario turned inside out: that one is about a row ABOVE
+  // last_verified_seq stopping the cursor from reaching it; this one is
+  // about a row AT OR BELOW it that should never have been reachable in
+  // this state at all, so it needs no separate "blocked" line of its own.
+  const impossibleVerifiedUnarchived = await count(
+    "SELECT COUNT(*) AS n FROM audit_log WHERE seq <= ? AND (archived_at IS NULL OR archive_key IS NULL)",
+    newLastVerifiedSeq
+  );
+  const impossibleArchivedNoKey = await count("SELECT COUNT(*) AS n FROM audit_log WHERE archived_at IS NOT NULL AND archive_key IS NULL");
+  // (d): two distinct ways the retention boundary can be wrong, combined
+  // into one count/line -- a row that should already have been purged but
+  // is still present at or below the expiry boundary, or the boundary
+  // itself having been moved past what has actually been verified (nothing
+  // legitimate ever does that; Task 10's retention sweep only ever advances
+  // expired_through_seq to a point at or behind last_verified_seq).
+  const expiredThroughSeq = state?.expired_through_seq ?? 0;
+  const impossibleExpiry =
+    (await count("SELECT COUNT(*) AS n FROM audit_log WHERE seq <= ?", expiredThroughSeq)) +
+    (expiredThroughSeq > newLastVerifiedSeq ? 1 : 0);
 
   // 4. Daily anchor for the previous UTC day, plus reading back and
   // re-verifying anchors already on file (Ruling 29).
@@ -205,6 +307,10 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
     blockedAtSeq != null ? `verification blocked at seq ${blockedAtSeq}: sealed but not archived` : null,
     unknown ? `${unknown} actions in the last 24 hours have no recorded outcome` : null,
     sealAlerts ? `${sealAlerts} entries failed their integrity check when sealing` : null,
+    impossibleSealed ? `${impossibleSealed} entries are in an impossible state (sealed without a seal time)` : null,
+    impossibleVerifiedUnarchived ? `${impossibleVerifiedUnarchived} entries are in an impossible state (verified but not fully archived)` : null,
+    impossibleArchivedNoKey ? `${impossibleArchivedNoKey} entries are in an impossible state (archived without an archive key)` : null,
+    impossibleExpiry ? `${impossibleExpiry} entries are in an impossible state (expired retention inconsistent with verified history)` : null,
     anchorWriteProblem,
     latestAnchor.problem,
     priorAnchor.problem,
@@ -224,6 +330,7 @@ export async function runAuditNightly(env: NightlyEnv, now = new Date(), send: S
         walk: walk && { from: walk.fromSeq, to: walk.toSeq, ok: walk.ok, firstBadSeq: walk.firstBadSeq },
         unsealed, unarchived, unknown, sealAlerts,
         blockedAtSeq,
+        impossibleSealed, impossibleVerifiedUnarchived, impossibleArchivedNoKey, impossibleExpiry,
         anchor: anchorRow ? { date: yesterday, seq: anchorRow.seq } : null,
       },
     });
