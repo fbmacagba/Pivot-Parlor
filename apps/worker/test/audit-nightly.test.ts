@@ -99,12 +99,14 @@ describe("runAuditNightly", () => {
     expect(state!.last_verified_seq).toBe(tamperSeq);
     expect(state!.walk_cursor_seq).toBe(tamperSeq);
 
-    // A second run resumes right after the tampered row and clears the rest.
+    // A second run resumes right after the tampered row (X+1) and clears the rest.
     await runAuditNightly(withEnv(), new Date(), async () => {});
     const state2 = await sealState();
     expect(state2!.last_verified_seq).toBe(maxSeq);
     const entry2 = await latestVerifyEntry();
     expect(entry2!.outcome).toBe("succeeded");
+    const details2 = JSON.parse(entry2!.details_json) as { incremental: { from: number } | null };
+    expect(details2.incremental?.from).toBe(tamperSeq + 1);
   });
 
   // Ruling 31: an interior GAP (not merely a bad row) has no stored
@@ -243,11 +245,46 @@ describe("runAuditNightly", () => {
     entry = await latestVerifyEntry();
     expect(entry!.reason).toMatch(/alert email not configured/);
     expect(sentB.length).toBe(0);
+
+    // Recipient set, RESEND_API_KEY unset: also unconfigured (a Boolean(recipient)
+    // check alone would incorrectly pass this case).
+    const sentC: unknown[] = [];
+    await runAuditNightly({ ...E, RESEND_API_KEY: undefined, AUDIT_OPERATOR_EMAIL: OWNER_EMAIL }, new Date(), async (...args) => { sentC.push(args); });
+    entry = await latestVerifyEntry();
+    expect(entry!.reason).toMatch(/alert email not configured/);
+    expect(sentC.length).toBe(0);
   });
 
-  // Ruling 30: neither a failed WRITE nor a failed SEND may swallow the other
-  // required step.
-  it("still attempts the alert email when the audit.verify write throws, and still attempts the anchor email when the alert send throws", async () => {
+  // Ruling 30: a failed WRITE may not swallow the alert send.
+  it("still attempts the alert email when the audit.verify write itself throws", async () => {
+    const seq = await sealedTrail(1);
+    const maxSeq = seq;
+    // Force a problem so the alert path has something to send.
+    await E.DB.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(maxSeq + 5).run();
+
+    const realBatch = E.DB.batch.bind(E.DB);
+    (E.DB as unknown as { batch: typeof E.DB.batch }).batch = (() => {
+      throw new Error("db down");
+    }) as unknown as typeof E.DB.batch;
+
+    const calls: string[] = [];
+    const send = async (_k: string, _to: string, subject: string) => { calls.push(subject); };
+
+    try {
+      await runAuditNightly(withEnv(), new Date(), send);
+      expect(calls.some((s) => /needs attention/i.test(s))).toBe(true);
+    } finally {
+      (E.DB as unknown as { batch: typeof E.DB.batch }).batch = realBatch;
+      // Restore the cursor the forced problem left behind, for later tests
+      // (in a finally so a failed assertion above still cleans up).
+      await E.DB.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(maxSeq).run();
+    }
+  });
+
+  // Ruling 30 / minors: a failed alert SEND may not swallow the anchor send,
+  // and the audit.verify entry must still get written (the real db.batch is
+  // used this time, unlike the write-throws test above).
+  it("still attempts the anchor email when the alert send throws, and still writes the audit.verify entry", async () => {
     const clock = new Date();
     const today = clock.toISOString().slice(0, 10);
     const yesterday = new Date(Date.parse(`${today}T00:00:00.000Z`) - 24 * 3600_000).toISOString().slice(0, 10);
@@ -264,27 +301,49 @@ describe("runAuditNightly", () => {
     // Force a problem so the alert path has something to send.
     await E.DB.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(maxSeq + 5).run();
 
-    const realBatch = E.DB.batch.bind(E.DB);
-    (E.DB as unknown as { batch: typeof E.DB.batch }).batch = (() => {
-      throw new Error("db down");
-    }) as unknown as typeof E.DB.batch;
+    const countBefore = await E.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.verify' AND details_json LIKE '%checked%'").first<{ n: number }>();
 
     const calls: string[] = [];
-    const throwingSend = async (_k: string, _to: string, subject: string) => {
+    const throwOnAnchor = async (_k: string, _to: string, subject: string) => {
       calls.push(subject);
-      if (/needs attention/i.test(subject)) throw new Error("send down");
+      if (/anchor/i.test(subject)) throw new Error("send down");
     };
 
     try {
-      await runAuditNightly(withEnv(), clock, throwingSend);
+      await runAuditNightly(withEnv(), clock, throwOnAnchor);
+
       expect(calls.some((s) => /needs attention/i.test(s))).toBe(true);
       expect(calls.some((s) => /anchor/i.test(s))).toBe(true);
+
+      const countAfter = await E.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.verify' AND details_json LIKE '%checked%'").first<{ n: number }>();
+      expect(countAfter!.n).toBe(countBefore!.n + 1);
     } finally {
-      (E.DB as unknown as { batch: typeof E.DB.batch }).batch = realBatch;
-      // Restore the cursor the forced problem left behind, for later tests
-      // (in a finally so a failed assertion above still cleans up).
       await E.DB.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(maxSeq).run();
     }
+  });
+
+  // Ruling 30: a bucket that throws on every call must not throw OUT of
+  // runAuditNightly — each guarded step (verify, anchor write, anchor
+  // readback) turns into its own problem line instead.
+  it("turns a completely failing bucket into problem lines instead of throwing", async () => {
+    const clock = new Date(Date.now() + 24 * 3600_000); // tomorrow, so anchorRow exists and the write guard actually runs
+    await sealedTrail(1);
+
+    const throwingBucket = {
+      head: async () => { throw new Error("r2 down"); },
+      get: async () => { throw new Error("r2 down"); },
+      put: async () => { throw new Error("r2 down"); },
+      delete: async () => { throw new Error("r2 down"); },
+    } as unknown as R2Bucket;
+
+    const sent: { subject: string; lines: string[] }[] = [];
+    await runAuditNightly(withEnv({ AUDIT_ARCHIVE: throwingBucket }), clock, async (_k, _to, subject, lines) => { sent.push({ subject, lines }); });
+
+    const alertMail = sent.find((m) => /needs attention/i.test(m.subject));
+    expect(alertMail).toBeDefined();
+    expect(alertMail!.lines.some((l) => l.includes("verify error: Error"))).toBe(true);
+    expect(alertMail!.lines.some((l) => l.includes("could not write anchor"))).toBe(true);
+    expect(alertMail!.lines.some((l) => l.includes("could not verify stored anchor"))).toBe(true);
   });
 
   // Ruling 28. Placed immediately before the Ruling 27 test below on purpose:

@@ -89,6 +89,24 @@ describe("verifyRange", () => {
     expect(r.problem).toMatch(/missing from archive/);
   });
 
+  // Ruling 30: an unparsable archive line must not throw; it fails only the
+  // row whose own copy is corrupt, not every row that shares the object.
+  it("fails only the row behind a corrupt archive line, without throwing", async () => {
+    const max = await sealedTrail(2);
+    const rows = (await E.DB.prepare("SELECT seq, archive_key FROM audit_log WHERE seq IN (?, ?)").bind(max - 1, max).all<{ seq: number; archive_key: string }>()).results!;
+    expect(rows[0]!.archive_key).toBe(rows[1]!.archive_key); // one seal batch, one archive object (Ruling 24)
+    const key = rows[0]!.archive_key;
+    const obj = await E.AUDIT_ARCHIVE.get(key);
+    const lines = (await obj!.text()).split("\n").filter((l) => l.length > 0);
+    expect(lines.length).toBe(2);
+    lines[1] = "{garbage";
+    await E.AUDIT_ARCHIVE.put(key, lines.join("\n") + "\n");
+
+    const r = await verifyRange(E.DB, E.AUDIT_ARCHIVE, max - 1, max);
+    expect(r).toMatchObject({ ok: false, firstBadSeq: max, checked: 1 });
+    expect(r.problem).toMatch(/missing from archive/);
+  });
+
   it("returns ok:false for an invalid range instead of scanning", async () => {
     expect((await verifyRange(E.DB, E.AUDIT_ARCHIVE, 0, 5)).ok).toBe(false);
     expect((await verifyRange(E.DB, E.AUDIT_ARCHIVE, 10, 5)).ok).toBe(false);

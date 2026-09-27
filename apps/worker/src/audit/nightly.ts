@@ -22,10 +22,14 @@ interface StoredAnchor {
 /** Ruling 30: a throw from verifyRange (a bucket read error, an unexpected
  *  exception) must not suppress the audit.verify record or the alert email
  *  the way an uncaught throw out of runAuditNightly would. Never err.message
- *  (Ruling 5) — only the error's name. firstBadSeq is set to fromSeq (the
- *  start of the attempted range): we don't know how far the scan actually
- *  got, so the safest resumption point next run is "retry from here", same
- *  as any other structured failure. */
+ *  (Ruling 5) — only the error's name. firstBadSeq is set to fromSeq: fed
+ *  through advanceCursor below exactly like any other structured failure,
+ *  that sets last_verified_seq = fromSeq, so the NEXT run starts at
+ *  fromSeq + 1 — not "retry the same range". A transient failure (bucket
+ *  blip) therefore permanently skips verifying the single row at fromSeq;
+ *  recorded as a Ruling 31 cost in the report, not fixed here (the
+ *  alternative — leaving the cursor where it was — is what caused the
+ *  original stall Ruling 31 exists to close). */
 async function safeVerify(
   db: D1Database,
   bucket: R2Bucket,
