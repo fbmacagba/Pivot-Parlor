@@ -39,8 +39,8 @@ const DEV_NAV: NavItem[] = [
   { href: "/dev/shops", label: "Shops", icon: ShoppingBag },
   { href: "/dev/revenue", label: "Revenue", icon: BarChart3 },
   { href: "/dev/ai-deploy", label: "AI Deploy", icon: Bot },
-  { href: "/dev/enquiries", label: "Enquiries", icon: MessageSquare },
   { href: "/dev/activity", label: "Activity", icon: ScrollText },
+  { href: "/dev/enquiries", label: "Enquiries", icon: MessageSquare },
 ];
 
 const ADMIN_NAV: NavItem[] = [

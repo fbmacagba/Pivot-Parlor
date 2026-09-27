@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
@@ -6,6 +7,7 @@ import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { ErasureRequestDialog, type ErasureTarget } from "~/components/audit/ErasureRequestDialog";
 import { ACTION_GROUPS, actionLabel, auditQuery, dateOnlyQuery, entryStatus } from "~/lib/audit";
 
 interface Entry {
@@ -97,6 +99,11 @@ export default function DevActivity() {
   const result = useActionData<typeof action>();
   const [params] = useSearchParams();
   const nav = useNavigation();
+  // Ruling 51: erasure needs an explicit confirmation step (ErasureRequestDialog)
+  // rather than firing straight from a list-row button — this only tracks
+  // WHICH person the dialog is confirming for; the dialog itself does the
+  // actual submit once the developer confirms.
+  const [confirmErase, setConfirmErase] = useState<ErasureTarget | null>(null);
   const sealed = entries.filter((e) => e.seq !== null).map((e) => e.seq as number);
   const qs = auditQuery(params);
   // The subject export takes only from/to, not the full filter set (see
@@ -205,11 +212,14 @@ export default function DevActivity() {
                     <div className="flex flex-wrap gap-2 pt-1">
                       <a className="tap-target underline" href={`/dev/activity?actor=${encodeURIComponent(e.actor_ref)}`}>All activity by this person</a>
                       <a className="tap-target underline" href={`/dev/activity/export?subject=${encodeURIComponent(e.actor_ref)}${dateQs ? `&${dateQs}` : ""}`}>Export their data</a>
-                      <Form method="post">
-                        <input type="hidden" name="intent" value="erase" />
-                        <input type="hidden" name="user_id" value={e.actor_ref.slice("subj_user_".length)} />
-                        <Button type="submit" variant="ghost" className="tap-target">Record erasure request</Button>
-                      </Form>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="tap-target"
+                        onClick={() => setConfirmErase({ userId: e.actor_ref!.slice("subj_user_".length), who })}
+                      >
+                        Record erasure request
+                      </Button>
                     </div>
                   )}
                   {/* Erasure is user-only (the route takes a userId), and a
@@ -241,6 +251,12 @@ export default function DevActivity() {
           <Button type="submit" variant="ghost" className="tap-target">Import AI usage history</Button>
         </Form>
       </div>
+
+      <ErasureRequestDialog
+        target={confirmErase}
+        onClose={() => setConfirmErase(null)}
+        busy={nav.state !== "idle"}
+      />
     </div>
   );
 }
