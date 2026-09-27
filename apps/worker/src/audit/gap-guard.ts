@@ -13,7 +13,7 @@ export const auditGapGuard: MiddlewareHandler<{ Bindings: Bindings }> = async (c
   await next();
   if (!MUTATING.has(c.req.method) || c.get("auditWritten")) return;
   const status = c.res.status;
-  if (status === 404 || status === 405) return;
+  if (status === 404 || status === 405 || status === 429) return;
   const outcome = status >= 500 ? "failed" : status >= 400 ? "refused" : "succeeded";
   try {
     await auditFor(c).write({

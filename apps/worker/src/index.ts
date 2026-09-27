@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
-import { requestId } from "hono/request-id";
 import type { MessageBatch } from "@cloudflare/workers-types";
 
 import type { Bindings } from "./bindings.js";
@@ -42,6 +41,7 @@ import {
   staffMeRouter,
   meRouter,
 } from "./routes/dashboard.js";
+import { requestId } from "./audit/request-id.js";
 import { auditGapGuard } from "./audit/gap-guard.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ const app = new Hono<{ Bindings: Bindings }>();
  * or non-JSON responses before the handler runs. This app only mounts the webhook router.
  */
 const stripeWebhookApp = new Hono<{ Bindings: Bindings }>();
-stripeWebhookApp.use("*", requestId(), auditGapGuard);
+stripeWebhookApp.use("*", requestId, auditGapGuard);
 stripeWebhookApp.route("/api/webhooks", webhooksRouter);
 
 // ─── Global middleware ────────────────────────────────────────────────────────
@@ -107,9 +107,9 @@ app.use(
   })
 );
 
-// Audit trail: every request gets an id; state-changing requests that write
-// no audit entry of their own leave an audit.gap floor entry.
-app.use("*", requestId(), auditGapGuard);
+// Audit trail: every request gets a server-generated id; state-changing
+// requests that write no audit entry of their own leave an audit.gap floor entry.
+app.use("*", requestId, auditGapGuard);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 
