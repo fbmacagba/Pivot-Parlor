@@ -141,9 +141,12 @@ async function sealBatch(db: D1Database, nowIso: string): Promise<{ sealed: numb
       // Ruling 23: a row that already carries an audit.seal.alert is excluded
       // here, not merely skipped after being read - it is never re-selected
       // once alerted, so a stall behind up to SEAL_BATCH permanently-tampered
-      // rows cannot happen.
+      // rows cannot happen on the normal (single active lease) path.
       `SELECT * FROM audit_log al WHERE al.sealed_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.action = 'audit.seal.alert' AND a.entity_id = al.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM audit_log a
+         WHERE a.action = 'audit.seal.alert' AND a.entity_type = 'audit_log' AND a.entity_id = al.id
+       )
        ORDER BY al.occurred_at, al.id LIMIT ?`
     )
     .bind(SEAL_BATCH)
@@ -171,17 +174,30 @@ async function sealBatch(db: D1Database, nowIso: string): Promise<{ sealed: numb
 
 /**
  * Ruling 22: an entry_hash mismatch at sealing time is a tamper alert, not
- * merely a console line. Ruling 23 moved the "already alerted" exclusion
- * into sealBatch's own SELECT, so every id passed here is, by construction,
- * a row with no existing audit.seal.alert - no separate existing-alert
- * lookup is needed anymore. A failed write here is logged and simply
- * retried next run (no alert was committed, so Ruling 23's exclusion does
- * not yet apply and the row is re-selected); it must never abort archiving.
+ * merely a console line, deduplicated by checking for a prior alert against
+ * the same entity_id before writing (Ruling 22 is still binding - Ruling 23
+ * added an exclusion in sealBatch, it did not retract this one).
+ *
+ * Ruling 23's sealBatch exclusion covers the normal path (a single active
+ * lease): a row already alerted is never re-selected, so this lookup would
+ * always find nothing there. It stays load-bearing for the lease-overrun
+ * case that Ruling 23 does not close - run A selects tampered row R, runs
+ * past LEASE_MS before writing R's alert, run B takes the lease and selects
+ * R too (no alert exists yet, so Ruling 23's exclusion does not yet apply),
+ * and both runs reach alertTampered for R. No test discriminates this
+ * lookup: sealBatch's exclusion means it is unreachable-in-practice on
+ * every path this suite can drive, and the race it actually guards needs
+ * two overlapping leases to trigger.
  */
 async function alertTampered(db: D1Database, tampered: string[]): Promise<void> {
   const rec = systemAudit(db, "cron");
   for (const id of tampered) {
     try {
+      const existing = await db
+        .prepare("SELECT 1 FROM audit_log WHERE action = 'audit.seal.alert' AND entity_type = 'audit_log' AND entity_id = ? LIMIT 1")
+        .bind(id)
+        .first();
+      if (existing) continue;
       await rec.write({
         action: "audit.seal.alert",
         outcome: "failed",

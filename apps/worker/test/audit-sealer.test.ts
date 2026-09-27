@@ -181,6 +181,41 @@ describe("sealer", () => {
     expect(stillPending!.n).toBe(0);
   });
 
+  // Ruling 25's headline point: a failure in the unknown-outcome step itself
+  // (not just a later sealBatch throw) must not block sealing. The unknown-
+  // outcome write is the FIRST db.batch() call a run makes (a system actor
+  // has no userId/ip, so write() adds no subject statements before its own
+  // insert; the lease uses plain .run(), not .batch()) - sealBatch's own
+  // batch is the second call. Fail only the first call, real batch after.
+  it("a failure marking a stale started row unknown does not block sealing it", async () => {
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+    const startedId = await systemAudit(E.DB, "queue").write({ action: "ai.call", phase: "started", occurredAt: old });
+
+    const realBatch = E.DB.batch.bind(E.DB);
+    let calls = 0;
+    (E.DB as unknown as { batch: typeof E.DB.batch }).batch = ((...args: Parameters<typeof realBatch>) => {
+      calls += 1;
+      if (calls === 1) throw new Error("unknown-outcome batch boom");
+      return realBatch(...args);
+    }) as typeof E.DB.batch;
+    let res;
+    try {
+      res = await runSealer(E);
+    } finally {
+      (E.DB as unknown as { batch: typeof E.DB.batch }).batch = realBatch;
+    }
+
+    expect(res.unknownMarked).toBe(0); // the write failed and was caught, not merely attempted
+    const started = await E.DB.prepare("SELECT sealed_at FROM audit_log WHERE id = ?").bind(startedId).first<{ sealed_at: string | null }>();
+    expect(started!.sealed_at).not.toBeNull(); // sealed anyway, in the SAME run
+    const childYet = await E.DB.prepare("SELECT 1 FROM audit_log WHERE parent_id = ?").bind(startedId).first();
+    expect(childYet).toBeNull(); // the unknown-outcome write really did fail, not silently no-op
+
+    await runSealer(E); // a normal run re-attempts the still-childless started row
+    const child = await E.DB.prepare("SELECT outcome, phase FROM audit_log WHERE parent_id = ?").bind(startedId).first();
+    expect(child).toEqual({ outcome: "unknown", phase: "outcome" });
+  });
+
   // Ruling 22: an entry_hash mismatch at sealing time is a tamper alert, not
   // just a console line. This test runs LAST in the file: it leaves one row
   // permanently unsealed, which would break the seq/tampered assertions in
