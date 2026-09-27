@@ -9,6 +9,19 @@ export function auditQuery(params: URLSearchParams): string {
   return out.toString();
 }
 
+/** The two date-range params in isolation. The subject export (unlike the
+ *  main list/CSV/proof export) accepts only `from`/`to`, not the full
+ *  filter set, so its download link and the export route's subject branch
+ *  need just these two rather than the full `auditQuery`. */
+export function dateOnlyQuery(params: URLSearchParams): string {
+  const out = new URLSearchParams();
+  for (const k of ["from", "to"] as const) {
+    const v = params.get(k);
+    if (v) out.set(k, v);
+  }
+  return out.toString();
+}
+
 export function entryStatus(e: { sealed_at: string | null; archived_at: string | null }): {
   label: "Pending" | "Sealed" | "Archived";
   variant: "warning" | "default" | "success";

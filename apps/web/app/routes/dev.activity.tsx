@@ -6,7 +6,7 @@ import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
-import { ACTION_GROUPS, actionLabel, auditQuery, entryStatus } from "~/lib/audit";
+import { ACTION_GROUPS, actionLabel, auditQuery, dateOnlyQuery, entryStatus } from "~/lib/audit";
 
 interface Entry {
   id: string;
@@ -24,6 +24,7 @@ interface Entry {
   actor_email: string | null;
   redacted: boolean;
   ip: string | null;
+  ip_ref: string | null;
   shop_id: string | null;
   entity_type: string | null;
   entity_id: string | null;
@@ -64,7 +65,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
     }
     if (intent === "erase") {
       const userId = String(form.get("user_id") ?? "");
-      return json({ erased: await api.post<{ redact_after: string }>(`/api/audit/subjects/${encodeURIComponent(userId)}/erase`), error: null });
+      // The route can genuinely return a null redact_after (a subject
+      // already redacted, with no date ever set) — kept nullable here
+      // rather than the earlier `string` type, which would have crashed
+      // the page's own render on that value.
+      return json({ erased: await api.post<{ redact_after: string | null }>(`/api/audit/subjects/${encodeURIComponent(userId)}/erase`), error: null });
     }
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : "Request failed" });
@@ -94,6 +99,11 @@ export default function DevActivity() {
   const nav = useNavigation();
   const sealed = entries.filter((e) => e.seq !== null).map((e) => e.seq as number);
   const qs = auditQuery(params);
+  // The subject export takes only from/to, not the full filter set (see
+  // dev.activity.export.tsx) — carried onto both "Export their/this
+  // visitor's data" links below so a filtered date range is actually
+  // actionable there, not just on the list/CSV/proof export.
+  const dateQs = dateOnlyQuery(params);
 
   return (
     <div className="space-y-6">
@@ -123,23 +133,36 @@ export default function DevActivity() {
       </header>
 
       {result && "verify" in result && result.verify && (
-        <p role="status" className={result.verify.ok ? "text-emerald-400" : "text-red-400"}>
-          {result.verify.ok
-            ? `Checked ${result.verify.checked} entries (${result.verify.fromSeq} to ${result.verify.toSeq}): the trail is intact.`
-            : `Problem at entry ${result.verify.firstBadSeq}: ${result.verify.problem}`}
+        <p
+          role="status"
+          className={
+            result.verify.checked === 0 ? "text-white/70" : result.verify.ok ? "text-emerald-400" : "text-red-400"
+          }
+        >
+          {result.verify.checked === 0
+            ? "Nothing has been sealed yet, so there was nothing to check. Try again in a minute."
+            : result.verify.ok
+              ? `Checked ${result.verify.checked} entries (${result.verify.fromSeq} to ${result.verify.toSeq}): the trail is intact.`
+              : `Problem at entry ${result.verify.firstBadSeq}: ${result.verify.problem}`}
         </p>
       )}
       {result && "imported" in result && result.imported && (
         <p role="status" className="text-white/80">Imported {result.imported.imported} AI usage rows{result.imported.more ? "; run again for more." : "."}</p>
       )}
       {result && "erased" in result && result.erased && (
-        <p role="status" className="text-white/80">Erasure recorded. Personal details will be blanked on {result.erased.redact_after.slice(0, 10)}.</p>
+        <p role="status" className="text-white/80">
+          {result.erased.redact_after
+            ? `Erasure recorded. Personal details will be blanked on ${new Date(result.erased.redact_after).toLocaleDateString("en-GB")}.`
+            : "Erasure recorded. This person's details are already scheduled to be blanked."}
+        </p>
       )}
       {(error || (result && result.error)) && <p role="alert" className="text-red-400">{error ?? result?.error}</p>}
 
-      <Form method="get" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <Form method="get" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Input name="shop_id" placeholder="Shop id" defaultValue={params.get("shop_id") ?? ""} aria-label="Shop id" />
         <Input name="actor" placeholder="Person (user id)" defaultValue={params.get("actor") ?? ""} aria-label="Person" />
+        <Input type="date" name="from" label="From" defaultValue={params.get("from") ?? ""} />
+        <Input type="date" name="to" label="To" defaultValue={params.get("to") ?? ""} />
         <select name="action" defaultValue={params.get("action") ?? ""} aria-label="Action" className="tap-target rounded-md border border-white/20 bg-transparent px-3 py-2 text-white">
           {ACTION_GROUPS.map((g) => <option key={g.value} value={g.value} className="bg-[#0D0D0D]">{g.label}</option>)}
         </select>
@@ -154,7 +177,7 @@ export default function DevActivity() {
       </Form>
 
       <ol className="space-y-2">
-        {entries.length === 0 && <li className="text-white/60">No activity matches these filters.</li>}
+        {entries.length === 0 && !error && <li className="text-white/60">No activity matches these filters.</li>}
         {entries.map((e) => {
           const status = entryStatus(e);
           const who = e.redacted ? "Redacted" : e.actor_name ?? e.actor_email ?? (e.actor_type === "system" ? "System" : e.actor_type === "anonymous" ? "Visitor" : e.actor_type);
@@ -171,7 +194,7 @@ export default function DevActivity() {
                 </summary>
                 <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm text-white/70">
                   {e.reason && <p>Reason: {e.reason}</p>}
-                  {e.shop_id && <p>Shop: <a className="underline" href={`/dev/activity?shop_id=${encodeURIComponent(e.shop_id)}`}>{e.shop_id}</a></p>}
+                  {e.shop_id && <p>Shop: <a className="tap-target inline-flex items-center underline" href={`/dev/activity?shop_id=${encodeURIComponent(e.shop_id)}`}>{e.shop_id}</a></p>}
                   {e.entity_type && <p>Item: {e.entity_type} {e.entity_id}</p>}
                   <Changes json={e.changes_json} />
                   {e.details_json && <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-black/30 p-2 text-xs">{JSON.stringify(JSON.parse(e.details_json), null, 2)}</pre>}
@@ -181,12 +204,25 @@ export default function DevActivity() {
                   {e.actor_ref?.startsWith("subj_user_") && !e.redacted && (
                     <div className="flex flex-wrap gap-2 pt-1">
                       <a className="tap-target underline" href={`/dev/activity?actor=${encodeURIComponent(e.actor_ref)}`}>All activity by this person</a>
-                      <a className="tap-target underline" href={`/dev/activity/export?subject=${encodeURIComponent(e.actor_ref)}`}>Export their data</a>
+                      <a className="tap-target underline" href={`/dev/activity/export?subject=${encodeURIComponent(e.actor_ref)}${dateQs ? `&${dateQs}` : ""}`}>Export their data</a>
                       <Form method="post">
                         <input type="hidden" name="intent" value="erase" />
                         <input type="hidden" name="user_id" value={e.actor_ref.slice("subj_user_".length)} />
                         <Button type="submit" variant="ghost" className="tap-target">Record erasure request</Button>
                       </Form>
+                    </div>
+                  )}
+                  {/* Erasure is user-only (the route takes a userId), and a
+                      shop subject (subj_shop_<id>) is created only when that
+                      shop is deleted (apps/worker/src/routes/shops.ts's
+                      shop.delete handler) — a live shop has no such row, so
+                      no "export this shop's data" link is offered here; it
+                      would 404 for every live shop. A visitor_ip subject has
+                      neither an actor_ref-based filter in the API nor an
+                      erasure route, but its export works via ip_ref alone. */}
+                  {e.ip_ref && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <a className="tap-target underline" href={`/dev/activity/export?subject=${encodeURIComponent(e.ip_ref)}${dateQs ? `&${dateQs}` : ""}`}>Export this visitor&apos;s data</a>
                     </div>
                   )}
                 </div>

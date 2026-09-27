@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { getSessionToken, requireRole } from "~/lib/auth";
-import { auditExportErrorHtml, auditQuery } from "~/lib/audit";
+import { auditExportErrorHtml, auditQuery, dateOnlyQuery } from "~/lib/audit";
 
 /**
  * A refused export (400 "Too many entries; narrow the filters/dates", 404
@@ -35,10 +35,21 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const url = new URL(request.url);
   const token = getSessionToken(request);
   const subject = url.searchParams.get("subject");
+  // The subject export accepts only an optional from/to (not the list's
+  // full filter set), so it gets the narrower dateOnlyQuery rather than
+  // auditQuery — without this, "narrow the dates" (its own 400 message)
+  // was something the user had no way to act on.
+  const dateQs = dateOnlyQuery(url.searchParams);
   const upstream = subject
-    ? `${env.API_URL}/api/audit/subjects/${encodeURIComponent(subject)}/export`
+    ? `${env.API_URL}/api/audit/subjects/${encodeURIComponent(subject)}/export${dateQs ? `?${dateQs}` : ""}`
     : `${env.API_URL}/api/audit/export?part=${url.searchParams.get("part") === "proof" ? "proof" : "csv"}${auditQuery(url.searchParams) ? `&${auditQuery(url.searchParams)}` : ""}`;
-  const res = await fetch(upstream, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+
+  let res: Response;
+  try {
+    res = await fetch(upstream, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  } catch {
+    return errorPage(502, "Could not reach the server. Please try again.");
+  }
 
   if (!res.ok) {
     let message = "Something went wrong. Please try again.";

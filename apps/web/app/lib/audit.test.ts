@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { actionLabel, auditExportErrorHtml, auditQuery, entryStatus, escapeHtml } from "./audit";
+import { actionLabel, auditExportErrorHtml, auditQuery, dateOnlyQuery, entryStatus, escapeHtml } from "./audit";
 
 describe("audit page helpers", () => {
   it("keeps only known filters", () => {
     const p = new URLSearchParams("shop_id=s1&action=site.&evil=1&cursor=c");
     expect(auditQuery(p)).toBe("shop_id=s1&action=site.&cursor=c");
+  });
+  it("isolates just the date range for the subject export, which takes no other filter", () => {
+    const p = new URLSearchParams("shop_id=s1&from=2026-01-01&to=2026-12-31&actor=a1");
+    expect(dateOnlyQuery(p)).toBe("from=2026-01-01&to=2026-12-31");
+    expect(dateOnlyQuery(new URLSearchParams("shop_id=s1"))).toBe("");
   });
   it("derives the status badge", () => {
     expect(entryStatus({ sealed_at: null, archived_at: null })).toEqual({ label: "Pending", variant: "warning" });
