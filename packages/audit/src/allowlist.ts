@@ -1,6 +1,9 @@
 /** Fields that may appear in changes_json, per entity type (spec 4.3). */
 export const CHANGE_ALLOWLIST: Record<string, readonly string[]> = {
-  shop_site: ["website_status", "template", "headline", "tagline"],
+  // headline and tagline are deliberately excluded (Ruling 21, same data
+  // class as Ruling 20 below): no Plan-1 caller logs them, and both are
+  // generated/free-form copy that can carry the shop name (personal data).
+  shop_site: ["website_status", "template"],
   shop: ["name", "slug", "type", "phone", "status", "is_active", "ai_model"],
   // heroHeadline and tagline are deliberately excluded (Ruling 20): generated
   // copy routinely carries the shop name (personal data) and, applied via

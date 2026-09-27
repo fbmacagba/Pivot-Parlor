@@ -100,9 +100,9 @@ describe("AI routes are audited", () => {
     expect(JSON.parse(last.changes_json as string).fontHeading).toEqual(["Playfair Display", null]);
   });
 
-  it("apply-theme changes nothing (row, entry, KV) when the batch fails", async () => {
+  it("apply-theme rolls back the shops row when the entry write fails (discriminates atomic from sequential)", async () => {
     const token = await dev();
-    const shopId = await seedShop("Blocked Update Shop");
+    const shopId = await seedShop("Blocked Insert Shop");
     const before = await env.DB.prepare("SELECT ai_model, ai_theme FROM shops WHERE id = ?")
       .bind(shopId)
       .first<{ ai_model: string; ai_theme: string | null }>();
@@ -112,23 +112,51 @@ describe("AI routes are audited", () => {
       aestheticKeywords: [], servicesIntro: "i", trustStatement: "trust", urgencyText: "u",
     };
     // Static, unscoped, no interpolation (constraints.md "never interpolate
-    // input"); this file's tests run sequentially, so it can only affect the
+    // input"). Aborts the audit_log INSERT specifically — a LATER statement
+    // in persistShopTheme's batch than the shops UPDATE, so this can only
+    // pass if the update (which DID run) is rolled back together with the
+    // failed insert: a trigger on the UPDATE itself would abort statement 0
+    // and pass even against non-atomic sequential code, proving nothing.
+    // This file's tests run sequentially, so the trigger can only affect the
     // one dispatch below, and is dropped in `finally` either way.
     await env.DB.prepare(
-      "CREATE TRIGGER test_block_shop_theme_update BEFORE UPDATE ON shops BEGIN SELECT RAISE(ABORT, 'blocked for test'); END"
+      "CREATE TRIGGER test_block_theme_apply_insert BEFORE INSERT ON audit_log WHEN NEW.action = 'theme.apply' BEGIN SELECT RAISE(ABORT, 'blocked for test'); END"
     ).run();
     try {
       const res = await dispatch("POST", "/api/ai/apply-theme", { headers: authHeaders(token), body: { shop_id: shopId, theme, model_id: "manual" } });
       expect(res.status).toBeGreaterThanOrEqual(500);
     } finally {
-      await env.DB.prepare("DROP TRIGGER test_block_shop_theme_update").run();
+      await env.DB.prepare("DROP TRIGGER test_block_theme_apply_insert").run();
     }
     const after = await env.DB.prepare("SELECT ai_model, ai_theme FROM shops WHERE id = ?")
       .bind(shopId)
       .first<{ ai_model: string; ai_theme: string | null }>();
-    expect(after).toEqual(before);
+    expect(after).toEqual(before); // the UPDATE that DID execute was rolled back with the failed insert
     expect((await byAction("theme.apply")).find((r) => r.shop_id === shopId)).toBeUndefined();
     expect(await env.KV.get(`shop:theme:${shopId}`)).toBeNull();
+  });
+
+  it("generate-theme logs null for a model-produced non-hex colour", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Non-Hex Colour Shop");
+    const badColourTheme = {
+      primaryColor: "cornflowerblue", accentColor: "#222222", fontHeading: "Playfair Display", fontBody: "DM Sans",
+      tagline: "t", heroHeadline: "h", heroSubheadline: "s", shortDescription: "d", ctaText: "c",
+      aestheticKeywords: [], servicesIntro: "i", trustStatement: "trust", urgencyText: "u",
+    };
+    // /generate-theme never runs validateBrandConfig — a model's raw JSON
+    // output reaches persistShopTheme unvalidated, so the log-side shape
+    // gate is the only thing standing between this and changes_json.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        choices: [{ message: { content: JSON.stringify(badColourTheme) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 20 },
+      })
+    );
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true } });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const applied = (await byAction("theme.apply")).find((r) => r.shop_id === shopId)!;
+    expect(JSON.parse(applied.changes_json as string).primaryColor).toEqual([null, null]);
   });
 
   it("apply-theme records an unregistered-but-shape-valid model id as-is, in both the row and the entry", async () => {

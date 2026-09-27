@@ -166,12 +166,21 @@ export interface ThemeAudit {
 // hashed and locked for 6 years, never blanked. `copy_changed` below records
 // only WHETHER that copy changed, never the words.
 const THEME_AUDIT_KEYS = ["primaryColor", "accentColor", "fontHeading", "fontBody"] as const;
-const FONT_LOG_KEYS = new Set<(typeof THEME_AUDIT_KEYS)[number]>(["fontHeading", "fontBody"]);
-/** A font name is free text too; only log it when it looks like one. */
-const FONT_LOG_SHAPE = /^[A-Za-z0-9 ,'"-]{1,64}$/;
 
-function loggableFont(value: string | undefined): string | null {
-  return typeof value === "string" && FONT_LOG_SHAPE.test(value) ? value : null;
+/** Per-field log-side shape gates (Ruling 20/21): a field is logged only when
+ *  it looks like what it claims to be, else `null`, checked independently on
+ *  the before AND after value. Log-side only — business validation
+ *  (`validateBrandConfig`) is untouched, and the /generate-theme path never
+ *  runs it at all, so a model's raw JSON output needs the same gate here. */
+const THEME_LOG_SHAPE: Record<(typeof THEME_AUDIT_KEYS)[number], RegExp> = {
+  primaryColor: /^#[0-9A-Fa-f]{3,8}$/,
+  accentColor: /^#[0-9A-Fa-f]{3,8}$/,
+  fontHeading: /^[A-Za-z0-9 ,'"-]{1,64}$/,
+  fontBody: /^[A-Za-z0-9 ,'"-]{1,64}$/,
+};
+
+function loggableIfShaped(value: string | undefined, shape: RegExp): string | null {
+  return typeof value === "string" && shape.test(value) ? value : null;
 }
 
 /** Write a theme to the shop row and the KV cache — the single "apply" path.
@@ -196,9 +205,8 @@ export async function persistShopTheme(
     const before = (safeJsonParse(prev?.ai_theme ?? null) ?? {}) as Partial<BrandConfig>;
     const changes: Record<string, [unknown, unknown]> = { ai_model: [prev?.ai_model ?? null, modelId] };
     for (const k of THEME_AUDIT_KEYS) {
-      changes[k] = FONT_LOG_KEYS.has(k)
-        ? [loggableFont(before[k]), loggableFont(config[k])]
-        : [before[k] ?? null, config[k] ?? null];
+      const shape = THEME_LOG_SHAPE[k];
+      changes[k] = [loggableIfShaped(before[k], shape), loggableIfShaped(config[k], shape)];
     }
     const copyChanged = before.heroHeadline !== config.heroHeadline || before.tagline !== config.tagline;
     // Commits the row update and the audit entry in ONE batch (Plan ruling 8):
