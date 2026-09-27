@@ -79,6 +79,15 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PUT /api/shops/:shopId/stock-takes/:stockTakeId/items": "pending",
   "PUT /api/shops/:shopId/suppliers/:supplierId": "pending",
   "PUT /api/staff/me/bookings/:bookingId/status": "pending",
+
+  // Proxy routes registered with .all() (sales/connect forward every method
+  // to the booking worker): audit ownership (proxy hop vs booking worker) is
+  // decided in Plan 3.
+  "ALL /api/shops/:shopId/connect/:action": "pending",
+  "ALL /api/shops/:shopId/sales": "pending",
+  "ALL /api/shops/:shopId/sales/:saleId": "pending",
+  "ALL /api/shops/:shopId/sales/:saleId/void": "pending",
+  "ALL /api/shops/:shopId/sales/:saleId/refund": "pending",
 };
 
 export const CRON_AUDIT: Record<string, AuditDeclaration> = {
@@ -94,4 +103,4 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 66;
+export const PENDING_CEILING = 71;

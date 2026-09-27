@@ -4,11 +4,26 @@ import { app, stripeWebhookApp } from "../src/index";
 import { CRON_AUDIT, PENDING_CEILING, QUEUE_AUDIT, ROUTE_AUDIT, type AuditDeclaration } from "../src/audit/registry";
 import wranglerToml from "../wrangler.toml?raw";
 
-const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE", "ALL"]);
+
+// Hono records every `app.use("*", ...)` / sub-router `.use("*", ...)` middleware
+// registration in `.routes` as method "ALL" too (composed with its mount prefix
+// for a nested router, e.g. "/api/shops/:shopId/staff/*"), alongside genuine
+// `.all()` route handlers like the sales/connect proxies. No real endpoint path
+// ends in a literal "*" segment, so excluding any "ALL" entry whose path is "*"
+// or ends with "/*" removes exactly the middleware (measured: 26 such entries
+// across app + stripeWebhookApp today) and none of the 5 real proxy routes.
+function isWildcardMiddleware(path: string): boolean {
+  return path === "*" || path.endsWith("/*");
+}
 
 function mutatingRoutes(): string[] {
   const all = [...app.routes, ...stripeWebhookApp.routes];
-  return [...new Set(all.filter((r) => MUTATING.has(r.method)).map((r) => `${r.method} ${r.path}`))].sort();
+  return [
+    ...new Set(
+      all.filter((r) => MUTATING.has(r.method) && !isWildcardMiddleware(r.path)).map((r) => `${r.method} ${r.path}`)
+    ),
+  ].sort();
 }
 
 function tomlList(re: RegExp): string[] {
