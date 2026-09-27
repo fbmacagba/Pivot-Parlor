@@ -5,10 +5,26 @@
  *
  * Comment lines are stripped FIRST (a ';' inside a comment would split the
  * file mid-comment). A CREATE TRIGGER body contains ';' before its END, so
- * trigger segments are re-joined until the segment that ends with END.
+ * trigger segments are re-joined until the trigger's own BEGIN...END closes.
+ *
+ * A trigger body may itself contain a `CASE ... END` expression, whose END
+ * is not the trigger's closing END. Rather than matching literally on the
+ * text ending with END, a trigger segment is complete only once it has seen
+ * strictly more whole-word END tokens than whole-word CASE tokens: each
+ * CASE consumes one END, and the trigger's own BEGIN...END contributes
+ * exactly one END that no CASE consumes.
  */
 const TRIGGER_START = /^CREATE\s+(TEMP\s+|TEMPORARY\s+)?TRIGGER\b/i;
-const ENDS_WITH_END = /\bEND$/i;
+const END_TOKEN = /\bEND\b/gi;
+const CASE_TOKEN = /\bCASE\b/gi;
+
+function countTokens(re, text) {
+  return (text.match(re) || []).length;
+}
+
+function isComplete(text) {
+  return countTokens(END_TOKEN, text) > countTokens(CASE_TOKEN, text);
+}
 
 export function statements(sql) {
   const parts = sql
@@ -22,14 +38,14 @@ export function statements(sql) {
     const part = raw.trim();
     if (trigger !== null) {
       trigger += ";" + raw;
-      if (ENDS_WITH_END.test(part)) {
+      if (isComplete(trigger)) {
         out.push(trigger.trim());
         trigger = null;
       }
       continue;
     }
     if (!part) continue;
-    if (TRIGGER_START.test(part) && !ENDS_WITH_END.test(part)) {
+    if (TRIGGER_START.test(part) && !isComplete(part)) {
       trigger = raw;
       continue;
     }

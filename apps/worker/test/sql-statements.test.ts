@@ -34,4 +34,23 @@ describe("statements()", () => {
     }
     await expect(env.DB.prepare("DELETE FROM probe_t").run()).rejects.toThrow(/probe blocked/);
   });
+
+  it("keeps a CASE...END expression inside a trigger body from ending the trigger early", async () => {
+    const sql = [
+      "CREATE TABLE case_t (x INTEGER);",
+      "CREATE TRIGGER case_t_check BEFORE INSERT ON case_t",
+      "BEGIN",
+      "  SELECT CASE WHEN NEW.x > 1 THEN RAISE(ABORT, 'too big') END;",
+      "END;",
+    ].join("\n");
+    const out = statements(sql);
+    expect(out).toHaveLength(2);
+    expect(out[1]).toMatch(/^CREATE TRIGGER case_t_check[\s\S]*CASE WHEN NEW\.x > 1[\s\S]*END;[\s\S]*END$/);
+
+    for (const s of out) {
+      await env.DB.prepare(s).run();
+    }
+    await env.DB.prepare("INSERT INTO case_t (x) VALUES (0)").run();
+    await expect(env.DB.prepare("INSERT INTO case_t (x) VALUES (2)").run()).rejects.toThrow(/too big/);
+  });
 });
