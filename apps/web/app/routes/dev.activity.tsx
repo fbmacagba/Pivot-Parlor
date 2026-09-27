@@ -109,29 +109,60 @@ export default function DevActivity() {
   // its own <form> before the browser's native submit step runs — see
   // ErasureRequestDialog.tsx's header comment for the full story). It
   // closes from the submission's OUTCOME instead, read here from this
-  // page's own useNavigation()/useActionData(): `erasingRef` remembers
-  // that the in-flight submission was specifically an erase (the modal
-  // makes any OTHER submission impossible while it's open, but this is
-  // still the precise signal rather than an inference from "is the dialog
-  // open"), and once nav.state returns to "idle" this closes the dialog on
-  // success or surfaces the error INSIDE it (DeleteShopDialog's own
-  // pattern) on failure — never both silently.
+  // page's own useNavigation()/useActionData(): once nav.state returns to
+  // "idle" this closes the dialog on success or surfaces the error INSIDE
+  // it (DeleteShopDialog's own pattern) on failure — never both silently.
+  //
+  // Fix round 3 (progress.md, Ruling 52 — Important race): round 2's
+  // `erasingRef` was a bare boolean, and the dialog could still be
+  // dismissed (Cancel / Escape / overlay-click) while a submission was in
+  // flight. That let a developer confirm erase for subject A, cancel out
+  // of A's still-in-flight dialog, open the dialog for subject B, and then
+  // have A's outcome land on B's dialog when A settled — closing it, or
+  // showing A's error on it, for a request B never made. Two changes fix
+  // this:
+  //   1. The dialog itself can no longer be dismissed while ITS erase is
+  //      in flight (Cancel disabled, Escape/overlay-click ignored — see
+  //      ErasureRequestDialog.tsx's `busy`-gated onOpenChange), so the
+  //      "cancel out from under an in-flight request" step is no longer
+  //      possible at all.
+  //   2. Defense in depth regardless: the ref now remembers the in-flight
+  //      submission's user_id (not just "an erase is happening"), and the
+  //      settled outcome is only applied if that user_id still matches
+  //      whichever target's dialog is currently open — a stale outcome
+  //      for a subject that isn't (or is no longer) the open dialog's
+  //      target is silently ignored rather than misapplied.
   const [eraseError, setEraseError] = useState<string | null>(null);
-  const erasingRef = useRef(false);
+  const erasingUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (nav.state !== "idle") {
-      if (nav.formData?.get("intent") === "erase") erasingRef.current = true;
+      if (nav.formData?.get("intent") === "erase") {
+        erasingUserIdRef.current = String(nav.formData.get("user_id") ?? "");
+      }
       return;
     }
-    if (!erasingRef.current) return;
-    erasingRef.current = false;
+    const erasedUserId = erasingUserIdRef.current;
+    if (!erasedUserId) return;
+    erasingUserIdRef.current = null;
+    // The outcome belongs to whichever subject was submitted — apply it
+    // only if that's still the subject the dialog has open.
+    if (confirmErase?.userId !== erasedUserId) return;
     if (result && "erased" in result && result.erased) {
       setConfirmErase(null);
       setEraseError(null);
     } else {
       setEraseError((result && "error" in result && result.error) || "Request failed");
     }
-  }, [nav.state, nav.formData, result]);
+  }, [nav.state, nav.formData, result, confirmErase]);
+  // Erase-specific busy flag (Ruling 52): true only while the in-flight
+  // navigation is an erase submission for THIS dialog's own open target —
+  // not `nav.state !== "idle"` on its own, which is also true during any
+  // unrelated verify/import submission. Drives both the Confirm button's
+  // disabled state and the dialog's can't-be-dismissed-mid-request gate.
+  const eraseBusy =
+    nav.state !== "idle" &&
+    nav.formData?.get("intent") === "erase" &&
+    nav.formData?.get("user_id") === confirmErase?.userId;
   const closeEraseDialog = () => {
     setConfirmErase(null);
     setEraseError(null);
@@ -290,7 +321,7 @@ export default function DevActivity() {
       <ErasureRequestDialog
         target={confirmErase}
         onClose={closeEraseDialog}
-        busy={nav.state !== "idle"}
+        busy={eraseBusy}
         error={eraseError}
       />
     </div>

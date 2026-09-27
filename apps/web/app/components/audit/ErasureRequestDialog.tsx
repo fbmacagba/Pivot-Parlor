@@ -25,6 +25,18 @@
 // never fires, so the erase action was silently unreachable from the UI.
 // The submit button now carries NO onClick at all — closing happens only
 // from the outcome, driven by the parent.
+//
+// Fix round 3 (progress.md, Ruling 52 — Important race): closing on the
+// outcome (round 2's fix) opened a narrower race — while subject A's
+// erase was in flight, Cancel/Escape/overlay-click could still dismiss
+// A's dialog, letting the developer open a dialog for subject B before A
+// settled; A's outcome would then land on B's now-open dialog. Fixed here
+// by refusing to dismiss the dialog AT ALL while its own erase is in
+// flight (Cancel disabled below; `onOpenChange` below is a no-op while
+// `busy`), so there is no longer a way to have a different dialog open
+// when a stale outcome arrives. The parent (dev.activity.tsx) also now
+// tracks the in-flight submission's user_id and only applies an outcome
+// to a dialog whose open target still matches it, as defense in depth.
 import { Loader2 } from "lucide-react";
 import { Form } from "@remix-run/react";
 import { Button } from "~/components/ui/Button";
@@ -47,9 +59,16 @@ export function ErasureRequestDialog({
 }: {
   target: ErasureTarget | null;
   onClose: () => void;
-  /** True while the erase submission is in flight (the parent's
-   *  `useNavigation()` gated to this dialog's own submission); disables
-   *  the confirm button so it can't be double-submitted. */
+  /** True only while the in-flight navigation is specifically an erase
+   *  submission FOR THIS DIALOG'S OWN OPEN TARGET (the parent scopes its
+   *  `useNavigation()` state to intent === "erase" AND a matching
+   *  user_id) — not simply `nav.state !== "idle"`, which would also be
+   *  true during an unrelated verify/import submission elsewhere on the
+   *  page. Disables the confirm button so it can't be double-submitted,
+   *  disables Cancel, and makes Escape/overlay-click a no-op (Ruling 52):
+   *  the dialog cannot be dismissed while its own request is in flight, so
+   *  a stale outcome can never land on a dialog open for a different
+   *  subject. */
   busy?: boolean;
   /** Set by the parent once a submission made from THIS dialog settles
    *  with an error — kept open and shown here (DeleteShopDialog's own
@@ -57,7 +76,17 @@ export function ErasureRequestDialog({
   error?: string | null;
 }) {
   return (
-    <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        // Ruling 52: while this dialog's own erase is in flight, ignore
+        // every dismiss path (Escape, overlay-click, or Radix's own
+        // programmatic close) — only a settled outcome, or Cancel once
+        // busy clears, may close it.
+        if (busy) return;
+        if (!open) onClose();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Record erasure request</DialogTitle>
@@ -77,7 +106,7 @@ export function ErasureRequestDialog({
               </div>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+              <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={busy}>
                 Cancel
               </Button>
               <Form method="post">
