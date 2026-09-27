@@ -346,6 +346,63 @@ describe("/api/audit", () => {
     expect(dataExportEntry).toBeTruthy();
   });
 
+  it("refuses an over-limit subject export before writing data.export (Ruling 48)", async () => {
+    const { token } = await dev();
+    const shopId = await seedShop("Subject Overflow Shop");
+    // Three entries scoped to this one shop's subject id, independent of
+    // whatever else the rest of the file has written.
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
+    await dispatch("POST", `/api/shops/${shopId}/activate`, { headers: authHeaders(token) });
+    await dispatch("POST", `/api/shops/${shopId}/pause`, { headers: authHeaders(token) });
+    const subjectId = `subj_shop_${shopId}`;
+    await E.DB.prepare(
+      "INSERT INTO audit_subjects (id, kind, shop_id, created_at) VALUES (?, 'shop', ?, ?) ON CONFLICT(id) DO NOTHING"
+    ).bind(subjectId, shopId, new Date().toISOString()).run();
+    const originalMax = EXPORT_LIMITS.max;
+    EXPORT_LIMITS.max = 2;
+    try {
+      const res = await dispatch("GET", `/api/audit/subjects/${subjectId}/export`, { headers: authHeaders(token) });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe("Too many entries; narrow the dates");
+      const written = await auditEntriesFor(requestIdOf(res), "data.export");
+      expect(written).toEqual([]);
+    } finally {
+      EXPORT_LIMITS.max = originalMax;
+    }
+  });
+
+  it("filters a subject export by from/to, echoing the canonicalized range in details (Ruling 48)", async () => {
+    const { token } = await dev();
+    const target = await seedUser("customer", null);
+    const subjectId = `subj_user_${target}`;
+    await E.DB.prepare("INSERT INTO audit_subjects (id, kind, user_id, created_at) VALUES (?, 'user', ?, ?)")
+      .bind(subjectId, target, new Date().toISOString())
+      .run();
+    const insertAt = (occurredAt: string) =>
+      E.DB.prepare(
+        `INSERT INTO audit_log (id, occurred_at, entry_hash, actor_type, actor_ref, via, action, phase, outcome, worker, historical)
+         VALUES (?, ?, 'x', 'customer', ?, 'api', 'customer.view', 'done', 'succeeded', 'test', 0)`
+      ).bind(crypto.randomUUID(), occurredAt, subjectId).run();
+    await insertAt("2020-06-01T00:00:00.000Z"); // outside the range below
+    await insertAt("2026-06-01T00:00:00.000Z"); // inside it
+    const res = await dispatch(
+      "GET",
+      `/api/audit/subjects/${subjectId}/export?from=2026-01-01&to=2026-12-31`,
+      { headers: authHeaders(token) }
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { entries: { occurred_at: string }[] } };
+    const dates = body.data.entries.map((e) => e.occurred_at);
+    expect(dates).toContain("2026-06-01T00:00:00.000Z");
+    expect(dates).not.toContain("2020-06-01T00:00:00.000Z");
+    const [entry] = await auditEntriesFor(requestIdOf(res), "data.export");
+    // A date-only `to` bumps to end of day, same as the list filters (Ruling 41 minor).
+    expect(JSON.parse(entry!.details_json as string)).toEqual({
+      from: "2026-01-01T00:00:00.000Z",
+      to: "2026-12-31T23:59:59.999Z",
+    });
+  });
+
   it("imports ai_usage_log once, as historical ai.call entries", async () => {
     const { token } = await dev();
     const shopId = await seedShop("Hist Shop");

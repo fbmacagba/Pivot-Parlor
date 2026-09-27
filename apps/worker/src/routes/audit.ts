@@ -31,6 +31,14 @@ function badDate(s: string): boolean {
   return s.length > 40 || Number.isNaN(Date.parse(s));
 }
 
+// Canonicalization shared by every `from`/`to` filter (the list, the export,
+// and — Ruling 48 — the subject export): never bind or echo the raw string
+// (badDate() only proves Date.parse-able, which is lenient enough to accept
+// free text alongside a date), and bump a date-only `to` to the END of that
+// day rather than its UTC midnight start.
+const isoFrom = (s: string): string => new Date(s).toISOString();
+const isoTo = (s: string): string => (DATE_ONLY.test(s) ? `${s}T23:59:59.999Z` : new Date(s).toISOString());
+
 /** Returns the name of the first invalid filter/cursor key, or null when every
  *  present value has a valid shape. An empty value (e.g. `?shop_id=`) is
  *  treated as absent, not invalid — matching filters()'s own truthy checks,
@@ -81,17 +89,8 @@ function filters(c: Ctx): Filters {
     }
   }
   if (q.outcome) add("outcome", "l.outcome = ?", q.outcome);
-  // Canonicalize to ISO before binding or echoing: badDate() only requires
-  // Date.parse-able, which V8 accepts for arbitrary loose text (e.g. a name
-  // alongside a date) — echoing the RAW string into details_json (permanent,
-  // hashed, never blanked) could leak personal data through this filter.
-  // new Date(...).toISOString() is safe here because invalidFilterKey()
-  // already rejected anything Date.parse can't handle.
-  if (q.from) add("from", "l.occurred_at >= ?", new Date(q.from).toISOString());
-  // A date-only `to` (e.g. "2026-01-01") parses as that day's UTC midnight —
-  // the START of the day, not the end — which would silently exclude every
-  // entry from later that same day. Bump a date-only value to 23:59:59.999.
-  if (q.to) add("to", "l.occurred_at <= ?", DATE_ONLY.test(q.to) ? `${q.to}T23:59:59.999Z` : new Date(q.to).toISOString());
+  if (q.from) add("from", "l.occurred_at >= ?", isoFrom(q.from));
+  if (q.to) add("to", "l.occurred_at <= ?", isoTo(q.to));
   if (q.request_id) add("request_id", "l.request_id = ?", q.request_id);
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", binds, echo };
 }
@@ -243,18 +242,37 @@ audit.get("/export", async (c) => {
   });
 });
 
-// GET /api/audit/subjects/:subjectId/export — subject access export. Works
-// for any existing subject kind ('user', 'visitor_ip', 'shop').
+// GET /api/audit/subjects/:subjectId/export?from&to — subject access export.
+// Works for any existing subject kind ('user', 'visitor_ip', 'shop').
 audit.get("/subjects/:subjectId/export", async (c) => {
   const subjectId = c.req.param("subjectId");
   const subject = await c.env.DB.prepare("SELECT * FROM audit_subjects WHERE id = ?")
     .bind(subjectId)
     .first<{ id: string; kind: string; shop_id: string | null }>();
   if (!subject) return c.json({ success: false, error: "Subject not found" }, 404);
-  const refused = await guarded(c, () =>
-    auditFor(c).write({ action: "data.export", outcome: "succeeded", entityType: "audit_subject", entityId: subjectId })
-  );
-  if (refused instanceof Response) return refused;
+
+  // Ruling 48: optional from/to, validated and canonicalized exactly like
+  // Ruling 41's list filters (empty value treated as absent; reuses
+  // badDate()/isoFrom()/isoTo() rather than duplicating them).
+  const q = c.req.query();
+  if (q.from && badDate(q.from)) return badRequest(c, "from");
+  if (q.to && badDate(q.to)) return badRequest(c, "to");
+  const rangeWhere: string[] = [];
+  const rangeBinds: unknown[] = [];
+  const echo: Record<string, string> = {};
+  if (q.from) {
+    const iso = isoFrom(q.from);
+    rangeWhere.push("occurred_at >= ?");
+    rangeBinds.push(iso);
+    echo.from = iso;
+  }
+  if (q.to) {
+    const iso = isoTo(q.to);
+    rangeWhere.push("occurred_at <= ?");
+    rangeBinds.push(iso);
+    echo.to = iso;
+  }
+
   // Ruling 46: pick the WHERE by kind instead of an unindexed OR across two
   // columns. A 'shop' subject is never referenced from actor_ref/ip_ref (Task
   // 6 puts it only inside details_json.shop_subject) — shop_id is its real,
@@ -265,11 +283,25 @@ audit.get("/subjects/:subjectId/export", async (c) => {
       : subject.kind === "visitor_ip"
         ? (["ip_ref", subjectId] as const)
         : (["actor_ref", subjectId] as const);
+  const where = [`${column} = ?`, ...rangeWhere].join(" AND ");
+
+  // Ruling 48: fetch one row past the cap and refuse (before writing any
+  // audit entry) rather than silently truncate — a shop subject can now
+  // span that shop's whole history (Ruling 46), same ordering Ruling 45
+  // uses for /export.
   const entries = (
-    await c.env.DB.prepare(`SELECT * FROM audit_log WHERE ${column} = ? ORDER BY occurred_at LIMIT ?`)
-      .bind(value, EXPORT_LIMITS.max)
-      .all()
+    await c.env.DB.prepare(`SELECT * FROM audit_log WHERE ${where} ORDER BY occurred_at LIMIT ?`)
+      .bind(value, ...rangeBinds, EXPORT_LIMITS.max + 1)
+      .all<Record<string, unknown>>()
   ).results ?? [];
+  if (entries.length > EXPORT_LIMITS.max) {
+    return c.json({ success: false, error: "Too many entries; narrow the dates" }, 400);
+  }
+
+  const refused = await guarded(c, () =>
+    auditFor(c).write({ action: "data.export", outcome: "succeeded", entityType: "audit_subject", entityId: subjectId, details: echo })
+  );
+  if (refused instanceof Response) return refused;
   return c.json({ success: true, data: { subject, entries } });
 });
 
