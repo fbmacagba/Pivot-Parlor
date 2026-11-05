@@ -1,4 +1,5 @@
 import { Link } from "@remix-run/react";
+import { isPortfolioDemoShop } from "@repo/utils";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 
 export function FinalCtaSection({ ctx, glow }: { ctx: SiteRenderContext; glow: boolean }) {
@@ -14,7 +15,7 @@ export function FinalCtaSection({ ctx, glow }: { ctx: SiteRenderContext; glow: b
           className="mt-10 inline-flex min-h-14 min-w-[14rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-12 pp-heading text-lg font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-accent-25)] transition hover:brightness-110 active:scale-[0.98]">
           {ctx.bookLabel} →
         </Link>
-        <p className="mt-6 text-sm text-[color:var(--st-ink-55)]">Book in under a minute · No account needed</p>
+        <p className="mt-6 text-sm text-[color:var(--st-ink-55)]">{isPortfolioDemoShop(ctx.shopSlug) ? "Sample details supplied · No account needed" : "Book in under a minute · No account needed"}</p>
       </div>
     </section>
   );

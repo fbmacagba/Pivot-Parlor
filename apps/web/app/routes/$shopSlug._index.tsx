@@ -3,10 +3,13 @@ import type { MetaFunction } from "@remix-run/cloudflare";
 import { useState, useEffect } from "react";
 import CommercialTemplate, { type SiteData } from "~/components/CommercialTemplate";
 import { ReviewModal } from "~/components/ReviewModal";
+import { isPortfolioDemoShop } from "@repo/utils";
 import type { loader as shopLoader } from "./$shopSlug";
 import type { ShopSiteData } from "./$shopSlug";
 
-export const meta: MetaFunction<typeof shopLoader> = ({ data }) => {
+export const meta: MetaFunction = ({ matches }) => {
+  // This index reads the parent loader, not a loader of its own.
+  const data = matches.find(m => m.id === "routes/$shopSlug")?.data as { shop?: { name?: string }; site?: ShopSiteData } | undefined;
   const shopName = data?.shop?.name ?? "Book your appointment";
   const title =
     data?.site?.seo_title?.trim() ||
@@ -45,7 +48,7 @@ export default function ShopLanding() {
 
   const [searchParams] = useSearchParams();
   const [reviewOpen, setReviewOpen] = useState(false);
-  const reviewBookingId = searchParams.get("review");
+  const reviewBookingId = isPortfolioDemoShop(data?.slug) ? null : searchParams.get("review");
 
   useEffect(() => {
     if (reviewBookingId) setReviewOpen(true);

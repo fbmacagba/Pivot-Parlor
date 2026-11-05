@@ -1,6 +1,7 @@
 import { Link, useLoaderData, useRouteLoaderData } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { json, redirect } from "@remix-run/cloudflare";
+import { isPortfolioDemoShop } from "@repo/utils";
 import { useEffect, useState } from "react";
 import { CheckCircle, Loader2, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
@@ -20,6 +21,7 @@ type BookingStatus = {
 };
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
+  if (isPortfolioDemoShop(params.shopSlug)) return redirect(`/${params.shopSlug}/book`);
   const env = context.env as { API_URL: string };
   const url = new URL(request.url);
   const bookingId = url.searchParams.get("id");

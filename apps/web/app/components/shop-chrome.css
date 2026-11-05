@@ -100,15 +100,15 @@
   position: fixed;
   z-index: 60;
   right: max(1.5rem, env(safe-area-inset-right, 0px));
-  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + var(--pp-bar-lift));
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + max(var(--pp-bar-lift), var(--pp-cookie-lift, 0px)));
   transition: bottom 250ms ease-out;
 }
 .pp-chat-panel {
   position: fixed;
   z-index: 60;
   right: max(1.5rem, env(safe-area-inset-right, 0px));
-  bottom: calc(6rem + env(safe-area-inset-bottom, 0px) + var(--pp-bar-lift));
-  height: min(480px, calc(100vh - 7.5rem - env(safe-area-inset-bottom, 0px) - var(--pp-bar-lift)));
+  bottom: calc(6rem + env(safe-area-inset-bottom, 0px) + max(var(--pp-bar-lift), var(--pp-cookie-lift, 0px)));
+  height: min(480px, calc(100vh - 7.5rem - env(safe-area-inset-bottom, 0px) - max(var(--pp-bar-lift), var(--pp-cookie-lift, 0px))));
   overscroll-behavior: contain;
 }
 
@@ -118,3 +118,11 @@
     transition: none;
   }
 }
+
+/* A plainly labelled portfolio example, scoped away from live shop designs. */
+.pp-demo-notice { padding: 1rem 1.5rem; border-bottom: 1px solid var(--st-line-15); color: var(--st-ink); background: var(--st-card); font-size: 0.9rem; line-height: 1.6; }
+.pp-demo-notice strong { font-weight: 600; }
+.pp-portfolio-demo [data-pp-hero], .pp-portfolio-demo [data-pp-hero] > .relative { min-height: 0; }
+.pp-portfolio-demo [data-pp-hero] > .relative { padding-block: clamp(2rem, 6vw, 5rem); }
+.pp-portfolio-demo [data-pp-hero] > .relative > div { transform: none; }
+.pp-portfolio-demo [data-pp-hero] > button { display: none; }

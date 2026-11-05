@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 import { archetypeFor } from "~/components/siteArchetype";
-import type { SectionKey } from "~/components/siteArchetype";
-import { normalizeDesignSpec, seedComposeDesignSpec } from "@repo/utils";
+import type { Archetype, SectionKey } from "~/components/siteArchetype";
+import { normalizeDesignSpec, seedComposeDesignSpec, isPortfolioDemoShop } from "@repo/utils";
 import { composeRenderPlan, downgradeForImages } from "~/components/site/composePlan";
 import type { RenderPlan } from "~/components/site/composePlan";
 import { HeroSection } from "~/components/site/sections/HeroSection";
@@ -88,6 +88,7 @@ export default function CommercialTemplate({
 }: CommercialTemplateProps) {
   const params = useParams();
   const shopSlug = params.shopSlug ?? "";
+  const demo = isPortfolioDemoShop(shopSlug);
 
   const [category, setCategory] = useState<string>("All");
   const categories = useMemo(() => {
@@ -130,7 +131,16 @@ export default function CommercialTemplate({
 
   // Per-shop design intent (WS-6). Every field is optional; when absent we fall
   // back to the template's original literals so pre-WS-6 sites render unchanged.
-  const archetype = archetypeFor(site.layout_mood);
+  const archetype: Archetype = { ...archetypeFor(site.layout_mood), ...(demo ? {
+    howSub: "Explore the booking steps with sample details. No appointment is reserved.",
+    ctaHeading: "Explore the booking experience",
+    ctaSub: "Try the complete walkthrough with sample details. Nothing is booked or charged.",
+    steps: [
+      { t: "Choose an example service", d: "Compare the illustrative services and prices." },
+      { t: "Explore sample availability", d: "Choose a sample team member and an illustrative time." },
+      { t: "Complete the demonstration", d: "See the completion screen. Nothing is booked, charged or emailed." },
+    ],
+  } : {}) };
   const heroCentered = archetype.heroAlign === "center";
 
   const trustSignals = (site.trust_signals ?? []).map((s) => s.trim()).filter(Boolean);

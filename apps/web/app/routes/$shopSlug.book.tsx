@@ -1,5 +1,5 @@
 import { Form, useFetcher, useLoaderData, useNavigation, useRouteLoaderData } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { useState } from "react";
 import { createApiClient } from "~/lib/api";
@@ -13,13 +13,25 @@ import {
   platformFallbackVars,
 } from "~/components/ThemedBookingControls";
 import type { Service } from "@repo/types";
-import { formatPence } from "@repo/utils";
+import { formatPence, isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
+import { portfolioDemoServices, portfolioDemoStaff, getPortfolioDemoSlots } from "~/lib/portfolioDemo";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 interface Staff { id: string; display_name: string; bio?: string }
 interface Slot { staff_id: string; start_time: string; end_time: string; is_available: boolean }
 
+export const meta: MetaFunction = ({ matches, params }) => {
+  const data = matches.find(m => m.id === "routes/$shopSlug")?.data as { shop?: { name?: string } } | undefined;
+  return [{ title: isPortfolioDemoShop(params.shopSlug) ? "Try a booking | FerdyM's Barber Shop demo" : `Book an appointment | ${data?.shop?.name || "Pivot Parlor"}` }];
+};
+
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
+  if (isPortfolioDemoShop(params.shopSlug)) {
+    const query = new URL(request.url).searchParams;
+    return json({ slug: params.shopSlug!, services: portfolioDemoServices, staff: portfolioDemoStaff,
+      slots: getPortfolioDemoSlots(query.get("date") || "", query.get("service_id") || "", query.get("staff_id") || "any"),
+      shopTimezone: "Europe/London", deposit: null, paymentCancelled: false });
+  }
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
   const url = new URL(request.url);
@@ -92,6 +104,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
 }
 
 export async function action({ params, request, context }: ActionFunctionArgs) {
+  if (isPortfolioDemoShop(params.shopSlug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
   const form = await request.formData();
@@ -143,7 +156,7 @@ export default function BookingRoute() {
         shopSlug={layoutData.slug}
         bookingBar={false}
       >
-        <BookingWizard />
+        <BookingWizard key={layoutData.slug} />
       </CommercialShopChrome>
     );
   }
@@ -159,14 +172,16 @@ function BookingWizard() {
     useLoaderData<typeof loader>();
   const nav = useNavigation();
   const slotsFetcher = useFetcher<typeof loader>();
+  const demo = isPortfolioDemoShop(slug);
+  const [demoComplete, setDemoComplete] = useState(false);
   const [step, setStep] = useState(0);
   const [selection, setSelection] = useState({
     service: null as Service | null,
     staffId: "",
     date: "",
     slot: "",
-    name: "",
-    email: "",
+    name: demo ? "Demo Guest" : "",
+    email: demo ? "guest@example.com" : "",
     phone: "",
     notes: "",
   });
@@ -178,6 +193,15 @@ function BookingWizard() {
   const availableSlots = [
     ...new Map(rawSlots.filter((s) => s.is_available).map((s) => [s.start_time, s])).values(),
   ].sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+  if (demoComplete) return (
+    <section className="mx-auto max-w-2xl px-4 py-16" role="status">
+      <h1 className="text-3xl font-semibold">Demo complete</h1>
+      <p className="mt-4">No appointment was booked. No payment was taken and no email was sent.</p>
+      <p className="mt-2">This walkthrough used sample services, times and guest details.</p>
+      <ThemedButton className="mt-6" onClick={() => { setDemoComplete(false); setStep(0); setSelection(p => ({ ...p, service: null, staffId: "", date: "", slot: "" })); }}>Try again</ThemedButton>
+    </section>
+  );
 
   return (
     <div className="min-h-screen bg-[color:var(--st-bg)] px-4 py-12 text-[color:var(--st-ink)] sm:px-6">
@@ -322,6 +346,13 @@ function BookingWizard() {
           {step === 3 && (
             <div className="space-y-4">
               <h2 className="font-heading text-2xl font-bold text-[color:var(--st-ink)]">Your details</h2>
+              {demo ? (
+                <div className="space-y-3">
+                  <p>Sample guest details are supplied for this demonstration. Please do not enter personal information.</p>
+                  <Row label="Name" value={selection.name} />
+                  <Row label="Email" value={selection.email} />
+                </div>
+              ) : <>
               <ThemedInput label="Full name" value={selection.name} onChange={(e) => setSelection((p) => ({ ...p, name: e.target.value }))} required />
               <ThemedInput label="Email address" type="email" value={selection.email} onChange={(e) => setSelection((p) => ({ ...p, email: e.target.value }))} required />
               <ThemedInput label="Phone (optional)" type="tel" value={selection.phone} onChange={(e) => setSelection((p) => ({ ...p, phone: e.target.value }))} />
@@ -331,6 +362,7 @@ function BookingWizard() {
                 value={selection.notes}
                 onChange={(e) => setSelection((p) => ({ ...p, notes: e.target.value }))}
               />
+              </>}
               <div className="flex gap-3">
                 <ThemedButton variant="ghost" onClick={() => setStep(2)}>Back</ThemedButton>
                 <ThemedButton disabled={!selection.name || !selection.email} onClick={() => setStep(4)}>Next →</ThemedButton>
@@ -339,7 +371,7 @@ function BookingWizard() {
           )}
 
           {step === 4 && (
-            <Form method="post" className="space-y-4">
+            <Form method="post" className="space-y-4" onSubmit={demo ? (event) => { event.preventDefault(); setDemoComplete(true); } : undefined}>
               <input type="hidden" name="service_id" value={selection.service?.id ?? ""} />
               <input type="hidden" name="staff_id" value={selection.staffId} />
               <input type="hidden" name="date" value={selection.date} />
@@ -377,11 +409,11 @@ function BookingWizard() {
                     ? "Confirming…"
                     : deposit
                       ? "Continue to payment →"
-                      : "Confirm booking →"}
+                      : demo ? "Complete demo booking →" : "Confirm booking →"}
                 </ThemedButton>
               </div>
               <p className="text-center text-xs text-[color:var(--st-ink-50)]">
-                We use these details only to manage your booking. See our{" "}
+                {demo ? "These are sample details. Nothing is reserved or sent. See our " : "We use these details only to manage your booking. See our "}
                 <a
                   href={`/${slug}/privacy`}
                   className="underline hover:text-[color:var(--st-ink-80)]"

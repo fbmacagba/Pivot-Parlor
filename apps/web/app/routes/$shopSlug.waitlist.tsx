@@ -1,6 +1,7 @@
 import { Form, useActionData, useNavigation, useParams, useRouteLoaderData } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { json, redirect } from "@remix-run/cloudflare";
+import { isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
@@ -13,10 +14,12 @@ import {
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 export async function loader({ params }: LoaderFunctionArgs) {
+  if (isPortfolioDemoShop(params.shopSlug)) return redirect(`/${params.shopSlug}/book`);
   return json({ slug: params.shopSlug });
 }
 
 export async function action({ params, request, context }: ActionFunctionArgs) {
+  if (isPortfolioDemoShop(params.shopSlug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
   const env = context.env as { API_URL: string };
   const form = await request.formData();
   try {
