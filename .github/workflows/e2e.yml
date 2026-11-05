@@ -26,7 +26,8 @@ concurrency:
 jobs:
   e2e:
     name: E2E against staging
-    runs-on: ubuntu-latest
+    # Playwright 1.58.x supports Noble; ubuntu-latest has moved to 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
