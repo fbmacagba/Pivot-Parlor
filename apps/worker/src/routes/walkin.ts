@@ -1,10 +1,11 @@
 // apps/worker/src/routes/walkin.ts
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
-import { authMiddleware, getUser } from "../middleware/auth.js";
+import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { getShopById, getShopBySlug } from "../db/queries.js";
+import { isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 
 const walkin = new Hono<{ Bindings: Bindings }>();
 
@@ -42,6 +43,7 @@ walkin.post(
   const slug = c.req.param("shopSlug");
   const shop = (await getShopBySlug(c.env.DB, slug)) ?? (await getShopById(c.env.DB, slug));
   if (!shop || !shop.is_active) return c.json({ success: false, error: "Shop not found" }, 404);
+  if (isPortfolioDemoShop(shop.slug)) return c.json({ success: false, error: PORTFOLIO_DEMO_ERROR }, 403);
 
   const body = await c.req
     .json<{ name?: string; phone?: string; service?: string; notes?: string }>()

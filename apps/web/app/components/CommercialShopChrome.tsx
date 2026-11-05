@@ -11,6 +11,8 @@ import {
   resolveSiteTheme,
   resolveCuratedFont,
   curatedFontStack,
+  isPortfolioDemoShop,
+  portfolioDemoReply,
 } from "@repo/utils";
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
@@ -147,6 +149,8 @@ export function CommercialShopChrome({
 }: CommercialShopChromeProps) {
   const [navOpen, setNavOpen] = useState(false);
   const [cookieForce, setCookieForce] = useState(false);
+  const [cookieHeight, setCookieHeight] = useState(0);
+  const demo = isPortfolioDemoShop(shopSlug);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -157,7 +161,7 @@ export function CommercialShopChrome({
 
   // Turnstile invisible widget — obtain a fresh token before each chat message
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (demo || typeof window === "undefined") return;
     if ((window as unknown as { turnstile?: unknown }).turnstile) return; // already loaded
     const script = document.createElement("script");
     script.src =
@@ -165,7 +169,7 @@ export function CommercialShopChrome({
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
-  }, []);
+  }, [demo]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const closeNav = () => setNavOpen(false);
 
@@ -195,6 +199,12 @@ export function CommercialShopChrome({
   const sendChatMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || chatSending || !shopId) return;
+    if (demo) {
+      setChatStarted(true);
+      setChatMessages(previous => [...previous, { role: "user", content: trimmed.slice(0, 2000) },
+        { role: "assistant", content: portfolioDemoReply(trimmed) }]);
+      return;
+    }
 
     // Get Turnstile token if widget is available (gracefully skip if not configured)
     let turnstileToken = "";
@@ -356,8 +366,8 @@ export function CommercialShopChrome({
 
   return (
     <div
-      className={`pp-commercial relative min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]${barShown ? " pp-bar-shown" : ""}`}
-      style={{ ...rootStyle, fontFamily: "var(--pp-font-body)" }}
+      className={`pp-commercial relative min-h-screen bg-[color:var(--st-bg)] text-[color:var(--st-ink)]${barShown ? " pp-bar-shown" : ""}${demo ? " pp-portfolio-demo" : ""}`}
+      style={{ ...rootStyle, fontFamily: "var(--pp-font-body)", "--pp-cookie-lift": `${cookieHeight}px` } as CSSProperties}
     >
       <style
         dangerouslySetInnerHTML={{
@@ -371,7 +381,7 @@ export function CommercialShopChrome({
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 md:px-6">
           <Link
             to={`/${shopSlug}`}
-            className="flex min-h-12 min-w-0 shrink-0 items-center gap-3"
+            className="flex min-h-12 min-w-0 items-center gap-3"
             onClick={closeNav}
           >
             {logoSrc ? (
@@ -428,18 +438,18 @@ export function CommercialShopChrome({
             {/* Single sign-in for owners, staff and customers — /login routes each
                 role to its own dashboard (and sends already-signed-in visitors
                 straight there). ?shop= powers a "back to shop" link on /login. */}
-            <Link
+            {!demo && <Link
               to={`/login?shop=${encodeURIComponent(shopSlug)}`}
               className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] border border-[color:var(--st-line-40)] px-5 pp-heading text-sm font-semibold text-[color:var(--st-ink-90)] transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--st-accent-text)]"
             >
               Sign in
-            </Link>
+            </Link>}
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}
                 className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
-                Book Now →
+                {demo ? "Try demo →" : "Book Now →"}
               </Link>
             ) : (
               <Link
@@ -452,14 +462,14 @@ export function CommercialShopChrome({
           </div>
 
           {/* Mobile: keep a booking CTA always in reach, plus the menu trigger. */}
-          <div className="flex items-center gap-2 md:hidden">
+          <div className="flex shrink-0 items-center gap-2 md:hidden">
             {bookingEnabled ? (
               <Link
                 to={`/${shopSlug}/book`}
                 onClick={closeNav}
                 className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
-                Book
+                {demo ? "Try demo" : "Book"}
               </Link>
             ) : null}
             <button
@@ -528,13 +538,13 @@ export function CommercialShopChrome({
               className="my-1 border-t border-[color:var(--st-line-10)]"
               aria-hidden
             />
-            <Link
+            {!demo && <Link
               to={`/login?shop=${encodeURIComponent(shopSlug)}`}
               className="min-h-12 rounded-[var(--st-r-sm)] px-4 py-3 text-left font-medium text-[color:var(--st-ink-90)]"
               onClick={closeNav}
             >
               Sign in
-            </Link>
+            </Link>}
             {/* Install entry for the shop's PWA; renders nothing unless this
                 device can install. Closing the menu first lets the native
                 dialog (or the iOS walkthrough in the root-mounted prompt)
@@ -546,7 +556,7 @@ export function CommercialShopChrome({
                 className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
-                Book Now →
+                {demo ? "Try demo →" : "Book Now →"}
               </Link>
             ) : (
               <Link
@@ -561,6 +571,10 @@ export function CommercialShopChrome({
         </div>
       ) : null}
 
+      {demo ? <aside className="pp-demo-notice" aria-label="Demonstration notice">
+        <strong>Interactive demonstration by BytesFX.</strong> Services, prices and team members are illustrative.
+        No real appointments or payments are created. The sample assistant uses scripted replies.
+      </aside> : null}
       {children}
 
       <footer className="border-t border-[color:var(--st-line-10)] bg-[color:var(--st-panel-3)] px-4 py-12 md:px-6">
@@ -759,6 +773,7 @@ export function CommercialShopChrome({
       <ShopSiteCookieConsent
         forceOpen={cookieForce}
         onClose={() => setCookieForce(false)}
+        onHeightChange={setCookieHeight}
       />
 
       {bookingBar ? (
@@ -770,7 +785,7 @@ export function CommercialShopChrome({
           ref={chatDialogRef}
           className="pp-chat-panel flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
           role="dialog"
-          aria-label={`Chat with ${site.shop_name}'s AI assistant`}
+          aria-label={demo ? "Scripted demonstration assistant" : `Chat with ${site.shop_name}'s AI assistant`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
@@ -797,7 +812,7 @@ export function CommercialShopChrome({
                   {site.shop_name}
                 </p>
                 <p className="text-xs text-[color:var(--st-ink-55)]">
-                  AI assistant · Ask us anything
+                  {demo ? "Sample assistant · Scripted replies" : "AI assistant · Ask us anything"}
                 </p>
               </div>
             </div>
@@ -822,8 +837,7 @@ export function CommercialShopChrome({
                 {/* Greeting bubble */}
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-[color:var(--st-bubble)] px-3 py-2 text-sm text-[color:var(--st-ink-95)]">
-                    Hi! I&apos;m {site.shop_name}&apos;s AI assistant. What can
-                    I help you with?
+                    {demo ? "Try a sample conversation about the example services, prices or team. Replies stay in this browser. Please do not enter personal details." : `Hi! I'm ${site.shop_name}'s AI assistant. What can I help you with?`}
                   </div>
                 </div>
 

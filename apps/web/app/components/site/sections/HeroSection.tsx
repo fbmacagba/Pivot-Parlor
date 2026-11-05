@@ -2,6 +2,7 @@ import { Link } from "@remix-run/react";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { StarRow } from "~/components/site/sections/bits";
 import { useParallax } from "~/components/site/motion/useParallax";
+import { isPortfolioDemoShop } from "@repo/utils";
 
 export function HeroSection({
   ctx,
@@ -53,7 +54,7 @@ export function HeroSection({
             ) : (
               <>
                 <span className="text-[color:var(--color-accent)]" aria-hidden>✓</span>
-                <span>Online booking · Instant confirmation</span>
+                <span>{isPortfolioDemoShop(ctx.shopSlug) ? "Interactive booking demonstration" : "Online booking · Instant confirmation"}</span>
               </>
             )}
           </div>

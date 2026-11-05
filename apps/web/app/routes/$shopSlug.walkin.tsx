@@ -3,9 +3,15 @@
 
 import { useState, useEffect } from "react";
 import { useParams } from "@remix-run/react";
-import type { MetaFunction } from "@remix-run/cloudflare";
+import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { json, redirect } from "@remix-run/cloudflare";
+import { isPortfolioDemoShop } from "@repo/utils";
 
 export const meta: MetaFunction = () => [{ title: "Join the Queue | Pivot Parlor" }];
+
+export function loader({ params }: LoaderFunctionArgs) {
+  return isPortfolioDemoShop(params.shopSlug) ? redirect(`/${params.shopSlug}/book`) : json({});
+}
 
 type Step = "form" | "waiting" | "serving" | "done";
 

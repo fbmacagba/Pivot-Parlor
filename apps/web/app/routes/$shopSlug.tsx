@@ -3,6 +3,8 @@ import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
 import { ErrorScreen } from "~/components/ErrorScreen";
+import { isPortfolioDemoShop } from "@repo/utils";
+import { getPortfolioDemoData } from "~/lib/portfolioDemo";
 import type {
   Review,
   Service,
@@ -137,6 +139,7 @@ export interface ShopSiteData {
 }
 
 export async function loader({ params, context }: LoaderFunctionArgs) {
+  if (isPortfolioDemoShop(params.shopSlug)) return json(getPortfolioDemoData());
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
   const slug = params.shopSlug!;

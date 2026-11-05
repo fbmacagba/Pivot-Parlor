@@ -33,12 +33,27 @@ function alreadyAcknowledgedOnShop(): boolean {
 export function ShopSiteCookieConsent({
   forceOpen,
   onClose,
+  onHeightChange,
 }: {
   forceOpen: boolean;
   onClose: () => void;
+  onHeightChange?: (height: number) => void;
 }) {
   const [visible, setVisible] = useState(false);
   const dismissRef = useRef<HTMLButtonElement>(null);
+  const noticeRef = useRef<HTMLDivElement>(null);
+
+  // Include wrapping and safe-area padding in the lift for floating chat controls.
+  useEffect(() => {
+    const notice = noticeRef.current;
+    if (!visible || !notice) { onHeightChange?.(0); return; }
+    const measure = () => onHeightChange?.(Math.ceil(notice.getBoundingClientRect().height));
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(notice);
+    window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); onHeightChange?.(0); };
+  }, [visible, onHeightChange]);
 
   useEffect(() => {
     if (forceOpen) {
@@ -87,6 +102,7 @@ export function ShopSiteCookieConsent({
 
   return (
     <div
+      ref={noticeRef}
       className="pp-safe-bottom pp-safe-x fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0a0a0a]/95 pt-4 [--pp-pad-bottom:1rem] [--pp-pad-x:1rem] shadow-2xl backdrop-blur-md md:pt-6 md:[--pp-pad-bottom:1.5rem] md:[--pp-pad-x:1.5rem]"
       role="region"
       aria-label="Cookie notice"
