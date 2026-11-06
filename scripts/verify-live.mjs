@@ -142,7 +142,7 @@ async function check3() {
 // Check 4 — API returns JSON
 async function check4() {
   try {
-    const { res, text } = await safeFetch(`${WORKER}/api/shops/${JSON_SLUG}/services`);
+    const { res } = await safeFetch(`${WORKER}/api/shops/${JSON_SLUG}/services`);
     const ct = res.headers.get("content-type") ?? "";
     if (isHtmlContentType(ct)) {
       logCheck("API returns JSON", false, `Content-Type was HTML: ${ct}`);
@@ -223,7 +223,7 @@ async function check7() {
 // Check 8 — No raw Cloudflare errors on /api/*
 async function check8() {
   try {
-    const { res, text } = await safeFetch(`${PAGES}/api/anything`);
+    const { text } = await safeFetch(`${PAGES}/api/anything`);
     if (/Error 1101|Worker threw exception/i.test(text)) {
       logCheck("No raw errors", false, "Cloudflare raw error page in body");
       return false;

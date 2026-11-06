@@ -43,7 +43,7 @@ test.describe("Dev shops — delete shop (headed repro)", () => {
       .poll(() => deleteResponses.length, { timeout: 20_000, message: "expected a POST to …/delete" })
       .toBeGreaterThan(0);
 
-    // eslint-disable-next-line no-console -- repro aid
+    // Repro aid: print the delete responses.
     console.log("\n[dev-shop-delete-repro] POST /api/shops/.../delete responses:\n", JSON.stringify(deleteResponses, null, 2));
 
     const last = deleteResponses[deleteResponses.length - 1]!;

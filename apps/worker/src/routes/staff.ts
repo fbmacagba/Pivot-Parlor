@@ -4,7 +4,7 @@ import {
   getStaffByShop, getStaffById, createStaffMember, updateStaffMember,
   addStaffService, getStaffServices, createUser, getUserByEmail,
 } from "../db/queries.js";
-import { authMiddleware, getUser } from "../middleware/auth.js";
+import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { hashPassword } from "../lib/password.js";
 

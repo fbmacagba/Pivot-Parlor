@@ -20,10 +20,17 @@ export default [
     files: ["scripts/**/*.mjs", "tools/**/*.mjs"],
     languageOptions: { globals: { process: "readonly", Buffer: "readonly" } },
   },
-  // Local tools are run by hand, never as a turbo task, so their env vars
-  // have no turbo cache key to declare.
+  // Run by hand or by Playwright, never as a turbo task, so their env vars
+  // (DEV_PASSWORD, E2E_BASE_URL, ...) have no turbo cache key to declare.
   {
-    files: ["tools/**/*.mjs"],
+    files: ["tools/**", "scripts/**", "apps/*/scripts/**", "tests/e2e/**", "playwright.config.ts"],
     rules: { "turbo/no-undeclared-env-vars": "off" },
+  },
+  // A leading underscore marks a parameter that a signature requires but the
+  // body does not use (e.g. the Workers `scheduled(event, env, _ctx)` handler).
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+    },
   },
 ];
