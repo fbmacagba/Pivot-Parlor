@@ -3,7 +3,16 @@
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
 import { parseLockedImages } from "./lockedImages";
-import { chooseImage, gateCopy, mergeCatalog, mergeGallery, servicesJsonNames } from "./publication";
+import {
+  buildCandidatePayload,
+  chooseImage,
+  gateCopy,
+  mergeCatalog,
+  mergeGallery,
+  servicesJsonNames,
+  siteWriteTarget,
+  type CandidateColumnValues,
+} from "./publication";
 
 export interface Env {
   DB: D1Database;
@@ -231,6 +240,33 @@ async function updateGenerationJob(
   await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
 }
 
+/** Drop the job's working keys once it has finished (complete or failed). */
+async function deleteJobKeys(env: Env, jobId: string): Promise<void> {
+  await env.KV.delete(genResearchKey(jobId));
+  await env.KV.delete(genImagesKey(jobId));
+  await env.KV.delete(genTextKey(jobId));
+  await env.KV.delete(genAssembleRetriesKey(jobId));
+  await env.KV.delete(genAssembleTextRetriesKey(jobId));
+}
+
+/** A crash in processOne used to be logged and acked, leaving the job
+ *  "running" until the browser poller gave up. Record it as failed instead;
+ *  a job that already finished is left as it is. */
+export async function failJobAfterCrash(env: Pick<Env, "DB">, body: unknown, e: unknown): Promise<void> {
+  const jobId = (body as { jobId?: unknown } | null)?.jobId;
+  if (typeof jobId !== "string" || !jobId) return;
+  const err = `assemble: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  try {
+    await env.DB.prepare(
+      "UPDATE generation_jobs SET status = 'failed', stage = 'assemble', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
+    )
+      .bind(err, new Date().toISOString(), jobId)
+      .run();
+  } catch (persistErr) {
+    console.error(`[${jobId}] [pivot-parlor-assembler] could not record the failure`, persistErr);
+  }
+}
+
 async function setShopActive(db: D1Database, shopId: string): Promise<void> {
   await db.prepare("UPDATE shops SET status = ?, is_active = 1 WHERE id = ?").bind("active", shopId).run();
 }
@@ -399,10 +435,11 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   // downgrade: its images fill any slot this job failed to produce, and its
   // locked hero/logo always survive.
   const existingRow = await env.DB.prepare(
-    "SELECT hero_image_url, logo_url, locked_images_json, catalog_images_json, gallery_images_json, services_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+    "SELECT website_status, hero_image_url, logo_url, locked_images_json, catalog_images_json, gallery_images_json, services_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
   )
     .bind(shopId)
     .first<{
+      website_status: string | null;
       hero_image_url: string | null;
       logo_url: string | null;
       locked_images_json: string | null;
@@ -498,6 +535,70 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   // shop_sites only ever stores families the web self-hosts.
   const font_heading = coerceCuratedFont(text.font_heading, "heading", intent.heading_style ?? "");
   const font_body = coerceCuratedFont(text.font_body, "body", "");
+
+  // ── Owner review (migration 049) ───────────────────────────────────────────
+  // A site the public can already reach is never replaced unapproved: the
+  // result is stored as the shop's one pending version (a newer regeneration
+  // replaces an older pending one) and the live row is left untouched.
+  if (siteWriteTarget(existingRow) === "candidate") {
+    const columns: CandidateColumnValues = {
+      headline: text.headline,
+      tagline: text.tagline,
+      about: text.about,
+      services_json,
+      hero_image_url,
+      logo_url,
+      catalog_images_json,
+      color_primary: text.color_primary,
+      color_accent: text.color_accent,
+      font_heading,
+      font_body,
+      seo_title: text.seo_title,
+      seo_description: text.seo_description,
+      trust_signals_json: intent.trust_signals_json,
+      usps_json: intent.usps_json,
+      layout_mood: intent.layout_mood,
+      brand_voice: intent.brand_voice,
+      hero_cta: intent.hero_cta,
+      about_title: intent.about_title,
+      palette_json: intent.palette_json,
+      heading_weight: intent.heading_weight,
+      heading_style: intent.heading_style,
+      design_spec: design_spec_json,
+      design_version,
+      gallery_images_json,
+      generated_at: now,
+    };
+    const payload = buildCandidatePayload({
+      columns,
+      ownerPalette: ownerColorPrimary && ownerColorAccent ? { primary: ownerColorPrimary, accent: ownerColorAccent } : null,
+      serviceNames: text.services.map((s) => s.name),
+    });
+    try {
+      await env.DB.prepare(
+        `INSERT INTO shop_site_candidates (shop_id, job_id, payload_json, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(shop_id) DO UPDATE SET job_id = excluded.job_id, payload_json = excluded.payload_json, created_at = excluded.created_at`
+      )
+        .bind(shopId, jobId, payload, now)
+        .run();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      const err = /no such table/i.test(detail)
+        ? "assemble: shop_site_candidates is missing (migration 049 has not run); the live site was left unchanged"
+        : `assemble: could not store the new version for review; the live site was left unchanged: ${detail}`.slice(0, 500);
+      console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
+      await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: err });
+      await deleteJobKeys(env, jobId);
+      return;
+    }
+    await updateGenerationJob(env.DB, jobId, { status: "complete", stage: "review", error: null });
+    await deleteJobKeys(env, jobId);
+    // No site: cache bust and no shop activation: nothing public changed.
+    console.log(
+      `[${jobId}] [pivot-parlor-assembler] DONE (waiting for review) shopSlug=${shopSlug} status=${existingRow?.website_status ?? "?"} services=${text.services.length}`
+    );
+    return;
+  }
 
   const upd = await env.DB.prepare(
     `UPDATE shop_sites SET
@@ -615,11 +716,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   });
   await setShopActive(env.DB, shopId);
 
-  await env.KV.delete(genResearchKey(jobId));
-  await env.KV.delete(genImagesKey(jobId));
-  await env.KV.delete(genTextKey(jobId));
-  await env.KV.delete(genAssembleRetriesKey(jobId));
-  await env.KV.delete(genAssembleTextRetriesKey(jobId));
+  await deleteJobKeys(env, jobId);
 
   try {
     await env.KV.delete(`site:${shopSlug}`);
@@ -645,6 +742,7 @@ export default {
         await processOne(m.body, env);
       } catch (e) {
         console.error("[pivot-parlor-assembler] outer failure", e);
+        await failJobAfterCrash(env, m.body, e);
       } finally {
         m.ack();
       }

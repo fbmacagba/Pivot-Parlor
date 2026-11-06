@@ -334,3 +334,13 @@ CREATE INDEX IF NOT EXISTS idx_service_products_shop ON service_products(shop_id
 CREATE INDEX IF NOT EXISTS idx_service_products_product ON service_products(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_takes_shop ON stock_takes(shop_id, status);
 CREATE INDEX IF NOT EXISTS idx_stock_take_items_shop ON stock_take_items(shop_id);
+
+-- Owner review for regenerated public sites (migration 049): one unpublished
+-- candidate per shop, written by the assembler, published or discarded by the
+-- owner or a developer.
+CREATE TABLE IF NOT EXISTS shop_site_candidates (
+  shop_id      TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+  job_id       TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);

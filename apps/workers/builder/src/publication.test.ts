@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildCandidatePayload,
+  CANDIDATE_COLUMNS,
+  siteWriteTarget,
+  type CandidateColumnValues,
   chooseImage,
   filterClaims,
   gateCopy,
@@ -223,5 +227,47 @@ describe("gateCopy", () => {
       factSignals: [],
     });
     expect(r.copy.about).toBe("A daylight studio for colour and considered cuts.");
+  });
+});
+
+describe("siteWriteTarget (owner review, migration 049)", () => {
+  it("writes in place only for a draft or a shop with no site row", () => {
+    expect(siteWriteTarget(null)).toBe("direct");
+    expect(siteWriteTarget(undefined)).toBe("direct");
+    expect(siteWriteTarget({ website_status: "draft" })).toBe("direct");
+    expect(siteWriteTarget({ website_status: null })).toBe("direct");
+    expect(siteWriteTarget({ website_status: " " })).toBe("direct");
+  });
+
+  it("holds every other status for review, including one it does not know", () => {
+    expect(siteWriteTarget({ website_status: "live" })).toBe("candidate");
+    expect(siteWriteTarget({ website_status: "paused" })).toBe("candidate");
+    expect(siteWriteTarget({ website_status: "LIVE" })).toBe("candidate");
+    expect(siteWriteTarget({ website_status: "archived" })).toBe("candidate");
+  });
+});
+
+describe("buildCandidatePayload", () => {
+  const columns = Object.fromEntries(CANDIDATE_COLUMNS.map((c) => [c, null])) as CandidateColumnValues;
+
+  it("stores every column, the owner palette and the menu, and nothing else", () => {
+    const json = buildCandidatePayload({
+      columns: { ...columns, headline: "Hi", design_version: 3, extra: "x" } as CandidateColumnValues,
+      ownerPalette: { primary: "#111111", accent: "#C9A84C" },
+      serviceNames: ["Skin fade", "Beard trim"],
+    });
+    const p = JSON.parse(json) as { version: number; columns: Record<string, unknown>; owner_palette: unknown; service_names: string[] };
+    expect(p.version).toBe(1);
+    expect(Object.keys(p.columns)).toEqual([...CANDIDATE_COLUMNS]);
+    expect(p.columns.headline).toBe("Hi");
+    expect(p.columns.design_version).toBe(3);
+    expect(p.columns).not.toHaveProperty("extra");
+    expect(p.owner_palette).toEqual({ primary: "#111111", accent: "#C9A84C" });
+    expect(p.service_names).toEqual(["Skin fade", "Beard trim"]);
+  });
+
+  it("records no owner palette when the job carried none", () => {
+    const p = JSON.parse(buildCandidatePayload({ columns, ownerPalette: null, serviceNames: [] })) as { owner_palette: unknown };
+    expect(p.owner_palette).toBeNull();
   });
 });

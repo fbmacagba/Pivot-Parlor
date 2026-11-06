@@ -137,6 +137,73 @@ export function mergeGallery(generated: string[], existing: string[], max = 3): 
   return out;
 }
 
+// ─── Owner review (migration 049) ────────────────────────────────────────────
+// A regeneration of a site the public can already reach (live or paused) is
+// stored in shop_site_candidates and published only when the developer or the
+// shop's admin approves it. Drafts and brand-new sites are written directly,
+// as before. The API worker reads, validates and publishes the payload
+// (apps/worker/src/lib/siteCandidate.ts); its column list must stay identical
+// to this one (a worker test compares them).
+
+/** shop_sites columns a regeneration writes, in the site UPDATE's order. */
+export const CANDIDATE_COLUMNS = [
+  "headline",
+  "tagline",
+  "about",
+  "services_json",
+  "hero_image_url",
+  "logo_url",
+  "catalog_images_json",
+  "color_primary",
+  "color_accent",
+  "font_heading",
+  "font_body",
+  "seo_title",
+  "seo_description",
+  "trust_signals_json",
+  "usps_json",
+  "layout_mood",
+  "brand_voice",
+  "hero_cta",
+  "about_title",
+  "palette_json",
+  "heading_weight",
+  "heading_style",
+  "design_spec",
+  "design_version",
+  "gallery_images_json",
+  "generated_at",
+] as const;
+
+export type CandidateColumn = (typeof CANDIDATE_COLUMNS)[number];
+export type CandidateColumnValues = Record<CandidateColumn, string | number | null>;
+
+/** Where this job's result goes. Only a draft (or a shop with no site row)
+ *  is written in place; any other status, including one this code does not
+ *  know, waits for review, so the public site never changes unapproved. */
+export function siteWriteTarget(existing: { website_status?: string | null } | null | undefined): "direct" | "candidate" {
+  if (!existing) return "direct";
+  const status = (existing.website_status ?? "draft").trim().toLowerCase() || "draft";
+  return status === "draft" ? "direct" : "candidate";
+}
+
+/** The stored candidate: every column, the owner palette override (if this
+ *  job carried one) and the menu the positional catalog was built for. */
+export function buildCandidatePayload(args: {
+  columns: CandidateColumnValues;
+  ownerPalette: { primary: string; accent: string } | null;
+  serviceNames: string[];
+}): string {
+  const columns: Record<string, string | number | null> = {};
+  for (const key of CANDIDATE_COLUMNS) columns[key] = args.columns[key] ?? null;
+  return JSON.stringify({
+    version: 1,
+    columns,
+    owner_palette: args.ownerPalette,
+    service_names: args.serviceNames,
+  });
+}
+
 export interface CandidateCopy {
   headline: string;
   tagline: string;

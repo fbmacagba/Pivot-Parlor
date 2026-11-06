@@ -21,7 +21,7 @@ const services = new Hono<{ Bindings: Bindings }>();
 
 /** Public API shape for booking UI (@repo/types Service). Money is pence (WS-4).
  *  The description is the generated copy for this service name, if any. */
-function toPublicService(row: DBService, descriptions?: Map<string, string>) {
+export function toPublicService(row: DBService, descriptions?: Map<string, string>) {
   return {
     id: row.id,
     shopId: row.shop_id,
