@@ -478,6 +478,35 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   }
 }
 
+/**
+ * An unexpected error still hands the assembler an explicit "no new images"
+ * payload, the same degrade path as a missing key: the job finishes now and
+ * keeps every published image, instead of the assembler polling 20 times,
+ * 60 s apart, for a KV entry that will never appear. Images never fail a job.
+ */
+export async function handOffAfterCrash(
+  env: Pick<Env, "KV" | "SITE_ASSEMBLE_QUEUE">,
+  body: unknown,
+  e: unknown
+): Promise<void> {
+  const b = (body ?? {}) as { jobId?: unknown; shopId?: unknown; shopSlug?: unknown };
+  if (typeof b.jobId !== "string" || typeof b.shopId !== "string" || typeof b.shopSlug !== "string") return;
+  const empty: ImagesKvPayload = {
+    heroUrl: "",
+    logoUrl: "",
+    catalogUrls: [],
+    galleryUrls: [],
+    completedAt: new Date().toISOString(),
+    errors: [{ step: "crash", detail: (e instanceof Error ? e.message : String(e)).slice(0, 300) }],
+  };
+  try {
+    await env.KV.put(genImagesKey(b.jobId), JSON.stringify(empty), { expirationTtl: KV_TTL_SEC });
+    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: b.jobId, shopId: b.shopId, shopSlug: b.shopSlug });
+  } catch (handOffErr) {
+    console.error(`[${b.jobId}] [pivot-parlor-images] could not hand off after a crash`, handOffErr);
+  }
+}
+
 export default {
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     for (const m of batch.messages) {
@@ -485,6 +514,7 @@ export default {
         await processOne(m.body, env);
       } catch (e) {
         console.error("[pivot-parlor-images] outer failure", e);
+        await handOffAfterCrash(env, m.body, e);
       } finally {
         m.ack();
       }

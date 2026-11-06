@@ -329,6 +329,27 @@ Return JSON:
   console.log(`[${jobId}] [pivot-parlor-text] enqueued site-assemble-queue`);
 }
 
+/**
+ * An unexpected error must end the job now. Nothing else writes the text KV,
+ * and the assembler (already enqueued by research and images) would keep
+ * polling for it: 20 retries, 60 s apart. Once D1 says failed, the assembler
+ * exits on its next attempt and the published site is untouched.
+ */
+export async function failJobAfterCrash(env: Pick<Env, "DB">, body: unknown, e: unknown): Promise<void> {
+  const jobId = (body as { jobId?: unknown } | null)?.jobId;
+  if (typeof jobId !== "string" || !jobId) return;
+  const err = `text: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  try {
+    await env.DB.prepare(
+      "UPDATE generation_jobs SET status = 'failed', stage = 'text', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
+    )
+      .bind(err, new Date().toISOString(), jobId)
+      .run();
+  } catch (persistErr) {
+    console.error(`[${jobId}] [pivot-parlor-text] could not record the failure`, persistErr);
+  }
+}
+
 export default {
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     for (const m of batch.messages) {
@@ -336,6 +357,7 @@ export default {
         await processOne(m.body, env);
       } catch (e) {
         console.error("[pivot-parlor-text] outer failure", e);
+        await failJobAfterCrash(env, m.body, e);
       } finally {
         m.ack();
       }
