@@ -154,8 +154,18 @@ export default function AdminOverview() {
   const completed = todayBookings.filter((b) => b.status === "completed");
 
   // Show setup gate until all steps complete
+  // The review card is shown in both branches: a shop can have a live site
+  // while a setup step (e.g. the Stripe subscription) is still open.
+  const reviewCard =
+    shopId && shopSlug ? <SiteCandidateCard shopId={shopId} shopSlug={shopSlug} /> : null;
+
   if (setupStatus && !setupStatus.all_done) {
-    return <SetupGate status={setupStatus} />;
+    return (
+      <div className="space-y-8">
+        <SetupGate status={setupStatus} />
+        {reviewCard}
+      </div>
+    );
   }
 
   return (
@@ -183,7 +193,7 @@ export default function AdminOverview() {
       </div>
 
       {/* A regenerated site waiting for the owner's review (migration 049). */}
-      {shopId && shopSlug ? <SiteCandidateCard shopId={shopId} shopSlug={shopSlug} /> : null}
+      {reviewCard}
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

@@ -35,27 +35,28 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return failure("Unauthorized", 401);
   const env = context.env as { API_URL: string };
+  // Only one failure is worth showing on a dashboard: a version exists but
+  // cannot be shown (409). Everything else (nothing waiting, not allowed, an
+  // API without this route mid-deploy, an outage) renders no card at all,
+  // the same way the shop page's preview falls back to the public site. It is
+  // answered 200 so the browser logs no failed request on every dashboard view.
+  const silent = () =>
+    json({ success: false as const, none: true as const, error: "No new version to show" }, { headers: NO_STORE });
   try {
     const res = await fetch(`${env.API_URL}/api/shops/${encodeURIComponent(shopId)}/site-candidate`, {
       headers: buildWorkerUpstreamHeaders(request, token),
     });
-    if (!workerResponseLooksLikeJson(res)) return failure("The site service returned an unexpected response.", 502);
+    if (!workerResponseLooksLikeJson(res)) return silent();
     const body = (await res.json()) as Envelope<{
       job_id?: string;
       created_at?: string;
       services_unchanged?: boolean;
       site?: { headline?: string | null };
     }>;
-    if (res.status === 404 || (res.ok && !body.data?.job_id)) {
-      // The normal case: nothing is waiting. The card renders nothing.
-      return json({ success: false as const, none: true as const, error: "No new version is waiting for review" }, {
-        status: 404,
-        headers: NO_STORE,
-      });
+    if (res.status === 409) {
+      return failure(body.error ?? "A new version is waiting but cannot be shown. Regenerate the site.", 409);
     }
-    if (!res.ok || !body.success || !body.data?.job_id) {
-      return failure(body.error ?? "Could not check for a new version of the site.", res.status || 502);
-    }
+    if (!res.ok || !body.success || !body.data?.job_id) return silent();
     const summary: SiteCandidateSummary = {
       job_id: body.data.job_id,
       created_at: body.data.created_at ?? "",
@@ -64,7 +65,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
     };
     return json({ success: true as const, data: summary }, { headers: NO_STORE });
   } catch {
-    return failure("The site service is unavailable. Try again in a moment.", 502);
+    return silent();
   }
 }
 

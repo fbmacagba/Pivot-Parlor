@@ -166,14 +166,34 @@ describe("BFF /api/shops/:shopId/site-candidate", () => {
 
     fakeApi({ candidate: "none" });
     const none = await candidateLoader({ params: { shopId: SHOP }, context: ctx, request: req({ role: "admin" }) } as never);
-    expect(none.status).toBe(404);
+    expect(none.status).toBe(200);
     expect(await none.json()).toMatchObject({ success: false, none: true });
     vi.restoreAllMocks();
 
     fakeApi({ candidate: "forbidden" });
     const forbidden = await candidateLoader({ params: { shopId: SHOP }, context: ctx, request: req({ role: "staff" }) } as never);
-    expect(forbidden.status).toBe(403);
-    expect(await forbidden.json()).not.toHaveProperty("none");
+    expect(forbidden.status).toBe(200);
+    expect(await forbidden.json()).toMatchObject({ none: true });
+  });
+
+  it("stays silent when the API cannot answer, and speaks only when a version cannot be shown", async () => {
+    const respond = (body: string, status: number, type: string) =>
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status, headers: { "Content-Type": type } }));
+    const load = async () =>
+      (await candidateLoader({ params: { shopId: SHOP }, context: ctx, request: req({ role: "admin" }) } as never)).json();
+
+    respond("<html>Not Found</html>", 404, "text/html"); // an API deployed without this route
+    expect(await load()).toMatchObject({ none: true });
+    vi.restoreAllMocks();
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+    expect(await load()).toMatchObject({ none: true });
+    vi.restoreAllMocks();
+
+    respond(JSON.stringify({ success: false, error: "This version can no longer be shown. Regenerate the site." }), 409, "application/json");
+    const unshowable = await load();
+    expect(unshowable).not.toHaveProperty("none");
+    expect(unshowable).toMatchObject({ success: false, error: expect.stringContaining("Regenerate") });
   });
 
   it("refuses without a session before calling the API", async () => {
