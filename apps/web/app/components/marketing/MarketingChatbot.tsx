@@ -418,7 +418,13 @@ export function MarketingChatbot() {
         </div>
       )}
 
-      <style>{`
+      {/* Keyframes go in as innerHTML, never as a text child. React's server
+          renderer escapes quotes in text ([role="dialog"] became
+          [role=&quot;dialog&quot;]) and a browser does not decode entities
+          inside a style element, so the server's style text never matched the
+          client's: every marketing page hit a hydration mismatch and React
+          re-rendered the whole document. Static CSS, no user input. */}
+      <style dangerouslySetInnerHTML={{ __html: `
         @keyframes pip-ping {
           0%        { transform: scale(1);   opacity: 0.4; }
           75%, 100% { transform: scale(2.2); opacity: 0; }
@@ -461,7 +467,7 @@ export function MarketingChatbot() {
           from { transform: translateY(100%); opacity: 1; }
           to   { transform: translateY(0);    opacity: 1; }
         }
-      `}</style>
+      ` }} />
     </>
   );
 }
