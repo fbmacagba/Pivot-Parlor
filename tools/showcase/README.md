@@ -77,9 +77,12 @@ refused and listed in the report.
 way an owner would. It is run by the operator, one deliberate step at a time:
 
 ```bash
-# 0. The two shop rows (the create route cannot mint the demo ids and slugs)
+# 0. The two shop rows (the create route cannot mint the demo ids and slugs).
+#    Pass the two INSERTs from provision-prod.sql with --command, not --file:
+#    --file uses D1's import API, which an OAuth login is refused (code 10000)
+#    and which takes the database offline while it runs.
 cd apps/worker && npx wrangler d1 execute pivot-parlor-db --remote --yes \
-  --file ../../tools/showcase/provision-prod.sql && cd ../..
+  --command "<the two INSERT statements from tools/showcase/provision-prod.sql>" && cd ../..
 
 # 1. Owner setup: settings, services, team, specialities, portraits (no cost)
 node --env-file=<path to .env with DEV_PASSWORD> tools/showcase/provision.mjs
@@ -87,6 +90,13 @@ node --env-file=<path to .env with DEV_PASSWORD> tools/showcase/provision.mjs
 # 2. PAID: one generation per shop. A first run writes the draft; on a live
 #    shop it leaves a new version waiting for review instead.
 node --env-file=<...> tools/showcase/provision.mjs --generate
+
+# 2b. Review the drafts: the copy, and every image by eye. List an image with
+#     legible lettering or a weak result in prod-image-fixes.json: a service
+#     fix uploads its vetted showcase asset as a custom photo (it survives
+#     regeneration); a remove fix clears a generated logo or hero.
+node --env-file=<...> tools/showcase/provision.mjs --fix-images --dry-run
+node --env-file=<...> tools/showcase/provision.mjs --fix-images
 
 # 3. Publish both shops
 node --env-file=<...> tools/showcase/provision.mjs --activate

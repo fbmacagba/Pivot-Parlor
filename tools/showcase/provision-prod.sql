@@ -5,6 +5,11 @@
 -- Everything an owner would enter (settings, services, team, portraits, style
 -- notes) then goes through the API: node tools/showcase/provision.mjs
 --
+-- Run these with `wrangler d1 execute <db> --remote --command "<both statements>"`.
+-- Not with --file: that uses D1's import API, which refuses an OAuth login
+-- (Authentication error 10000, seen 2026-11-06) and takes the database offline
+-- while it runs.
+--
 -- Plain INSERTs on purpose: a second run fails on the UNIQUE keys (id, slug,
 -- shop_number, owner_email) and changes nothing. Owner emails use the reserved
 -- .invalid domain and can never receive mail.

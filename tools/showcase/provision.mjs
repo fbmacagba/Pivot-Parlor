@@ -7,11 +7,15 @@
  *
  *   1. node tools/showcase/provision.mjs              owner setup (no cost)
  *   2. node tools/showcase/provision.mjs --generate   PAID: one generation per shop
- *   3. node tools/showcase/provision.mjs --activate   publish both shops
+ *   3. node tools/showcase/provision.mjs --fix-images [file] [--dry-run]
+ *        apply reviewed image fixes (default prod-image-fixes.json); with
+ *        --dry-run it reads public endpoints only and prints the plan
+ *   4. node tools/showcase/provision.mjs --activate   publish both shops
  *
- * Before step 1, insert the two shop rows (tools/showcase/provision-prod.sql):
- *   cd apps/worker && npx wrangler d1 execute pivot-parlor-db --remote \
- *     --file ../../tools/showcase/provision-prod.sql
+ * Before step 1, insert the two shop rows: pass the two INSERTs in
+ * tools/showcase/provision-prod.sql to
+ *   cd apps/worker && npx wrangler d1 execute pivot-parlor-db --remote --yes --command "..."
+ * (not --file, whose import API refuses an OAuth login; see the SQL header).
  *
  * Sign-in: DEV_PASSWORD (required) and DEV_EMAIL (default dev@pivotparlor.com)
  * come from the environment, e.g. `node --env-file=.env tools/showcase/provision.mjs`.
@@ -34,12 +38,14 @@ const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
 const option = (name, fallback) => {
   const i = args.indexOf(name);
-  return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
+  return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : fallback;
 };
 
 const API = option("--api", "https://api.pivotparlor.com").replace(/\/+$/, "");
 const ONLY = option("--shop", "");
-const MODE = flag("--generate") ? "generate" : flag("--activate") ? "activate" : "setup";
+const MODE = flag("--generate") ? "generate" : flag("--activate") ? "activate" : flag("--fix-images") ? "fix-images" : "setup";
+const DRY_RUN = flag("--dry-run");
+if (DRY_RUN && MODE !== "fix-images") throw new Error("--dry-run is only supported with --fix-images");
 const shops = DEMO_SHOPS.filter((s) => !ONLY || s.key === ONLY);
 if (shops.length === 0) throw new Error(`--shop must be one of: ${DEMO_SHOPS.map((s) => s.key).join(", ")}`);
 
@@ -188,6 +194,70 @@ async function generate(shop) {
   throw new Error(`${shop.name}: still ${last} after 25 minutes; check the dev shop page`);
 }
 
+/**
+ * Apply reviewed image fixes (prod-image-fixes.json, or the file after
+ * --fix-images). A service fix uploads that service's vetted showcase image as
+ * a custom photo (upload-image, then save-image), which wins over the
+ * generated one and survives regeneration. A remove fix clears a generated
+ * image (remove-image) so the site falls back to its typeset version.
+ * With --dry-run it reads only public endpoints, signs in to nothing and
+ * prints what it would do.
+ */
+async function fixImages(shop, fixes, dryRun) {
+  await requireShop(shop);
+  const mine = fixes.filter((f) => f.shop === shop.key);
+  if (mine.length === 0) return log(`${shop.name}: no image fixes`);
+  const services = await publicList(shop, "services");
+  const site = (await api("GET", `/api/shops/${shop.id}/site`, undefined, { auth: false })).json.data ?? {};
+  for (const fix of mine) {
+    if (fix.remove) {
+      const current = site[`${fix.remove}_url`];
+      if (!current) {
+        log(`${shop.name}: ${fix.remove} already cleared`);
+        continue;
+      }
+      if (dryRun) {
+        log(`${shop.name}: WOULD remove ${fix.remove} (${current}) because ${fix.why}`);
+        continue;
+      }
+      await api("POST", `/api/shops/${shop.id}/remove-image`, { type: fix.remove });
+      log(`${shop.name}: removed ${fix.remove}`);
+      continue;
+    }
+    const svc = services.find((s) => s.name === fix.service);
+    const spec = shop.services.find((s) => s.name === fix.service);
+    if (!svc || !spec) throw new Error(`${shop.name}: no service named "${fix.service}"`);
+    if (typeof svc.image_url === "string" && svc.image_url.includes("/custom-service-")) {
+      log(`${shop.name}: ${fix.service} already has a custom photo`);
+      continue;
+    }
+    const file = path.join(here, "assets", shop.key, `${spec.image}.webp`);
+    const bytes = readFileSync(file);
+    if (dryRun) {
+      log(`${shop.name}: WOULD set ${fix.service} (service ${svc.id}) to ${spec.image}.webp (${bytes.length} bytes) because ${fix.why}`);
+      continue;
+    }
+    const form = new FormData();
+    form.set("type", `service:${svc.id}`);
+    form.set("file", new File([bytes], `${spec.image}.webp`, { type: "image/webp" }));
+    const { json } = await api("POST", `/api/shops/${shop.id}/upload-image`, form);
+    const imageUrl = json?.imageUrl;
+    if (!imageUrl) throw new Error(`${shop.name}: upload-image returned no imageUrl: ${JSON.stringify(json).slice(0, 200)}`);
+    await api("POST", `/api/shops/${shop.id}/save-image`, { type: `service:${svc.id}`, imageUrl });
+    log(`${shop.name}: ${fix.service} now uses ${spec.image}.webp (${imageUrl})`);
+  }
+  if (dryRun) return;
+  const after = await publicList(shop, "services");
+  const siteAfter = (await api("GET", `/api/shops/${shop.id}/site`, undefined, { auth: false })).json.data ?? {};
+  for (const fix of mine) {
+    const ok = fix.remove
+      ? !siteAfter[`${fix.remove}_url`]
+      : String(after.find((s) => s.name === fix.service)?.image_url ?? "").includes("/custom-service-");
+    log(`${shop.name}: check ${fix.remove ?? fix.service}: ${ok ? "ok" : "NOT APPLIED"}`);
+    if (!ok) throw new Error(`${shop.name}: a fix did not apply; run again`);
+  }
+}
+
 async function activate(shop) {
   await requireShop(shop);
   await api("POST", `/api/shops/${shop.id}/activate`);
@@ -195,14 +265,18 @@ async function activate(shop) {
   log(`${shop.name}: website_status=${site?.website_status}`);
 }
 
-await signIn();
+const fixesFile = path.resolve(option("--fix-images", "") || path.join(here, "prod-image-fixes.json"));
+const fixes = MODE === "fix-images" ? JSON.parse(readFileSync(fixesFile, "utf8")).fixes : [];
+
+if (!DRY_RUN) await signIn();
 try {
   for (const shop of shops) {
     if (MODE === "setup") await setup(shop);
     else if (MODE === "generate") await generate(shop);
+    else if (MODE === "fix-images") await fixImages(shop, fixes, DRY_RUN);
     else await activate(shop);
   }
-  log(`${MODE} finished for ${shops.map((s) => s.name).join(" and ")}`);
+  log(`${MODE}${DRY_RUN ? " (dry run)" : ""} finished for ${shops.map((s) => s.name).join(" and ")}`);
 } finally {
   await signOut();
 }
