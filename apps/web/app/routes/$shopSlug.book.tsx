@@ -1,4 +1,12 @@
-import { Form, useActionData, useFetcher, useLoaderData, useNavigation, useRouteLoaderData } from "@remix-run/react";
+import {
+  Form,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+  useNavigation,
+  useRouteLoaderData,
+  useSearchParams,
+} from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +25,7 @@ import type { Service } from "@repo/types";
 import { formatPence, isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR, PORTFOLIO_DEMO_SLUG, portfolioDemoForSlug } from "@repo/utils";
 import { portfolioDemoServices, portfolioDemoStaff } from "~/lib/portfolioDemo";
 import { demoSlots, openingWindow, weekdayName } from "~/lib/demoBooking";
+import { restorableDay, restoredStep, skipRevalidationForWizardParams, wizardSearch } from "~/lib/bookingUrl";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 interface Staff { id: string; display_name: string; bio?: string; avatar_url?: string; speciality?: string }
@@ -30,15 +39,34 @@ export const meta: MetaFunction = ({ matches, params }) => {
     : [{ title: `Book an appointment | ${name}` }];
 };
 
-/** Only ids that exist in the lists this page loaded can be preselected. */
+/** Only ids that exist in the lists this page loaded can be preselected. The
+ *  wizard's own place (team "any", the day, the step) is restored from the
+ *  URL it keeps; see lib/bookingUrl. */
 function preselect(url: URL, services: Array<{ id: string }>, staff: Array<{ id: string }>) {
   const serviceId = url.searchParams.get("serviceId") ?? "";
   const staffId = url.searchParams.get("staffId") ?? "";
+  const preselectServiceId = services.some((s) => s.id === serviceId) ? serviceId : "";
+  const preselectStaffId =
+    preselectServiceId && staffId === "any" ? "any" : staff.some((s) => s.id === staffId) ? staffId : "";
+  const preselectDay =
+    preselectServiceId && preselectStaffId
+      ? restorableDay(url.searchParams.get("day"), new Date().toISOString().slice(0, 10))
+      : "";
   return {
-    preselectServiceId: services.some((s) => s.id === serviceId) ? serviceId : "",
-    preselectStaffId: staff.some((s) => s.id === staffId) ? staffId : "",
+    preselectServiceId,
+    preselectStaffId,
+    preselectDay,
+    preselectStep: restoredStep({
+      stepParam: url.searchParams.get("step"),
+      hasService: Boolean(preselectServiceId),
+      hasStaff: Boolean(preselectStaffId),
+    }),
   };
 }
+
+// Recording the wizard's place in the URL reloads nothing (and a demo makes
+// no extra request); every other navigation or submission revalidates.
+export const shouldRevalidate = skipRevalidationForWizardParams;
 
 /**
  * Demo mode is READ-ONLY. It shows the fictional backing shop's own services
@@ -282,19 +310,32 @@ const choiceClass = (selected: boolean) =>
   }`;
 
 function BookingWizard({ shopName }: { shopName?: string }) {
-  const { slug, services, staff, slots, shopTimezone, deposit, paymentCancelled, closedDay, preselectServiceId, preselectStaffId } =
-    useLoaderData<typeof loader>();
+  const {
+    slug,
+    services,
+    staff,
+    slots,
+    shopTimezone,
+    deposit,
+    paymentCancelled,
+    closedDay,
+    preselectServiceId,
+    preselectStaffId,
+    preselectDay,
+    preselectStep,
+  } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success: boolean; error?: string }>();
   const nav = useNavigation();
   const slotsFetcher = useFetcher<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const demo = isPortfolioDemoShop(slug);
   const [demoComplete, setDemoComplete] = useState(false);
   const initialService = services.find((s) => s.id === preselectServiceId) ?? null;
-  const [step, setStep] = useState(initialService ? (preselectStaffId ? 2 : 1) : 0);
+  const [step, setStep] = useState(preselectStep);
   const [selection, setSelection] = useState({
     service: initialService as Service | null,
     staffId: preselectStaffId || "",
-    date: "",
+    date: preselectDay || "",
     slot: "",
     name: demo ? "Demo Guest" : "",
     email: demo ? "guest@example.com" : "",
@@ -332,6 +373,29 @@ function BookingWizard({ shopName }: { shopName?: string }) {
     const staffParam = staffId && staffId !== "any" ? `&staff_id=${encodeURIComponent(staffId)}` : "";
     slotsFetcher.load(`/${slug}/book?date=${encodeURIComponent(date)}&service_id=${encodeURIComponent(serviceId)}${staffParam}`);
   };
+
+  // A restored day needs its times again (a GET, like picking the day).
+  useEffect(() => {
+    if (preselectDay && initialService) loadSlots(preselectDay, initialService.id, preselectStaffId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the day the URL restored
+  }, []);
+
+  // Keep the wizard's place in the URL (replace, so Back still leaves the
+  // page). Only choices are recorded: no time and no personal details.
+  const serviceIdChosen = selection.service?.id ?? "";
+  useEffect(() => {
+    if (demoComplete) return;
+    const next = wizardSearch(searchParams, {
+      step,
+      serviceId: serviceIdChosen,
+      staffId: selection.staffId,
+      day: selection.date,
+    });
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true, preventScrollReset: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- searchParams is read, not watched
+  }, [step, serviceIdChosen, selection.staffId, selection.date, demoComplete]);
 
   if (demoComplete) return (
     <section className="mx-auto max-w-2xl px-4 py-16" aria-live="polite">
@@ -410,6 +474,11 @@ function BookingWizard({ shopName }: { shopName?: string }) {
           {step === 1 && (
             <div className="space-y-3">
               <h2 ref={headingRef} tabIndex={-1} className="pp-heading text-2xl font-bold text-[color:var(--st-ink)] focus:outline-none">Choose who you&apos;d like</h2>
+              {selection.service ? (
+                <p className="text-sm text-[color:var(--st-ink-60)]">
+                  {selection.service.name}, {selection.service.durationMinutes} min, {displayPence(selection.service.price_pence)}
+                </p>
+              ) : null}
               <button
                 type="button"
                 aria-pressed={selection.staffId === "any"}
@@ -510,6 +579,12 @@ function BookingWizard({ shopName }: { shopName?: string }) {
           {step === 3 && (
             <div className="space-y-4">
               <h2 ref={headingRef} tabIndex={-1} className="pp-heading text-2xl font-bold text-[color:var(--st-ink)] focus:outline-none">Your details</h2>
+              {selection.service && selection.date && selection.slot ? (
+                <p className="text-sm text-[color:var(--st-ink-60)]">
+                  {selection.service.name} with {staffName}, {displayDate(selection.date)} at{" "}
+                  {formatSlotTime(selection.slot, shopTimezone)}.
+                </p>
+              ) : null}
               {demo ? (
                 <div className="space-y-3">
                   <p>Sample guest details are supplied for this demo. Please do not enter personal information.</p>

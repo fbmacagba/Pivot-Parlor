@@ -5,6 +5,7 @@ import { createApiClient } from "~/lib/api";
 import { decodeToken, getSessionToken } from "~/lib/auth";
 import { ErrorScreen } from "~/components/ErrorScreen";
 import { CandidatePreviewBar } from "~/components/CandidatePreviewBar";
+import { skipRevalidationForWizardParams } from "~/lib/bookingUrl";
 import { PORTFOLIO_DEMO_SLUG, portfolioDemoForSlug, shopDataKeyForSlug } from "@repo/utils";
 import { getPortfolioDemoData } from "~/lib/portfolioDemo";
 import type {
@@ -174,6 +175,10 @@ export const headers: HeadersFunction = ({ loaderHeaders, parentHeaders }) => {
   }
   return out;
 };
+
+// The booking wizard records its place in the URL (lib/bookingUrl); that must
+// not reload the shop, its site or its menu.
+export const shouldRevalidate = skipRevalidationForWizardParams;
 
 export async function loader({ params, context, request }: LoaderFunctionArgs) {
   const slug = params.shopSlug!;
