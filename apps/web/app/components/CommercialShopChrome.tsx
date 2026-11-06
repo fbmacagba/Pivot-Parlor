@@ -585,9 +585,10 @@ export function CommercialShopChrome({
       {demoInfo ? (
         <aside className="pp-demo-notice" aria-label="Demonstration notice">
           {/* Wide screens have room for the whole sentence. On a phone it
-              folds to one line that still says what matters (a demo, a
-              fictional shop, nothing is booked) so the shop's own first
-              screen stays visible; the rest is one tap away. */}
+              folds to one line (it fits at 320px) that still says what
+              matters (a fictional demo, nothing is booked) so the shop's own
+              first screen stays visible; the credit and the rest are one tap
+              away. */}
           <p className="pp-demo-full">
             <strong>Demo site by BytesFX.</strong> {site.shop_name} is a fictional {demoInfo.kind} generated with
             Pivot Parlor. Booking, payment and chat are simulated, and the address and phone number are illustrative.
@@ -595,11 +596,11 @@ export function CommercialShopChrome({
           <details className="pp-demo-folded">
             <summary>
               <span>
-                <strong>Demo site by BytesFX.</strong> Fictional shop, nothing is booked.
+                <strong>Fictional demo.</strong> Nothing is booked.
               </span>
             </summary>
             <p>
-              {site.shop_name} is a fictional {demoInfo.kind} generated with Pivot Parlor. Booking, payment and chat
+              Demo site by BytesFX. {site.shop_name} is a fictional {demoInfo.kind} generated with Pivot Parlor. Booking, payment and chat
               are simulated, and the address and phone number are illustrative.
             </p>
           </details>

@@ -184,7 +184,7 @@ export function VisualManager({ shopId, apiUrl, role, hero, logo, catalog, servi
                 {src ? (
                   <img src={src} alt={`${tile.label} preview`} className="max-h-full max-w-full object-contain" />
                 ) : (
-                  <span className="text-xs text-white/40">No image</span>
+                  <span className="text-xs text-white/60">No image</span>
                 )}
               </div>
               <input
