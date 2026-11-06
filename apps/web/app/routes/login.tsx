@@ -7,17 +7,9 @@ import { json, redirect } from "@remix-run/cloudflare";
 import { Link, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, sessionCookieHeaders } from "~/lib/auth";
+import { safeRedirectPath } from "~/lib/safeRedirect";
 
 export const meta: MetaFunction = () => [{ title: "Sign in | Pivot Parlor" }];
-
-/** Same-origin path only; blocks open redirects. */
-function safeRedirectPath(raw: string | null): string | null {
-  if (!raw || typeof raw !== "string") return null;
-  const t = raw.trim();
-  if (!t.startsWith("/") || t.startsWith("//")) return null;
-  if (t.includes(":") || t.includes("@")) return null;
-  return t;
-}
 
 /** Maps a known role to its dashboard. Returns null for an unrecognised role so
  *  callers never redirect to /login — which would loop forever for an already
