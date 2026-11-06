@@ -8,6 +8,8 @@ here touches a Cloudflare account, production data or a paid API.
 node tools/showcase/run.mjs                 # bundle, migrate, seed, generate, verify, exit
 node tools/showcase/run.mjs --serve         # ...then keep the API on :8787
 node tools/showcase/run.mjs --serve --skip-build   # reuse the last worker bundles
+node tools/showcase/run.mjs --serve --pending-review  # ...and leave the salon's next
+                                                      # version waiting for review
 
 # in a second shell, the web app against it:
 cd apps/web && npm run build
@@ -18,8 +20,13 @@ npx wrangler pages dev ./build/client --port 8788 --binding API_URL=http://127.0
 ```
 
 The run exits non-zero unless both shops verify, every demo write probe is
-refused, and no booking, waitlist or walk-in row exists for a demo shop. The
-report is written to `.state/report.json`.
+refused, and no booking, waitlist or walk-in row exists for a demo shop. It
+then regenerates the barber shop while it is live and checks the owner review
+step end to end: the job finishes as "candidate", the public site and its row
+are unchanged, the pending version is previewable, publishing a different
+version is refused (409), and Publish writes the row, clears the pending
+version and the shop still verifies. The report is written to
+`.state/report.json`.
 
 ## What is real
 

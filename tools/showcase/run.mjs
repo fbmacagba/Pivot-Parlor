@@ -418,6 +418,48 @@ async function verify(db, shop) {
   };
 }
 
+// ── 9. Owner review: regenerating a LIVE site changes nothing until Publish ─
+// Staging has no generation pipeline, so this is the end-to-end proof of
+// assembler -> shop_site_candidates -> preview -> publish (migration 049).
+async function reviewFlow(db, shop) {
+  const problems = [];
+  const check = (cond, msg) => {
+    if (!cond) problems.push(msg);
+  };
+  const publicSite = async () => JSON.stringify((await api("GET", `/api/shops/${shop.slug}/site`)).data);
+  const rowStamp = async () =>
+    (await db.prepare("SELECT generated_at FROM shop_sites WHERE shop_id = ? AND status = 'active'").bind(shop.id).first())
+      ?.generated_at ?? null;
+
+  const siteBefore = await publicSite();
+  const stampBefore = await rowStamp();
+
+  const jobId = await generate(db, shop);
+  const status = (await api("GET", `/api/jobs/${jobId}/status`)).data;
+  check(status.outcome === "candidate", `job outcome is ${status.outcome}, expected candidate`);
+  check(status.stage === "review", `job stage is ${status.stage}, expected review`);
+  check((await publicSite()) === siteBefore, "the public site changed before Publish");
+  check((await rowStamp()) === stampBefore, "the site row was rewritten before Publish");
+
+  const preview = (await api("GET", `/api/shops/${shop.id}/site-candidate`)).data;
+  check(preview.job_id === jobId, `pending version is job ${preview.job_id}, expected ${jobId}`);
+  check(preview.services_unchanged === true, "pending version was made for a different menu");
+  check(Array.isArray(preview.services) && preview.services.length === shop.services.length, "preview services missing");
+
+  const stale = await api("POST", `/api/shops/${shop.id}/site-candidate/publish`, { job_id: "not-the-previewed-job" }, { raw: true });
+  check(stale.status === 409, `publishing a version other than the previewed one returned ${stale.status}`);
+
+  await api("POST", `/api/shops/${shop.id}/site-candidate/publish`, { job_id: jobId });
+  const stampAfter = await rowStamp();
+  check(Boolean(stampAfter) && stampAfter !== stampBefore, "Publish did not write the site row");
+  const gone = await api("GET", `/api/shops/${shop.id}/site-candidate`, undefined, { raw: true });
+  check(gone.status === 404, `pending version still present after Publish (${gone.status})`);
+
+  const after = await verify(db, shop);
+  problems.push(...after.problems.map((p) => `after Publish: ${p}`));
+  return { shop: shop.name, jobId, stampBefore, stampAfter, problems };
+}
+
 async function writeCounts(db) {
   const out = {};
   for (const table of ["bookings", "waitlist", "walkin_queue"]) {
@@ -470,6 +512,12 @@ async function main() {
     report.shops.push({ ...v, jobId });
     log(`${shop.name}: ${v.problems.length === 0 ? "verified" : `PROBLEMS: ${v.problems.join("; ")}`}`);
   }
+  report.review = await reviewFlow(db, DEMO_SHOPS[0]);
+  log(
+    `${report.review.shop} regenerated while live: ${
+      report.review.problems.length === 0 ? "held for review, then published" : `PROBLEMS: ${report.review.problems.join("; ")}`
+    }`
+  );
   report.counts.beforeProbes = await writeCounts(db);
   report.probes = await probeDemoWrites(db);
   report.counts.afterProbes = await writeCounts(db);
@@ -478,6 +526,7 @@ async function main() {
   const refused = outboundLog.filter((e) => e.outcome.startsWith("refused"));
   report.summary = {
     verified: report.shops.every((s) => s.problems.length === 0),
+    reviewHeld: report.review.problems.length === 0,
     probesRefused: report.probes.every((p) => p.status === 403),
     noDemoRows: JSON.stringify(report.counts.afterProbes) === JSON.stringify({ bookings: {}, waitlist: {}, walkin_queue: {} }),
     refusedOutbound: refused.map((e) => `${e.worker} ${e.method} ${e.url} (${e.outcome})`),
@@ -487,6 +536,15 @@ async function main() {
   log(JSON.stringify(report.summary, null, 2));
 
   if (argv.has("--serve")) {
+    // For looking at the review step in the browser: leave the salon's next
+    // version pending, and hand over this local developer session (signed
+    // with the harness's fake secret, valid only against this local API).
+    if (argv.has("--pending-review")) {
+      const pendingJob = await generate(db, DEMO_SHOPS[1]);
+      log(`${DEMO_SHOPS[1].name}: new version ${pendingJob} left waiting for review`);
+    }
+    writeFileSync(path.join(stateDir, "dev-session.txt"), token);
+    log(`local developer session: .state/dev-session.txt (set it as the pp_session cookie on ${WEB})`);
     log(`serving the API on ${BASE}. Start the web app with:`);
     log(`  cd apps/web && npm run build && npx wrangler pages dev ./build/client --port 8788 --binding API_URL=${BASE}`);
     log(`then open ${WEB}/${DEMO_SHOPS[0].slug} and ${WEB}/${DEMO_SHOPS[1].slug}`);
@@ -498,7 +556,9 @@ async function main() {
     setInterval(() => writeFileSync(path.join(stateDir, "outbound.json"), JSON.stringify(outboundLog, null, 2)), 5000);
   } else {
     await mf.dispose();
-    if (!report.summary.verified || !report.summary.probesRefused || !report.summary.noDemoRows) process.exit(1);
+    if (!report.summary.verified || !report.summary.reviewHeld || !report.summary.probesRefused || !report.summary.noDemoRows) {
+      process.exit(1);
+    }
   }
 }
 
