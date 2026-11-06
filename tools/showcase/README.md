@@ -71,6 +71,37 @@ it cannot produce the code-owned demo ids and `-demo` slugs.
 Every other outbound request (OpenRouter's model list, email, payments) is
 refused and listed in the report.
 
+## Provisioning the demos in a real environment
+
+`provision.mjs` sets up the same two fictional shops through a real API, the
+way an owner would. It is run by the operator, one deliberate step at a time:
+
+```bash
+# 0. The two shop rows (the create route cannot mint the demo ids and slugs)
+cd apps/worker && npx wrangler d1 execute pivot-parlor-db --remote --yes \
+  --file ../../tools/showcase/provision-prod.sql && cd ../..
+
+# 1. Owner setup: settings, services, team, specialities, portraits (no cost)
+node --env-file=<path to .env with DEV_PASSWORD> tools/showcase/provision.mjs
+
+# 2. PAID: one generation per shop. A first run writes the draft; on a live
+#    shop it leaves a new version waiting for review instead.
+node --env-file=<...> tools/showcase/provision.mjs --generate
+
+# 3. Publish both shops
+node --env-file=<...> tools/showcase/provision.mjs --activate
+```
+
+It signs in with `DEV_PASSWORD` (and `DEV_EMAIL`, default
+`dev@pivotparlor.com`) and revokes that session when it finishes. Setup is
+idempotent: it creates only what is missing and finishes a team member whose
+speciality or portrait did not land, so a re-run resumes. It refuses to touch
+anything whose id and slug are not the fictional backing shop's.
+`--shop ferdyms|linden` limits a run to one shop; `--api <url>` points it
+elsewhere (default `https://api.pivotparlor.com`). Against this harness, set
+`PROVISION_TOKEN` to the session in `.state/dev-session.txt` and pass
+`--api http://127.0.0.1:8787`.
+
 ## The fictional shops
 
 `shops.mjs` holds both shops. Phone numbers come from Ofcom's drama ranges,
