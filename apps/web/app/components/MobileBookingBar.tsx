@@ -1,4 +1,5 @@
 import { Link } from "@remix-run/react";
+import { DEFAULT_BOOK_LABEL, VIEW_SERVICES_LABEL } from "~/lib/shopLabels";
 
 /**
  * Thumb-reach booking CTA for phones. Fixed to the bottom edge, safe-area
@@ -11,13 +12,16 @@ export function MobileBookingBar({
   shopSlug,
   bookingEnabled,
   visible,
+  bookLabel = DEFAULT_BOOK_LABEL,
 }: {
   shopSlug: string;
   bookingEnabled: boolean;
   visible: boolean;
+  /** The shop's one booking label (lib/shopLabels bookingLabel). */
+  bookLabel?: string;
 }) {
   const to = bookingEnabled ? `/${shopSlug}/book` : `/${shopSlug}#services`;
-  const label = bookingEnabled ? "Book now" : "View services";
+  const label = bookingEnabled ? bookLabel : VIEW_SERVICES_LABEL;
   return (
     <div
       className="pp-bottom-bar md:hidden"
@@ -29,7 +33,8 @@ export function MobileBookingBar({
         tabIndex={visible ? undefined : -1}
         className="flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-6 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-black/20 transition active:scale-[0.98]"
       >
-        {label} →
+        {label}
+        <span aria-hidden>&nbsp;→</span>
       </Link>
     </div>
   );

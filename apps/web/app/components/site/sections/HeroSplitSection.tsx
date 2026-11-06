@@ -54,7 +54,7 @@ export function HeroSplitSection({
             </Link>
             <button type="button" onClick={() => ctx.scrollToId("services")}
               className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] border-2 border-[color:var(--st-line-40)] bg-transparent px-8 pp-heading text-base font-semibold text-[color:var(--st-ink)] transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--st-accent-text)]">
-              See Our Services
+              View services
             </button>
           </div>
           <p className="mt-8 text-sm text-[color:var(--st-ink-55)]">{ctx.heroSubline}</p>

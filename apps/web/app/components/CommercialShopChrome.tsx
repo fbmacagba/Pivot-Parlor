@@ -18,7 +18,7 @@ import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 import { useModalA11y } from "~/lib/useModalA11y";
 import { useScrolledPastHero } from "~/lib/useScrolledPastHero";
-import { isRetailCategory, shopNameInitials } from "~/lib/shopLabels";
+import { bookingLabel, isRetailCategory, shopNameInitials, VIEW_SERVICES_LABEL } from "~/lib/shopLabels";
 import { MobileBookingBar } from "~/components/MobileBookingBar";
 import { InstallAppButton } from "~/components/InstallAppButton";
 import "~/components/shop-chrome.css";
@@ -147,6 +147,9 @@ export function CommercialShopChrome({
   const [cookieForce, setCookieForce] = useState(false);
   const [cookieHeight, setCookieHeight] = useState(0);
   const demoInfo = portfolioDemoForSlug(shopSlug);
+  // The shop's one booking label (see lib/shopLabels): the same verb and case
+  // on the header, the phone menu and the phone bar as on the page itself.
+  const bookLabel = bookingLabel(site.hero_cta, [site.shop_name, ...(staff ?? []).map((m) => m.display_name)]);
   const demo = demoInfo !== null;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
@@ -455,14 +458,14 @@ export function CommercialShopChrome({
                 to={`/${shopSlug}/book`}
                 className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
-                Book Now<span aria-hidden>&nbsp;→</span>
+                {bookLabel}<span aria-hidden>&nbsp;→</span>
               </Link>
             ) : (
               <Link
                 to={`/${shopSlug}#services`}
                 className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
-                View services →
+                {VIEW_SERVICES_LABEL}<span aria-hidden>&nbsp;→</span>
               </Link>
             )}
           </div>
@@ -562,7 +565,7 @@ export function CommercialShopChrome({
                 className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
-                Book Now<span aria-hidden>&nbsp;→</span>
+                {bookLabel}<span aria-hidden>&nbsp;→</span>
               </Link>
             ) : (
               <Link
@@ -570,7 +573,7 @@ export function CommercialShopChrome({
                 className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
-                View services →
+                {VIEW_SERVICES_LABEL}<span aria-hidden>&nbsp;→</span>
               </Link>
             )}
           </nav>
@@ -581,10 +584,25 @@ export function CommercialShopChrome({
           and the assistant each restate only what applies at that moment. */}
       {demoInfo ? (
         <aside className="pp-demo-notice" aria-label="Demonstration notice">
-          <p>
+          {/* Wide screens have room for the whole sentence. On a phone it
+              folds to one line that still says what matters (a demo, a
+              fictional shop, nothing is booked) so the shop's own first
+              screen stays visible; the rest is one tap away. */}
+          <p className="pp-demo-full">
             <strong>Demo site by BytesFX.</strong> {site.shop_name} is a fictional {demoInfo.kind} generated with
             Pivot Parlor. Booking, payment and chat are simulated, and the address and phone number are illustrative.
           </p>
+          <details className="pp-demo-folded">
+            <summary>
+              <span>
+                <strong>Demo site by BytesFX.</strong> Fictional shop, nothing is booked.
+              </span>
+            </summary>
+            <p>
+              {site.shop_name} is a fictional {demoInfo.kind} generated with Pivot Parlor. Booking, payment and chat
+              are simulated, and the address and phone number are illustrative.
+            </p>
+          </details>
         </aside>
       ) : null}
       {children}
@@ -789,7 +807,7 @@ export function CommercialShopChrome({
       />
 
       {bookingBar ? (
-        <MobileBookingBar shopSlug={shopSlug} bookingEnabled={bookingEnabled} visible={barShown} />
+        <MobileBookingBar shopSlug={shopSlug} bookingEnabled={bookingEnabled} visible={barShown} bookLabel={bookLabel} />
       ) : null}
 
       {chatOpen ? (

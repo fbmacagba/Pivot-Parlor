@@ -75,7 +75,7 @@ export function HeroSection({
             </Link>
             <button type="button" onClick={() => ctx.scrollToId("services")}
               className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] border-2 border-white/50 bg-transparent px-8 pp-heading text-base font-semibold text-white transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]">
-              See Our Services
+              View services
             </button>
           </div>
 

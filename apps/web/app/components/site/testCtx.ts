@@ -40,7 +40,7 @@ export function makeTestCtx(overrides: Partial<SiteRenderContext> = {}): SiteRen
     heroSrc: "https://img.example/hero.jpg",
     aboutText: "A neighbourhood shop with proper chairs.",
     aboutHeading: "Why us",
-    bookLabel: "Book Now",
+    bookLabel: "Book now",
     pillars: [
       { title: "Expert Staff", icon: null },
       { title: "Easy Booking", icon: null },

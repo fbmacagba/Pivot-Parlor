@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 import { archetypeFor } from "~/components/siteArchetype";
+import { bookingLabel } from "~/lib/shopLabels";
 import type { Archetype, SectionKey } from "~/components/siteArchetype";
 import { normalizeDesignSpec, seedComposeDesignSpec, isPortfolioDemoShop } from "@repo/utils";
 import { composeRenderPlan, downgradeForImages } from "~/components/site/composePlan";
@@ -155,8 +156,9 @@ export default function CommercialTemplate({
   // of repeating them. (The old fallback promised "No card required ·
   // Cancel anytime", which is false for deposit-taking shops.)
   const heroSubline = "Book online, any time. No account needed.";
-  const bookLabel =
-    typeof site.hero_cta === "string" && site.hero_cta.trim() ? site.hero_cta.trim() : "Book Now";
+  // One booking verb and one case across the shop's buttons (header, hero,
+  // final call to action, phone menu and bar); names keep their capitals.
+  const bookLabel = bookingLabel(site.hero_cta, [site.shop_name, ...staff.map((m) => m.display_name)]);
   const aboutHeading =
     typeof site.about_title === "string" && site.about_title.trim()
       ? site.about_title.trim()

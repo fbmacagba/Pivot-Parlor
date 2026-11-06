@@ -126,3 +126,28 @@
 .pp-demo-notice p { margin: 0 auto; max-width: 80rem; padding: 0.625rem 1rem; text-wrap: pretty; }
 @media (min-width: 768px) { .pp-demo-notice p { padding-inline: 1.5rem; } }
 .pp-demo-notice strong { font-weight: 600; color: var(--st-ink); }
+/* Phone: one tappable line (44px target) carrying the disclosure; wide: the
+   full sentence. Only one variant is displayed, so assistive tech reads one. */
+.pp-demo-full { display: none; }
+.pp-demo-folded summary {
+  display: flex; align-items: center; gap: 0.75rem;
+  margin: 0 auto; max-width: 80rem; min-height: 44px; padding: 0.5rem 1rem;
+  cursor: pointer; list-style: none; text-wrap: pretty;
+}
+.pp-demo-folded summary::-webkit-details-marker { display: none; }
+/* A drawn chevron (geometry, not a glyph) that turns when open. */
+.pp-demo-folded summary::after {
+  content: ""; flex: none; margin-left: auto; width: 0.5rem; height: 0.5rem;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg); transition: transform 0.2s ease-out;
+}
+.pp-demo-folded[open] summary::after { transform: translateY(2px) rotate(-135deg); }
+.pp-demo-folded summary:focus-visible { outline: 2px solid var(--st-ink); outline-offset: -2px; }
+.pp-demo-folded > p { padding-top: 0; }
+@media (min-width: 768px) {
+  .pp-demo-full { display: block; }
+  .pp-demo-folded { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-demo-folded summary::after { transition: none; }
+}

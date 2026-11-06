@@ -56,7 +56,7 @@ describe("hero variants", () => {
     expect(html).toContain("aspect-[21/9]");
     expect(html).not.toContain("uppercase");
     // The small print follows the calls to action instead of sitting above the h1.
-    expect(html.indexOf("Walk-ins welcome")).toBeGreaterThan(html.indexOf("See Our Services"));
+    expect(html.indexOf("Walk-ins welcome")).toBeGreaterThan(html.indexOf("View services"));
     expect(html.indexOf("<h1")).toBeLessThan(html.indexOf("Walk-ins welcome"));
   });
 
