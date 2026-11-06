@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getPortfolioDemoData } from "./portfolioDemo";
 import { isPortfolioDemoShop, PORTFOLIO_DEMO_SLUG } from "@repo/utils";
-vi.mock("@remix-run/react", () => ({ Outlet: () => null }));
+vi.mock("@remix-run/react", () => ({ Outlet: () => null, useLoaderData: () => null }));
 vi.mock("~/components/ErrorScreen", () => ({ ErrorScreen: () => null }));
 vi.mock("~/components/CommercialShopChrome", () => ({
   CommercialShopChrome: () => null,

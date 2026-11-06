@@ -16,6 +16,7 @@ import { StatCard } from "~/components/dashboards/StatCard";
 import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
 import { SetupGate } from "~/components/admin/SetupGate";
 import type { SetupStatus } from "~/components/admin/SetupGate";
+import { SiteCandidateCard } from "~/components/SiteCandidateCard";
 
 interface AdminStats {
   date: string;
@@ -119,12 +120,14 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   // Public shop-site URL for the share card. Built from the request origin so
   // staging previews link to themselves rather than production.
   let shopShare: { url: string; name: string } | null = null;
+  let shopSlug: string | null = null;
   if (shopId) {
     try {
       const shop = await api.get<{ slug: string; name: string }>(
         `/api/shops/${shopId}`,
       );
       if (shop?.slug) {
+        shopSlug = shop.slug;
         shopShare = {
           url: `${new URL(request.url).origin}/${shop.slug}`,
           name: shop.name,
@@ -135,11 +138,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
   }
 
-  return json({ stats, todayBookings, shopId, setupStatus, shopShare });
+  return json({ stats, todayBookings, shopId, setupStatus, shopShare, shopSlug });
 }
 
 export default function AdminOverview() {
-  const { stats, todayBookings, shopId, setupStatus, shopShare } =
+  const { stats, todayBookings, shopId, setupStatus, shopShare, shopSlug } =
     useLoaderData<typeof loader>();
 
   const upcoming = todayBookings.filter(
@@ -178,6 +181,9 @@ export default function AdminOverview() {
           All bookings <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       </div>
+
+      {/* A regenerated site waiting for the owner's review (migration 049). */}
+      {shopId && shopSlug ? <SiteCandidateCard shopId={shopId} shopSlug={shopSlug} /> : null}
 
       {/* Stats */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

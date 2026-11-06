@@ -174,6 +174,9 @@ export default function DevShops() {
     shopId: string;
   } | null>(null);
   const [devGenDoneSlug, setDevGenDoneSlug] = useState<string | null>(null);
+  // A live or paused site's regeneration waits for review on the shop's page
+  // instead of replacing the site (migration 049).
+  const [devGenReviewShopId, setDevGenReviewShopId] = useState<string | null>(null);
 
   useEffect(() => {
     if (devGenJob && !shops.some((s) => s.id === devGenJob.shopId)) {
@@ -225,13 +228,13 @@ export default function DevShops() {
     };
     const tick = async () => {
       let data:
-        | { status?: string; stage?: string; shopSlug?: string; error?: string }
+        | { status?: string; stage?: string; shopSlug?: string; error?: string; outcome?: string }
         | undefined;
       try {
         const r = await fetch(`/api/jobs/${devGenJob.id}/status`, { cache: "no-store" });
         const j = (await r.json()) as {
           success?: boolean;
-          data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
+          data?: { status?: string; stage?: string; shopSlug?: string; error?: string; outcome?: string };
         };
         if (cancelled) return;
         if (j.success && j.data) data = j.data;
@@ -255,7 +258,11 @@ export default function DevShops() {
           stop();
           if ((data?.status ?? "") === "failed") {
             console.warn("[dev/shops] generation failed", data?.error);
+          } else if (data?.outcome === "candidate") {
+            setDevGenDoneSlug(null);
+            setDevGenReviewShopId(devGenJob.shopId);
           } else {
+            setDevGenReviewShopId(null);
             setDevGenDoneSlug(data?.shopSlug || devGenJob.slug);
           }
           setDevGenJob(null);
@@ -380,6 +387,18 @@ export default function DevShops() {
           >
             View Site →
           </a>
+        </div>
+      )}
+
+      {devGenReviewShopId && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-gold/30 bg-gold/10 px-4 py-3 text-sm text-white/85"
+        >
+          New version ready. The live site has not changed.{" "}
+          <Link to={`/dev/shops/${devGenReviewShopId}`} className="text-gold hover:underline">
+            Review it on the shop&apos;s page
+          </Link>
         </div>
       )}
 

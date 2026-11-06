@@ -9,9 +9,13 @@ import type { ShopSiteData } from "./$shopSlug";
 
 export const meta: MetaFunction = ({ matches, params }) => {
   // This index reads the parent loader, not a loader of its own.
-  const data = matches.find(m => m.id === "routes/$shopSlug")?.data as { shop?: { name?: string }; site?: ShopSiteData } | undefined;
-  // A fictional demo shop must never be indexed as if it were a business.
+  const data = matches.find(m => m.id === "routes/$shopSlug")?.data as
+    | { shop?: { name?: string }; site?: ShopSiteData; preview?: unknown }
+    | undefined;
+  // A fictional demo shop must never be indexed as if it were a business, and
+  // neither may an unpublished version under review.
   const demo = isPortfolioDemoShop(params.shopSlug);
+  const preview = Boolean(data?.preview);
   const shopName = data?.shop?.name ?? "Book your appointment";
   const title =
     data?.site?.seo_title?.trim() ||
@@ -24,8 +28,8 @@ export const meta: MetaFunction = ({ matches, params }) => {
   const image = data?.site?.hero_image_url || data?.site?.logo_url || "";
 
   return [
-    { title: demo ? `${title} (demo)` : title },
-    ...(demo ? [{ name: "robots", content: "noindex, nofollow" }] : []),
+    { title: preview ? `Preview: ${title}` : demo ? `${title} (demo)` : title },
+    ...(demo || preview ? [{ name: "robots", content: "noindex, nofollow" }] : []),
     { name: "description", content: description },
     { property: "og:title", content: title },
     { property: "og:description", content: description },
