@@ -1,4 +1,7 @@
 import type { D1Database } from "@cloudflare/workers-types";
+import { CANDIDATE_COLUMNS } from "../lib/siteCandidate.js";
+
+const CANDIDATE_COLUMN_SET = new Set<string>(CANDIDATE_COLUMNS);
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +66,8 @@ export interface DBStaff {
   display_name: string;
   bio: string | null;
   avatar_url: string | null;
+  /** Owner-entered public specialism (migration 048). */
+  speciality?: string | null;
   is_active: number;
 }
 
@@ -612,6 +617,14 @@ export interface DBShopSite {
   website_status?: string;
 }
 
+/** The owner-entered location and opening hours the site generator may state. */
+export function getShopSiteFacts(db: D1Database, shopId: string) {
+  return db
+    .prepare("SELECT address, hours_json FROM shop_settings WHERE shop_id = ? LIMIT 1")
+    .bind(shopId)
+    .first<{ address: string | null; hours_json: string | null }>();
+}
+
 export function getShopSiteByShopId(db: D1Database, shopId: string) {
   return db
     .prepare(
@@ -619,6 +632,79 @@ export function getShopSiteByShopId(db: D1Database, shopId: string) {
     )
     .bind(shopId)
     .first<DBShopSite>();
+}
+
+// ─── Owner review: unpublished regenerations (migration 049) ────────────────
+
+export interface DBSiteCandidate {
+  shop_id: string;
+  job_id: string;
+  payload_json: string;
+  created_at: string;
+}
+
+export function getSiteCandidate(db: D1Database, shopId: string) {
+  return db
+    .prepare("SELECT shop_id, job_id, payload_json, created_at FROM shop_site_candidates WHERE shop_id = ? LIMIT 1")
+    .bind(shopId)
+    .first<DBSiteCandidate>();
+}
+
+/** Discard: removes the candidate only if it is still the one the caller saw. */
+export function deleteSiteCandidate(db: D1Database, shopId: string, jobId: string) {
+  return db
+    .prepare("DELETE FROM shop_site_candidates WHERE shop_id = ? AND job_id = ?")
+    .bind(shopId, jobId)
+    .run();
+}
+
+/**
+ * Publish as one atomic batch: the candidate's columns onto the active row,
+ * the owner palette override when the candidate carries one, then the
+ * candidate itself (guarded by job id, so a newer regeneration that replaced
+ * it in the meantime stays pending). Column names come from a fixed list, never
+ * from input.
+ */
+export function publishSiteCandidateStatements(
+  db: D1Database,
+  args: {
+    shopId: string;
+    jobId: string;
+    columns: Array<[column: string, value: string | number | null]>;
+    ownerPalette: { primary: string; accent: string } | null;
+  },
+) {
+  for (const [column] of args.columns) {
+    if (!CANDIDATE_COLUMN_SET.has(column)) throw new Error(`publishSiteCandidateStatements: column not allowed: ${column}`);
+  }
+  // Every write is conditional on the candidate still being the one the
+  // caller checked: if a newer regeneration replaced it between the route's
+  // read and this batch, nothing is written and the newer one stays pending.
+  const stillPending =
+    "EXISTS (SELECT 1 FROM shop_site_candidates WHERE shop_id = ? AND job_id = ?)";
+  const statements = [];
+  if (args.columns.length > 0) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE shop_sites SET ${args.columns.map(([column]) => `${column} = ?`).join(", ")} WHERE shop_id = ? AND status = 'active' AND ${stillPending}`,
+        )
+        .bind(...args.columns.map(([, value]) => value), args.shopId, args.shopId, args.jobId),
+    );
+  }
+  if (args.ownerPalette) {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE shop_sites SET owner_color_primary = ?, owner_color_accent = ? WHERE shop_id = ? AND status = 'active' AND ${stillPending}`,
+        )
+        .bind(args.ownerPalette.primary, args.ownerPalette.accent, args.shopId, args.shopId, args.jobId),
+    );
+  }
+  statements.push(
+    db.prepare("DELETE FROM shop_site_candidates WHERE shop_id = ? AND job_id = ?").bind(args.shopId, args.jobId),
+  );
+  return statements;
 }
 
 export function createShopSite(
@@ -1070,10 +1156,15 @@ export function updateStaffMember(
     bio?: string | null;
     is_active?: number;
     avatar_url?: string | null;
+    speciality?: string | null;
   },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
+  if (fields.speciality !== undefined) {
+    sets.push("speciality = ?");
+    vals.push(fields.speciality);
+  }
   if (fields.display_name !== undefined) {
     sets.push("display_name = ?");
     vals.push(fields.display_name);

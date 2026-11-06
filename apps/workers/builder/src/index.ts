@@ -2,7 +2,17 @@
  * pivot-parlor-assembler — Consumes site-assemble-queue: merge KV images+text → shop_sites, complete job, cleanup KV.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
-import { parseLockedImages, resolveRegeneratedImageUrls } from "./lockedImages";
+import { parseLockedImages } from "./lockedImages";
+import {
+  buildCandidatePayload,
+  chooseImage,
+  gateCopy,
+  mergeCatalog,
+  mergeGallery,
+  servicesJsonNames,
+  siteWriteTarget,
+  type CandidateColumnValues,
+} from "./publication";
 
 export interface Env {
   DB: D1Database;
@@ -22,6 +32,8 @@ interface ImagesKvPayload {
   heroUrl: string;
   logoUrl: string;
   catalogUrls: string[];
+  /** Absent on payloads from an images worker older than migration 048. */
+  galleryUrls?: string[];
   completedAt: string;
   errors: unknown[];
 }
@@ -66,12 +78,19 @@ interface GenResearchKvPayload {
       heading_style?: string;
     };
     content?: {
+      headline?: string;
+      about_body?: string;
       hero_cta?: string;
       about_title?: string;
       trust_signals?: string[];
       unique_selling_points?: string[];
     };
   };
+  shopName?: string;
+  /** Owner's notes and records: the only facts generated copy may claim. */
+  style_notes?: string;
+  business?: unknown;
+  fact_signals?: string[];
   template: string;
   /** Owner-chosen palette override (6-digit hex pair) — persisted to the winning owner_color_* slot. */
   owner_color_primary?: string;
@@ -186,6 +205,7 @@ const emptyImagesPayload = (jobId: string): ImagesKvPayload => ({
   heroUrl: "",
   logoUrl: "",
   catalogUrls: [],
+  galleryUrls: [],
   completedAt: new Date().toISOString(),
   errors: [{ step: "assemble_timeout", detail: `no KV images after ${ASSEMBLE_MAX_RETRIES} retries`, jobId }],
 });
@@ -218,6 +238,33 @@ async function updateGenerationJob(
   }
   vals.push(id);
   await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+}
+
+/** Drop the job's working keys once it has finished (complete or failed). */
+async function deleteJobKeys(env: Env, jobId: string): Promise<void> {
+  await env.KV.delete(genResearchKey(jobId));
+  await env.KV.delete(genImagesKey(jobId));
+  await env.KV.delete(genTextKey(jobId));
+  await env.KV.delete(genAssembleRetriesKey(jobId));
+  await env.KV.delete(genAssembleTextRetriesKey(jobId));
+}
+
+/** A crash in processOne used to be logged and acked, leaving the job
+ *  "running" until the browser poller gave up. Record it as failed instead;
+ *  a job that already finished is left as it is. */
+export async function failJobAfterCrash(env: Pick<Env, "DB">, body: unknown, e: unknown): Promise<void> {
+  const jobId = (body as { jobId?: unknown } | null)?.jobId;
+  if (typeof jobId !== "string" || !jobId) return;
+  const err = `assemble: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  try {
+    await env.DB.prepare(
+      "UPDATE generation_jobs SET status = 'failed', stage = 'assemble', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
+    )
+      .bind(err, new Date().toISOString(), jobId)
+      .run();
+  } catch (persistErr) {
+    console.error(`[${jobId}] [pivot-parlor-assembler] could not record the failure`, persistErr);
+  }
 }
 
 async function setShopActive(db: D1Database, shopId: string): Promise<void> {
@@ -338,7 +385,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
 
-  if (!text.headline?.trim() || !Array.isArray(text.services) || text.services.length < 2) {
+  // A menu may legitimately be empty (a shop with no services yet); the text
+  // worker builds it from the real services, so only the shape is checked.
+  if (!text.headline?.trim() || !Array.isArray(text.services)) {
     const err = "assemble: text failed validation";
     console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
     await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: err });
@@ -355,9 +404,11 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   let ownerColorAccent: string | null = null;
   let intent = designIntentFrom(undefined);
   let rawDesignSpec: unknown;
+  let research: GenResearchKvPayload | null = null;
   if (researchRaw) {
     try {
       const r = JSON.parse(researchRaw) as GenResearchKvPayload;
+      research = r;
       if (typeof r.template === "string" && r.template) template = r.template;
       if (HEX6.test(r.owner_color_primary ?? "") && HEX6.test(r.owner_color_accent ?? "")) {
         ownerColorPrimary = r.owner_color_primary!;
@@ -379,40 +430,175 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const design_version = design_spec_json ? 3 : 2;
 
   const now = new Date().toISOString();
-  const services_json = servicesForJson(text.services);
-  // Positional: one slot per service, in service order. A failed image is kept
-  // as an empty-string hole, NOT removed — compacting here would shift every
-  // later service's photo, because the site maps catalog[index] -> service[index].
-  // An empty string renders that one service's card imageless (a state the site
-  // already handles), so a single failed image never lands on the wrong service.
-  const catalog_positional = (images.catalogUrls ?? []).map((u) =>
-    typeof u === "string" ? u : ""
-  );
-  const catalog_images_json = JSON.stringify(catalog_positional);
 
-  // Preserve a customised (locked) hero/logo across a regenerate. Read the
-  // existing active row; for a locked slot keep its stored url instead of the
-  // freshly generated one. No existing row (fresh INSERT) => nothing locked.
+  // The published row (if any) is the baseline this candidate must not
+  // downgrade: its images fill any slot this job failed to produce, and its
+  // locked hero/logo always survive.
   const existingRow = await env.DB.prepare(
-    "SELECT hero_image_url, logo_url, locked_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+    "SELECT website_status, hero_image_url, logo_url, locked_images_json, catalog_images_json, gallery_images_json, services_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
   )
     .bind(shopId)
-    .first<{ hero_image_url: string | null; logo_url: string | null; locked_images_json: string | null }>();
-  const resolvedImages = resolveRegeneratedImageUrls({
-    existingHero: existingRow?.hero_image_url ?? null,
-    existingLogo: existingRow?.logo_url ?? null,
-    generatedHero: images.heroUrl?.trim() || null,
-    generatedLogo: images.logoUrl?.trim() || null,
-    locked: parseLockedImages(existingRow?.locked_images_json),
+    .first<{
+      website_status: string | null;
+      hero_image_url: string | null;
+      logo_url: string | null;
+      locked_images_json: string | null;
+      catalog_images_json: string | null;
+      gallery_images_json: string | null;
+      services_json: string | null;
+    }>();
+  const urlList = (json: string | null | undefined): string[] => {
+    if (!json) return [];
+    try {
+      const p = JSON.parse(json) as unknown;
+      return Array.isArray(p) ? p.map((u) => (typeof u === "string" ? u : "")) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  // ── Truthfulness gate ──────────────────────────────────────────────────────
+  const ownerFacts = [
+    research?.style_notes ?? "",
+    JSON.stringify(research?.business ?? {}),
+    ...text.services.map((s) => s.name),
+  ].join("\n");
+  const gated = gateCopy({
+    shopName: research?.shopName ?? shopSlug,
+    ownerFacts,
+    researchHeadline: research?.spec?.content?.headline,
+    researchAbout: research?.spec?.content?.about_body,
+    factSignals: Array.isArray(research?.fact_signals) ? research!.fact_signals : [],
+    copy: {
+      headline: text.headline,
+      tagline: text.tagline,
+      about: text.about,
+      seo_title: text.seo_title,
+      seo_description: text.seo_description,
+      hero_cta: intent.hero_cta,
+      about_title: intent.about_title,
+      trust_signals: (research?.spec?.content?.trust_signals ?? []).filter((s): s is string => typeof s === "string"),
+      usps: (research?.spec?.content?.unique_selling_points ?? []).filter((s): s is string => typeof s === "string"),
+      services: text.services.map((s) => ({ name: s.name, description: s.description ?? "" })),
+    },
   });
-  const hero_image_url = resolvedImages.hero;
-  const logo_url = resolvedImages.logo;
+  if (gated.dropped.length > 0) {
+    console.warn(
+      `[${jobId}] [pivot-parlor-assembler] dropped ${gated.dropped.length} unverifiable claim(s): ${JSON.stringify(gated.dropped).slice(0, 600)}`
+    );
+  }
+  intent = {
+    ...intent,
+    hero_cta: gated.copy.hero_cta,
+    about_title: gated.copy.about_title,
+    trust_signals_json: cleanStringArrayJson(gated.copy.trust_signals),
+    usps_json: cleanStringArrayJson(gated.copy.usps),
+  };
+  text.headline = gated.copy.headline;
+  text.tagline = gated.copy.tagline;
+  text.about = gated.copy.about;
+  text.seo_title = gated.copy.seo_title;
+  text.seo_description = gated.copy.seo_description;
+  text.services = text.services.map((s, i) => ({ ...s, description: gated.copy.services[i]?.description ?? "" }));
+  const services_json = servicesForJson(text.services);
+
+  // ── Images: no downgrade ───────────────────────────────────────────────────
+  // Positional: one catalog slot per service, in service order. A failed image
+  // is an empty-string hole, never compacted away (the site maps catalog[i] to
+  // service[i]), and is filled from the published photo only while the service
+  // list is unchanged.
+  const locked = parseLockedImages(existingRow?.locked_images_json);
+  const hero_image_url = chooseImage({ generated: images.heroUrl, existing: existingRow?.hero_image_url, locked: Boolean(locked.hero) });
+  const logo_url = chooseImage({ generated: images.logoUrl, existing: existingRow?.logo_url, locked: Boolean(locked.logo) });
+  const catalog_images_json = JSON.stringify(
+    mergeCatalog({
+      generated: (images.catalogUrls ?? []).map((u) => (typeof u === "string" ? u : "")),
+      existing: urlList(existingRow?.catalog_images_json),
+      serviceNames: text.services.map((s) => s.name),
+      existingServiceNames: servicesJsonNames(existingRow?.services_json),
+    })
+  );
+  const gallery = mergeGallery(
+    (images.galleryUrls ?? []).map((u) => (typeof u === "string" ? u : "")),
+    urlList(existingRow?.gallery_images_json)
+  );
+  const gallery_images_json = gallery.length > 0 ? JSON.stringify(gallery) : null;
+  const imageErrors = Array.isArray(images.errors) ? images.errors.length : 0;
+  if (imageErrors > 0) {
+    console.warn(
+      `[${jobId}] [pivot-parlor-assembler] ${imageErrors} image step(s) failed; kept the published image in each failed slot`
+    );
+  }
 
   // Curated typography (WS-6 item 5): the research worker already pins fonts,
   // but text output from older payloads may carry anything — coerce again so
   // shop_sites only ever stores families the web self-hosts.
   const font_heading = coerceCuratedFont(text.font_heading, "heading", intent.heading_style ?? "");
   const font_body = coerceCuratedFont(text.font_body, "body", "");
+
+  // ── Owner review (migration 049) ───────────────────────────────────────────
+  // A site the public can already reach is never replaced unapproved: the
+  // result is stored as the shop's one pending version (a newer regeneration
+  // replaces an older pending one) and the live row is left untouched.
+  if (siteWriteTarget(existingRow) === "candidate") {
+    const columns: CandidateColumnValues = {
+      headline: text.headline,
+      tagline: text.tagline,
+      about: text.about,
+      services_json,
+      hero_image_url,
+      logo_url,
+      catalog_images_json,
+      color_primary: text.color_primary,
+      color_accent: text.color_accent,
+      font_heading,
+      font_body,
+      seo_title: text.seo_title,
+      seo_description: text.seo_description,
+      trust_signals_json: intent.trust_signals_json,
+      usps_json: intent.usps_json,
+      layout_mood: intent.layout_mood,
+      brand_voice: intent.brand_voice,
+      hero_cta: intent.hero_cta,
+      about_title: intent.about_title,
+      palette_json: intent.palette_json,
+      heading_weight: intent.heading_weight,
+      heading_style: intent.heading_style,
+      design_spec: design_spec_json,
+      design_version,
+      gallery_images_json,
+      generated_at: now,
+    };
+    const payload = buildCandidatePayload({
+      columns,
+      ownerPalette: ownerColorPrimary && ownerColorAccent ? { primary: ownerColorPrimary, accent: ownerColorAccent } : null,
+      serviceNames: text.services.map((s) => s.name),
+    });
+    try {
+      await env.DB.prepare(
+        `INSERT INTO shop_site_candidates (shop_id, job_id, payload_json, created_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(shop_id) DO UPDATE SET job_id = excluded.job_id, payload_json = excluded.payload_json, created_at = excluded.created_at`
+      )
+        .bind(shopId, jobId, payload, now)
+        .run();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      const err = /no such table/i.test(detail)
+        ? "assemble: shop_site_candidates is missing (migration 049 has not run); the live site was left unchanged"
+        : `assemble: could not store the new version for review; the live site was left unchanged: ${detail}`.slice(0, 500);
+      console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
+      await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: err });
+      await deleteJobKeys(env, jobId);
+      return;
+    }
+    await updateGenerationJob(env.DB, jobId, { status: "complete", stage: "review", error: null });
+    await deleteJobKeys(env, jobId);
+    // No site: cache bust and no shop activation: nothing public changed.
+    console.log(
+      `[${jobId}] [pivot-parlor-assembler] DONE (waiting for review) shopSlug=${shopSlug} status=${existingRow?.website_status ?? "?"} services=${text.services.length}`
+    );
+    return;
+  }
 
   const upd = await env.DB.prepare(
     `UPDATE shop_sites SET
@@ -425,6 +611,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       hero_cta = ?, about_title = ?, palette_json = ?,
       heading_weight = ?, heading_style = ?,
       design_spec = ?, design_version = ?,
+      gallery_images_json = ?,
       status = 'active', generated_at = ?
     WHERE shop_id = ?`
   )
@@ -453,6 +640,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       intent.heading_style,
       design_spec_json,
       design_version,
+      gallery_images_json,
       now,
       shopId
     )
@@ -469,8 +657,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         seo_title, seo_description,
         trust_signals_json, usps_json, layout_mood, brand_voice,
         hero_cta, about_title, palette_json, heading_weight, heading_style,
-        design_spec, design_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        design_spec, design_version, gallery_images_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
       .bind(
         siteId,
@@ -500,7 +688,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
         intent.heading_weight,
         intent.heading_style,
         design_spec_json,
-        design_version
+        design_version,
+        gallery_images_json
       )
       .run();
     console.log(`[${jobId}] [pivot-parlor-assembler] INSERT shop_sites id=${siteId} shopId=${shopId}`);
@@ -527,11 +716,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   });
   await setShopActive(env.DB, shopId);
 
-  await env.KV.delete(genResearchKey(jobId));
-  await env.KV.delete(genImagesKey(jobId));
-  await env.KV.delete(genTextKey(jobId));
-  await env.KV.delete(genAssembleRetriesKey(jobId));
-  await env.KV.delete(genAssembleTextRetriesKey(jobId));
+  await deleteJobKeys(env, jobId);
 
   try {
     await env.KV.delete(`site:${shopSlug}`);
@@ -557,6 +742,7 @@ export default {
         await processOne(m.body, env);
       } catch (e) {
         console.error("[pivot-parlor-assembler] outer failure", e);
+        await failJobAfterCrash(env, m.body, e);
       } finally {
         m.ack();
       }

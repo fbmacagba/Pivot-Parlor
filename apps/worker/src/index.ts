@@ -68,6 +68,13 @@ app.use("/assets/*", async (c, next) => {
   await next();
   c.header("Cross-Origin-Resource-Policy", "cross-origin");
 });
+// Staff portraits (/staff/:shopId/:staffId/avatar.<ext>, served below) are
+// embedded by the same shop sites and booking flow, so they need the same
+// relaxation; the route itself only ever serves the avatar object.
+app.use("/staff/*", async (c, next) => {
+  await next();
+  c.header("Cross-Origin-Resource-Policy", "cross-origin");
+});
 
 app.use("*", logger());
 
@@ -122,6 +129,26 @@ app.get("/assets/:shopSlug/:filename", async (c) => {
   return new Response(object.body, {
     headers: {
       "Content-Type": contentType,
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+});
+
+// ─── Public: staff portraits ──────────────────────────────────────────────────
+// POST /api/shops/:shopId/staff/:staffId/avatar stores the photo at
+// staff/<shopId>/<staffId>/avatar.<ext> and records `${ASSET_BASE_URL}/staff/...`
+// as the public avatar_url. Nothing served that path, so every uploaded
+// portrait 404'd on the shop site and the booking flow.
+app.get("/staff/:shopId/:staffId/:filename", async (c) => {
+  const { shopId, staffId, filename } = c.req.param();
+  const ext = /^avatar\.(png|jpe?g|webp)$/i.exec(filename)?.[1]?.toLowerCase();
+  if (!ext) return c.json({ success: false, error: "Not found" }, 404);
+  const object = await c.env.ASSETS.get(`staff/${shopId}/${staffId}/${filename}`);
+  if (!object) return c.json({ success: false, error: "Not found" }, 404);
+  const fallbackType = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  return new Response(object.body, {
+    headers: {
+      "Content-Type": object.httpMetadata?.contentType || fallbackType,
       "Cache-Control": "public, max-age=86400",
     },
   });

@@ -8,3 +8,10 @@ tool = "npm"
 rule = "GHSA-34x7-hfp2-rc4v"
 path = "package-lock.json"
 reason = "node-tar 6.2.1 is reachable only through @remix-run/dev -> cacache ^17 -> tar ^6 (build-time dev tooling, never shipped to Cloudflare Pages/Workers); no Remix 2.x release (latest 2.17.5) moves off cacache 17, so no in-range fix exists. Owner decision 2026-09-12; re-check when @remix-run/dev changes its cacache range."
+
+[[suppress]]
+id = "63d57c8dcb8708798c1b1b8956390b6e05170f76fab6a55914d5e29c579b3f12"
+tool = "gitleaks"
+rule = "generic-api-key"
+path = "apps/web/app/components/marketing/AnnouncementBar.tsx"
+reason = "False positive, not a credential: the matched value 'pp_announcement_dismissed_v1' is a localStorage key for the announcement-bar dismissal flag. The whole 36-line file was read and contains no key material. gitleaks' generic-api-key rule fired on entropy alone. Ledger also marked it not-a-secret 2026-11-06; this suppression stops whole-tree scans blocking on it. Re-check if the file ever holds a real value."

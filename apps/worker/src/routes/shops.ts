@@ -12,6 +12,7 @@ import {
   getNextShopNumber,
   createInvite,
   getShopSiteByShopId,
+  getShopSiteFacts,
   updateShopStripeSession,
   insertGenerationJob,
   updateGenerationJob,
@@ -20,6 +21,9 @@ import {
   getServiceById,
   getShopSiteImages,
   updateShopSiteWebsiteStatus,
+  getSiteCandidate,
+  deleteSiteCandidate,
+  publishSiteCandidateStatements,
   type DBService,
 } from "../db/queries.js";
 import {
@@ -36,6 +40,17 @@ import {
   buildServiceImagePrompt,
 } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
+import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
+import { buildSiteData, siteDesignIntent, siteWebsiteStatus } from "../lib/siteData.js";
+import {
+  overlayCandidate,
+  parseCandidatePayload,
+  servicesUnchanged,
+  withoutLockedImages,
+  type CandidateColumn,
+} from "../lib/siteCandidate.js";
+import { toPublicService } from "./services.js";
+import { serviceDescriptionsByName } from "../lib/serviceCopy.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
@@ -54,74 +69,32 @@ const shops = new Hono<{ Bindings: Bindings }>();
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Matches `ResearchQueueMessage.services` in apps/workers/research. */
-type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number };
+type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number; category?: string };
 
 function mapDbServiceToResearchQueue(row: DBService): SiteResearchQueueService {
   // price_gbp is a presentation value for the AI site pipeline, not money math.
-  return { name: row.name, price_gbp: row.price_pence / 100, duration_min: row.duration_min };
-}
-
-function servicesFromShopSitesJson(servicesJson: string | null | undefined): SiteResearchQueueService[] {
-  if (!servicesJson) return [];
-  try {
-    const arr = JSON.parse(servicesJson) as unknown[];
-    if (!Array.isArray(arr)) return [];
-    const out: SiteResearchQueueService[] = [];
-    for (const item of arr) {
-      if (!item || typeof item !== "object") continue;
-      const o = item as Record<string, unknown>;
-      if (typeof o.name !== "string" || !o.name.trim()) continue;
-      const price_gbp =
-        typeof o.price_gbp === "number" && !Number.isNaN(o.price_gbp)
-          ? o.price_gbp
-          : typeof o.price === "number" && !Number.isNaN(o.price)
-            ? o.price
-            : 25;
-      const duration_min =
-        typeof o.duration_min === "number" && !Number.isNaN(o.duration_min)
-          ? o.duration_min
-          : typeof o.duration_minutes === "number" && !Number.isNaN(o.duration_minutes)
-            ? o.duration_minutes
-            : 30;
-      out.push({ name: o.name.trim(), price_gbp, duration_min });
-    }
-    return out;
-  } catch {
-    return [];
-  }
+  const category = row.category?.trim();
+  return {
+    name: row.name,
+    price_gbp: row.price_pence / 100,
+    duration_min: row.duration_min,
+    ...(category ? { category } : {}),
+  };
 }
 
 async function buildSiteResearchQueueServices(
   db: D1Database,
   shopId: string
 ): Promise<SiteResearchQueueService[]> {
+  // The services table is the only source: it is what the booking flow sells,
+  // so the generated menu can never disagree with it. This used to top a
+  // short menu up from the previous generation's services_json (itself model
+  // output, once told to "invent exactly 3 plausible services") and then pad
+  // to two with "Default service N" at £25; both could publish services the
+  // shop does not offer. A shop with no services generates a site without a
+  // menu (the pipeline accepts zero) until the owner adds real ones.
   const dbRows = await getServicesByShop(db, shopId);
-  let services = dbRows.map(mapDbServiceToResearchQueue);
-
-  if (services.length < 2) {
-    const site = await getShopSiteByShopId(db, shopId);
-    const fromSite = servicesFromShopSitesJson(site?.services_json ?? null);
-    const seen = new Set(services.map((s) => s.name.toLowerCase()));
-    for (const s of fromSite) {
-      if (services.length >= 2) break;
-      const k = s.name.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      services.push(s);
-    }
-  }
-
-  let n = 0;
-  while (services.length < 2) {
-    n += 1;
-    services.push({
-      name: `Default service ${n}`,
-      price_gbp: 25,
-      duration_min: 30,
-    });
-  }
-
-  return services;
+  return dbRows.map(mapDbServiceToResearchQueue);
 }
 
 function toSlug(name: string): string {
@@ -202,45 +175,10 @@ shops.get("/:shopId/site", async (c) => {
   if (!site) return c.json({ success: false, error: "No site generated for this shop" }, 404);
 
   const freshServices = safeJsonParse<unknown[]>(site.services_json) ?? [];
-
-  const websiteStatus = (site as { website_status?: string | null }).website_status ?? "draft";
-
-  // Design intent persisted by the assembler (WS-6) — arrays parsed here so
-  // the web loader receives plain data.
-  const siteExtra = site as {
-    seo_title?: string | null;
-    seo_description?: string | null;
-    trust_signals_json?: string | null;
-    usps_json?: string | null;
-    layout_mood?: string | null;
-    brand_voice?: string | null;
-    hero_cta?: string | null;
-    about_title?: string | null;
-    palette_json?: string | null;
-    design_version?: number | null;
-    heading_weight?: string | null;
-    heading_style?: string | null;
-    design_spec?: string | null;
-  };
-  const designIntent = {
-    trust_signals: safeJsonParse<string[]>(siteExtra.trust_signals_json) ?? [],
-    usps: safeJsonParse<string[]>(siteExtra.usps_json) ?? [],
-    layout_mood: siteExtra.layout_mood ?? null,
-    brand_voice: siteExtra.brand_voice ?? null,
-    hero_cta: siteExtra.hero_cta ?? null,
-    about_title: siteExtra.about_title ?? null,
-    // WS-6 item 3: full research palette + the version gate that decides
-    // whether the web renders palette tokens (>= 2) or the legacy dark theme.
-    palette: safeJsonParse<Record<string, string>>(siteExtra.palette_json),
-    design_version: siteExtra.design_version ?? 1,
-    // WS-6 item 5: curated typography — the web honours heading_weight only on
-    // v2 sites; heading_style hints serif/sans when resolving legacy fonts.
-    heading_weight: siteExtra.heading_weight ?? null,
-    heading_style: siteExtra.heading_style ?? null,
-    // Site Design v3 (Design Director): the composition spec, if the site was
-    // generated/composed at design_version >= 3. NULL for v1/v2 sites.
-    design_spec: safeJsonParse<unknown>(siteExtra.design_spec ?? undefined) ?? null,
-  };
+  const websiteStatus = siteWebsiteStatus(site);
+  // Design intent persisted by the assembler (WS-6 onward); shared with the
+  // owner-review preview so both read the same shape.
+  const designIntent = siteDesignIntent(site);
 
   const cached = await c.env.KV.get(`site:${shop.slug}`);
   if (cached) {
@@ -259,27 +197,120 @@ shops.get("/:shopId/site", async (c) => {
     }
   }
 
-  const data = {
-    template: site.template,
-    headline: site.headline,
-    tagline: site.tagline,
-    about: site.about,
-    services: freshServices,
-    color_primary: site.color_primary,
-    color_accent: site.color_accent,
-    font_heading: site.font_heading,
-    font_body: site.font_body,
-    hero_image_url: site.hero_image_url,
-    logo_url: site.logo_url,
-    catalog_images: safeJsonParse<unknown[]>(site.catalog_images_json) ?? [],
-    seo_title: siteExtra.seo_title ?? null,
-    seo_description: siteExtra.seo_description ?? null,
-    website_status: websiteStatus,
-    ...designIntent,
-  };
+  const data = buildSiteData(site);
 
   await c.env.KV.put(`site:${shop.slug}`, JSON.stringify(data), { expirationTtl: 60 * 60 * 24 });
   return c.json({ success: true, data });
+});
+
+// ─── Owner review for regenerated public sites (migration 049) ──────────────
+// A regeneration of a live or paused site is stored as a candidate instead of
+// replacing the public site. Developers, or the shop's own admin, can preview
+// it, publish it or discard it. requireShopRole compares :shopId with the
+// admin's shop_id, so an admin must address their own shop by id; an admin of
+// another shop, staff and customers get 403, and no token gets 401.
+
+async function shopForReview(c: Context<{ Bindings: Bindings }>) {
+  const param = c.req.param("shopId") ?? "";
+  return (await getShopById(c.env.DB, param)) ?? (await getShopBySlug(c.env.DB, param));
+}
+
+const SERVICES_CHANGED =
+  "The shop's services changed after this version was made, so its service photos would land on the wrong services. Regenerate the site to get a matching version.";
+
+shops.get("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const shop = await shopForReview(c);
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  const candidate = await getSiteCandidate(c.env.DB, shop.id);
+  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+  const payload = parseCandidatePayload(candidate.payload_json);
+  const site = await getShopSiteByShopId(c.env.DB, shop.id);
+  if (!payload || !site) {
+    return c.json({ success: false, error: "This version can no longer be shown. Regenerate the site." }, 409);
+  }
+  const rows = await getServicesByShop(c.env.DB, shop.id);
+  // Preview exactly what Publish will write: the same lock rule, the same
+  // public shapes, the candidate's own service descriptions.
+  const columns = withoutLockedImages(payload.columns, (site as { locked_images_json?: string | null }).locked_images_json);
+  const merged = overlayCandidate(site as unknown as Record<string, unknown>, columns) as unknown as typeof site;
+  const descriptions = serviceDescriptionsByName(merged.services_json);
+  return c.json({
+    success: true,
+    data: {
+      job_id: candidate.job_id,
+      created_at: candidate.created_at,
+      services_unchanged: servicesUnchanged(payload.service_names, rows.map((r) => r.name)),
+      site: buildSiteData(merged),
+      services: rows.map((r) => toPublicService(r, descriptions)),
+    },
+  });
+});
+
+shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("admin"), async (c) => {
+  const shop = await shopForReview(c);
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { job_id?: unknown };
+  const jobId = typeof body.job_id === "string" ? body.job_id.trim() : "";
+  if (!jobId) return c.json({ success: false, error: "job_id is required: publish the version you previewed" }, 400);
+
+  const candidate = await getSiteCandidate(c.env.DB, shop.id);
+  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+  if (candidate.job_id !== jobId) {
+    return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
+  }
+  const payload = parseCandidatePayload(candidate.payload_json);
+  if (!payload) {
+    return c.json({ success: false, error: "This version cannot be published by this release. Regenerate the site." }, 409);
+  }
+  const site = await getShopSiteByShopId(c.env.DB, shop.id);
+  if (!site) return c.json({ success: false, error: "The shop has no published site to update." }, 409);
+  const rows = await getServicesByShop(c.env.DB, shop.id);
+  if (!servicesUnchanged(payload.service_names, rows.map((r) => r.name))) {
+    return c.json({ success: false, error: SERVICES_CHANGED }, 409);
+  }
+
+  const columns = withoutLockedImages(payload.columns, (site as { locked_images_json?: string | null }).locked_images_json);
+  const entries = Object.entries(columns) as Array<[CandidateColumn, string | number | null]>;
+  const results = await c.env.DB.batch(
+    publishSiteCandidateStatements(c.env.DB, {
+      shopId: shop.id,
+      jobId,
+      columns: entries,
+      ownerPalette: payload.owner_palette,
+    }),
+  );
+  // The last statement removes the candidate. If it removed nothing, a newer
+  // regeneration replaced this one mid-publish and every write was skipped.
+  const removed = results[results.length - 1]?.meta?.changes ?? 0;
+  if (removed === 0) {
+    return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
+  }
+  try {
+    await c.env.KV.delete(`site:${shop.slug}`);
+  } catch (err) {
+    // /site re-reads services, status, images and design intent from D1 on
+    // every request; only headline, tagline, about, colours, fonts and SEO
+    // would stay on the cached copy until its 24h expiry.
+    console.error(`[site-candidate] KV bust failed shop=${shop.id}`, err);
+  }
+  console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
+  return c.json({ success: true, data: { published: true, job_id: jobId } });
+});
+
+shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), async (c) => {
+  const shop = await shopForReview(c);
+  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
+  const jobId = (c.req.query("job_id") ?? "").trim();
+  if (!jobId) return c.json({ success: false, error: "job_id is required: discard the version you previewed" }, 400);
+  const candidate = await getSiteCandidate(c.env.DB, shop.id);
+  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+  if (candidate.job_id !== jobId) {
+    return c.json({ success: false, error: "A newer version replaced the one you previewed." }, 409);
+  }
+  await deleteSiteCandidate(c.env.DB, shop.id, jobId);
+  console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
+  return c.json({ success: true, data: { discarded: true, job_id: jobId } });
 });
 
 // ─── GET /api/shops/:shopId/booking-staff — public staff list for customer booking (no emails) ─
@@ -294,10 +325,15 @@ shops.get("/:shopId/booking-staff", async (c) => {
   }
 
   const members = await getStaffByShop(c.env.DB, shop.id);
+  // Public profile only: the admin-uploaded portrait (staff/:id/avatar) and the
+  // owner-entered specialism are meant for the shop's site. Email, user id and
+  // schedule stay private.
   const data = members.map((m) => ({
     id: m.id,
     display_name: m.display_name,
     bio: m.bio ?? undefined,
+    avatar_url: m.avatar_url ?? undefined,
+    speciality: m.speciality ?? undefined,
   }));
 
   console.log(
@@ -1245,6 +1281,18 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     }
 
     const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
+    // Owner-entered facts (team, hours, area): the only business facts the
+    // generated copy may state. Older research workers ignore the field.
+    const [teamRows, siteFacts] = await Promise.all([
+      getStaffByShop(c.env.DB, shop.id),
+      getShopSiteFacts(c.env.DB, shop.id),
+    ]);
+    const business = buildSiteResearchBusiness({
+      staff: teamRows,
+      services: researchServices,
+      address: siteFacts?.address,
+      hours_json: siteFacts?.hours_json,
+    });
 
     const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
     const hasLogoFile =
@@ -1301,6 +1349,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       styleNotes: styleNotesMerged,
       hasLogoFile,
       services: researchServices,
+      business,
       text_model,
       ...(text_effort ? { text_effort } : {}),
       image_model,
@@ -1331,7 +1380,11 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     }
 
     await c.env.site_research_queue.send(queuePayload);
-    await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "draft");
+    // Publication state is NOT touched here. This used to flip the site to
+    // "draft", which 404'd a live site for the whole job and kept it offline
+    // afterwards (success or failure) until a developer re-activated it. A
+    // never-published site is already draft; a live site stays live and the
+    // assembler only replaces it with output that passes its publication gate.
     return c.json(
       { success: true, data: { jobId, message: "Site generation started" } },
       202

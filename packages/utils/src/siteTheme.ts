@@ -134,6 +134,19 @@ const LEGACY_ACCENT = "#d4a853";
 
 /** Alpha steps the template uses for foreground ink (text-white/NN today). */
 const INK_STEPS = [25, 30, 40, 45, 50, 55, 60, 70, 75, 80, 85, 90, 95] as const;
+/** Ink steps at or above this carry text (muted copy, captions, meta lines). */
+const TEXT_INK_FLOOR_STEP = 40;
+
+/** Lowest opacity >= `alpha` at which `ink` composited over `bg` clears 4.5:1
+ *  (WCAG AA, small text). On a light palette the plain /55 step measured
+ *  3.5:1, so every muted line of copy failed; a dark palette already passes
+ *  and keeps its exact value. `ink` itself is contrast-checked, so 1 passes. */
+function readableInkAlpha(ink: Rgb, bg: Rgb, alpha: number): number {
+  for (let a = alpha; a < 1; a = Math.round((a + 0.01) * 100) / 100) {
+    if (contrastRatio(mix(bg, ink, a), bg) >= 4.5) return a;
+  }
+  return 1;
+}
 /** Alpha steps for hairline borders (border-white/NN today). */
 const LINE_STEPS = [10, 15, 20, 40] as const;
 /** Alpha steps for accent tints (bg/border/ring-accent/NN today). */
@@ -193,7 +206,9 @@ export function resolveSiteTheme(input: SiteThemeInput): ResolvedSiteTheme {
     vars["--st-accent-text"] = hex(ensureContrast(accent, bg, 3));
     vars["--st-on-accent"] =
       contrastRatio(BLACK, accent) >= contrastRatio(WHITE, accent) ? "#000000" : "#ffffff";
-    for (const s of INK_STEPS) vars[`--st-ink-${s}`] = rgba(ink, s / 100);
+    for (const s of INK_STEPS) {
+      vars[`--st-ink-${s}`] = rgba(ink, s >= TEXT_INK_FLOOR_STEP ? readableInkAlpha(ink, bg, s / 100) : s / 100);
+    }
     for (const s of LINE_STEPS) vars[`--st-line-${s}`] = rgba(ink, s / 100);
     if (scheme === "dark") {
       vars["--st-card"] = rgba(ink, 0.04);

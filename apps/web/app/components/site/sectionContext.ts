@@ -20,8 +20,15 @@ export interface SiteRenderContext {
   sortedReviews: Review[];
   reviewCount: number;
   hasAddress: boolean;
+  /** Address, opening hours or a phone number: enough for a visit section. */
+  hasVisitInfo: boolean;
+  /** A fictional demo: address and phone are labelled illustrative, no map. */
+  illustrativeContact: boolean;
+  /** Generated "the space" photos, in order. */
+  galleryImages: string[];
+  /** True only with real published reviews AND a real average rating. */
   hasSocialProof: boolean;
-  statsHappy: string;
+  /** Average of the shop's own reviews ("4.7"); "" when there are none. */
   statsRating: string;
   trustSignals: string[];
   heroSubline: string;

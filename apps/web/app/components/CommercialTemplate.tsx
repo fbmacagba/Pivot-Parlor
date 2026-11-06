@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import type { SiteData, ShopSettings } from "~/components/commercialSiteTypes";
 import { archetypeFor } from "~/components/siteArchetype";
+import { bookingLabel } from "~/lib/shopLabels";
 import type { Archetype, SectionKey } from "~/components/siteArchetype";
 import { normalizeDesignSpec, seedComposeDesignSpec, isPortfolioDemoShop } from "@repo/utils";
 import { composeRenderPlan, downgradeForImages } from "~/components/site/composePlan";
@@ -31,7 +32,7 @@ import { LocationSection } from "~/components/site/sections/LocationSection";
 import { LocationMapFirstSection } from "~/components/site/sections/LocationMapFirstSection";
 import { SignatureGallerySection } from "~/components/site/sections/SignatureGallerySection";
 import { SignatureSpotlightSection } from "~/components/site/sections/SignatureSpotlightSection";
-import { isGenericCategory } from "~/components/site/sections/bits";
+import { hasOpenDay, isGenericCategory } from "~/components/site/sections/bits";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { Reveal } from "~/components/site/motion/Reveal";
 import "~/components/site/motion/motion.css";
@@ -113,6 +114,11 @@ export default function CommercialTemplate({
 
   const reviewCount = site.review_count ?? reviews.length;
   const hasAddress = Boolean(settings.address?.trim());
+  // Hours or a phone number are worth a "visit us" section on their own; this
+  // used to require an address, so a shop with hours but no address hid them.
+  const hasHours = hasOpenDay(settings.hours_json);
+  const hasVisitInfo = hasAddress || hasHours || Boolean(settings.phone?.trim());
+  const galleryImages = (site.gallery_images ?? []).map((u) => u.trim()).filter(Boolean);
 
   const scrollToId = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
@@ -124,41 +130,44 @@ export default function CommercialTemplate({
   const heroTagline = typeof site.tagline === "string" ? site.tagline.trim() : "";
   const aboutText = typeof site.about === "string" ? site.about.trim() : "";
 
-  // Only ever show real review data — never invented ratings/counts (trust + ASA/CAP).
-  const hasSocialProof = reviewCount > 0;
-  const statsHappy = `${Math.max(10, Math.ceil(reviewCount / 10) * 10)}+`;
-  const statsRating = typeof site.rating === "number" ? site.rating.toFixed(1) : "5.0";
+  // Only ever show real review data: never invented ratings or counts (trust +
+  // ASA/CAP). The rating is the average of the shop's own published reviews;
+  // with no rating there is no social-proof line at all (this used to default
+  // to "5.0" and to a "10+ happy clients" floor).
+  const realRating =
+    typeof site.rating === "number" && Number.isFinite(site.rating)
+      ? site.rating
+      : reviews.length > 0
+        ? reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length
+        : null;
+  const hasSocialProof = reviewCount > 0 && realRating !== null;
+  const statsRating = realRating !== null ? realRating.toFixed(1) : "";
 
   // Per-shop design intent (WS-6). Every field is optional; when absent we fall
   // back to the template's original literals so pre-WS-6 sites render unchanged.
-  const archetype: Archetype = { ...archetypeFor(site.layout_mood), ...(demo ? {
-    howSub: "Explore the booking steps with sample details. No appointment is reserved.",
-    ctaHeading: "Explore the booking experience",
-    ctaSub: "Try the complete walkthrough with sample details. Nothing is booked or charged.",
-    steps: [
-      { t: "Choose an example service", d: "Compare the illustrative services and prices." },
-      { t: "Explore sample availability", d: "Choose a sample team member and an illustrative time." },
-      { t: "Complete the demonstration", d: "See the completion screen. Nothing is booked, charged or emailed." },
-    ],
-  } : {}) };
+  // A demo renders its generated copy like any shop; its one consolidated
+  // disclosure lives in the chrome, the booking flow and the assistant.
+  const archetype: Archetype = archetypeFor(site.layout_mood);
   const heroCentered = archetype.heroAlign === "center";
 
   const trustSignals = (site.trust_signals ?? []).map((s) => s.trim()).filter(Boolean);
-  const heroSubline =
-    trustSignals.length > 0
-      ? trustSignals.slice(0, 3).join(" · ")
-      : "Instant confirmation · No card required · Cancel anytime";
-  const bookLabel =
-    typeof site.hero_cta === "string" && site.hero_cta.trim() ? site.hero_cta.trim() : "Book Now";
+  // The trust strip sits directly under the hero and already lists the
+  // signals, so the hero's small print carries a plain booking line instead
+  // of repeating them. (The old fallback promised "No card required ·
+  // Cancel anytime", which is false for deposit-taking shops.)
+  const heroSubline = "Book online, any time. No account needed.";
+  // One booking verb and one case across the shop's buttons (header, hero,
+  // final call to action, phone menu and bar); names keep their capitals.
+  const bookLabel = bookingLabel(site.hero_cta, [site.shop_name, ...staff.map((m) => m.display_name)]);
   const aboutHeading =
     typeof site.about_title === "string" && site.about_title.trim()
       ? site.about_title.trim()
       : "Why book with us";
 
   const defaultPillars: Pillar[] = [
-    { title: "Expert Staff", body: "Skilled professionals who listen and deliver every time.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.847a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /> },
+    { title: "Choose who you see", body: "Pick a team member, or take the first free time.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.847a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" /> },
     { title: "Easy Booking", body: "Pick a service and time in seconds. No phone tag.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5a2.25 2.25 0 0 0 2.25-2.25m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5a2.25 2.25 0 0 1 2.25 2.25v7.5" /> },
-    { title: "Guaranteed Satisfaction", body: "We stand behind every visit. Your confidence matters.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" /> },
+    { title: "Prices up front", body: "Every service shows its price and time before you book.", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" /> },
   ];
   // USP titles come straight from the shop's generated spec — never invent a
   // supporting line, so the body is simply omitted; icons cycle from the stock set.
@@ -188,8 +197,10 @@ export default function CommercialTemplate({
     sortedReviews,
     reviewCount,
     hasAddress,
+    hasVisitInfo,
+    illustrativeContact: demo,
+    galleryImages,
     hasSocialProof,
-    statsHappy,
     statsRating,
     trustSignals,
     heroSubline,
@@ -228,6 +239,11 @@ export default function CommercialTemplate({
     v3Plan = fellBack.includes("all")
       ? null
       : downgradeForImages(composeRenderPlan(spec), { everyServiceImaged, anyServiceImaged, hasHeroImage });
+  }
+  // With no trust strip in the plan, the hero's small print is the only place
+  // the shop's factual signals can appear.
+  if (v3Plan && !v3Plan.sections.some((s) => s.key === "trust") && trustSignals.length > 0) {
+    ctx.heroSubline = trustSignals.slice(0, 3).join(" · ");
   }
 
   const sections: Record<SectionKey, ReactNode> = {
@@ -302,13 +318,32 @@ export default function CommercialTemplate({
       : key === "reviews"
         ? sortedReviews.length > 0
         : key === "location"
-          ? hasAddress
+          ? hasVisitInfo
           : true;
 
-  // Signature imagery pool: hero + service photos, deduped, order-stable.
+  // Signature imagery: the generated "space" photos when the site has a set.
+  // The hero and service photos are only the fallback pool for sites made
+  // before galleries existed; mixing them in repeated photos the visitor had
+  // just seen in the hero and the menu. Deduped, order-stable.
   const signatureImages = Array.from(
-    new Set([heroSrc, ...services.map((s) => (typeof s.image_url === "string" ? s.image_url : ""))].map((s) => s.trim()).filter(Boolean)),
+    new Set(
+      (galleryImages.length >= 3
+        ? galleryImages
+        : [...galleryImages, heroSrc, ...services.map((s) => (typeof s.image_url === "string" ? s.image_url : ""))]
+      )
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
   );
+
+  // A shop with its own gallery photos always shows them. When the composed
+  // signature is the gallery they ARE the signature; otherwise they follow
+  // the about section (or lead into the signature when about is excluded), so
+  // every supported composition keeps its own showpiece.
+  const spaceNode = (plan: { density: RenderPlan["density"]; motif: RenderPlan["motif"] }): ReactNode =>
+    galleryImages.length >= 3 ? (
+      <SignatureGallerySection ctx={ctx} images={galleryImages} density={plan.density} motif={plan.motif} />
+    ) : null;
 
   const v3SignatureNode = (plan: RenderPlan): ReactNode => {
     switch (plan.signature) {
@@ -330,7 +365,7 @@ export default function CommercialTemplate({
   };
 
   return (
-    <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} homeActive>
+    <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug} services={services} staff={staff} homeActive>
       {v3Plan ? (
         (() => {
           const plan = v3Plan;
@@ -338,14 +373,28 @@ export default function CommercialTemplate({
           const enabled = plan.reveal !== null;
           const lively = plan.reveal?.intensity === "lively";
           const style = plan.reveal?.style ?? "fade-up";
+          const space = plan.signature === "gallery" ? null : spaceNode(plan);
+          const spaceAfterAbout = space !== null && visible.some((p) => p.key === "about");
           const body = (
             <>
               {v3Hero(plan)}
               {visible.map((p, i) => (
-                <Reveal key={p.key} enabled={enabled} style={style} index={i} lively={lively}>
-                  {v3SectionNode(p.key, p.variant, plan)}
-                </Reveal>
+                <Fragment key={p.key}>
+                  <Reveal enabled={enabled} style={style} index={i} lively={lively}>
+                    {v3SectionNode(p.key, p.variant, plan)}
+                  </Reveal>
+                  {spaceAfterAbout && p.key === "about" ? (
+                    <Reveal enabled={enabled} style={style} index={i} lively={lively}>
+                      {space}
+                    </Reveal>
+                  ) : null}
+                </Fragment>
               ))}
+              {space !== null && !spaceAfterAbout ? (
+                <Reveal enabled={enabled} style={style} index={visible.length} lively={lively}>
+                  {space}
+                </Reveal>
+              ) : null}
               {(() => {
                 const sig = v3SignatureNode(plan);
                 return sig ? (
@@ -370,7 +419,10 @@ export default function CommercialTemplate({
           <HeroSection ctx={ctx} centered={heroCentered} minH={archetype.heroMinH} />
           {/* Middle sections in the archetype's order */}
           {archetype.order.map((key) => (
-            <Fragment key={key}>{sections[key]}</Fragment>
+            <Fragment key={key}>
+              {sections[key]}
+              {key === "about" ? spaceNode({ density: "airy", motif: "none" }) : null}
+            </Fragment>
           ))}
           <FinalCtaSection ctx={ctx} glow={archetype.glow} />
         </>

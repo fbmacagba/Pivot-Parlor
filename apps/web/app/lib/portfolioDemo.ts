@@ -51,7 +51,9 @@ export const portfolioDemoStaff: StaffMember[] = [
   },
 ];
 
-/** A synthetic public view, independent of the original tenant's records. */
+/** Static stand-in for the ORIGINAL demo URL only, served until the fictional
+ *  backing shop (pp-demo-ferdyms-barber) is provisioned and live; the loaders
+ *  prefer the generated shop the moment it exists. Delete after rollout. */
 export function getPortfolioDemoData() {
   const site: ShopSiteData = {
     template: "commercial",
@@ -111,34 +113,3 @@ export function getPortfolioDemoData() {
   };
 }
 
-export function getPortfolioDemoSlots(
-  date: string,
-  serviceId: string,
-  staffId: string,
-) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
-  const day = new Date(`${date}T00:00:00Z`);
-  if (
-    !Number.isFinite(day.getTime()) ||
-    day.toISOString().slice(0, 10) !== date
-  )
-    return [];
-  const service = portfolioDemoServices.find((s) => s.id === serviceId);
-  if (!service) return [];
-  const member =
-    staffId && staffId !== "any"
-      ? portfolioDemoStaff.find((s) => s.id === staffId)
-      : portfolioDemoStaff[0];
-  if (!member) return [];
-  return ["09:00", "10:00", "11:30", "13:00", "14:00", "15:30"].map((time) => {
-    const start = new Date(`${date}T${time}:00.000Z`);
-    return {
-      staff_id: member.id,
-      start_time: start.toISOString(),
-      end_time: new Date(
-        start.getTime() + service.durationMinutes * 60000,
-      ).toISOString(),
-      is_available: true,
-    };
-  });
-}

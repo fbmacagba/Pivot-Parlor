@@ -36,6 +36,8 @@ export type SiteData = {
    *  `DesignSpec` (packages/utils/src/designSpec.ts). NULL/undefined for v1/v2
    *  sites; the composer only reads it when design_version >= 3. */
   design_spec?: unknown;
+  /** Generated "the space" photos (interior, tools, detail), in order. */
+  gallery_images?: string[];
 };
 
 export type ShopSettings = {

@@ -20,6 +20,7 @@ import {
 } from "~/components/dev-shops/constants";
 import { buildRegeneratePayload, decidePollAction, regenJobStepStates } from "~/components/dev-shops/helpers";
 import { VisualManager, type VisualsData } from "~/components/VisualManager";
+import { SiteCandidateCard } from "~/components/SiteCandidateCard";
 import type { Shop } from "~/components/dev-shops/types";
 import type { AIModel } from "@repo/types";
 import type { DevGenerationPrefs, DevShopOwnerDetails } from "./dev.shops.$shopId";
@@ -54,7 +55,9 @@ export default function DevShopDetailIndex() {
   const [genBusy, setGenBusy] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [genJobId, setGenJobId] = useState<string | null>(null);
-  const [genPoll, setGenPoll] = useState<{ status: string; stage: string; error?: string } | null>(null);
+  const [genPoll, setGenPoll] = useState<{ status: string; stage: string; error?: string; outcome?: string } | null>(null);
+  // Re-check the review card when a regeneration on this page finishes.
+  const [candidateRefresh, setCandidateRefresh] = useState(0);
 
   // Reusing images requires the shop to already have them.
   const hasHero = Boolean(shop.hero_image_url);
@@ -121,12 +124,12 @@ export default function DevShopDetailIndex() {
       }
     };
     const tick = async () => {
-      let data: { status?: string; stage?: string; error?: string } | undefined;
+      let data: { status?: string; stage?: string; error?: string; outcome?: string } | undefined;
       try {
         const r = await fetch(`/api/jobs/${jobId}/status`, { cache: "no-store" });
         const j = (await r.json()) as {
           success?: boolean;
-          data?: { status?: string; stage?: string; error?: string };
+          data?: { status?: string; stage?: string; error?: string; outcome?: string };
         };
         if (cancelled) return;
         if (j.success && j.data) data = j.data;
@@ -145,7 +148,12 @@ export default function DevShopDetailIndex() {
         consecutiveFailures: failures,
       });
       if (ok) {
-        setGenPoll({ status: data!.status ?? "", stage: data!.stage ?? "", error: data!.error ?? undefined });
+        setGenPoll({
+          status: data!.status ?? "",
+          stage: data!.stage ?? "",
+          error: data!.error ?? undefined,
+          outcome: data!.outcome ?? undefined,
+        });
       }
       switch (decision.kind) {
         case "terminal":
@@ -154,6 +162,7 @@ export default function DevShopDetailIndex() {
           if ((data?.status ?? "") !== "failed") {
             setGenJobId(null);
             revalidator.revalidate(); // pull the regenerated copy/images into the page
+            setCandidateRefresh((n) => n + 1);
           }
           break;
         case "stalled":
@@ -269,6 +278,9 @@ export default function DevShopDetailIndex() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* ── Owner review: a regenerated live site waits here (migration 049) ──── */}
+      <SiteCandidateCard shopId={shop.id} shopSlug={shop.slug} refreshKey={candidateRefresh} />
 
       {/* ── Configure & regenerate ─────────────────────────────────────────────── */}
       <section className="rounded-xl border border-gold/30 bg-gold/5 p-6">
@@ -388,7 +400,7 @@ export default function DevShopDetailIndex() {
             />
             <span>
               Generate new images (hero, logo, service photos)
-              <span className="ml-1 text-white/45">— slower, 1–3 min. Uncheck to reuse the current images.</span>
+              <span className="ml-1 text-white/60">(slower, 1–3 min). Uncheck to reuse the current images.</span>
             </span>
           </label>
 
@@ -424,7 +436,11 @@ export default function DevShopDetailIndex() {
                 ))}
               </ol>
               {jobComplete ? (
-                <p className="mt-3 text-sm text-emerald-300">Done. The updated site is live.</p>
+                <p className="mt-3 text-sm text-emerald-300">
+                  {genPoll?.outcome === "candidate"
+                    ? "Done. The new version is ready for review at the top of this page. The live site has not changed."
+                    : "Done. The site is updated."}
+                </p>
               ) : null}
               {jobFailed ? (
                 <p className="mt-3 text-sm text-red-300">{genPoll?.error ?? "Generation failed."}</p>

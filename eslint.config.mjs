@@ -14,4 +14,16 @@ export default [
     ".playwright-cli/**",
   ]),
   ...config,
+  // Repo scripts and local tools run under Node, not in a browser, so the
+  // shared web rules would flag every `process` and `Buffer` as undefined.
+  {
+    files: ["scripts/**/*.mjs", "tools/**/*.mjs"],
+    languageOptions: { globals: { process: "readonly", Buffer: "readonly" } },
+  },
+  // Local tools are run by hand, never as a turbo task, so their env vars
+  // have no turbo cache key to declare.
+  {
+    files: ["tools/**/*.mjs"],
+    rules: { "turbo/no-undeclared-env-vars": "off" },
+  },
 ];

@@ -48,8 +48,26 @@ describe("LocationSection maps", () => {
     expect(html).toContain(COORDS_EMBED);
     expect(html).not.toContain(ADDRESS_EMBED);
   });
-  it("renders nothing without an address", () => {
-    expect(renderToStaticMarkup(<LocationSection ctx={makeTestCtx({ hasAddress: false })} />)).toBe("");
+  it("renders nothing without an address, hours or phone", () => {
+    expect(
+      renderToStaticMarkup(<LocationSection ctx={makeTestCtx({ hasAddress: false, hasVisitInfo: false, settings: {} })} />),
+    ).toBe("");
+  });
+  it("shows opening hours for a shop with hours but no address, without a map", () => {
+    const html = renderToStaticMarkup(
+      <LocationSection
+        ctx={makeTestCtx({ hasAddress: false, hasVisitInfo: true, settings: { hours_json: '{"sat":"10:00-16:00"}' } })}
+      />,
+    );
+    expect(html).toContain("Opening hours");
+    expect(html).toContain("10:00 to 16:00");
+    expect(html).not.toContain("iframe");
+  });
+  it("never maps or dials a demo shop's illustrative details", () => {
+    const html = renderToStaticMarkup(<LocationSection ctx={makeTestCtx({ illustrativeContact: true })} />);
+    expect(html).toContain("1 High St, London");
+    expect(html).toContain("Illustrative contact details");
+    expect(html).not.toMatch(/iframe|google\.com\/maps|tel:/);
   });
 });
 

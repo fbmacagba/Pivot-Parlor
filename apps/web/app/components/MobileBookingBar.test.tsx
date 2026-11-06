@@ -29,8 +29,19 @@ describe("MobileBookingBar", () => {
       <MobileBookingBar shopSlug="test-shop" bookingEnabled visible />,
     );
     expect(html).toContain('data-visible="true"');
-    expect(html).not.toContain("aria-hidden");
+    // The bar and its link are exposed; only the decorative arrow is hidden.
+    expect(html).toMatch(/^<div class="pp-bottom-bar md:hidden" data-visible="true">/);
+    expect(html).not.toMatch(/<a [^>]*aria-hidden/);
+    expect(html).toContain('<span aria-hidden="true">');
     expect(html).not.toContain("tabindex");
+  });
+
+  it("carries the shop's own booking label", () => {
+    const html = renderToStaticMarkup(
+      <MobileBookingBar shopSlug="test-shop" bookingEnabled visible bookLabel="Book your cut" />,
+    );
+    expect(html).toContain("Book your cut");
+    expect(html).not.toContain("Book now");
   });
 
   it("offers the services anchor when booking is disabled", () => {

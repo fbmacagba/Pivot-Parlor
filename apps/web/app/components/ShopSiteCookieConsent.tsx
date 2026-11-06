@@ -103,23 +103,31 @@ export function ShopSiteCookieConsent({
   return (
     <div
       ref={noticeRef}
-      className="pp-safe-bottom pp-safe-x fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0a0a0a]/95 pt-4 [--pp-pad-bottom:1rem] [--pp-pad-x:1rem] shadow-2xl backdrop-blur-md md:pt-6 md:[--pp-pad-bottom:1.5rem] md:[--pp-pad-x:1.5rem]"
+      className="pp-safe-bottom pp-safe-x fixed inset-x-0 bottom-0 z-[60] border-t border-white/10 bg-[#0a0a0a]/95 pt-3 [--pp-pad-bottom:0.75rem] [--pp-pad-x:1rem] shadow-2xl backdrop-blur-md md:pt-6 md:[--pp-pad-bottom:1.5rem] md:[--pp-pad-x:1.5rem]"
       role="region"
       aria-label="Cookie notice"
     >
-      <div className="mx-auto flex max-w-4xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="pp-heading text-lg text-white">Cookies &amp; privacy</p>
-          <p className="mt-1 max-w-2xl text-sm text-white/60">
+      {/* Phone: one compact row beside the button, so the notice does not
+          take the shop's first screen. Wider: heading and full sentence. */}
+      <div className="mx-auto flex max-w-4xl items-center gap-3 md:justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="pp-heading hidden text-lg text-white md:block">Cookies &amp; privacy</p>
+          <p className="text-sm text-white/60 md:hidden">
+            Only strictly necessary cookies, for your session and security. No analytics or marketing.
+          </p>
+          <p className="mt-1 hidden max-w-2xl text-sm text-white/60 md:block">
             We use only strictly necessary cookies to run this site, such as
             your session and security checks. We don&rsquo;t use analytics or
             marketing cookies. See the Privacy Policy in the footer for details.
           </p>
         </div>
+        {/* The label takes the theme's on-accent colour: fixed black text was
+            1.76:1 on a dark accent (a deep green salon palette). Black stays
+            the fallback for a scope without the site-theme tokens. */}
         <button
           ref={dismissRef}
           type="button"
-          className="min-h-12 min-w-[10rem] shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-black"
+          className="min-h-11 shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--st-on-accent,#000)] md:min-h-12 md:min-w-[10rem]"
           onClick={dismiss}
         >
           Got it

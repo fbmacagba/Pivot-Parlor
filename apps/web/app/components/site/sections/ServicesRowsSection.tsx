@@ -53,12 +53,20 @@ export function ServicesRowsSection({
                     <span className="hidden min-w-8 flex-1 self-center border-b border-dotted border-[color:var(--st-line-20)] sm:block" aria-hidden />
                     <span className="pp-heading shrink-0 text-xl font-bold text-[color:var(--st-accent-text)] md:text-2xl">£{formatPrice(svc.price_gbp)}</span>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-                    <p className="min-w-0 flex-1 text-sm text-[color:var(--st-ink-55)]">
-                      <span className="tabular-nums">{svc.duration_minutes} min</span>
-                      {!isGenericCategory(svc.category) ? <span> · {svc.category}</span> : null}
-                      {svc.description ? <span className="hidden md:inline"> · {svc.description}</span> : null}
-                    </p>
+                  {/* The description is its own line at every width: it was
+                      appended to the meta line and hidden on phones, so the
+                      category ran into it ("Colour · Colour applied...") and
+                      mobile visitors never saw what an appointment involves. */}
+                  <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {svc.description ? (
+                        <p className="max-w-[62ch] text-base leading-relaxed text-[color:var(--st-ink-70)]">{svc.description}</p>
+                      ) : null}
+                      <p className={`${svc.description ? "mt-1.5 " : ""}text-sm text-[color:var(--st-ink-55)]`}>
+                        <span className="tabular-nums">{svc.duration_minutes} min</span>
+                        {!isGenericCategory(svc.category) ? <span> · {svc.category}</span> : null}
+                      </p>
+                    </div>
                     <Link to={`/${ctx.shopSlug}/book?serviceId=${encodeURIComponent(svc.id)}`}
                       className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-[var(--st-r-sm)] border border-[color:var(--color-accent)] px-5 pp-heading text-sm font-semibold text-[color:var(--st-accent-text)] transition hover:bg-[color:var(--st-accent-10)]">
                       Book <span aria-hidden>→</span>
