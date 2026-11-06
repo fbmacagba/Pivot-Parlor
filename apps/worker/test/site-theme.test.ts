@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contrastRatio,
   ensureContrast,
+  ensureContrastOnAll,
   hexToRgb,
   relativeLuminance,
   resolveSiteTheme,
@@ -163,7 +164,7 @@ describe("resolveSiteTheme — v2 palette path", () => {
     expect(contrastRatio(ink, hexToRgb("#ffffff")!)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("guards accent-as-text to >= 3:1 while leaving fills untouched", () => {
+  it("guards accent-as-text to >= 4.5:1 while leaving fills untouched", () => {
     const { vars } = resolveSiteTheme({
       palette: { background: "#ffffff", text: "#111111", accent: "#f5d76e" }, // pale gold fails on white
       design_version: 2,
@@ -171,7 +172,61 @@ describe("resolveSiteTheme — v2 palette path", () => {
     });
     expect(vars["--color-accent"]).toBe("#f5d76e"); // fill keeps brand colour
     const accentText = hexToRgb(vars["--st-accent-text"]!)!;
-    expect(contrastRatio(accentText, hexToRgb("#ffffff")!)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(accentText, hexToRgb("#ffffff")!)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // Every surface the template draws text on, composited the way the browser
+  // paints it: the page, the strongest ink wash (light: --st-panel-3 / chips,
+  // dark: --st-chip) and the strongest accent tint (--st-accent-25), alone and
+  // on the wash. Measured live on 2026-11-06 before this guard: accent text
+  // 2.6-3.2:1 and muted copy 4.3:1 on the footer wash.
+  const parseRgba = (v: string) => {
+    const n = v.match(/[\d.]+/g)!.map(Number);
+    return { c: { r: n[0]!, g: n[1]!, b: n[2]! }, a: n[3] ?? 1 };
+  };
+  const over = (v: string, base: { r: number; g: number; b: number }) => {
+    const { c, a } = parseRgba(v);
+    return { r: c.r * a + base.r * (1 - a), g: c.g * a + base.g * (1 - a), b: c.b * a + base.b * (1 - a) };
+  };
+  const surfacesOf = (vars: Record<string, string>, scheme: "dark" | "light") => {
+    const bg = hexToRgb(vars["--st-bg"]!)!;
+    const wash = over(vars[scheme === "dark" ? "--st-chip" : "--st-panel-3"]!, bg);
+    return { bg, wash, tint: over(vars["--st-accent-25"]!, bg), tintOnWash: over(vars["--st-accent-25"]!, wash) };
+  };
+  const livePalettes = {
+    "FerdyM's (live)": { primary: "#1a3a2a", accent: "#d4af37", background: "#fdfbf7", text: "#2d2d2d", muted: "#757575" },
+    "Linden & Lark (live)": { primary: "#4A5D4E", accent: "#C4A484", background: "#FDFBF7", text: "#2D2D2D", muted: "#757575" },
+    "dark gold": { primary: "#1F3A2E", accent: "#B8893B", background: "#0F1512", text: "#ECE5D5", muted: "#A39E8F" },
+  };
+
+  for (const [name, palette] of Object.entries(livePalettes)) {
+    it(`keeps accent text >= 4.5:1 on the page, washes and tints: ${name}`, () => {
+      const { scheme, vars } = resolveSiteTheme({ palette, design_version: 3, shop_id: name });
+      const accentText = hexToRgb(vars["--st-accent-text"]!)!;
+      for (const [surface, rgb] of Object.entries(surfacesOf(vars, scheme))) {
+        expect(contrastRatio(accentText, rgb), `${surface}`).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(vars["--color-accent"]).toBe(palette.accent.toLowerCase()); // fills keep the brand colour
+    });
+
+    it(`keeps every text ink step >= 4.5:1 on the page and the strongest wash: ${name}`, () => {
+      const { scheme, vars } = resolveSiteTheme({ palette, design_version: 3, shop_id: name });
+      const { bg, wash } = surfacesOf(vars, scheme);
+      for (const step of [40, 45, 50, 55, 60, 70, 75, 80, 85, 90, 95]) {
+        for (const [surface, rgb] of Object.entries({ bg, wash })) {
+          const shown = over(vars[`--st-ink-${step}`]!, rgb);
+          expect(contrastRatio(shown, rgb), `ink-${step} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    });
+  }
+
+  it("ensureContrastOnAll clears every surface and returns a passing colour untouched", () => {
+    const surfaces = [hexToRgb("#fdfbf7")!, hexToRgb("#ecebe7")!, hexToRgb("#f6efd7")!];
+    const fixed = ensureContrastOnAll(hexToRgb("#d4af37")!, surfaces, 4.5);
+    for (const s of surfaces) expect(contrastRatio(fixed, s)).toBeGreaterThanOrEqual(4.5);
+    const good = hexToRgb("#222222")!;
+    expect(ensureContrastOnAll(good, surfaces, 4.5)).toBe(good);
   });
 
   it("picks the on-accent colour by contrast", () => {

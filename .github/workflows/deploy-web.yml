@@ -6,6 +6,10 @@ on:
     paths:
       - "apps/web/**"
       - "packages/types/**"
+      # apps/web bundles @repo/utils (site theme, demo registry, money), so a
+      # change there must redeploy Pages too; before this, a utils-only merge
+      # deployed the worker and left the live sites on the old code.
+      - "packages/utils/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/deploy-web.yml"

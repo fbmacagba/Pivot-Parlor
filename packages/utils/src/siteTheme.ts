@@ -10,9 +10,13 @@
  *   existing sites render unchanged until they are regenerated.
  * - **v2** (`design_version >= 2` with a palette): the page background comes
  *   from `palette.background` (light or dark), foreground ink from
- *   `palette.text`, and every derived tone is computed per scheme. Guards:
- *   ink is pushed to >= 4.5:1 contrast against the background (WCAG AA body
- *   text) and accent-as-text to >= 3:1 (AA large text / UI); the on-accent
+ *   `palette.text`, and every derived tone is computed per scheme. Guards
+ *   (WCAG AA body text, 4.5:1): ink, every text ink step and accent-as-text
+ *   must clear 4.5:1 on every surface the template draws them on, not just
+ *   the page: the strongest translucent ink wash (chips, panels, the footer)
+ *   and, for accent text, the strongest accent tint behind it. Accent text is
+ *   small (nav links, category labels, specialities, "Book with", the selected
+ *   time), so the 3:1 large-text threshold never applied. The on-accent
  *   colour is whichever of black/white contrasts better with the accent.
  *
  * All functions are pure and deterministic — no Date, no randomness — so SSR
@@ -105,6 +109,24 @@ export function ensureContrast(fg: Rgb, bg: Rgb, minRatio: number): Rgb {
   return target;
 }
 
+/**
+ * `ensureContrast` against several surfaces at once: `fg` is nudged (1% steps,
+ * so a brand colour keeps as much of its hue as AA allows) until it clears
+ * `minRatio` on EVERY surface. The direction (toward black or white) is chosen
+ * from the first surface, the page background. Returns `fg` itself when it
+ * already passes.
+ */
+export function ensureContrastOnAll(fg: Rgb, surfaces: readonly Rgb[], minRatio: number): Rgb {
+  const passes = (c: Rgb) => surfaces.every((s) => contrastRatio(c, s) >= minRatio);
+  if (passes(fg)) return fg;
+  const target = relativeLuminance(surfaces[0]!) >= 0.5 ? BLACK : WHITE;
+  for (let step = 1; step < 100; step++) {
+    const candidate = mix(fg, target, step / 100);
+    if (passes(candidate)) return candidate;
+  }
+  return target;
+}
+
 // ─── Per-shop variation (item 4) ─────────────────────────────────────────────
 
 /** FNV-1a 32-bit — stable, dependency-free string hash. */
@@ -137,16 +159,26 @@ const INK_STEPS = [25, 30, 40, 45, 50, 55, 60, 70, 75, 80, 85, 90, 95] as const;
 /** Ink steps at or above this carry text (muted copy, captions, meta lines). */
 const TEXT_INK_FLOOR_STEP = 40;
 
-/** Lowest opacity >= `alpha` at which `ink` composited over `bg` clears 4.5:1
- *  (WCAG AA, small text). On a light palette the plain /55 step measured
- *  3.5:1, so every muted line of copy failed; a dark palette already passes
- *  and keeps its exact value. `ink` itself is contrast-checked, so 1 passes. */
-function readableInkAlpha(ink: Rgb, bg: Rgb, alpha: number): number {
+/** Lowest opacity >= `alpha` at which `ink` composited over each surface
+ *  clears 4.5:1 on that surface (WCAG AA, small text). On a light palette the
+ *  plain /55 step measured 3.5:1 on the page, and the lifted steps still
+ *  measured 4.3:1 on the footer's ink wash, so every surface counts; a dark
+ *  palette already passes and keeps its exact value. `ink` itself is
+ *  contrast-checked on every surface, so 1 passes. */
+function readableInkAlpha(ink: Rgb, surfaces: readonly Rgb[], alpha: number): number {
   for (let a = alpha; a < 1; a = Math.round((a + 0.01) * 100) / 100) {
-    if (contrastRatio(mix(bg, ink, a), bg) >= 4.5) return a;
+    if (surfaces.every((s) => contrastRatio(mix(s, ink, a), s) >= 4.5)) return a;
   }
   return 1;
 }
+
+/** Strongest translucent ink wash text is drawn on, per scheme: light pages
+ *  use rgba(ink, 0.08) for chips, panel-3 and bubbles; dark pages use
+ *  rgba(ink, 0.1) for chips. Keep in step with the tokens below. */
+const MAX_INK_WASH = { light: 0.08, dark: 0.1 } as const;
+/** Strongest accent tint drawn behind accent-coloured text (--st-accent-25,
+ *  the team initials; the selected time sits on -20, step numbers on -15). */
+const MAX_ACCENT_TINT = 0.25;
 /** Alpha steps for hairline borders (border-white/NN today). */
 const LINE_STEPS = [10, 15, 20, 40] as const;
 /** Alpha steps for accent tints (bg/border/ring-accent/NN today). */
@@ -200,14 +232,25 @@ export function resolveSiteTheme(input: SiteThemeInput): ResolvedSiteTheme {
     // Scheme = whichever ink extreme reads better on this background.
     scheme = contrastRatio(WHITE, bg) >= contrastRatio(BLACK, bg) ? "dark" : "light";
     const inkStart = parseHexOr(palette!.text, scheme === "dark" ? WHITE : { r: 20, g: 20, b: 20 });
+    // The wash is made from the ink itself, so settle the ink first: a guard
+    // that darkens (or lightens) it also moves the wash it is checked on.
+    const washAlpha = MAX_INK_WASH[scheme];
     ink = ensureContrast(inkStart, bg, 4.5);
+    for (let i = 0; i < 3; i++) {
+      const next = ensureContrastOnAll(ink, [bg, mix(bg, ink, washAlpha)], 4.5);
+      if (next === ink) break;
+      ink = next;
+    }
+    const wash = mix(bg, ink, washAlpha);
+    const textSurfaces = [bg, wash];
     accent = parseHexOr(palette!.accent, legacyAccent);
     brand = parseHexOr(palette!.primary, legacyBg);
-    vars["--st-accent-text"] = hex(ensureContrast(accent, bg, 3));
+    const accentSurfaces = [bg, wash, mix(bg, accent, MAX_ACCENT_TINT), mix(wash, accent, MAX_ACCENT_TINT)];
+    vars["--st-accent-text"] = hex(ensureContrastOnAll(accent, accentSurfaces, 4.5));
     vars["--st-on-accent"] =
       contrastRatio(BLACK, accent) >= contrastRatio(WHITE, accent) ? "#000000" : "#ffffff";
     for (const s of INK_STEPS) {
-      vars[`--st-ink-${s}`] = rgba(ink, s >= TEXT_INK_FLOOR_STEP ? readableInkAlpha(ink, bg, s / 100) : s / 100);
+      vars[`--st-ink-${s}`] = rgba(ink, s >= TEXT_INK_FLOOR_STEP ? readableInkAlpha(ink, textSurfaces, s / 100) : s / 100);
     }
     for (const s of LINE_STEPS) vars[`--st-line-${s}`] = rgba(ink, s / 100);
     if (scheme === "dark") {
