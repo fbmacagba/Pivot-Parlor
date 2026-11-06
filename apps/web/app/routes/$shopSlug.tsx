@@ -3,7 +3,7 @@ import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
 import { ErrorScreen } from "~/components/ErrorScreen";
-import { isPortfolioDemoShop } from "@repo/utils";
+import { PORTFOLIO_DEMO_SLUG, portfolioDemoForSlug, shopDataKeyForSlug } from "@repo/utils";
 import { getPortfolioDemoData } from "~/lib/portfolioDemo";
 import type {
   Review,
@@ -136,13 +136,24 @@ export interface ShopSiteData {
   /** Site Design v3 (Design Director) composition spec — see @repo/utils DesignSpec.
    *  NULL for v1/v2 sites. */
   design_spec?: unknown;
+  /** Generated "the space" photos (interior, tools, detail); migration 048. */
+  gallery_images?: string[];
 }
 
 export async function loader({ params, context }: LoaderFunctionArgs) {
-  if (isPortfolioDemoShop(params.shopSlug)) return json(getPortfolioDemoData());
+  const slug = params.shopSlug!;
+  // A portfolio demo renders its FICTIONAL backing shop, read by fixed id with
+  // public GETs only, so the alias URL can never show a real tenant's records.
+  // Until that shop is provisioned and live, the barber alias keeps serving
+  // the static fixture so the published demo URL never 404s.
+  const demo = portfolioDemoForSlug(slug);
+  const key = shopDataKeyForSlug(slug);
+  const demoFallback = () => {
+    if (slug === PORTFOLIO_DEMO_SLUG) return json(getPortfolioDemoData());
+    throw new Response("Shop not found", { status: 404 });
+  };
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
-  const slug = params.shopSlug!;
 
   type ShopPublic = {
     id: string;
@@ -153,17 +164,20 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   };
   let shop: ShopPublic | null = null;
   try {
-    shop = await api.get<ShopPublic>(`/api/shops/${slug}`);
+    shop = await api.get<ShopPublic>(`/api/shops/${key}`);
   } catch {
+    if (demo) return demoFallback();
     throw new Response("Shop not found", { status: 404 });
   }
+  if (demo && shop.id !== demo.shopId) return demoFallback();
 
   let site: ShopSiteData | null = null;
   try {
-    site = await api.get<ShopSiteData>(`/api/shops/${slug}/site`);
+    site = await api.get<ShopSiteData>(`/api/shops/${key}/site`);
   } catch {
     /* Coming Soon */
   }
+  if (demo && (site?.website_status ?? "draft").toLowerCase() !== "live") return demoFallback();
 
   if (site) {
     const ws = (site.website_status ?? "draft").toLowerCase();
@@ -184,7 +198,7 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   const catalog = site?.catalog_images ?? [];
   let commercialServices: Service[] = [];
   try {
-    const apiRows = await api.get<ApiPublicService[]>(`/api/shops/${slug}/services`);
+    const apiRows = await api.get<ApiPublicService[]>(`/api/shops/${key}/services`);
     if (Array.isArray(apiRows) && apiRows.length > 0) {
       commercialServices = mapApiServicesToCommercial(apiRows, catalog);
     }
@@ -205,9 +219,10 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   }
 
   const [staffR, reviewsR, settingsR] = await Promise.allSettled([
-    api.get<StaffMember[]>(`/api/shops/${slug}/booking-staff`),
-    api.get<Review[]>(`/api/shops/${slug}/reviews`),
-    api.get<ShopSettings>(`/api/shops/${slug}/settings`),
+    api.get<StaffMember[]>(`/api/shops/${key}/booking-staff`),
+    // A demo shows no reviews: any review on a fictional shop would be invented.
+    demo ? Promise.resolve([] as Review[]) : api.get<Review[]>(`/api/shops/${key}/reviews`),
+    api.get<ShopSettings>(`/api/shops/${key}/settings`),
   ]);
 
   const staff = staffR.status === "fulfilled" ? staffR.value : [];

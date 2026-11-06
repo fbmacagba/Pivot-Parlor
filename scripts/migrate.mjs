@@ -10,6 +10,8 @@
  *   node scripts/migrate.mjs --remote --baseline   # one-time adoption: mark all
  *                                                  # migrations applied WITHOUT running
  *   node scripts/migrate.mjs --dry-run       # show pending, change nothing
+ *   node scripts/migrate.mjs --persist-to <dir>   # local D1 kept under <dir>
+ *                                                  # (an isolated harness database)
  *
  * Semantics:
  *  - Migration list = 000_schema (apps/worker/src/db/schema.sql) + sorted
@@ -48,6 +50,12 @@ const baseline = args.includes("--baseline");
 const dryRun = args.includes("--dry-run");
 const dbFlag = args.indexOf("--db");
 const dbName = dbFlag !== -1 ? args[dbFlag + 1] : "pivot-parlor-db";
+const persistFlag = args.indexOf("--persist-to");
+const persistTo = persistFlag !== -1 ? path.resolve(args[persistFlag + 1] ?? "") : null;
+if (persistTo && remote) {
+  console.error("--persist-to applies to local databases only");
+  process.exit(1);
+}
 
 const BENIGN = /duplicate column name|already exists/i;
 
@@ -75,6 +83,7 @@ function wranglerJson(sql) {
     [
       wranglerBin, "d1", "execute", dbName,
       remote ? "--remote" : "--local",
+      ...(persistTo ? ["--persist-to", persistTo] : []),
       "--json", "--command", sql,
     ],
     { cwd: workerDir, encoding: "utf8" }

@@ -30,27 +30,27 @@ export function HeroSplitSection({
           <div className="inline-flex min-h-11 w-fit items-center gap-2 rounded-full border border-[color:var(--st-line-20)] bg-[color:var(--st-card-faint)] px-4 py-2 text-sm text-[color:var(--st-ink-90)]">
             {ctx.hasSocialProof ? (
               <>
-                <StarRow rating={typeof ctx.site.rating === "number" ? ctx.site.rating : 5} className="text-sm" />
+                <StarRow rating={Number(ctx.statsRating)} className="text-sm" />
                 <span>{ctx.statsRating}★ from {ctx.reviewCount} review{ctx.reviewCount === 1 ? "" : "s"}</span>
               </>
             ) : (
               <>
                 <span className="text-[color:var(--st-accent-text)]" aria-hidden>✓</span>
-                <span>Online booking · Instant confirmation</span>
+                <span>Online booking, any time</span>
               </>
             )}
           </div>
-          <h1 className="mt-8 text-[clamp(2.5rem,5vw,4.25rem)] font-bold leading-[1.05] tracking-tight text-[color:var(--st-ink)]">
+          <h1 className="mt-8 text-[clamp(2.5rem,5vw,4.25rem)] font-bold leading-[1.05] tracking-[-0.02em] text-[color:var(--st-ink)] [text-wrap:balance]">
             {ctx.heroHeadline}
           </h1>
           {ctx.heroTagline ? (
-            <h2 className="mt-4 max-w-xl text-[clamp(1.05rem,2vw,1.3rem)] font-light leading-relaxed text-[color:var(--st-ink-70)]">
+            <p className="mt-4 max-w-xl text-[clamp(1.05rem,2vw,1.3rem)] font-light leading-relaxed text-[color:var(--st-ink-70)]">
               {ctx.heroTagline}
-            </h2>
+            </p>
           ) : null}
           <div className="mt-10 flex flex-wrap gap-4">
             <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110 active:scale-[0.98]">
-              {ctx.bookLabel} →
+              {ctx.bookLabel}<span aria-hidden>&nbsp;→</span>
             </Link>
             <button type="button" onClick={() => ctx.scrollToId("services")}
               className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] border-2 border-[color:var(--st-line-40)] bg-transparent px-8 pp-heading text-base font-semibold text-[color:var(--st-ink)] transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--st-accent-text)]">

@@ -110,6 +110,38 @@ describe("resolveSiteTheme — v2 palette path", () => {
     expect(contrastRatio(ink, bg)).toBeGreaterThanOrEqual(4.5);
   });
 
+  it("keeps every text ink step readable (>= 4.5:1) on a light palette", () => {
+    // The salon demo's ivory palette: a plain /55 step measured 3.5:1.
+    const { vars } = resolveSiteTheme({
+      palette: { primary: "#6F7D63", accent: "#2F3A2B", background: "#F6F2EA", text: "#22251F", muted: "#6A6E62" },
+      design_version: 3,
+      shop_id: "pp-demo-linden-lark",
+    });
+    const bg = hexToRgb(vars["--st-bg"]!)!;
+    const ink = hexToRgb(vars["--st-ink"]!)!;
+    for (const step of [40, 45, 50, 55, 60, 70]) {
+      const alpha = Number(/,\s*([\d.]+)\)$/.exec(vars[`--st-ink-${step}`]!)![1]);
+      expect(alpha).toBeGreaterThanOrEqual(step / 100);
+      const shown = {
+        r: Math.round(bg.r + (ink.r - bg.r) * alpha),
+        g: Math.round(bg.g + (ink.g - bg.g) * alpha),
+        b: Math.round(bg.b + (ink.b - bg.b) * alpha),
+      };
+      expect(contrastRatio(shown, bg)).toBeGreaterThanOrEqual(4.5);
+    }
+    // Decorative steps below /40 keep their exact opacity.
+    expect(vars["--st-ink-30"]).toBe("rgba(34, 37, 31, 0.3)");
+  });
+
+  it("leaves a dark palette's ink steps at their exact values when they already pass", () => {
+    const { vars } = resolveSiteTheme({
+      palette: { primary: "#1F3A2E", accent: "#B8893B", background: "#0F1512", text: "#ECE5D5", muted: "#A39E8F" },
+      design_version: 3,
+      shop_id: "pp-demo-ferdyms-barber",
+    });
+    expect(vars["--st-ink-70"]).toBe("rgba(236, 229, 213, 0.7)");
+  });
+
   it("keeps a dark scheme for a dark palette background", () => {
     const { scheme, vars } = resolveSiteTheme({
       palette: { ...lightPalette, background: "#141210", text: "#f2ede4" },

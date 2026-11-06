@@ -46,11 +46,14 @@ type ArchetypeCopy = Pick<Archetype, "howSub" | "ctaHeading" | "ctaSub" | "steps
 const copyClassic: ArchetypeCopy = {
   howSub: "Three steps from browsing to booked, about sixty seconds.",
   ctaHeading: "Ready for your best look?",
-  ctaSub: "Book your appointment in 60 seconds.",
+  // One subline under the final CTA (a second small-print line used to repeat it).
+  ctaSub: "Book online in a few steps. No account needed.",
   steps: [
     { t: "Choose a service", d: "Browse treatments and pick what suits you." },
     { t: "Pick your time", d: "Select a staff member and a slot that fits your diary." },
-    { t: "Confirm your booking", d: "Lock in your slot instantly. No card required." },
+    // Step 3 copy must hold for every shop: deposit-taking shops DO take a
+    // card and confirm on payment, so "instant, no card" was false for them.
+    { t: "Confirm your booking", d: "Add your name and email and confirm. No account needed." },
   ],
 };
 
@@ -62,7 +65,7 @@ const copyUnderstated: ArchetypeCopy = {
   steps: [
     { t: "Browse the services", d: "Take your time and find the treatment that suits you." },
     { t: "Choose a time", d: "Pick a day and a slot that fits around your week." },
-    { t: "You are booked in", d: "Confirmation is instant and no card is required." },
+    { t: "You are booked in", d: "Add your details and confirm. There is no account to create." },
   ],
 };
 
@@ -74,7 +77,7 @@ const copyEnergetic: ArchetypeCopy = {
   steps: [
     { t: "Pick your treatment", d: "Find the service that catches your eye." },
     { t: "Lock in a slot", d: "Choose who you want to see and when suits you." },
-    { t: "Done, see you soon", d: "Your slot is confirmed instantly, no card needed." },
+    { t: "Done, see you soon", d: "Pop in your details and confirm, no account needed." },
   ],
 };
 

@@ -22,7 +22,7 @@ export interface StageMessage {
 }
 
 interface ResearchSpecShape {
-  image_prompts?: { hero?: string; logo?: string; catalog?: string[] };
+  image_prompts?: { hero?: string; logo?: string; catalog?: string[]; gallery?: string[] };
 }
 
 interface GenResearchKvPayload {
@@ -43,9 +43,24 @@ interface ImagesKvPayload {
   heroUrl: string;
   logoUrl: string;
   catalogUrls: string[];
+  /** "The space" photos; "" marks a failed slot (the assembler keeps the old one). */
+  galleryUrls: string[];
   completedAt: string;
   errors: Array<{ step: string; detail: string }>;
 }
+
+/** Job-scoped object name. Each run writes NEW keys, so a regeneration can
+ *  never change the bytes behind URLs the live site is serving: until the
+ *  assembler publishes, the published row keeps pointing at the old objects,
+ *  and a failed or rejected job leaves them untouched. (The old fixed names,
+ *  hero.png and catalog-<i>.png, were overwritten mid-job.) Flat, because the
+ *  public route is /assets/:shopSlug/:filename. */
+export function jobAssetName(jobId: string, slot: string): string {
+  const tag = jobId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12) || "job";
+  return `g${tag}-${slot}.png`;
+}
+
+const GALLERY_MAX = 3;
 
 const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -236,27 +251,29 @@ async function processOne(body: unknown, env: Env): Promise<void> {
 
   if (msg.skip_images) {
     const row = await env.DB.prepare(
-      "SELECT hero_image_url, logo_url, catalog_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+      "SELECT hero_image_url, logo_url, catalog_images_json, gallery_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
     )
       .bind(shopId)
       .first<{
         hero_image_url: string | null;
         logo_url: string | null;
         catalog_images_json: string | null;
+        gallery_images_json: string | null;
       }>();
-    let catalogUrls: string[] = [];
-    if (row?.catalog_images_json) {
+    const urls = (json: string | null | undefined): string[] => {
+      if (!json) return [];
       try {
-        const p = JSON.parse(row.catalog_images_json) as unknown;
-        if (Array.isArray(p)) catalogUrls = p.filter((x): x is string => typeof x === "string");
+        const p = JSON.parse(json) as unknown;
+        return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : [];
       } catch {
-        /* ignore */
+        return [];
       }
-    }
+    };
     const imagesPayload: ImagesKvPayload = {
       heroUrl: row?.hero_image_url?.trim() ?? "",
       logoUrl: row?.logo_url?.trim() ?? "",
-      catalogUrls,
+      catalogUrls: urls(row?.catalog_images_json),
+      galleryUrls: urls(row?.gallery_images_json),
       completedAt: new Date().toISOString(),
       errors: [],
     };
@@ -266,16 +283,33 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
 
+  // A configuration or hand-off failure still hands the assembler an explicit
+  // "no new images" payload, so the job finishes now (keeping every existing
+  // image) instead of after a 20-minute wait for KV that will never appear.
+  const handOffWithoutImages = async (step: string, detail: string) => {
+    console.error(`[${jobId}] [pivot-parlor-images] ${step}: ${detail}`);
+    const empty: ImagesKvPayload = {
+      heroUrl: "",
+      logoUrl: "",
+      catalogUrls: [],
+      galleryUrls: [],
+      completedAt: new Date().toISOString(),
+      errors: [{ step, detail }],
+    };
+    await env.KV.put(genImagesKey(jobId), JSON.stringify(empty), { expirationTtl: KV_TTL_SEC });
+    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+  };
+
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    console.error(`[${jobId}] [pivot-parlor-images] OPENROUTER_API_KEY missing`);
+    await handOffWithoutImages("config", "OPENROUTER_API_KEY missing");
     return;
   }
 
   const researchRaw = await env.KV.get(genResearchKey(jobId));
   const researchFound = Boolean(researchRaw);
   if (!researchRaw) {
-    console.error(`[${jobId}] [pivot-parlor-images] missing KV ${genResearchKey(jobId)}`);
+    await handOffWithoutImages("research_kv", `missing KV ${genResearchKey(jobId)}`);
     return;
   }
 
@@ -283,7 +317,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   try {
     research = JSON.parse(researchRaw) as GenResearchKvPayload;
   } catch {
-    console.error(`[${jobId}] [pivot-parlor-images] invalid research JSON`);
+    await handOffWithoutImages("research_kv", "invalid research JSON");
     return;
   }
 
@@ -320,8 +354,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     const r = await openRouterGenerateImage(apiKey, resolvedImageModel, heroPrompt, "16:9", "hero", jobId);
     if (r.buffer) {
       try {
-        await uploadPng(env.ASSETS, `${prefix}/hero.png`, r.buffer);
-        heroUrl = publicAssetUrl(baseUrl, shopSlug, "hero.png");
+        const name = jobAssetName(jobId, "hero");
+        await uploadPng(env.ASSETS, `${prefix}/${name}`, r.buffer);
+        heroUrl = publicAssetUrl(baseUrl, shopSlug, name);
         console.log(`[${jobId}] [pivot-parlor-images] hero uploaded ${heroUrl}`);
       } catch (e) {
         const d = e instanceof Error ? e.message : String(e);
@@ -342,8 +377,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       try {
         const buf = await uploaded.arrayBuffer();
         const ct = uploaded.httpMetadata?.contentType ?? "image/png";
-        await env.ASSETS.put(`${prefix}/logo.png`, buf, { httpMetadata: { contentType: ct } });
-        logoUrl = publicAssetUrl(baseUrl, shopSlug, "logo.png");
+        const name = jobAssetName(jobId, "logo");
+        await env.ASSETS.put(`${prefix}/${name}`, buf, { httpMetadata: { contentType: ct } });
+        logoUrl = publicAssetUrl(baseUrl, shopSlug, name);
         console.log(`[${jobId}] [pivot-parlor-images] logo from upload ${logoUrl}`);
       } catch (e) {
         const d = e instanceof Error ? e.message : String(e);
@@ -358,8 +394,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     const r = await openRouterGenerateImage(apiKey, resolvedImageModel, logoPrompt, "1:1", "logo", jobId);
     if (r.buffer) {
       try {
-        await uploadPng(env.ASSETS, `${prefix}/logo.png`, r.buffer);
-        logoUrl = publicAssetUrl(baseUrl, shopSlug, "logo.png");
+        const name = jobAssetName(jobId, "logo");
+        await uploadPng(env.ASSETS, `${prefix}/${name}`, r.buffer);
+        logoUrl = publicAssetUrl(baseUrl, shopSlug, name);
         console.log(`[${jobId}] [pivot-parlor-images] logo generated ${logoUrl}`);
       } catch (e) {
         const d = e instanceof Error ? e.message : String(e);
@@ -374,7 +411,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   for (let i = 0; i < catalogPrompts.length; i++) {
     const p = catalogPrompts[i]!;
     const r = await openRouterGenerateImage(apiKey, resolvedImageModel, p, "1:1", `catalog-${i}`, jobId);
-    const filename = `catalog-${i}.png`;
+    const filename = jobAssetName(jobId, `catalog-${i}`);
     if (r.buffer) {
       try {
         await uploadPng(env.ASSETS, `${prefix}/${filename}`, r.buffer);
@@ -391,14 +428,39 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     }
   }
 
+  // "The space": interior / tools / detail photos for the gallery section.
+  // Positional like the catalog: a failed slot is "" so the assembler can keep
+  // that slot's previously published photo.
+  const galleryPrompts = (Array.isArray(ip?.gallery) ? ip.gallery : [])
+    .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+    .slice(0, GALLERY_MAX);
+  const galleryUrls: string[] = [];
+  for (let i = 0; i < galleryPrompts.length; i++) {
+    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, galleryPrompts[i]!, "4:3", `gallery-${i}`, jobId);
+    const filename = jobAssetName(jobId, `gallery-${i}`);
+    if (r.buffer) {
+      try {
+        await uploadPng(env.ASSETS, `${prefix}/${filename}`, r.buffer);
+        galleryUrls.push(publicAssetUrl(baseUrl, shopSlug, filename));
+      } catch (e) {
+        errors.push({ step: `gallery_${i}_r2`, detail: e instanceof Error ? e.message : String(e) });
+        galleryUrls.push("");
+      }
+    } else {
+      errors.push({ step: `gallery_${i}_openrouter`, detail: r.rawBody.slice(0, 8000) });
+      galleryUrls.push("");
+    }
+  }
+
   if (!heroUrl) {
-    console.error(`[${jobId}] [pivot-parlor-images] HERO FAILED — errors:`, JSON.stringify(errors));
+    console.error(`[${jobId}] [pivot-parlor-images] HERO FAILED, errors:`, JSON.stringify(errors));
   }
 
   const imagesPayload: ImagesKvPayload = {
     heroUrl,
     logoUrl,
     catalogUrls,
+    galleryUrls,
     completedAt: new Date().toISOString(),
     errors,
   };

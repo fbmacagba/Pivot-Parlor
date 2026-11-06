@@ -63,6 +63,8 @@ export interface DBStaff {
   display_name: string;
   bio: string | null;
   avatar_url: string | null;
+  /** Owner-entered public specialism (migration 048). */
+  speciality?: string | null;
   is_active: number;
 }
 
@@ -612,6 +614,14 @@ export interface DBShopSite {
   website_status?: string;
 }
 
+/** The owner-entered location and opening hours the site generator may state. */
+export function getShopSiteFacts(db: D1Database, shopId: string) {
+  return db
+    .prepare("SELECT address, hours_json FROM shop_settings WHERE shop_id = ? LIMIT 1")
+    .bind(shopId)
+    .first<{ address: string | null; hours_json: string | null }>();
+}
+
 export function getShopSiteByShopId(db: D1Database, shopId: string) {
   return db
     .prepare(
@@ -1070,10 +1080,15 @@ export function updateStaffMember(
     bio?: string | null;
     is_active?: number;
     avatar_url?: string | null;
+    speciality?: string | null;
   },
 ) {
   const sets: string[] = [];
   const vals: unknown[] = [];
+  if (fields.speciality !== undefined) {
+    sets.push("speciality = ?");
+    vals.push(fields.speciality);
+  }
   if (fields.display_name !== undefined) {
     sets.push("display_name = ?");
     vals.push(fields.display_name);

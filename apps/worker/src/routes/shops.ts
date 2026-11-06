@@ -12,6 +12,7 @@ import {
   getNextShopNumber,
   createInvite,
   getShopSiteByShopId,
+  getShopSiteFacts,
   updateShopStripeSession,
   insertGenerationJob,
   updateGenerationJob,
@@ -36,6 +37,7 @@ import {
   buildServiceImagePrompt,
 } from "@repo/utils";
 import { authMiddleware, getUser } from "../middleware/auth.js";
+import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
 import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
@@ -54,74 +56,32 @@ const shops = new Hono<{ Bindings: Bindings }>();
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 /** Matches `ResearchQueueMessage.services` in apps/workers/research. */
-type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number };
+type SiteResearchQueueService = { name: string; price_gbp: number; duration_min: number; category?: string };
 
 function mapDbServiceToResearchQueue(row: DBService): SiteResearchQueueService {
   // price_gbp is a presentation value for the AI site pipeline, not money math.
-  return { name: row.name, price_gbp: row.price_pence / 100, duration_min: row.duration_min };
-}
-
-function servicesFromShopSitesJson(servicesJson: string | null | undefined): SiteResearchQueueService[] {
-  if (!servicesJson) return [];
-  try {
-    const arr = JSON.parse(servicesJson) as unknown[];
-    if (!Array.isArray(arr)) return [];
-    const out: SiteResearchQueueService[] = [];
-    for (const item of arr) {
-      if (!item || typeof item !== "object") continue;
-      const o = item as Record<string, unknown>;
-      if (typeof o.name !== "string" || !o.name.trim()) continue;
-      const price_gbp =
-        typeof o.price_gbp === "number" && !Number.isNaN(o.price_gbp)
-          ? o.price_gbp
-          : typeof o.price === "number" && !Number.isNaN(o.price)
-            ? o.price
-            : 25;
-      const duration_min =
-        typeof o.duration_min === "number" && !Number.isNaN(o.duration_min)
-          ? o.duration_min
-          : typeof o.duration_minutes === "number" && !Number.isNaN(o.duration_minutes)
-            ? o.duration_minutes
-            : 30;
-      out.push({ name: o.name.trim(), price_gbp, duration_min });
-    }
-    return out;
-  } catch {
-    return [];
-  }
+  const category = row.category?.trim();
+  return {
+    name: row.name,
+    price_gbp: row.price_pence / 100,
+    duration_min: row.duration_min,
+    ...(category ? { category } : {}),
+  };
 }
 
 async function buildSiteResearchQueueServices(
   db: D1Database,
   shopId: string
 ): Promise<SiteResearchQueueService[]> {
+  // The services table is the only source: it is what the booking flow sells,
+  // so the generated menu can never disagree with it. This used to top a
+  // short menu up from the previous generation's services_json (itself model
+  // output, once told to "invent exactly 3 plausible services") and then pad
+  // to two with "Default service N" at £25; both could publish services the
+  // shop does not offer. A shop with no services generates a site without a
+  // menu (the pipeline accepts zero) until the owner adds real ones.
   const dbRows = await getServicesByShop(db, shopId);
-  let services = dbRows.map(mapDbServiceToResearchQueue);
-
-  if (services.length < 2) {
-    const site = await getShopSiteByShopId(db, shopId);
-    const fromSite = servicesFromShopSitesJson(site?.services_json ?? null);
-    const seen = new Set(services.map((s) => s.name.toLowerCase()));
-    for (const s of fromSite) {
-      if (services.length >= 2) break;
-      const k = s.name.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      services.push(s);
-    }
-  }
-
-  let n = 0;
-  while (services.length < 2) {
-    n += 1;
-    services.push({
-      name: `Default service ${n}`,
-      price_gbp: 25,
-      duration_min: 30,
-    });
-  }
-
-  return services;
+  return dbRows.map(mapDbServiceToResearchQueue);
 }
 
 function toSlug(name: string): string {
@@ -221,8 +181,14 @@ shops.get("/:shopId/site", async (c) => {
     heading_weight?: string | null;
     heading_style?: string | null;
     design_spec?: string | null;
+    gallery_images_json?: string | null;
   };
   const designIntent = {
+    // Generated "the space" photos (migration 048), separate from the
+    // positional per-service catalog. Read fresh from D1 like the hero.
+    gallery_images: (safeJsonParse<unknown[]>(siteExtra.gallery_images_json ?? undefined) ?? []).filter(
+      (u): u is string => typeof u === "string" && u.trim().length > 0
+    ),
     trust_signals: safeJsonParse<string[]>(siteExtra.trust_signals_json) ?? [],
     usps: safeJsonParse<string[]>(siteExtra.usps_json) ?? [],
     layout_mood: siteExtra.layout_mood ?? null,
@@ -294,10 +260,15 @@ shops.get("/:shopId/booking-staff", async (c) => {
   }
 
   const members = await getStaffByShop(c.env.DB, shop.id);
+  // Public profile only: the admin-uploaded portrait (staff/:id/avatar) and the
+  // owner-entered specialism are meant for the shop's site. Email, user id and
+  // schedule stay private.
   const data = members.map((m) => ({
     id: m.id,
     display_name: m.display_name,
     bio: m.bio ?? undefined,
+    avatar_url: m.avatar_url ?? undefined,
+    speciality: m.speciality ?? undefined,
   }));
 
   console.log(
@@ -1245,6 +1216,18 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     }
 
     const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
+    // Owner-entered facts (team, hours, area): the only business facts the
+    // generated copy may state. Older research workers ignore the field.
+    const [teamRows, siteFacts] = await Promise.all([
+      getStaffByShop(c.env.DB, shop.id),
+      getShopSiteFacts(c.env.DB, shop.id),
+    ]);
+    const business = buildSiteResearchBusiness({
+      staff: teamRows,
+      services: researchServices,
+      address: siteFacts?.address,
+      hours_json: siteFacts?.hours_json,
+    });
 
     const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
     const hasLogoFile =
@@ -1301,6 +1284,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       styleNotes: styleNotesMerged,
       hasLogoFile,
       services: researchServices,
+      business,
       text_model,
       ...(text_effort ? { text_effort } : {}),
       image_model,
@@ -1331,7 +1315,11 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     }
 
     await c.env.site_research_queue.send(queuePayload);
-    await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "draft");
+    // Publication state is NOT touched here. This used to flip the site to
+    // "draft", which 404'd a live site for the whole job and kept it offline
+    // afterwards (success or failure) until a developer re-activated it. A
+    // never-published site is already draft; a live site stays live and the
+    // assembler only replaces it with output that passes its publication gate.
     return c.json(
       { success: true, data: { jobId, message: "Site generation started" } },
       202

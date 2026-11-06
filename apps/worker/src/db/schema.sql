@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS staff (
   display_name TEXT NOT NULL,
   bio          TEXT,
   avatar_url   TEXT,
+  speciality   TEXT,
   is_active    INTEGER NOT NULL DEFAULT 1
 );
 

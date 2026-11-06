@@ -119,10 +119,10 @@
   }
 }
 
-/* A plainly labelled portfolio example, scoped away from live shop designs. */
-.pp-demo-notice { padding: 1rem 1.5rem; border-bottom: 1px solid var(--st-line-15); color: var(--st-ink); background: var(--st-card); font-size: 0.9rem; line-height: 1.6; }
-.pp-demo-notice strong { font-weight: 600; }
-.pp-portfolio-demo [data-pp-hero], .pp-portfolio-demo [data-pp-hero] > .relative { min-height: 0; }
-.pp-portfolio-demo [data-pp-hero] > .relative { padding-block: clamp(2rem, 6vw, 5rem); }
-.pp-portfolio-demo [data-pp-hero] > .relative > div { transform: none; }
-.pp-portfolio-demo [data-pp-hero] > button { display: none; }
+/* The single disclosure strip on a portfolio demo. It sits in the page flow
+   under the header and leaves the generated design itself untouched (the
+   hero used to be collapsed for demos, hiding the shop's own composition). */
+.pp-demo-notice { border-bottom: 1px solid var(--st-line-15); color: var(--st-ink-80); background: var(--st-card); font-size: 0.875rem; line-height: 1.5; }
+.pp-demo-notice p { margin: 0 auto; max-width: 80rem; padding: 0.625rem 1rem; text-wrap: pretty; }
+@media (min-width: 768px) { .pp-demo-notice p { padding-inline: 1.5rem; } }
+.pp-demo-notice strong { font-weight: 600; color: var(--st-ink); }

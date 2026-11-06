@@ -11,13 +11,14 @@ import {
   resolveSiteTheme,
   resolveCuratedFont,
   curatedFontStack,
-  isPortfolioDemoShop,
+  portfolioDemoForSlug,
   portfolioDemoReply,
 } from "@repo/utils";
 import type { ShopSettings, SiteData } from "~/components/commercialSiteTypes";
 import { ShopSiteCookieConsent } from "~/components/ShopSiteCookieConsent";
 import { useModalA11y } from "~/lib/useModalA11y";
 import { useScrolledPastHero } from "~/lib/useScrolledPastHero";
+import { isRetailCategory, shopNameInitials } from "~/lib/shopLabels";
 import { MobileBookingBar } from "~/components/MobileBookingBar";
 import { InstallAppButton } from "~/components/InstallAppButton";
 import "~/components/shop-chrome.css";
@@ -77,20 +78,6 @@ function trimMediaUrl(url: string | undefined | null): string {
   return url.trim();
 }
 
-function shopNameInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return `${parts[0]![0] ?? ""}${parts[1]![0] ?? ""}`.toUpperCase() || "?";
-}
-
-/** Returns true if a service name/category looks like a retail product. */
-function looksLikeProduct(name: string, category?: string | null): boolean {
-  if (category?.toLowerCase() === "product") return true;
-  return /\b(shampoo|conditioner|pomade|wax|gel|oil|serum|cream|balm|spray|tonic|beard|hair product|grooming kit|aftershave|moisturiser|moisturizer|clay|paste|putty|powder|treatment kit|retail)\b/i.test(
-    name,
-  );
-}
 
 function SocialIcon({
   href,
@@ -130,7 +117,15 @@ export type CommercialShopChromeProps = {
    * Services already loaded by the SSR route loader.
    * Used to populate the chatbot welcome chips — no extra fetch needed.
    */
-  services?: { name: string; price_gbp: number; category?: string | null }[];
+  services?: {
+    name: string;
+    price_gbp: number;
+    category?: string | null;
+    duration_minutes?: number;
+    description?: string;
+  }[];
+  /** The public team, used only by a demo's scripted assistant. */
+  staff?: { display_name: string; speciality?: string | null }[];
   /**
    * Render the phone-only sticky "Book now" bar (default true). Pages whose
    * own flow owns the primary CTA (/book, /confirm, /waitlist) pass false.
@@ -145,12 +140,14 @@ export function CommercialShopChrome({
   homeActive = false,
   children,
   services = [],
+  staff = [],
   bookingBar = true,
 }: CommercialShopChromeProps) {
   const [navOpen, setNavOpen] = useState(false);
   const [cookieForce, setCookieForce] = useState(false);
   const [cookieHeight, setCookieHeight] = useState(0);
-  const demo = isPortfolioDemoShop(shopSlug);
+  const demoInfo = portfolioDemoForSlug(shopSlug);
+  const demo = demoInfo !== null;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<ChatTurn[]>([]);
   const [chatDraft, setChatDraft] = useState("");
@@ -183,12 +180,8 @@ export function CommercialShopChrome({
   const shopId = site.shop_id?.trim() ?? "";
 
   // Separate treatments from products for the welcome chips
-  const treatmentServices = services.filter(
-    (s) => !looksLikeProduct(s.name, s.category),
-  );
-  const hasProducts = services.some((s) =>
-    looksLikeProduct(s.name, s.category),
-  );
+  const treatmentServices = services.filter((s) => !isRetailCategory(s.category));
+  const hasProducts = services.some((s) => isRetailCategory(s.category));
 
   useEffect(() => {
     const el = chatScrollRef.current;
@@ -201,8 +194,21 @@ export function CommercialShopChrome({
     if (!trimmed || chatSending || !shopId) return;
     if (demo) {
       setChatStarted(true);
-      setChatMessages(previous => [...previous, { role: "user", content: trimmed.slice(0, 2000) },
-        { role: "assistant", content: portfolioDemoReply(trimmed) }]);
+      const reply = portfolioDemoReply(trimmed, {
+        shopName: site.shop_name,
+        services: services.map((s) => ({
+          name: s.name,
+          price_gbp: Number(s.price_gbp),
+          duration_minutes: s.duration_minutes ?? 0,
+          description: s.description,
+        })),
+        staff,
+      });
+      setChatMessages((previous) => [
+        ...previous,
+        { role: "user", content: trimmed.slice(0, 2000) },
+        { role: "assistant", content: reply },
+      ]);
       return;
     }
 
@@ -264,7 +270,7 @@ export function CommercialShopChrome({
       const reply =
         typeof data.reply === "string" && data.reply.trim()
           ? data.reply.trim()
-          : "Sorry — something went wrong. Please try again.";
+          : "Sorry, something went wrong. Please try again.";
       setChatMessages((prev) => [
         ...prev,
         { role: "assistant", content: reply },
@@ -275,7 +281,7 @@ export function CommercialShopChrome({
         {
           role: "assistant",
           content:
-            "Sorry — we couldn't reach the assistant. Please try again in a moment.",
+            "Sorry, we couldn't reach the assistant. Please try again in a moment.",
         },
       ]);
     } finally {
@@ -371,7 +377,7 @@ export function CommercialShopChrome({
     >
       <style
         dangerouslySetInnerHTML={{
-          __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);${headingWeight ? `font-weight:${headingWeight};` : ""}}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}`,
+          __html: `.pp-commercial h1,.pp-commercial h2,.pp-commercial h3,.pp-commercial .pp-heading{font-family:var(--pp-font-heading);${headingWeight ? `font-weight:${headingWeight};` : ""}}@keyframes pp-chat-bounce{0%,80%,100%{transform:translateY(0);opacity:.45}40%{transform:translateY(-5px);opacity:1}}@media (prefers-reduced-motion: reduce){.pp-commercial .pp-chat-dot{animation:none!important;opacity:.7}}`,
         }}
       />
 
@@ -449,7 +455,7 @@ export function CommercialShopChrome({
                 to={`/${shopSlug}/book`}
                 className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
-                {demo ? "Try demo →" : "Book Now →"}
+                Book Now<span aria-hidden>&nbsp;→</span>
               </Link>
             ) : (
               <Link
@@ -469,7 +475,7 @@ export function CommercialShopChrome({
                 onClick={closeNav}
                 className="inline-flex min-h-12 items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-4 pp-heading text-sm font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
               >
-                {demo ? "Try demo" : "Book"}
+                Book
               </Link>
             ) : null}
             <button
@@ -556,7 +562,7 @@ export function CommercialShopChrome({
                 className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-[var(--st-r-sm)] bg-[color:var(--color-accent)] px-6 pp-heading font-semibold text-[color:var(--st-on-accent)] transition active:scale-[0.98]"
                 onClick={closeNav}
               >
-                {demo ? "Try demo →" : "Book Now →"}
+                Book Now<span aria-hidden>&nbsp;→</span>
               </Link>
             ) : (
               <Link
@@ -571,10 +577,16 @@ export function CommercialShopChrome({
         </div>
       ) : null}
 
-      {demo ? <aside className="pp-demo-notice" aria-label="Demonstration notice">
-        <strong>Interactive demonstration by BytesFX.</strong> Services, prices and team members are illustrative.
-        No real appointments or payments are created. The sample assistant uses scripted replies.
-      </aside> : null}
+      {/* The one site-wide disclosure for a portfolio demo. The booking flow
+          and the assistant each restate only what applies at that moment. */}
+      {demoInfo ? (
+        <aside className="pp-demo-notice" aria-label="Demonstration notice">
+          <p>
+            <strong>Demo site by BytesFX.</strong> {site.shop_name} is a fictional {demoInfo.kind} generated with
+            Pivot Parlor. Booking, payment and chat are simulated, and the address and phone number are illustrative.
+          </p>
+        </aside>
+      ) : null}
       {children}
 
       <footer className="border-t border-[color:var(--st-line-10)] bg-[color:var(--st-panel-3)] px-4 py-12 md:px-6">
@@ -829,6 +841,9 @@ export function CommercialShopChrome({
           {/* Body */}
           <div
             ref={chatScrollRef}
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation"
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3 space-y-3"
           >
             {/* Welcome state: greeting + service chips (shown before any message is sent) */}
@@ -837,7 +852,7 @@ export function CommercialShopChrome({
                 {/* Greeting bubble */}
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-[color:var(--st-bubble)] px-3 py-2 text-sm text-[color:var(--st-ink-95)]">
-                    {demo ? "Try a sample conversation about the example services, prices or team. Replies stay in this browser. Please do not enter personal details." : `Hi! I'm ${site.shop_name}'s AI assistant. What can I help you with?`}
+                    {demo ? `This is a scripted sample assistant for a fictional shop, not an AI. Ask about the services, prices or team. Replies stay in this browser, so please do not enter personal details.` : `Hi! I'm ${site.shop_name}'s AI assistant. What can I help you with?`}
                   </div>
                 </div>
 
@@ -887,7 +902,9 @@ export function CommercialShopChrome({
                         </button>
                       )}
                     </div>
-                    <p className="text-xs text-[color:var(--st-ink-30)] px-1 pt-1">
+                    {/* ink-60, not ink-30: steps below 40 are for rules and
+                        decoration, and this hint measured 1.85:1 / 2.38:1. */}
+                    <p className="text-xs text-[color:var(--st-ink-60)] px-1 pt-1">
                       Tap a service or type your question below
                     </p>
                   </div>
@@ -922,7 +939,7 @@ export function CommercialShopChrome({
                   {[0, 1, 2].map((dot) => (
                     <span
                       key={dot}
-                      className="h-2 w-2 rounded-full bg-[color:var(--st-ink-55)]"
+                      className="pp-chat-dot h-2 w-2 rounded-full bg-[color:var(--st-ink-55)]"
                       style={{
                         animation: "pp-chat-bounce 1.2s ease-in-out infinite",
                         animationDelay: `${dot * 0.2}s`,

@@ -42,6 +42,10 @@ interface GenResearchKvPayload {
   /** Owner-chosen palette override (6-digit hex pair) — wins over the AI palette. */
   owner_color_primary?: string;
   owner_color_accent?: string;
+  /** Research's per-service description, keyed by the real service name. */
+  service_copy?: Record<string, string>;
+  /** Owner-entered facts block (team, hours, area); absent on older payloads. */
+  business?: unknown;
 }
 
 export interface TextServiceOut {
@@ -133,48 +137,57 @@ function validateTextOut(raw: unknown): raw is TextKvPayload {
   if (typeof o.color_accent !== "string" || !HEX6.test(o.color_accent)) return false;
   if (typeof o.font_heading !== "string" || !o.font_heading.trim()) return false;
   if (typeof o.font_body !== "string" || !o.font_body.trim()) return false;
-  if (!Array.isArray(o.services) || o.services.length < 2) return false;
-  for (const s of o.services) {
-    if (!s || typeof s !== "object") return false;
-    const sv = s as Record<string, unknown>;
-    if (typeof sv.name !== "string" || !sv.name.trim()) return false;
-    if (typeof sv.price_gbp !== "number" || Number.isNaN(sv.price_gbp)) return false;
-    if (typeof sv.duration_minutes !== "number" || Number.isNaN(sv.duration_minutes)) return false;
-    if (typeof sv.description !== "string") return false;
-    if (typeof sv.image_prompt !== "string") return false;
-  }
+  // Model services only contribute descriptions (see servicesFromSource); the
+  // shape check stays tolerant so one malformed entry cannot sink the copy.
+  if (o.services !== undefined && !Array.isArray(o.services)) return false;
   return true;
 }
 
-function padServices(shopType: string, existing: TextServiceOut[]): TextServiceOut[] {
-  const out = [...existing];
-  let n = 0;
-  while (out.length < 2) {
-    n += 1;
-    out.push({
-      name: `Default service ${n}`,
-      price_gbp: 25,
-      duration_minutes: 30,
-      description: `Popular ${shopType.replace(/_/g, " ")} treatment. Book online.`,
-      image_prompt: `Professional ${shopType} service product shot, square, studio lighting, clean background`,
-    });
+const normName = (s: string) => s.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * The published menu is the shop's REAL services: names, prices and durations
+ * come from the source list (the services table), in source order, so the
+ * site, the booking flow and the catalog images always agree. The model may
+ * only supply a description, matched by name; research's per-service copy is
+ * the fallback; otherwise the description is left empty rather than invented.
+ * (This replaced an instruction to "invent exactly 3 plausible services" and a
+ * pad to two "Default service" rows at £25.)
+ */
+export function servicesFromSource(
+  research: Pick<GenResearchKvPayload, "services" | "service_copy" | "spec">,
+  modelServices: unknown,
+): TextServiceOut[] {
+  const modelDesc = new Map<string, string>();
+  if (Array.isArray(modelServices)) {
+    for (const s of modelServices) {
+      if (!s || typeof s !== "object") continue;
+      const { name, description } = s as { name?: unknown; description?: unknown };
+      if (typeof name === "string" && typeof description === "string" && description.trim()) {
+        modelDesc.set(normName(name), description.trim().slice(0, 280));
+      }
+    }
   }
-  return out;
+  const copy = new Map<string, string>();
+  for (const [k, v] of Object.entries(research.service_copy ?? {})) {
+    if (typeof v === "string" && v.trim()) copy.set(normName(k), v.trim());
+  }
+  const catalog = (research.spec.image_prompts as { catalog?: unknown } | undefined)?.catalog;
+  return research.services.map((s, i) => ({
+    name: s.name,
+    price_gbp: s.price_gbp,
+    duration_minutes: s.duration_min,
+    description: modelDesc.get(normName(s.name)) ?? copy.get(normName(s.name)) ?? "",
+    image_prompt: Array.isArray(catalog) && typeof catalog[i] === "string" ? (catalog[i] as string) : "",
+  }));
 }
 
-function fallbackFromResearch(research: GenResearchKvPayload): TextKvPayload {
+export function fallbackFromResearch(research: GenResearchKvPayload): TextKvPayload {
   const spec = research.spec;
   const content = spec.content as Record<string, unknown> | undefined;
   const palette = spec.palette as Record<string, unknown> | undefined;
   const typo = spec.typography as Record<string, unknown> | undefined;
-  const img = spec.image_prompts as { catalog?: string[] } | undefined;
-  const services: TextServiceOut[] = research.services.map((s, i) => ({
-    name: s.name,
-    price_gbp: s.price_gbp,
-    duration_minutes: s.duration_min,
-    description: `Professional ${s.name} at ${research.shopName}. Book online in seconds.`,
-    image_prompt: typeof img?.catalog?.[i] === "string" ? img.catalog[i]! : `Square product photo for ${s.name}`,
-  }));
+  const services = servicesFromSource(research, undefined);
   return {
     headline: typeof content?.headline === "string" ? content.headline : research.shopName,
     tagline: typeof content?.subheadline === "string" ? content.subheadline : "Book your appointment online",
@@ -182,8 +195,8 @@ function fallbackFromResearch(research: GenResearchKvPayload): TextKvPayload {
       typeof content?.about_body === "string"
         ? content.about_body
         : `Welcome to ${research.shopName}. We look forward to seeing you.`,
-    services: padServices(research.shopType, services),
-    seo_title: typeof content?.seo_title === "string" ? content.seo_title : `${research.shopName} — Book online`,
+    services,
+    seo_title: typeof content?.seo_title === "string" ? content.seo_title : `${research.shopName} | Book online`,
     seo_description:
       typeof content?.seo_description === "string" ? content.seo_description : `Book at ${research.shopName} in a few clicks.`,
     color_primary: typeof palette?.primary === "string" && HEX6.test(palette.primary) ? palette.primary : "#1a1a1a",
@@ -201,65 +214,59 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
   const { jobId } = msg;
-  const apiKey = env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    console.error(`[${jobId}] [pivot-parlor-text] OPENROUTER_API_KEY missing`);
+
+  const researchRaw = await env.KV.get(genResearchKey(jobId));
+  let research: GenResearchKvPayload | null = null;
+  try {
+    research = researchRaw ? (JSON.parse(researchRaw) as GenResearchKvPayload) : null;
+  } catch {
+    research = null;
+  }
+  if (!research) {
+    // Nothing to write copy from: fail the job now instead of leaving the
+    // assembler to poll for text for 20 minutes. The published site is untouched.
+    const err = `text: research output ${researchRaw ? "unreadable" : "missing"} (gen:${jobId}:research)`;
+    console.error(`[${jobId}] [pivot-parlor-text] ${err}`);
+    await env.DB.prepare("UPDATE generation_jobs SET status = 'failed', stage = 'text', error = ?, updated_at = ? WHERE id = ?")
+      .bind(err, new Date().toISOString(), jobId)
+      .run();
     return;
   }
 
+  const apiKey = env.OPENROUTER_API_KEY;
   const keys: ProviderKeys = {
     openrouter: apiKey,
     openai: env.OPENAI_API_KEY || undefined,
     anthropic: env.ANTHROPIC_API_KEY || undefined,
   };
 
-  const researchRaw = await env.KV.get(genResearchKey(jobId));
-  if (!researchRaw) {
-    console.error(`[${jobId}] [pivot-parlor-text] missing KV ${genResearchKey(jobId)}`);
-    return;
-  }
-
-  let research: GenResearchKvPayload;
-  try {
-    research = JSON.parse(researchRaw) as GenResearchKvPayload;
-  } catch {
-    console.error(`[${jobId}] [pivot-parlor-text] bad research JSON`);
-    return;
-  }
-
   const servicesJson = JSON.stringify(research.services);
   const specJson = JSON.stringify(research.spec).slice(0, 12000);
+  const businessJson = JSON.stringify(research.business ?? {}).slice(0, 2000);
 
-  const system = `You output JSON only for a barber/beauty shop website. Obey word limits exactly. Colours must be 6-digit hex like #1a2b3c.`;
+  const system = `You output JSON only for a barber/beauty shop website. Obey word limits exactly. Colours must be 6-digit hex like #1a2b3c. State only facts you are given: never invent client counts, ratings, reviews, awards, rankings, years in business, qualifications, guarantees or testimonials.`;
 
   const user = `Shop name: ${research.shopName}
 Shop type: ${research.shopType}
-Research spec (for style — do not copy long legal text): ${specJson}
+Owner-entered facts (the only business facts you may state): ${businessJson}
+Research spec (for style; do not copy long legal text): ${specJson}
 
-Source services (name, price_gbp, duration_min) — keep these names and prices unless you must merge duplicates:
+The shop's real services (name, price_gbp, duration_min). They are fixed: do not add, remove, rename or reprice any.
 ${servicesJson}
 
 Return JSON:
 {
-  "headline": string (max 10 words),
+  "headline": string (max 10 words, specific to this shop, no superlatives),
   "tagline": string (max 20 words),
-  "about": string (2-3 sentences, warm owner voice),
-  "services": [{
-    "name": string,
-    "price_gbp": number,
-    "duration_minutes": number,
-    "description": string (one sentence),
-    "image_prompt": string (square product/style photo prompt)
-  }]  (at least 2 items; align with source services where possible),
+  "about": string (3-4 sentences, warm owner voice, grounded in the facts and style notes),
+  "services": [{ "name": string (exact name from the list), "description": string (one or two plain sentences, max 30 words, what the appointment involves and who it suits; no prices, no claims) }] (one entry per real service; empty array when there are none),
   "seo_title": string (max 60 chars),
   "seo_description": string (max 155 chars),
   "color_primary": string (hex),
   "color_accent": string (hex),
   "font_heading": string (Google Font),
   "font_body": string (Google Font)
-}
-
-If source services are missing or empty, invent exactly 3 plausible services for this shop type.`;
+}`;
 
   const textModel = msg.text_model?.trim() || research.text_model?.trim() || DEFAULT_TEXT_MODEL;
   const textEffort = msg.text_effort ?? research.text_effort;
@@ -270,10 +277,15 @@ If source services are missing or empty, invent exactly 3 plausible services for
   // Chosen model first; if it fails outright (missing direct key, outage)
   // rescue with the default model on OpenRouter before settling for the
   // research-derived copy.
-  const attempts: { model: string; effort?: TextEffort }[] = [
-    { model: textModel, effort: textEffort },
-    ...(textModel !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
-  ];
+  // No key: skip the model and publish research's own copy (still generated
+  // for this shop) rather than leaving the job waiting on text.
+  const attempts: { model: string; effort?: TextEffort }[] = !apiKey
+    ? []
+    : [
+        { model: textModel, effort: textEffort },
+        ...(textModel !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
+      ];
+  if (!apiKey) console.error(`[${jobId}] [pivot-parlor-text] OPENROUTER_API_KEY missing; using research copy`);
 
   let payload: TextKvPayload | null = null;
   for (const { model, effort } of attempts) {
@@ -284,7 +296,7 @@ If source services are missing or empty, invent exactly 3 plausible services for
       const raw = await textJson(jobId, keys, model, system, user, effort);
       const parsed: unknown = JSON.parse(raw);
       if (validateTextOut(parsed)) {
-        parsed.services = padServices(research.shopType, parsed.services);
+        parsed.services = servicesFromSource(research, parsed.services);
         parsed.completedAt = new Date().toISOString();
         payload = parsed;
       } else {

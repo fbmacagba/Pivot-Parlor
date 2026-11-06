@@ -13,7 +13,7 @@ import { authMiddleware, getUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { sendWaitlistSlotOpen } from "../services/email.js";
 import { reportError } from "../services/report-error.js";
-import { isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
+import { isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
 
@@ -66,7 +66,7 @@ waitlist.post(
     if (!shop || !shop.is_active) {
       return c.json({ success: false, error: "Shop not found" }, 404);
     }
-    if (isPortfolioDemoShop(shop.slug)) {
+    if (isPortfolioDemoShopRecord(shop)) {
       return c.json({ success: false, error: PORTFOLIO_DEMO_ERROR }, 403);
     }
     if (body.service_id) {

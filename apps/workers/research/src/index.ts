@@ -12,6 +12,14 @@ import {
   type ComposerId,
 } from "./design-spec";
 import { chatComplete, type ProviderKeys } from "@repo/llm";
+import {
+  alignServiceCopy,
+  factSignals,
+  formatFactsBlock,
+  normalizeGalleryPrompts,
+  parseBusiness,
+  type ResearchBusiness,
+} from "./facts";
 
 export interface Env {
   DB: D1Database;
@@ -36,7 +44,9 @@ export interface ResearchQueueMessage {
   shopType: "barber_shop" | "beauty_parlor" | "both";
   shopSlug: string;
   styleNotes: string;
-  services: { name: string; price_gbp: number; duration_min: number }[];
+  services: { name: string; price_gbp: number; duration_min: number; category?: string }[];
+  /** Owner-entered facts (team, hours, area). Empty on older messages. */
+  business: ResearchBusiness;
   hasLogoFile: boolean;
   text_model: string;
   text_effort?: TextEffort;
@@ -77,11 +87,16 @@ export interface ResearchSpec {
     unique_selling_points: string[];
     seo_title: string;
     seo_description: string;
+    /** { [exact service name]: description }. Not validated here; aligned
+     *  onto the real service names by alignServiceCopy. */
+    service_copy?: unknown;
   };
   image_prompts: {
     hero: string;
     logo: string;
     catalog: string[];
+    /** "The space" photos (interior, tools, detail); normalized to exactly 3. */
+    gallery?: string[];
   };
   legal_content: {
     privacy_policy: string;
@@ -113,6 +128,15 @@ export interface GenResearchKvPayload {
   owner_color_primary?: string;
   owner_color_accent?: string;
   design_spec: DesignSpec;
+  /** Owner-entered facts, forwarded so the text worker states only these. */
+  business: ResearchBusiness;
+  /** True trust lines from the records; the assembler fills the strip from
+   *  these when generated items are dropped as unverifiable claims. */
+  fact_signals: string[];
+  /** Generated description per real service name (absent names: none). */
+  service_copy: Record<string, string>;
+  /** The owner's own notes: a claim they wrote here may be published. */
+  style_notes: string;
 }
 
 const KV_TTL_SEC = 3600;
@@ -219,7 +243,10 @@ async function updateGenerationJob(
 }
 
 function buildUserPrompt(msg: ResearchQueueMessage): string {
-  const servicesText = msg.services.map((s) => `${s.name} (£${s.price_gbp}, ${s.duration_min} min)`).join("; ");
+  const servicesText = msg.services
+    .map((s) => `${s.name} (${s.category ? `${s.category}, ` : ""}£${s.price_gbp}, ${s.duration_min} min)`)
+    .join("; ");
+  const facts = formatFactsBlock(msg.business, msg.services);
   const style = msg.styleNotes?.trim() || "not provided";
   const pinnedMood = layoutMoodForTemplate(msg.template);
   // Falls back to the full HERO_VARIANTS pool if a template key is ever
@@ -255,6 +282,11 @@ Style notes from owner: ${style}
 Services offered: ${servicesText || "none listed"}
 Has existing logo: ${msg.hasLogoFile}
 
+Facts from the owner's records (the ONLY business facts you may state):
+${facts}
+
+Truthfulness rules for every piece of copy: state only the facts above and what the owner's style notes say. Never invent client or booking counts, star ratings, review scores, awards, rankings ("best", "#1", "top-rated"), years in business, founding dates, qualifications, guarantees, testimonials, celebrity clients or press. If a field would need such a claim, write something true and specific about the services, the team's specialisms, the area or the atmosphere instead.
+
 ${moodLine}Produce a complete visual and content specification. Return this exact JSON structure with no other text:
 {
   "palette": {
@@ -277,16 +309,18 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
     "subheadline": string (max 18 words, expands on headline, includes shop personality),
     "hero_cta": string (max 4 words, action-oriented e.g. Book Your Cut),
     "about_title": string (max 6 words),
-    "about_body": string (3 sentences written as the shop owner, warm and personal, mentions speciality),
-    "trust_signals": string[] (exactly 3 items, specific and credible e.g. 500+ happy clients, Walk-ins welcome, 5-star rated on Google),
-    "unique_selling_points": string[] (exactly 3 items, max 8 words each, what makes this shop different),
+    "about_body": string (3 to 4 sentences written as the shop owner, warm and personal, about what the shop is like and what the team specialises in, grounded only in the Facts and style notes),
+    "trust_signals": string[] (exactly 3 short factual lines built only from the Facts, e.g. the opening days, how many team members a customer can choose from, the area, or that booking is online),
+    "unique_selling_points": string[] (exactly 3 items, max 8 words each, what makes this shop different, drawn from its services, specialisms and style; no superlatives),
     "seo_title": string (max 60 chars, includes shop name and location type),
-    "seo_description": string (max 155 chars, includes booking CTA)
+    "seo_description": string (max 155 chars, includes booking CTA),
+    "service_copy": object (one key per service listed above, using its EXACT name; each value is one or two plain sentences, max 30 words, describing what the appointment involves and who it suits; no prices, no claims)
   },
   "image_prompts": {
     "hero": string (detailed photorealistic prompt for a full-bleed hero image featuring real people — ${heroPeople} — set in a barbershop or beauty salon that matches the layout_mood and palette; warm natural light, authentic candid moment, and leave clean negative space on one side or the top for an overlaid headline),
     "logo": string (detailed prompt for a professional logo — style matching layout_mood, includes shop name, clean and scalable, white background),
-    "catalog": string[] (one prompt per service in the input services array, in the same order — each prompt describes the ACTUAL finished result of that specific service on a real person (a fresh haircut, a styled beard, a finished colour or style), photographed close and flattering so the style itself is clearly readable, square format, professional lighting)
+    "catalog": string[] (one prompt per service in the input services array, in the same order — each prompt describes the ACTUAL finished result of that specific service on a real person (a fresh haircut, a styled beard, a finished colour or style), photographed close and flattering so the style itself is clearly readable, square format, professional lighting),
+    "gallery": string[] (exactly 3 photorealistic prompts showing the shop itself in the same art direction as the hero: the empty interior, a still life of tools or products on the counter, and one characterful detail; no people, no text, no signage, no logos)
   },
   "legal_content": {
     "privacy_policy": string (full GDPR and UK PECR compliant privacy policy for a barber/beauty booking platform — includes: data collected, how used, cookies, third parties, customer rights, contact details placeholder, shop name inserted throughout),
@@ -304,7 +338,7 @@ ${moodLine}Produce a complete visual and content specification. Return this exac
   }${designSpecBlock}
 }
 
-You MUST include exactly ${msg.services.length} strings in image_prompts.catalog (same order as services listed above).`;
+You MUST include exactly ${msg.services.length} strings in image_prompts.catalog (same order as services listed above)${msg.services.length === 0 ? "; with no services listed, catalog is an empty array and service_copy is an empty object" : ""}.`;
 }
 
 /** One JSON-only completion through the shared client; HTTP retries and the
@@ -379,7 +413,9 @@ function validateResearchSpec(raw: unknown): raw is ResearchSpec {
   if (!img || typeof img !== "object") return false;
   const im = img as Record<string, unknown>;
   if (typeof im.hero !== "string" || typeof im.logo !== "string") return false;
-  if (!Array.isArray(im.catalog) || im.catalog.length < 1) return false;
+  // catalog is rebuilt deterministically from the services in coerceSpecCounts,
+  // and a shop with no services legitimately has none, so only the type matters.
+  if (!Array.isArray(im.catalog)) return false;
   if (!im.catalog.every((x) => typeof x === "string")) return false;
   const legal = o.legal_content;
   if (!legal || typeof legal !== "object") return false;
@@ -413,18 +449,23 @@ function catalogSubjectFor(shopType: string): string {
  * instead of 3) yields a usable site instead of failing the whole job. The
  * image worker maps catalog[i] → services[i], so catalog must match 1:1.
  */
-function coerceSpecCounts(spec: ResearchSpec, services: { name: string }[], shopType: string): void {
-  spec.content.trust_signals = fitArray(
-    spec.content.trust_signals,
-    3,
-    (i) => ["Trusted by local clients", "Easy online booking", "Friendly expert team"][i] ?? "Quality service"
-  );
+function coerceSpecCounts(
+  spec: ResearchSpec,
+  services: { name: string }[],
+  shopType: string,
+  business: ResearchBusiness,
+): void {
+  // Fillers come from the shop's own records, never from stock claims (the
+  // old fillers asserted "Trusted by local clients" for every shop). The
+  // assembler re-checks every item against the claims gate before publishing.
+  const facts = factSignals(business, services.length, shopType);
+  spec.content.trust_signals = fitArray(spec.content.trust_signals, 3, (i) => facts[i] ?? "Book online, any time");
   spec.content.unique_selling_points = fitArray(
     spec.content.unique_selling_points,
     3,
-    (i) =>
-      ["Experienced professionals", "Convenient online booking", "Welcoming atmosphere"][i] ?? "Great value"
+    (i) => ["Every price shown up front", "Pick your own team member", "Book online, any time"][i] ?? "Book online, any time"
   );
+  spec.image_prompts.gallery = normalizeGalleryPrompts(spec.image_prompts.gallery, spec.layout_mood, shopType);
   // Catalog images map positionally: the images worker generates catalog[i]
   // from this prompt and the site renders it on services[i]. Both the catalog
   // build and the site's service list come from getServicesByShop (ORDER BY
@@ -461,9 +502,11 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     if (!s || typeof s !== "object") return null;
     const sv = s as Record<string, unknown>;
     if (typeof sv.name !== "string" || typeof sv.price_gbp !== "number" || typeof sv.duration_min !== "number") return null;
-    services.push({ name: sv.name, price_gbp: sv.price_gbp, duration_min: sv.duration_min });
+    const category = typeof sv.category === "string" && sv.category.trim() ? sv.category.trim().slice(0, 40) : undefined;
+    services.push({ name: sv.name, price_gbp: sv.price_gbp, duration_min: sv.duration_min, ...(category ? { category } : {}) });
   }
-  if (services.length < 2) return null;
+  // No minimum: a shop with no services yet gets a site without a menu. The
+  // old two-service floor was met upstream by inventing placeholder services.
   const text_model =
     typeof o.text_model === "string" && o.text_model.trim() ? o.text_model.trim() : DEFAULT_TEXT_MODEL;
   const text_effort =
@@ -488,6 +531,7 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     shopSlug: o.shopSlug,
     styleNotes: o.styleNotes,
     services,
+    business: parseBusiness(o.business),
     hasLogoFile: o.hasLogoFile,
     text_model,
     ...(text_effort ? { text_effort } : {}),
@@ -595,7 +639,8 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       return;
     }
 
-    coerceSpecCounts(spec, input.services, input.shopType);
+    coerceSpecCounts(spec, input.services, input.shopType, input.business);
+    const serviceCopy = alignServiceCopy(spec.content.service_copy, input.services);
     // Honour an owner-chosen palette: overwrite the AI palette so the text
     // worker's research fallback and any spec consumer see the chosen colours.
     // The text worker re-applies the same override after its own copy pass,
@@ -636,6 +681,10 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     const payload: GenResearchKvPayload = {
       spec,
       design_spec: designSpec,
+      business: input.business,
+      fact_signals: factSignals(input.business, input.services.length, input.shopType),
+      service_copy: serviceCopy,
+      style_notes: input.styleNotes.slice(0, 4000),
       services: input.services.map((s) => ({
         name: s.name,
         price_gbp: s.price_gbp,
@@ -669,29 +718,30 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
 
     if (input.skip_images) {
       const row = await env.DB.prepare(
-        "SELECT hero_image_url, logo_url, catalog_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+        "SELECT hero_image_url, logo_url, catalog_images_json, gallery_images_json FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
       )
         .bind(shopId)
         .first<{
           hero_image_url: string | null;
           logo_url: string | null;
           catalog_images_json: string | null;
+          gallery_images_json: string | null;
         }>();
-      let catalogUrls: string[] = [];
-      if (row?.catalog_images_json) {
+      const urls = (json: string | null | undefined): string[] => {
+        if (!json) return [];
         try {
-          const p = JSON.parse(row.catalog_images_json) as unknown;
-          if (Array.isArray(p)) {
-            catalogUrls = p.filter((x): x is string => typeof x === "string");
-          }
+          const p = JSON.parse(json) as unknown;
+          return Array.isArray(p) ? p.filter((x): x is string => typeof x === "string") : [];
         } catch {
-          /* ignore */
+          return [];
         }
-      }
+      };
+      const catalogUrls = urls(row?.catalog_images_json);
       const imagesPayload = {
         heroUrl: row?.hero_image_url?.trim() ?? "",
         logoUrl: row?.logo_url?.trim() ?? "",
         catalogUrls,
+        galleryUrls: urls(row?.gallery_images_json),
         completedAt: new Date().toISOString(),
         errors: [] as { step: string; detail: string }[],
       };

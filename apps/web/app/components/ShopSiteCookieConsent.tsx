@@ -116,10 +116,13 @@ export function ShopSiteCookieConsent({
             marketing cookies. See the Privacy Policy in the footer for details.
           </p>
         </div>
+        {/* The label takes the theme's on-accent colour: fixed black text was
+            1.76:1 on a dark accent (a deep green salon palette). Black stays
+            the fallback for a scope without the site-theme tokens. */}
         <button
           ref={dismissRef}
           type="button"
-          className="min-h-12 min-w-[10rem] shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-black"
+          className="min-h-12 min-w-[10rem] shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--st-on-accent,#000)]"
           onClick={dismiss}
         >
           Got it
