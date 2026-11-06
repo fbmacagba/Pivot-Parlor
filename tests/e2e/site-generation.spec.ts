@@ -191,7 +191,6 @@ async function closeOnboardDialogIfOpen(page: import("@playwright/test").Page) {
  * If the table updated but the dialog stayed on the form, Escape reveals the row for row-level checks.
  */
 async function submitNewShopAndAwaitSuccess(page: import("@playwright/test").Page, shopName: string) {
-  const d = page.getByRole("dialog");
   const row = page.locator("tr").filter({ hasText: shopName }).first();
 
   const respPromise = page.waitForResponse(
