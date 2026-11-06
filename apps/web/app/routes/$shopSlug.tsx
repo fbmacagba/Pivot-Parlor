@@ -223,10 +223,11 @@ export async function loader({ params, context, request }: LoaderFunctionArgs) {
   // for review. The Worker decides who may read it (a developer, or this
   // shop's own admin); for anyone else, or when nothing is waiting, the
   // request falls back to the public site exactly as if the flag were absent.
-  // A portfolio demo alias never previews.
+  // Portfolio demos preview too (they are regenerated and published like any
+  // shop); without a session they still make no request beyond their GETs.
   let preview: CandidatePreview | null = null;
   let previewServices: ApiPublicService[] | null = null;
-  const token = !demo && new URL(request.url).searchParams.get("preview") === "candidate" ? getSessionToken(request) : null;
+  const token = new URL(request.url).searchParams.get("preview") === "candidate" ? getSessionToken(request) : null;
   if (token) {
     try {
       const candidate = await createApiClient(env.API_URL, token).get<SiteCandidateApi>(

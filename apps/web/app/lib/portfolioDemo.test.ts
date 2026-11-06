@@ -40,6 +40,14 @@ function backingApi(opts: { provisioned: boolean }) {
       return ok([{ id: "svc-fade", shopId: BACKING, name: "Skin fade", description: "Faded to the skin.", durationMinutes: 40, price_pence: 2400, category: "Cuts", isActive: true }]);
     if (path === `/api/shops/${BACKING}/booking-staff`) return ok([{ id: "st-kofi", display_name: "Kofi Asante", speciality: "Skin fades" }]);
     if (path === `/api/shops/${BACKING}/settings`) return ok({ hours_json: JSON.stringify({ tue: "09:00-18:00", sat: "09:00-17:00" }) });
+    if (path === `/api/shops/${BACKING}/site-candidate`)
+      return ok({
+        job_id: "job-demo",
+        created_at: "2026-11-06T10:00:00Z",
+        services_unchanged: true,
+        site: { template: "classic", headline: "Regenerated fades", tagline: "", about: "", services: [], website_status: "live", catalog_images: [], hero_image_url: null, logo_url: null },
+        services: [{ id: "svc-fade", shopId: BACKING, name: "Skin fade", description: "New copy.", durationMinutes: 40, price_pence: 2400, category: "Cuts", isActive: true }],
+      });
     return new Response(JSON.stringify({ success: false, error: "unexpected" }), { status: 500 });
   });
   return { calls, spy };
@@ -87,6 +95,22 @@ describe("portfolio demonstration", () => {
     expect(data.shop.id).toBe(BACKING);
     expect(data.commercialServices.map((s: { name: string }) => s.name)).toEqual(["Skin fade"]);
     expect(data.reviews).toEqual([]);
+    expectReadOnly(calls);
+  });
+
+  it("lets a reviewer preview the demo's pending version, still read-only on the backing shop", async () => {
+    const { calls } = backingApi({ provisioned: true });
+    const response = await loader({
+      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+      context: ctx,
+      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}?preview=candidate`, {
+        headers: { Cookie: "pp_session=a.eyJyb2xlIjoiZGV2ZWxvcGVyIn0.s" },
+      }),
+    } as never);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const data = (await response.json()) as unknown as { site: { headline: string }; preview: unknown };
+    expect(data.site.headline).toBe("Regenerated fades");
+    expect(data.preview).toMatchObject({ dashboard_href: `/dev/shops/${BACKING}` });
     expectReadOnly(calls);
   });
 
