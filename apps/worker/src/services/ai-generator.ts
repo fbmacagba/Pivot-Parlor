@@ -1,6 +1,8 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { getModel, type TextEffort } from "./model-registry.js";
 import { chatComplete, type ProviderKeys } from "@repo/llm";
+import { AuditWriteError, type AuditRecorder } from "@repo/audit";
+import { safeJsonParse } from "@repo/utils";
 
 // ─── Brand config (full schema, with conversion-optimised copy fields) ────────
 
@@ -32,6 +34,8 @@ export interface ThemeGenerationOptions {
   palette?: ThemePalette;
   /** Write the result to D1/KV (default true). Previews pass false. */
   persist?: boolean;
+  /** When set, the vendor call and the persisted theme are audited. */
+  audit?: AuditRecorder;
 }
 
 // ─── Prompt builder ───────────────────────────────────────────────────────────
@@ -106,6 +110,12 @@ function maxTokensForEffort(effort: TextEffort | undefined): number {
   return 1024;
 }
 
+/** estimated_cost_usd is permanent (details_json); round rather than carry
+ *  floating-point noise into a hashed, 6-year-locked column. */
+function round6(n: number): number {
+  return Math.round(n * 1_000_000) / 1_000_000;
+}
+
 const THEME_SYSTEM_PROMPT =
   "You are a brand designer and direct response copywriter. Return ONLY valid JSON, no markdown, no explanation, no code fences.";
 
@@ -114,7 +124,7 @@ async function callThemeModel(
   prompt: string,
   keys: ProviderKeys,
   effort?: TextEffort
-): Promise<BrandConfig> {
+): Promise<{ config: BrandConfig; route: string; model: string; inputTokens: number | null; outputTokens: number | null }> {
   // A developer is waiting on this request: one retry, not three.
   const result = await chatComplete(
     {
@@ -132,23 +142,90 @@ async function callThemeModel(
   console.log(
     `[AI Generator] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
   );
-  return JSON.parse(result.text) as BrandConfig;
+  return {
+    config: JSON.parse(result.text) as BrandConfig,
+    route: result.route,
+    model: result.model,
+    inputTokens: result.usage?.inputTokens ?? null,
+    outputTokens: result.usage?.outputTokens ?? null,
+  };
 }
 
 // ─── Main generator ───────────────────────────────────────────────────────────
 
-/** Write a theme to the shop row and the KV cache — the single "apply" path. */
+export interface ThemeAudit {
+  recorder: AuditRecorder;
+  /** null when the caller cannot know (e.g. /apply-theme persisting a
+   *  client-supplied preview whose own generation this server never saw). */
+  fallback: boolean | null;
+}
+
+// heroHeadline and tagline are excluded (Ruling 20): generated copy routinely
+// contains the shop name (personal data, Ruling 17) and, via /apply-theme, is
+// unbounded client text (Ruling 14) — and changes_json/details_json are
+// hashed and locked for 6 years, never blanked. `copy_changed` below records
+// only WHETHER that copy changed, never the words.
+const THEME_AUDIT_KEYS = ["primaryColor", "accentColor", "fontHeading", "fontBody"] as const;
+
+/** Per-field log-side shape gates (Ruling 20/21): a field is logged only when
+ *  it looks like what it claims to be, else `null`, checked independently on
+ *  the before AND after value. Log-side only — business validation
+ *  (`validateBrandConfig`) is untouched, and the /generate-theme path never
+ *  runs it at all, so a model's raw JSON output needs the same gate here. */
+const THEME_LOG_SHAPE: Record<(typeof THEME_AUDIT_KEYS)[number], RegExp> = {
+  primaryColor: /^#[0-9A-Fa-f]{3,8}$/,
+  accentColor: /^#[0-9A-Fa-f]{3,8}$/,
+  fontHeading: /^[A-Za-z0-9 ,'"-]{1,64}$/,
+  fontBody: /^[A-Za-z0-9 ,'"-]{1,64}$/,
+};
+
+function loggableIfShaped(value: string | undefined, shape: RegExp): string | null {
+  return typeof value === "string" && shape.test(value) ? value : null;
+}
+
+/** Write a theme to the shop row and the KV cache — the single "apply" path.
+ *  With `audit`, the row update and its theme.apply entry commit together. */
 export async function persistShopTheme(
   db: D1Database,
   kv: KVNamespace,
   shopId: string,
   modelId: string,
-  config: BrandConfig
+  config: BrandConfig,
+  audit?: ThemeAudit
 ): Promise<void> {
-  await db
+  const update = db
     .prepare("UPDATE shops SET ai_theme = ?, ai_model = ? WHERE id = ?")
-    .bind(JSON.stringify(config), modelId, shopId)
-    .run();
+    .bind(JSON.stringify(config), modelId, shopId);
+
+  if (audit) {
+    const prev = await db
+      .prepare("SELECT ai_theme, ai_model FROM shops WHERE id = ?")
+      .bind(shopId)
+      .first<{ ai_theme: string | null; ai_model: string | null }>();
+    const before = (safeJsonParse(prev?.ai_theme ?? null) ?? {}) as Partial<BrandConfig>;
+    const changes: Record<string, [unknown, unknown]> = { ai_model: [prev?.ai_model ?? null, modelId] };
+    for (const k of THEME_AUDIT_KEYS) {
+      const shape = THEME_LOG_SHAPE[k];
+      changes[k] = [loggableIfShaped(before[k], shape), loggableIfShaped(config[k], shape)];
+    }
+    const copyChanged = before.heroHeadline !== config.heroHeadline || before.tagline !== config.tagline;
+    // Commits the row update and the audit entry in ONE batch (Plan ruling 8):
+    // `statements()` alone never flips the gap guard's `auditWritten` flag, so
+    // batching through the recorder is required for the guard to see this as
+    // a committed write, not a false gap.
+    await audit.recorder.batch([update], {
+      action: "theme.apply",
+      outcome: "succeeded",
+      shopId,
+      entityType: "theme",
+      entityId: shopId,
+      changes,
+      details: { model: modelId, fallback: audit.fallback, copy_changed: copyChanged },
+    });
+  } else {
+    await update.run();
+  }
+
   await kv.put(`shop:theme:${shopId}`, JSON.stringify(config), {
     expirationTtl: THEME_KV_TTL,
   });
@@ -215,15 +292,37 @@ export async function generateShopTheme(
   const prompt = buildPrompt(shopName, shopType, styleKeywords, options.palette);
 
   let config: BrandConfig;
-
+  let fallback = false;
+  // Only forward effort to models that accept it — OpenRouter rejects the
+  // reasoning parameter on some non-reasoning providers.
+  const effectiveEffort = model.supportsEffort ? effort : undefined;
+  const call = () => callThemeModel(modelId, prompt, keys, effectiveEffort);
   try {
-    // Only forward effort to models that accept it — OpenRouter rejects the
-    // reasoning parameter on some non-reasoning providers.
-    const effectiveEffort = model.supportsEffort ? effort : undefined;
-    config = await callThemeModel(modelId, prompt, keys, effectiveEffort);
+    const result = options.audit
+      ? await options.audit.run(
+          { action: "ai.call", shopId, entityType: "shop", entityId: shopId, details: { purpose: "theme", model: modelId } },
+          call,
+          (r) => ({
+            details: {
+              purpose: "theme",
+              model: r.model,
+              route: r.route,
+              input_tokens: r.inputTokens,
+              output_tokens: r.outputTokens,
+              estimated_cost_usd:
+                r.inputTokens !== null && r.outputTokens !== null && (model.costPer1MInput !== 0 || model.costPer1MOutput !== 0)
+                  ? round6((r.inputTokens * model.costPer1MInput + r.outputTokens * model.costPer1MOutput) / 1_000_000)
+                  : null,
+            },
+          })
+        )
+      : await call();
+    config = result.config;
   } catch (err) {
+    if (err instanceof AuditWriteError) throw err;
     console.error(`[AI Generator] ${model.provider} call failed, using fallback:`, err);
     config = defaultTheme(shopName, shopType);
+    fallback = true;
   }
 
   // An owner-chosen palette must win over the model's colour pick.
@@ -233,7 +332,7 @@ export async function generateShopTheme(
   }
 
   if (options.persist !== false) {
-    await persistShopTheme(db, kv, shopId, modelId, config);
+    await persistShopTheme(db, kv, shopId, modelId, config, options.audit ? { recorder: options.audit, fallback } : undefined);
   }
 
   return config;

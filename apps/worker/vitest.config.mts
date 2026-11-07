@@ -9,7 +9,7 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         d1Databases: ["DB"],
         kvNamespaces: ["KV"],
-        r2Buckets: ["ASSETS"],
+        r2Buckets: ["ASSETS", "AUDIT_ARCHIVE"],
         bindings: {
           JWT_SECRET: "test-secret",
           OPENROUTER_API_KEY: "test-openrouter-key",

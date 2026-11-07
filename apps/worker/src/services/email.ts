@@ -163,6 +163,25 @@ export async function sendEodAlert(
   );
 }
 
+// ─── Audit trail alerts and daily anchor (spec 5.3, 5.4) ─────────────────────
+
+export async function sendAuditEmail(
+  apiKey: string,
+  to: string,
+  subject: string,
+  lines: string[],
+): Promise<void> {
+  const body = lines
+    .map((l) => `<p style="margin:0 0 8px;font-family:monospace;font-size:13px">${escapeHtml(l)}</p>`)
+    .join("");
+  await sendEmail(
+    apiKey,
+    to,
+    subject,
+    emailBaseLayout(emailHeader(subject, "Pivot Parlor audit trail") + emailBodySection(body), "Pivot Parlor"),
+  );
+}
+
 // ─── Email verification (SEC-3) ───────────────────────────────────────────────
 
 export interface VerificationEmailData {

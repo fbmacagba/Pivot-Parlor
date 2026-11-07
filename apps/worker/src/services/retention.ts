@@ -16,8 +16,12 @@
  *    erasure is a request flow, not a cron).
  *  - reviews: content the customer chose to publish.
  *  - contacts that onboarded: an active business relationship record.
+ *  - audit_log: 6 years (spec 2026-09-26); personal details live in
+ *    audit_subjects and are blanked 30 days after a shop leaves or an
+ *    erasure request.
  */
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
+import { expireOldEntries, redactDueSubjects } from "../audit/retention.js";
 import {
   anonymiseOldBookings,
   deleteExpiredChatSessions,
@@ -52,9 +56,12 @@ export type RetentionResult = {
 };
 
 /** One nightly pass. Sweeps run independently — one failing table never
- *  blocks the others; failures are returned for the caller to log. */
+ *  blocks the others; failures are returned for the caller to log.
+ *  `bucket` is the audit archive (Ruling 40: expireOldEntries re-verifies its
+ *  candidate range against R2 immediately before deleting). */
 export async function runRetentionSweep(
   db: D1Database,
+  bucket: R2Bucket,
   maxPerTable = RETENTION_MAX_PER_TABLE_PER_RUN
 ): Promise<RetentionResult> {
   const sweeps: Array<[string, () => Promise<number>]> = [
@@ -64,6 +71,8 @@ export async function runRetentionSweep(
     ["contacts", () => deleteStaleContacts(db, RETENTION_POLICY.contactsMonths, maxPerTable)],
     ["bookings_anonymised", () => anonymiseOldBookings(db, RETENTION_POLICY.bookingPiiMonths, maxPerTable)],
     ["ai_usage_log", () => pruneAiUsageLog(db, RETENTION_POLICY.aiUsageLogMonths, maxPerTable)],
+    ["audit_subjects_redacted", () => redactDueSubjects(db, new Date(), maxPerTable)],
+    ["audit_log_expired", () => expireOldEntries(db, bucket, new Date(), maxPerTable)],
   ];
 
   const counts: Record<string, number> = {};

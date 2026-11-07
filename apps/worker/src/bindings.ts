@@ -4,6 +4,8 @@ export type Bindings = {
   DB: D1Database;
   KV: KVNamespace;
   ASSETS: R2Bucket;
+  /** Append-only audit archive (retention-locked bucket, spec 5.2). */
+  AUDIT_ARCHIVE: R2Bucket;
   /** Service binding to pivot-parlor-booking — the canonical booking system (WS-1).
    *  Public /api/bookings and /api/shops/:shopId/slots proxy through it. */
   BOOKING: Fetcher;
@@ -31,4 +33,10 @@ export type Bindings = {
   LINKEDIN_OAUTH_CLIENT_SECRET?: string;
   TURNSTILE_SECRET_KEY?: string;
   RESEND_API_KEY?: string;
+  /** Audit trail alert/anchor recipient (spec 5.4, Ruling 32). Never read the
+   *  recipient from D1 — an in-account attacker can rewrite platform_users,
+   *  but not a Worker secret. Unset (with RESEND_API_KEY) records an
+   *  "alert email not configured" problem on the nightly audit.verify entry
+   *  instead of silently sending nothing. */
+  AUDIT_OPERATOR_EMAIL?: string;
 };

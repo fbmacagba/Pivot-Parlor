@@ -38,6 +38,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { statements } from "./sql-statements.mjs";
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const workerDir = path.join(repoRoot, "apps", "worker");
@@ -129,18 +130,6 @@ function printRestoreGuidance(bookmark, startedAtIso) {
 function migrationNumber(name) {
   const m = name.match(/^(\d+)_/);
   return m ? Number(m[1]) : null;
-}
-
-function statements(sql) {
-  // Strip comment lines FIRST — a ';' inside a comment would otherwise split
-  // the file mid-comment and corrupt the following statement.
-  return sql
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("--"))
-    .join("\n")
-    .split(";")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
 }
 
 function applyFile(name, sql, strict) {

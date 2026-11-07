@@ -41,6 +41,11 @@ import {
   staffMeRouter,
   meRouter,
 } from "./routes/dashboard.js";
+import { requestId } from "./audit/request-id.js";
+import { auditGapGuard } from "./audit/gap-guard.js";
+import { runSealer } from "./audit/sealer.js";
+import { runAuditNightly } from "./audit/nightly.js";
+import auditRouter from "./routes/audit.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -52,6 +57,7 @@ const app = new Hono<{ Bindings: Bindings }>();
  * or non-JSON responses before the handler runs. This app only mounts the webhook router.
  */
 const stripeWebhookApp = new Hono<{ Bindings: Bindings }>();
+stripeWebhookApp.use("*", requestId, auditGapGuard("webhook"));
 stripeWebhookApp.route("/api/webhooks", webhooksRouter);
 
 // ─── Global middleware ────────────────────────────────────────────────────────
@@ -110,6 +116,12 @@ app.use(
     maxAge: 86400,
   })
 );
+
+// Audit trail: every request that reaches this point gets a server-generated
+// id (CORS preflight OPTIONS requests are answered by cors() above and never
+// reach here); state-changing requests that write no audit entry of their
+// own leave an audit.gap floor entry.
+app.use("*", requestId, auditGapGuard("api"));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 
@@ -225,6 +237,9 @@ app.route("/api/waitlist", waitlistRouter);
 // Developer: AI theme generation + model management
 app.route("/api/ai", aiRouter);
 
+// Developer: audit trail viewer, checks and exports
+app.route("/api/audit", auditRouter);
+
 // Public: contact form + developer enquiry list
 // Primary path when the Worker is mounted at the domain root:
 app.route("/api/contact", contactRouter);
@@ -249,6 +264,9 @@ function isStripeWebhookPost(request: Request, url: URL): boolean {
   return path === "/api/webhooks/stripe";
 }
 
+// Exported for the audit coverage test (test/audit-coverage.test.ts).
+export { app, stripeWebhookApp };
+
 export default {
   fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
     const url = new URL(request.url);
@@ -265,13 +283,37 @@ export default {
   async scheduled(event: ScheduledEvent, env: Bindings, _ctx: ExecutionContext) {
     const cron = event.cron;
 
-    // 03:00 UTC — LEG-6 retention: bounded, idempotent sweeps (WS-8 phase 2).
+    // Every minute — audit sealer (spec 5.1). Quiet unless something is wrong.
+    if (cron === "* * * * *") {
+      const r = await runSealer(env);
+      if (r.tampered.length || r.archiveError) console.error("[Cron audit-seal]", JSON.stringify(r));
+      return;
+    }
+
+    // 03:00 UTC — LEG-6 retention: bounded, idempotent sweeps (WS-8 phase 2),
+    // then the audit nightly check (spec 5.3, 5.4). Each step has its OWN
+    // try/catch, so neither a retention failure nor a nightly failure can
+    // ever abort the other — runRetentionSweep already catches per-table
+    // errors internally, but that alone would not stop an error thrown
+    // earlier (e.g. from its own setup) from skipping the nightly check
+    // below; the outer catch here closes that gap regardless of what
+    // runRetentionSweep does internally.
     if (cron === "0 3 * * *") {
-      console.log("[Cron 03:00] Running retention sweep...");
-      const { counts, errors } = await runRetentionSweep(env.DB);
-      console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
-      for (const e of errors) {
-        console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);
+      try {
+        console.log("[Cron 03:00] Running retention sweep...");
+        const { counts, errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
+        console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
+        for (const e of errors) {
+          console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);
+        }
+      } catch (err) {
+        console.error("[Cron 03:00] Retention sweep failed:", err);
+      }
+
+      try {
+        await runAuditNightly(env);
+      } catch (err) {
+        console.error("[Cron 03:00] Audit nightly check failed:", err);
       }
       return;
     }

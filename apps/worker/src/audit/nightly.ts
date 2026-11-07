@@ -1,0 +1,467 @@
+import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
+import { sendAuditEmail } from "../services/email.js";
+import { systemAudit } from "./context.js";
+import { verifyRange, type VerifyResult } from "./verify.js";
+
+export const WALK_ROWS_PER_NIGHT = 20_000;
+
+/** Ruling 54: archive objects (one R2 GET each) the nightly may read across
+ *  BOTH ranges combined. Workers Paid allows 10,000 subrequests per
+ *  invocation by default; 2,000 leaves ample headroom for the D1 pages,
+ *  cursor updates, the audit.verify/audit.anchor writes and the emails. The
+ *  incremental range is served first and the walk gets what is left, so new
+ *  entries are never starved by the history re-walk. */
+export const NIGHTLY_ARCHIVE_OBJECTS = 2000;
+
+export interface NightlyLimits {
+  archiveObjects: number;
+}
+
+type NightlyEnv = {
+  DB: D1Database;
+  AUDIT_ARCHIVE: R2Bucket;
+  RESEND_API_KEY?: string;
+  AUDIT_OPERATOR_EMAIL?: string;
+};
+type Send = typeof sendAuditEmail;
+
+interface StoredAnchor {
+  date: string;
+  seq: number;
+  chain_hash: string;
+}
+
+/** Ruling 30: a throw from verifyRange (a bucket read error, an unexpected
+ *  exception) must not suppress the audit.verify record or the alert email
+ *  the way an uncaught throw out of runAuditNightly would. Never err.message
+ *  (Ruling 5) — only the error's name. firstBadSeq is set to fromSeq: fed
+ *  through advanceCursor below exactly like any other structured failure,
+ *  that sets last_verified_seq = fromSeq, so the NEXT run starts at
+ *  fromSeq + 1 — not "retry the same range". A transient failure (bucket
+ *  blip) therefore permanently skips verifying the single row at fromSeq;
+ *  recorded as a Ruling 31 cost in the report, not fixed here (the
+ *  alternative — leaving the cursor where it was — is what caused the
+ *  original stall Ruling 31 exists to close). */
+async function safeVerify(
+  db: D1Database,
+  bucket: R2Bucket,
+  fromSeq: number,
+  toSeq: number,
+  opts: { requireArchived?: boolean; maxArchiveObjects: number }
+): Promise<VerifyResult> {
+  try {
+    return await verifyRange(db, bucket, fromSeq, toSeq, opts);
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "Error";
+    // Ruling 54: how many GETs ran before the throw is unknown, so count the
+    // whole budget as spent (conservative: the walk then does not run on a
+    // night whose incremental range threw, and the problem line alerts).
+    return {
+      ok: false, fromSeq, toSeq, checked: 0, firstBadSeq: fromSeq, problem: `verify error: ${name}`,
+      capped: false, archiveObjects: opts.maxArchiveObjects,
+    };
+  }
+}
+
+/** Ruling 31: never advance a cursor BACKWARDS past where it already is.
+ *  verifyRange's own "no chain value before seq X" failure reports
+ *  firstBadSeq = X - 1 (the last GOOD seq it could confirm, which is simply
+ *  the cursor's current position when X itself is a gap) — advancing to that
+ *  value would repeat the same failure every subsequent night forever, which
+ *  is exactly the stall Ruling 31 forbids. Clamping to at least `fromSeq`
+ *  guarantees forward progress; a gap then resolves within a few nights
+ *  instead of never (seq X missing entirely means there is no stored
+ *  chain_hash to seed from at X, so "seeded from the stored chain_hash at X"
+ *  cannot apply in that specific case — recorded in the report). */
+function advanceCursor(r: VerifyResult): number {
+  return r.ok ? r.toSeq : Math.max(r.firstBadSeq ?? r.fromSeq, r.fromSeq);
+}
+
+// Ruling 36: every individual step inside runAuditNightlyBody already
+// guards its own failure into a problem line (Ruling 30), but that only
+// covers throws INSIDE the guarded steps -- a throw from something that
+// runs before or between them (the very first state SELECT, MAX(seq) query,
+// or any future addition that forgets its own try/catch) would otherwise
+// escape uncaught, silently skipping both the audit.verify record and the
+// alert email for the whole night. One top-level catch here is the backstop
+// for anything the per-step guards don't cover, not a replacement for them.
+export async function runAuditNightly(
+  env: NightlyEnv,
+  now = new Date(),
+  send: Send = sendAuditEmail,
+  limits: NightlyLimits = { archiveObjects: NIGHTLY_ARCHIVE_OBJECTS }
+): Promise<void> {
+  try {
+    await runAuditNightlyBody(env, now, send, limits);
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "Error"; // never err.message (Ruling 5)
+    // Ruling 32: recipient from env, never D1 -- same rule as the body's own
+    // alert path, duplicated here rather than shared because the body's
+    // `recipient`/`alertingConfigured` locals may not exist if whatever threw
+    // did so before they were computed.
+    const recipient = env.AUDIT_OPERATOR_EMAIL;
+    const alertingConfigured = Boolean(recipient && env.RESEND_API_KEY);
+    // Carried Task 9 minor (b): the crash entry's own reason should say so
+    // too when alerting isn't configured, same as the body's normal problem
+    // list already does -- otherwise a crash with no alert email leaves no
+    // trace in the audit_log reason of WHY no one was notified.
+    const reason = `nightly check crashed: ${name}${alertingConfigured ? "" : "; alert email not configured"}`;
+    try {
+      await systemAudit(env.DB, "cron").write({
+        action: "audit.verify",
+        outcome: "failed",
+        reason,
+      });
+    } catch (writeErr) {
+      console.error("[audit] nightly crash entry could not be written:", writeErr instanceof Error ? writeErr.name : writeErr);
+    }
+    if (alertingConfigured) {
+      try {
+        await send(env.RESEND_API_KEY!, recipient!, "Audit trail needs attention", [`nightly check crashed: ${name}`]);
+      } catch (sendErr) {
+        console.error("[audit] crash alert email failed:", sendErr instanceof Error ? sendErr.name : sendErr);
+      }
+    }
+  }
+}
+
+async function runAuditNightlyBody(env: NightlyEnv, now: Date, send: Send, limits: NightlyLimits): Promise<void> {
+  const db = env.DB;
+  const state = await db.prepare("SELECT last_verified_seq, walk_cursor_seq, expired_through_seq FROM audit_seal_state WHERE id = 1")
+    .first<{ last_verified_seq: number; walk_cursor_seq: number; expired_through_seq: number }>();
+  const maxRow = await db.prepare("SELECT MAX(seq) AS m FROM audit_log").first<{ m: number | null }>();
+  const maxSeq = maxRow?.m ?? 0;
+  const floor = (state?.expired_through_seq ?? 0) + 1;
+  const lastVerifiedSeq = state?.last_verified_seq ?? 0;
+
+  // Ruling 29: a deleted tail (the trail's own MAX(seq) regressing below what
+  // was already verified) is otherwise invisible — nothing below re-scans
+  // seq numbers that no longer exist.
+  const newestMissing = maxSeq < lastVerifiedSeq;
+
+  // Ruling 28: never verify a row that isn't archived yet (normal sealing/
+  // archiving lag) as if its archive comparison passed — cap each scan's
+  // upper bound BELOW the first unarchived seq WITHIN that scan's own
+  // candidate range (not a single global ceiling: one unrelated row with a
+  // nulled archived_at elsewhere in history must not block tonight's
+  // incremental check on fresh entries).
+  async function archivedCeiling(from: number, tentativeTo: number): Promise<number> {
+    if (tentativeTo < from) return tentativeTo;
+    const row = await db
+      .prepare("SELECT MIN(seq) AS m FROM audit_log WHERE seq BETWEEN ? AND ? AND archived_at IS NULL")
+      .bind(from, tentativeTo)
+      .first<{ m: number | null }>();
+    return row?.m != null ? row.m - 1 : tentativeTo;
+  }
+
+  // Moved up from the health-counts section below so it is available to the
+  // Ruling 33 computation immediately following it as well.
+  const iso = (msAgo: number) => new Date(now.getTime() - msAgo).toISOString();
+
+  // Ruling 33: archivedCeiling above can silently stop BOTH the incremental
+  // scan and the rotating walk well short of MAX(seq) when a single row
+  // never finishes archiving — the cap just makes incremental/walk both
+  // null forever, with no problem line naming why. Name the seq once it has
+  // been stuck long enough to rule out ordinary archiver lag (same 1-hour
+  // threshold as the "unarchived" count below). Computed ONCE for the whole
+  // run, from the first unarchived sealed seq above last_verified_seq — NOT
+  // per scan range, unlike archivedCeiling (a range-scoped cap is right for
+  // "don't verify this yet"; the blocked-seq report is about the trail as a
+  // whole, so computing it twice would just duplicate the same answer).
+  const blockedRow = await db
+    .prepare("SELECT seq, sealed_at FROM audit_log WHERE seq > ? AND sealed_at IS NOT NULL AND archived_at IS NULL ORDER BY seq LIMIT 1")
+    .bind(lastVerifiedSeq)
+    .first<{ seq: number; sealed_at: string }>();
+  const blockedAtSeq = blockedRow && blockedRow.sealed_at < iso(3600_000) ? blockedRow.seq : null;
+
+  // 1. New entries since the last successful check.
+  const incFrom = Math.max(floor, lastVerifiedSeq + 1);
+  const incTentativeTo = Math.min(maxSeq, incFrom + WALK_ROWS_PER_NIGHT - 1);
+  const incTo = await archivedCeiling(incFrom, incTentativeTo);
+  // Ruling 54: a capped range reports toSeq = its last fully verified seq,
+  // so advanceCursor below moves the cursor exactly that far and the next
+  // night resumes right after it.
+  const incremental: VerifyResult | null =
+    incTo >= incFrom
+      ? await safeVerify(db, env.AUDIT_ARCHIVE, incFrom, incTo, { requireArchived: true, maxArchiveObjects: limits.archiveObjects })
+      : null;
+  const walkBudget = limits.archiveObjects - (incremental?.archiveObjects ?? 0);
+  let newLastVerifiedSeq = lastVerifiedSeq;
+  if (incremental) {
+    newLastVerifiedSeq = advanceCursor(incremental);
+    await db.prepare("UPDATE audit_seal_state SET last_verified_seq = ? WHERE id = 1").bind(newLastVerifiedSeq).run();
+  }
+
+  // 2. Rotating re-walk of older history (Plan 1 decision 9).
+  //
+  // Ruling 34: every nightly itself writes an audit.verify row that the
+  // sealer seals (and archives) before the next run, so MAX(seq) always
+  // grows and `walkFrom > maxSeq` never fires in production -- the walk
+  // never wraps. The literal ruling text says to compare against
+  // last_verified_seq "using the value after this night's incremental
+  // update" (i.e. newLastVerifiedSeq). Measured (three variants, one new
+  // seal+archive between each of 4 nights, apps/worker/test/
+  // audit-nightly-walk-wrap.test.ts): that literal reading reproduces the
+  // EXACT SAME bug it's meant to fix. Once one full backlog has been
+  // walked, walk_cursor_seq == newLastVerifiedSeq from that same night,
+  // so tomorrow's walkFrom (= walk_cursor_seq + 1) is always exactly one
+  // more than TOMORROW's own newLastVerifiedSeq too (both grow by the same
+  // one row between nights), so `walkFrom > newLastVerifiedSeq` is never
+  // true either -- it shadows the incremental one row at a time, just
+  // like the old maxSeq condition did. Comparing against `lastVerifiedSeq`
+  // instead -- the START-of-run value captured at the top of this
+  // function, before tonight's OWN incremental update -- is NOT stale in
+  // the way that sounds: it is exactly last night's ending
+  // last_verified_seq, which does not move between nights except when a
+  // nightly run itself advances it. So walkFrom (= last night's walk
+  // ending + 1) does legitimately exceed it once the walk has fully
+  // caught up, wrapping for real. The upper bound below still uses
+  // newLastVerifiedSeq (tonight's, post-incremental value) so the walk
+  // still only ever covers rows at or below last_verified_seq, per the
+  // ruling's own stated invariant -- only the WRAP DECISION differs from
+  // the literal text. Flagged to the coordinator as a deviation, not
+  // applied silently; see task-9-report.md for the three measured runs.
+  let walkFrom = Math.max(floor, (state?.walk_cursor_seq ?? 0) + 1);
+  if (walkFrom > lastVerifiedSeq) walkFrom = floor;
+  const walkTentativeTo = Math.min(newLastVerifiedSeq, walkFrom + WALK_ROWS_PER_NIGHT - 1);
+  const walkTo = await archivedCeiling(walkFrom, walkTentativeTo);
+  // Ruling 54: no budget left = no walk tonight (cursor untouched).
+  const walk: VerifyResult | null =
+    walkTo >= walkFrom && walkBudget >= 1
+      ? await safeVerify(db, env.AUDIT_ARCHIVE, walkFrom, walkTo, { requireArchived: true, maxArchiveObjects: walkBudget })
+      : null;
+  if (walk) await db.prepare("UPDATE audit_seal_state SET walk_cursor_seq = ? WHERE id = 1").bind(advanceCursor(walk)).run();
+
+  // 3. Health counts. (`iso` is defined above, ahead of the Ruling 33 check.)
+  const count = async (sql: string, ...binds: unknown[]) =>
+    (await db.prepare(sql).bind(...binds).first<{ n: number }>())?.n ?? 0;
+  // Ruling 27: a row that already carries an audit.seal.alert is excluded
+  // from "unsealed" — the sealer never advances it past unsealed (Ruling 23),
+  // so it would otherwise be reported as a growing backlog forever instead
+  // of the one-time integrity failure it actually is. Same NOT EXISTS shape
+  // sealBatch itself uses to skip these rows.
+  const unsealed = await count(
+    `SELECT COUNT(*) AS n FROM audit_log al WHERE al.sealed_at IS NULL AND al.occurred_at < ?
+     AND NOT EXISTS (
+       SELECT 1 FROM audit_log a
+       WHERE a.action = 'audit.seal.alert' AND a.entity_type = 'audit_log' AND a.entity_id = al.id
+     )`,
+    iso(10 * 60_000)
+  );
+  const unarchived = await count("SELECT COUNT(*) AS n FROM audit_log WHERE sealed_at IS NOT NULL AND archived_at IS NULL AND sealed_at < ?", iso(3600_000));
+  const unknown = await count("SELECT COUNT(*) AS n FROM audit_log WHERE outcome = 'unknown' AND occurred_at >= ?", iso(24 * 3600_000));
+  // Ruling 27: rows that failed their entry_hash check at sealing time,
+  // reported separately from "unsealed" (above) since sealing will never
+  // resolve them on its own.
+  const sealAlerts = await count("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.seal.alert' AND occurred_at >= ?", iso(24 * 3600_000));
+  // Ruling 56: the 24 h line above goes quiet a day after the alert, and the
+  // alerted row is excluded from "unsealed" -- so a tamper would alarm once
+  // and then read green forever. This count has no time window: every row
+  // still unsealed because it failed its integrity check is reported every
+  // night for as long as it stays in the trail.
+  const alertedUnsealed = await count(
+    `SELECT COUNT(*) AS n FROM audit_log al WHERE al.sealed_at IS NULL
+     AND EXISTS (
+       SELECT 1 FROM audit_log a
+       WHERE a.action = 'audit.seal.alert' AND a.entity_type = 'audit_log' AND a.entity_id = al.id
+     )`
+  );
+
+  // Ruling 35: timestamp-free invariants -- states a legitimate row can
+  // never reach through the normal seal/archive/expire code paths, so a
+  // nonzero count here means something wrote to audit_log or
+  // audit_seal_state directly, bypassing the code that keeps these columns
+  // in sync. Unlike every other health count above, these do not depend on
+  // `now`, sealed_at or expired_through_seq being trustworthy AT ALL -- they
+  // ARE the check on whether those very values still make sense, so a
+  // D1-write attacker who also rewrites the timestamps every other gate
+  // above reads cannot talk their way out of these.
+  const impossibleSealed = await count("SELECT COUNT(*) AS n FROM audit_log WHERE seq IS NOT NULL AND sealed_at IS NULL");
+  // (b): a row at or below last_verified_seq is CLAIMED as already verified,
+  // and verifyRange's own requireArchived gate (Ruling 28) would have
+  // refused to advance last_verified_seq past a row that wasn't archived --
+  // so finding one here means it was un-archived AFTER being verified
+  // (direct tampering), not ordinary archiver lag. This is Ruling 33's
+  // "blocked" scenario turned inside out: that one is about a row ABOVE
+  // last_verified_seq stopping the cursor from reaching it; this one is
+  // about a row AT OR BELOW it that should never have been reachable in
+  // this state at all, so it needs no separate "blocked" line of its own.
+  const impossibleVerifiedUnarchived = await count(
+    "SELECT COUNT(*) AS n FROM audit_log WHERE seq <= ? AND (archived_at IS NULL OR archive_key IS NULL)",
+    newLastVerifiedSeq
+  );
+  const impossibleArchivedNoKey = await count("SELECT COUNT(*) AS n FROM audit_log WHERE archived_at IS NOT NULL AND archive_key IS NULL");
+  // (d): two distinct ways the retention boundary can be wrong, combined
+  // into one count/line -- a row that should already have been purged but
+  // is still present at or below the expiry boundary, or the boundary
+  // itself having been moved past what has actually been verified. Task 10's
+  // expireOldEntries itself reads audit_seal_state.last_verified_seq and
+  // gates its candidate rows on seq <= last_verified_seq (Ruling 38), so
+  // expired_through_seq can never legitimately land above it through that
+  // path -- a nonzero second term here means something moved the boundary
+  // outside it (direct tampering, not ordinary sweep behaviour).
+  const expiredThroughSeq = state?.expired_through_seq ?? 0;
+  const impossibleExpiry =
+    (await count("SELECT COUNT(*) AS n FROM audit_log WHERE seq <= ?", expiredThroughSeq)) +
+    (expiredThroughSeq > newLastVerifiedSeq ? 1 : 0);
+
+  // 4. Daily anchor for the previous UTC day, plus reading back and
+  // re-verifying anchors already on file (Ruling 29).
+  const today = now.toISOString().slice(0, 10);
+  const yesterday = new Date(Date.parse(`${today}T00:00:00.000Z`) - 24 * 3600_000).toISOString().slice(0, 10);
+  const dayBefore = new Date(Date.parse(`${today}T00:00:00.000Z`) - 2 * 24 * 3600_000).toISOString().slice(0, 10);
+  const anchorRow = await db.prepare("SELECT seq, chain_hash FROM audit_log WHERE seq IS NOT NULL AND sealed_at < ? ORDER BY seq DESC LIMIT 1")
+    .bind(`${today}T00:00:00.000Z`)
+    .first<{ seq: number; chain_hash: string }>();
+  const anchorKey = `anchors/${yesterday}.json`;
+
+  // Ruling 30: the anchor step is guarded — a write failure becomes a
+  // problem line, never an uncaught throw.
+  let anchorWriteProblem: string | null = null;
+  try {
+    if (anchorRow && !(await env.AUDIT_ARCHIVE.head(anchorKey))) {
+      await env.AUDIT_ARCHIVE.put(anchorKey, JSON.stringify({ date: yesterday, seq: anchorRow.seq, chain_hash: anchorRow.chain_hash }));
+    }
+  } catch (err) {
+    anchorWriteProblem = `could not write anchor for ${yesterday}: ${err instanceof Error ? err.name : "Error"}`;
+  }
+
+  // Ruling 29: compare a stored anchor against the LIVE row at its seq (never
+  // trust a freshly recomputed value — the anchor exists precisely because a
+  // recompute is what an attacker who owns the DB can do). Only meaningful
+  // when the anchored seq is still expected to exist (not legitimately
+  // expired by retention, Task 10).
+  async function checkStoredAnchor(date: string): Promise<{ anchor: StoredAnchor | null; problem: string | null }> {
+    try {
+      const obj = await env.AUDIT_ARCHIVE.get(`anchors/${date}.json`);
+      if (!obj) return { anchor: null, problem: null };
+      const stored = JSON.parse(await obj.text()) as StoredAnchor;
+      if (stored.seq <= floor - 1) return { anchor: stored, problem: null };
+      const row = await db.prepare("SELECT chain_hash FROM audit_log WHERE seq = ?").bind(stored.seq).first<{ chain_hash: string }>();
+      if (!row || row.chain_hash !== stored.chain_hash) {
+        return { anchor: stored, problem: `stored anchor for ${date} no longer matches the chain at seq ${stored.seq}` };
+      }
+      return { anchor: stored, problem: null };
+    } catch (err) {
+      return { anchor: null, problem: `could not verify stored anchor for ${date}: ${err instanceof Error ? err.name : "Error"}` };
+    }
+  }
+  const latestAnchor = await checkStoredAnchor(yesterday);
+  const priorAnchor = await checkStoredAnchor(dayBefore);
+
+  // Ruling 32: never read the recipient from D1.
+  const recipient = env.AUDIT_OPERATOR_EMAIL;
+  const alertingConfigured = Boolean(recipient && env.RESEND_API_KEY);
+
+  // Ruling 57: a send that failed last night is only on record in last
+  // night's audit.anchor entry; raise it tonight. Read BEFORE tonight's own
+  // audit.anchor is written below, so it is always the previous night's.
+  let previousSendProblems: string[] = [];
+  try {
+    const prev = await db
+      .prepare("SELECT outcome, details_json FROM audit_log WHERE action = 'audit.anchor' ORDER BY occurred_at DESC, id DESC LIMIT 1")
+      .first<{ outcome: string; details_json: string | null }>();
+    if (prev?.outcome === "failed") {
+      const d = JSON.parse(prev.details_json ?? "{}") as Partial<Record<"alert" | "anchor", SendRecord>>;
+      previousSendProblems = (["alert", "anchor"] as const)
+        .filter((k) => d[k]?.outcome === "failed")
+        .map((k) => `previous night's ${k} email could not be sent (${d[k]?.error ?? "Error"})`);
+      if (!previousSendProblems.length) previousSendProblems = ["previous night's email could not be sent"];
+    }
+  } catch (err) {
+    previousSendProblems = [`could not read the previous night's email record: ${err instanceof Error ? err.name : "Error"}`];
+  }
+
+  const problems = [
+    incremental && !incremental.ok ? `Check failed at seq ${incremental.firstBadSeq}: ${incremental.problem}` : null,
+    walk && !walk.ok ? `History re-walk failed at seq ${walk.firstBadSeq}: ${walk.problem}` : null,
+    newestMissing ? "newest entries missing" : null,
+    unsealed ? `${unsealed} entries unsealed for more than 10 minutes` : null,
+    unarchived ? `${unarchived} sealed entries unarchived for more than 1 hour` : null,
+    blockedAtSeq != null ? `verification blocked at seq ${blockedAtSeq}: sealed but not archived` : null,
+    unknown ? `${unknown} actions in the last 24 hours have no recorded outcome` : null,
+    sealAlerts ? `${sealAlerts} entries failed their integrity check when sealing` : null,
+    alertedUnsealed ? `${alertedUnsealed} entries are permanently unsealed after failing their integrity check` : null,
+    impossibleSealed ? `${impossibleSealed} entries are in an impossible state (sealed without a seal time)` : null,
+    impossibleVerifiedUnarchived ? `${impossibleVerifiedUnarchived} entries are in an impossible state (verified but not fully archived)` : null,
+    impossibleArchivedNoKey ? `${impossibleArchivedNoKey} entries are in an impossible state (archived without an archive key)` : null,
+    impossibleExpiry ? `${impossibleExpiry} entries are in an impossible state (expired retention inconsistent with verified history)` : null,
+    anchorWriteProblem,
+    latestAnchor.problem,
+    priorAnchor.problem,
+    ...previousSendProblems,
+    alertingConfigured ? null : "alert email not configured",
+  ].filter((x): x is string => x !== null);
+
+  // Ruling 30: a throw here (audit_log itself unwritable) must not suppress
+  // the alert email below.
+  try {
+    await systemAudit(db, "cron").write({
+      action: "audit.verify",
+      outcome: problems.length ? "failed" : "succeeded",
+      reason: problems.length ? problems.join("; ").slice(0, 500) : null,
+      details: {
+        checked: (incremental?.checked ?? 0) + (walk?.checked ?? 0),
+        incremental: incremental && { from: incremental.fromSeq, to: incremental.toSeq, ok: incremental.ok, firstBadSeq: incremental.firstBadSeq, capped: incremental.capped },
+        walk: walk && { from: walk.fromSeq, to: walk.toSeq, ok: walk.ok, firstBadSeq: walk.firstBadSeq, capped: walk.capped },
+        archiveObjects: (incremental?.archiveObjects ?? 0) + (walk?.archiveObjects ?? 0),
+        unsealed, unarchived, unknown, sealAlerts, alertedUnsealed,
+        blockedAtSeq,
+        impossibleSealed, impossibleVerifiedUnarchived, impossibleArchivedNoKey, impossibleExpiry,
+        anchor: anchorRow ? { date: yesterday, seq: anchorRow.seq } : null,
+      },
+    });
+  } catch (err) {
+    console.error("[audit] nightly check entry could not be written:", err instanceof Error ? err.name : err);
+  }
+
+  // Ruling 57 decision: with alerting not configured nothing is sent and no
+  // audit.anchor entry is written; the audit.verify entry above already
+  // carries "alert email not configured".
+  if (!alertingConfigured) return;
+
+  // Minor: alert before anchor, each isolated so one send failing does not
+  // suppress the other.
+  const errorName = (err: unknown) => (err instanceof Error ? err.name : "Error"); // never err.message (Ruling 5)
+  let alertSend: SendRecord = null;
+  let anchorSend: SendRecord = null;
+  if (problems.length) {
+    try {
+      await send(env.RESEND_API_KEY!, recipient!, "Audit trail needs attention", problems);
+      alertSend = { outcome: "succeeded" };
+    } catch (err) {
+      console.error("[audit] alert email failed:", errorName(err));
+      alertSend = { outcome: "failed", error: errorName(err) };
+    }
+  }
+  if (latestAnchor.anchor) {
+    try {
+      await send(env.RESEND_API_KEY!, recipient!, `Audit anchor ${latestAnchor.anchor.date}`, [
+        `Date: ${latestAnchor.anchor.date}`,
+        `Last sealed entry: ${latestAnchor.anchor.seq}`,
+        `Chain fingerprint: ${latestAnchor.anchor.chain_hash}`,
+        "Keep this email. It proves what the audit trail said on this date.",
+      ]);
+      anchorSend = { outcome: "succeeded", date: latestAnchor.anchor.date };
+    } catch (err) {
+      console.error("[audit] anchor email failed:", errorName(err));
+      anchorSend = { outcome: "failed", error: errorName(err), date: latestAnchor.anchor.date };
+    }
+  }
+
+  // Ruling 57: the delivery itself goes on record (null = nothing to send).
+  const anyFailed = alertSend?.outcome === "failed" || anchorSend?.outcome === "failed";
+  try {
+    await systemAudit(db, "cron").write({
+      action: "audit.anchor",
+      outcome: anyFailed ? "failed" : "succeeded",
+      reason: anyFailed ? "email send failed" : null,
+      details: { alert: alertSend, anchor: anchorSend },
+    });
+  } catch (err) {
+    console.error("[audit] audit.anchor entry could not be written:", errorName(err));
+  }
+}
+
+/** Ruling 57: one email send's outcome; `error` is the error's name only. */
+type SendRecord = { outcome: "succeeded" | "failed"; error?: string; date?: string } | null;

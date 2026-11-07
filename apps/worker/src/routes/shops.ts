@@ -20,7 +20,7 @@ import {
   getServicesByShop,
   getServiceById,
   getShopSiteImages,
-  updateShopSiteWebsiteStatus,
+  shopSiteWebsiteStatusStatement,
   getSiteCandidate,
   deleteSiteCandidate,
   publishSiteCandidateStatements,
@@ -39,6 +39,8 @@ import {
   parseComposer,
   buildServiceImagePrompt,
 } from "@repo/utils";
+import { AuditWriteError, userSubjectId } from "@repo/audit";
+import { auditFor, auditRefused, batchWithAudit } from "../audit/context.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
 import { buildSiteData, siteDesignIntent, siteWebsiteStatus } from "../lib/siteData.js";
@@ -247,55 +249,86 @@ shops.get("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), a
   });
 });
 
+/** Version ids are server-made generation job ids. Bound what a request can
+ *  put into an audit entry, which is hashed and kept for 6 years (Ruling 14),
+ *  before anything is recorded. */
+const CANDIDATE_JOB_ID = /^[A-Za-z0-9-]{1,64}$/;
+
+/** Audit outcome for a site-candidate response: 4xx is a refusal and 5xx a
+ *  failure, the same split the gap guard uses. */
+const candidateOutcome = (jobId: string) => (res: Response) => ({
+  outcome: res.status >= 500 ? ("failed" as const) : res.status >= 400 ? ("refused" as const) : ("succeeded" as const),
+  reason: res.status < 400 ? null : `HTTP ${res.status}`,
+  details: { job_id: jobId },
+});
+
 shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("admin"), async (c) => {
   const shop = await shopForReview(c);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
   const body = (await c.req.json().catch(() => ({}))) as { job_id?: unknown };
   const jobId = typeof body.job_id === "string" ? body.job_id.trim() : "";
   if (!jobId) return c.json({ success: false, error: "job_id is required: publish the version you previewed" }, 400);
+  if (!CANDIDATE_JOB_ID.test(jobId)) return c.json({ success: false, error: "job_id is not a valid version id" }, 400);
 
-  const candidate = await getSiteCandidate(c.env.DB, shop.id);
-  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
-  if (candidate.job_id !== jobId) {
-    return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
-  }
-  const payload = parseCandidatePayload(candidate.payload_json);
-  if (!payload) {
-    return c.json({ success: false, error: "This version cannot be published by this release. Regenerate the site." }, 409);
-  }
-  const site = await getShopSiteByShopId(c.env.DB, shop.id);
-  if (!site) return c.json({ success: false, error: "The shop has no published site to update." }, 409);
-  const rows = await getServicesByShop(c.env.DB, shop.id);
-  if (!servicesUnchanged(payload.service_names, rows.map((r) => r.name))) {
-    return c.json({ success: false, error: SERVICES_CHANGED }, 409);
-  }
-
-  const columns = withoutLockedImages(payload.columns, (site as { locked_images_json?: string | null }).locked_images_json);
-  const entries = Object.entries(columns) as Array<[CandidateColumn, string | number | null]>;
-  const results = await c.env.DB.batch(
-    publishSiteCandidateStatements(c.env.DB, {
-      shopId: shop.id,
-      jobId,
-      columns: entries,
-      ownerPalette: payload.owner_palette,
-    }),
-  );
-  // The last statement removes the candidate. If it removed nothing, a newer
-  // regeneration replaced this one mid-publish and every write was skipped.
-  const removed = results[results.length - 1]?.meta?.changes ?? 0;
-  if (removed === 0) {
-    return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
-  }
   try {
-    await c.env.KV.delete(`site:${shop.slug}`);
-  } catch (err) {
-    // /site re-reads services, status, images and design intent from D1 on
-    // every request; only headline, tagline, about, colours, fonts and SEO
-    // would stay on the cached copy until its 24h expiry.
-    console.error(`[site-candidate] KV bust failed shop=${shop.id}`, err);
+    return await auditFor(c).run(
+      {
+        action: "site.candidate.publish",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: { job_id: jobId },
+      },
+      async (): Promise<Response> => {
+        const candidate = await getSiteCandidate(c.env.DB, shop.id);
+        if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+        if (candidate.job_id !== jobId) {
+          return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
+        }
+        const payload = parseCandidatePayload(candidate.payload_json);
+        if (!payload) {
+          return c.json({ success: false, error: "This version cannot be published by this release. Regenerate the site." }, 409);
+        }
+        const site = await getShopSiteByShopId(c.env.DB, shop.id);
+        if (!site) return c.json({ success: false, error: "The shop has no published site to update." }, 409);
+        const rows = await getServicesByShop(c.env.DB, shop.id);
+        if (!servicesUnchanged(payload.service_names, rows.map((r) => r.name))) {
+          return c.json({ success: false, error: SERVICES_CHANGED }, 409);
+        }
+
+        const columns = withoutLockedImages(payload.columns, (site as { locked_images_json?: string | null }).locked_images_json);
+        const entries = Object.entries(columns) as Array<[CandidateColumn, string | number | null]>;
+        const results = await c.env.DB.batch(
+          publishSiteCandidateStatements(c.env.DB, {
+            shopId: shop.id,
+            jobId,
+            columns: entries,
+            ownerPalette: payload.owner_palette,
+          }),
+        );
+        // The last statement removes the candidate. If it removed nothing, a newer
+        // regeneration replaced this one mid-publish and every write was skipped.
+        const removed = results[results.length - 1]?.meta?.changes ?? 0;
+        if (removed === 0) {
+          return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
+        }
+        try {
+          await c.env.KV.delete(`site:${shop.slug}`);
+        } catch (err) {
+          // /site re-reads services, status, images and design intent from D1 on
+          // every request; only headline, tagline, about, colours, fonts and SEO
+          // would stay on the cached copy until its 24h expiry.
+          console.error(`[site-candidate] KV bust failed shop=${shop.id}`, err);
+        }
+        console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
+        return c.json({ success: true, data: { published: true, job_id: jobId } });
+      },
+      candidateOutcome(jobId),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
-  return c.json({ success: true, data: { published: true, job_id: jobId } });
 });
 
 shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), async (c) => {
@@ -303,14 +336,33 @@ shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin")
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
   const jobId = (c.req.query("job_id") ?? "").trim();
   if (!jobId) return c.json({ success: false, error: "job_id is required: discard the version you previewed" }, 400);
-  const candidate = await getSiteCandidate(c.env.DB, shop.id);
-  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
-  if (candidate.job_id !== jobId) {
-    return c.json({ success: false, error: "A newer version replaced the one you previewed." }, 409);
+  if (!CANDIDATE_JOB_ID.test(jobId)) return c.json({ success: false, error: "job_id is not a valid version id" }, 400);
+
+  try {
+    return await auditFor(c).run(
+      {
+        action: "site.candidate.discard",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: { job_id: jobId },
+      },
+      async (): Promise<Response> => {
+        const candidate = await getSiteCandidate(c.env.DB, shop.id);
+        if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+        if (candidate.job_id !== jobId) {
+          return c.json({ success: false, error: "A newer version replaced the one you previewed." }, 409);
+        }
+        await deleteSiteCandidate(c.env.DB, shop.id, jobId);
+        console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
+        return c.json({ success: true, data: { discarded: true, job_id: jobId } });
+      },
+      candidateOutcome(jobId),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  await deleteSiteCandidate(c.env.DB, shop.id, jobId);
-  console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
-  return c.json({ success: true, data: { discarded: true, job_id: jobId } });
 });
 
 // ─── GET /api/shops/:shopId/booking-staff — public staff list for customer booking (no emails) ─
@@ -1109,31 +1161,86 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
     (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
+  // Ruling 17: shop name and slug are personal data (sole traders trade under
+  // their own name) and must never enter the permanent, unblankable
+  // details_json. They live only in this redactable audit_subjects row,
+  // referenced from the entry by id.
+  const shopSubjectRef = `subj_shop_${shop.id}`;
   try {
-    await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
-    await c.env.DB
-      .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
-      .bind(shop.id)
-      .run()
-      .catch(() => {
-        /* table may not exist in older DB snapshots */
-      });
-    await c.env.DB
-      .prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?")
-      .bind(shop.id)
-      .run()
-      .catch(() => {
-        /* best effort */
-      });
+    await c.env.DB.prepare(
+      `INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at)
+       VALUES (?, 'shop', ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, shop_id = excluded.shop_id
+       WHERE audit_subjects.redacted_at IS NULL`
+    )
+      .bind(shopSubjectRef, shop.id, `${shop.name} (${shop.slug})`, new Date().toISOString())
+      .run();
+  } catch (e) {
+    console.error("[shops.delete] subject upsert failed", e);
+    return auditRefused(c);
+  }
 
-    await c.env.KV.delete(`site:${shop.slug}`);
-    await c.env.KV.delete(`shop:theme:${shop.id}`);
-    await c.env.KV.delete(`gen:settings:${shop.id}`);
-    await c.env.KV.delete(`walkin:queue:${shop.id}`);
+  const [userCountRow, bookingCountRow] = await Promise.all([
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM platform_users WHERE shop_id = ?").bind(shop.id).first<{ n: number }>(),
+    c.env.DB.prepare("SELECT COUNT(*) AS n FROM bookings WHERE shop_id = ?").bind(shop.id).first<{ n: number }>(),
+  ]);
 
-    await c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id).run();
+  try {
+    await auditFor(c).run(
+      {
+        action: "shop.delete",
+        shopId: shop.id,
+        entityType: "shop",
+        entityId: shop.id,
+        details: {
+          shop_subject: shopSubjectRef,
+          type: shop.type,
+          created_at: shop.created_at,
+          users: userCountRow?.n ?? 0,
+          bookings: bookingCountRow?.n ?? 0,
+        },
+      },
+      async () => {
+        await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
+        await c.env.DB
+          .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
+          .bind(shop.id)
+          .run()
+          .catch(() => {
+            /* table may not exist in older DB snapshots */
+          });
+        await c.env.DB
+          .prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?")
+          .bind(shop.id)
+          .run()
+          .catch(() => {
+            /* best effort */
+          });
+
+        await c.env.KV.delete(`site:${shop.slug}`);
+        await c.env.KV.delete(`shop:theme:${shop.id}`);
+        await c.env.KV.delete(`gen:settings:${shop.id}`);
+        await c.env.KV.delete(`walkin:queue:${shop.id}`);
+
+        // Ruling 15: the redact schedule and the shop's removal commit
+        // together in one batch — a failed delete must never schedule
+        // blanking a live shop's people. Ruling 16: the date may only move
+        // forward, never back.
+        // Spec 6.2: personal details of this shop's people are blanked 30 days after it leaves.
+        const redactAfter = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        await c.env.DB.batch([
+          c.env.DB
+            .prepare(
+              "UPDATE audit_subjects SET redact_after = ? WHERE shop_id = ? AND redacted_at IS NULL AND (redact_after IS NULL OR redact_after > ?)"
+            )
+            .bind(redactAfter, shop.id, redactAfter),
+          c.env.DB.prepare("DELETE FROM shops WHERE id = ?").bind(shop.id),
+        ]);
+      }
+    );
     return c.json({ success: true, data: { id: shop.id } });
   } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
     console.error("[shops.delete]", e);
     const msg = e instanceof Error ? e.message : "Delete failed";
     return c.json({ success: false, error: msg }, 500);
@@ -1143,27 +1250,42 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
 shops.delete("/:shopId", authMiddleware, requireRole("developer"), deleteShopDeveloper);
 shops.post("/:shopId/delete", authMiddleware, requireRole("developer"), deleteShopDeveloper);
 
-// ─── POST /api/shops/:shopId/activate — developer only ───
-
-shops.post("/:shopId/activate", authMiddleware, requireRole("developer"), async (c) => {
+async function changeWebsiteStatus(
+  c: Context<{ Bindings: Bindings }>,
+  status: "live" | "paused",
+  action: "site.activate" | "site.pause"
+) {
   const param = c.req.param("shopId");
-  const shop =
-    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
+  if (!param) return c.json({ success: false, error: "Missing shop id" }, 400);
+  const shop = (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
-  await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "live");
+  const site = await c.env.DB.prepare(
+    "SELECT website_status FROM shop_sites WHERE shop_id = ? AND status = 'active' LIMIT 1"
+  )
+    .bind(shop.id)
+    .first<{ website_status: string | null }>();
+  const refused = await batchWithAudit(c, [shopSiteWebsiteStatusStatement(c.env.DB, shop.id, status)], {
+    action,
+    outcome: "succeeded",
+    shopId: shop.id,
+    entityType: "shop_site",
+    entityId: shop.id,
+    changes: site ? { website_status: [site.website_status ?? null, status] } : null,
+    details: site ? null : { no_site_row: true },
+  });
+  if (refused) return refused;
   return c.json({ ok: true });
-});
+}
+
+// ─── POST /api/shops/:shopId/activate — developer only ───
+shops.post("/:shopId/activate", authMiddleware, requireRole("developer"), (c) =>
+  changeWebsiteStatus(c, "live", "site.activate")
+);
 
 // ─── POST /api/shops/:shopId/pause — developer only ───
-
-shops.post("/:shopId/pause", authMiddleware, requireRole("developer"), async (c) => {
-  const param = c.req.param("shopId");
-  const shop =
-    (await getShopBySlug(c.env.DB, param)) ?? (await getShopById(c.env.DB, param));
-  if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
-  await updateShopSiteWebsiteStatus(c.env.DB, shop.id, "paused");
-  return c.json({ ok: true });
-});
+shops.post("/:shopId/pause", authMiddleware, requireRole("developer"), (c) =>
+  changeWebsiteStatus(c, "paused", "site.pause")
+);
 
 // ─── POST /api/shops/:shopId/generate-site — AI site generation (developer or admin) ───
 
@@ -1251,6 +1373,17 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
 
   const skip_images = body.skip_images === true;
 
+  // Owner-chosen template (WS-6): forwarded to the research worker, which
+  // pins layout_mood to it. Anything outside the known set — including the
+  // "auto" / "Let AI decide" value — leaves the choice to the model.
+  // Ruling 14: validated BEFORE the audit entry is built, since details_json
+  // is hashed and locked for 6 years — never the raw, unbounded request string.
+  const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
+  const ownerTemplate =
+    typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
+      ? body.template.trim().toLowerCase()
+      : undefined;
+
   let jobId: string | null = null;
   const nowKv = () =>
     JSON.stringify({
@@ -1260,155 +1393,174 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     });
 
   try {
-    jobId = crypto.randomUUID();
-    await insertGenerationJob(c.env.DB, {
-      id: jobId,
-      shop_id: shop.id,
-      status: "queued",
-      stage: "research",
-    });
-    await c.env.KV.put(`job:${jobId}`, nowKv(), { expirationTtl: 60 * 60 * 48 });
-
-    if (body.logo_file && body.logo_file.size > 0) {
-      const buf = await body.logo_file.arrayBuffer();
-      const ext = body.logo_file.name.match(/\.(png|jpg|jpeg|svg|webp)$/i)?.[1] ?? "png";
-      const contentType =
-        body.logo_file.type ||
-        (ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
-      await c.env.ASSETS.put(`shops/${shop.slug}/logo-upload`, buf, {
-        httpMetadata: { contentType },
-      });
-    }
-
-    const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
-    // Owner-entered facts (team, hours, area): the only business facts the
-    // generated copy may state. Older research workers ignore the field.
-    const [teamRows, siteFacts] = await Promise.all([
-      getStaffByShop(c.env.DB, shop.id),
-      getShopSiteFacts(c.env.DB, shop.id),
-    ]);
-    const business = buildSiteResearchBusiness({
-      staff: teamRows,
-      services: researchServices,
-      address: siteFacts?.address,
-      hours_json: siteFacts?.hours_json,
-    });
-
-    const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
-    const hasLogoFile =
-      Boolean(body.logo_file && body.logo_file.size > 0) || logoUploadHead !== null;
-
-    // bodyText/bodyImage are already validated (400'd above if unknown). A
-    // stored KV value that no longer resolves in the catalog (a catalog
-    // shrink) silently degrades to the pipeline default instead of 400ing,
-    // so legacy shops keep generating.
-    const storedText = settingsKv.text_model?.trim() ?? "";
-    const storedTextListed = Boolean(storedText) && listed(storedText, "text");
-    if (!bodyText && storedText && !storedTextListed) {
-      console.warn(`[generate-site] stored text model ${storedText} is no longer listed; using ${DEFAULT_TEXT_MODEL_ID}`);
-    }
-    const text_model = bodyText || (storedTextListed ? storedText : DEFAULT_TEXT_MODEL_ID);
-    // Reasoning effort for the text/research model. Request wins over saved
-    // settings; anything but low/medium/high is dropped (pipeline default).
-    const text_effort =
-      parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
-    const storedImage = settingsKv.image_model?.trim() ?? "";
-    const storedImageListed = Boolean(storedImage) && listed(storedImage, "image");
-    if (!bodyImage && storedImage && !storedImageListed) {
-      console.warn(`[generate-site] stored image model ${storedImage} is no longer listed; using ${DEFAULT_IMAGE_MODEL_ID}`);
-    }
-    const image_model = bodyImage || (storedImageListed ? storedImage : DEFAULT_IMAGE_MODEL_ID);
-    // Design Director composer: request wins over saved settings; anything
-    // but ai/seed (incl. legacy junk in KV) silently defaults to "ai".
-    const composer =
-      parseComposer(bodyComposerRaw) ?? parseComposer(settingsKv.composer) ?? "ai";
-
-    // Optional owner-chosen palette. Only honour a complete, valid pair so a
-    // partial/garbage value can never override the AI-generated palette.
-    const isHex6 = (v: unknown): v is string =>
-      typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v.trim());
-    const ownerColorPrimary = isHex6(body.color_primary) ? body.color_primary.trim() : undefined;
-    const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
-    const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
-
-    // Owner-chosen template (WS-6): forwarded to the research worker, which
-    // pins layout_mood to it. Anything outside the known set — including the
-    // "auto" / "Let AI decide" value — leaves the choice to the model.
-    const KNOWN_TEMPLATES = ["minimal", "luxury", "vibrant", "editorial", "classic", "fresh"];
-    const ownerTemplate =
-      typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
-        ? body.template.trim().toLowerCase()
-        : undefined;
-
-    const queuePayload = {
-      jobId,
-      shopId: shop.id,
-      shopName: shop.name,
-      shopSlug: shop.slug,
-      shopType: shop.type as "barber_shop" | "beauty_parlor" | "both",
-      styleNotes: styleNotesMerged,
-      hasLogoFile,
-      services: researchServices,
-      business,
-      text_model,
-      ...(text_effort ? { text_effort } : {}),
-      image_model,
-      composer,
-      skip_images,
-      ...(hasColorOverride
-        ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
-        : {}),
-      ...(ownerTemplate ? { template: ownerTemplate } : {}),
-    };
-
-    if (!c.env.site_research_queue) {
-      await updateGenerationJob(c.env.DB, jobId, {
-        status: "failed",
-        error: "site_research_queue binding not configured",
-      });
-      await c.env.KV.put(
-        `job:${jobId}`,
-        JSON.stringify({
-          status: "failed",
-          stage: "research",
-          shopSlug: shop.slug,
-          error: "site_research_queue binding not configured",
-        }),
-        { expirationTtl: 60 * 60 * 48 }
-      );
-      return c.json({ success: false, error: "Site generation queue is not configured" }, 503);
-    }
-
-    await c.env.site_research_queue.send(queuePayload);
-    // Publication state is NOT touched here. This used to flip the site to
-    // "draft", which 404'd a live site for the whole job and kept it offline
-    // afterwards (success or failure) until a developer re-activated it. A
-    // never-published site is already draft; a live site stays live and the
-    // assembler only replaces it with output that passes its publication gate.
-    return c.json(
-      { success: true, data: { jobId, message: "Site generation started" } },
-      202
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Site generation failed";
-    if (jobId) {
-      try {
-        await updateGenerationJob(c.env.DB, jobId, { status: "failed", error: msg });
-        await c.env.KV.put(
-          `job:${jobId}`,
-          JSON.stringify({
-            status: "failed",
+    return await auditFor(c).run(
+      {
+        action: "site.regenerate.request",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: {
+          text_model: bodyText || null,
+          image_model: bodyImage || null,
+          skip_images: body.skip_images === true,
+          composer: bodyComposerRaw || null,
+          template: ownerTemplate ?? null,
+        },
+      },
+      async (): Promise<Response> => {
+        try {
+          jobId = crypto.randomUUID();
+          await insertGenerationJob(c.env.DB, {
+            id: jobId,
+            shop_id: shop.id,
+            status: "queued",
             stage: "research",
+          });
+          await c.env.KV.put(`job:${jobId}`, nowKv(), { expirationTtl: 60 * 60 * 48 });
+
+          if (body.logo_file && body.logo_file.size > 0) {
+            const buf = await body.logo_file.arrayBuffer();
+            const ext = body.logo_file.name.match(/\.(png|jpg|jpeg|svg|webp)$/i)?.[1] ?? "png";
+            const contentType =
+              body.logo_file.type ||
+              (ext === "svg" ? "image/svg+xml" : ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png");
+            await c.env.ASSETS.put(`shops/${shop.slug}/logo-upload`, buf, {
+              httpMetadata: { contentType },
+            });
+          }
+
+          const researchServices = await buildSiteResearchQueueServices(c.env.DB, shop.id);
+          // Owner-entered facts (team, hours, area): the only business facts the
+          // generated copy may state. Older research workers ignore the field.
+          const [teamRows, siteFacts] = await Promise.all([
+            getStaffByShop(c.env.DB, shop.id),
+            getShopSiteFacts(c.env.DB, shop.id),
+          ]);
+          const business = buildSiteResearchBusiness({
+            staff: teamRows,
+            services: researchServices,
+            address: siteFacts?.address,
+            hours_json: siteFacts?.hours_json,
+          });
+
+          const logoUploadHead = await c.env.ASSETS.head(`shops/${shop.slug}/logo-upload`);
+          const hasLogoFile =
+            Boolean(body.logo_file && body.logo_file.size > 0) || logoUploadHead !== null;
+
+          // bodyText/bodyImage are already validated (400'd above if unknown). A
+          // stored KV value that no longer resolves in the catalog (a catalog
+          // shrink) silently degrades to the pipeline default instead of 400ing,
+          // so legacy shops keep generating.
+          const storedText = settingsKv.text_model?.trim() ?? "";
+          const storedTextListed = Boolean(storedText) && listed(storedText, "text");
+          if (!bodyText && storedText && !storedTextListed) {
+            console.warn(`[generate-site] stored text model ${storedText} is no longer listed; using ${DEFAULT_TEXT_MODEL_ID}`);
+          }
+          const text_model = bodyText || (storedTextListed ? storedText : DEFAULT_TEXT_MODEL_ID);
+          // Reasoning effort for the text/research model. Request wins over saved
+          // settings; anything but low/medium/high is dropped (pipeline default).
+          const text_effort =
+            parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
+          const storedImage = settingsKv.image_model?.trim() ?? "";
+          const storedImageListed = Boolean(storedImage) && listed(storedImage, "image");
+          if (!bodyImage && storedImage && !storedImageListed) {
+            console.warn(`[generate-site] stored image model ${storedImage} is no longer listed; using ${DEFAULT_IMAGE_MODEL_ID}`);
+          }
+          const image_model = bodyImage || (storedImageListed ? storedImage : DEFAULT_IMAGE_MODEL_ID);
+          // Design Director composer: request wins over saved settings; anything
+          // but ai/seed (incl. legacy junk in KV) silently defaults to "ai".
+          const composer =
+            parseComposer(bodyComposerRaw) ?? parseComposer(settingsKv.composer) ?? "ai";
+
+          // Optional owner-chosen palette. Only honour a complete, valid pair so a
+          // partial/garbage value can never override the AI-generated palette.
+          const isHex6 = (v: unknown): v is string =>
+            typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v.trim());
+          const ownerColorPrimary = isHex6(body.color_primary) ? body.color_primary.trim() : undefined;
+          const ownerColorAccent = isHex6(body.color_accent) ? body.color_accent.trim() : undefined;
+          const hasColorOverride = Boolean(ownerColorPrimary && ownerColorAccent);
+
+          const queuePayload = {
+            jobId,
+            shopId: shop.id,
+            shopName: shop.name,
             shopSlug: shop.slug,
-            error: msg,
-          }),
-          { expirationTtl: 60 * 60 * 48 }
-        );
-      } catch {
-        /* best effort */
-      }
-    }
-    return c.json({ success: false, error: msg }, 400);
+            shopType: shop.type as "barber_shop" | "beauty_parlor" | "both",
+            styleNotes: styleNotesMerged,
+            hasLogoFile,
+            services: researchServices,
+            business,
+            text_model,
+            ...(text_effort ? { text_effort } : {}),
+            image_model,
+            composer,
+            origin_actor_ref: user.sub ? userSubjectId(user.sub) : null,
+            skip_images,
+            ...(hasColorOverride
+              ? { color_primary: ownerColorPrimary, color_accent: ownerColorAccent }
+              : {}),
+            ...(ownerTemplate ? { template: ownerTemplate } : {}),
+          };
+
+          if (!c.env.site_research_queue) {
+            await updateGenerationJob(c.env.DB, jobId, {
+              status: "failed",
+              error: "site_research_queue binding not configured",
+            });
+            await c.env.KV.put(
+              `job:${jobId}`,
+              JSON.stringify({
+                status: "failed",
+                stage: "research",
+                shopSlug: shop.slug,
+                error: "site_research_queue binding not configured",
+              }),
+              { expirationTtl: 60 * 60 * 48 }
+            );
+            return c.json({ success: false, error: "Site generation queue is not configured" }, 503);
+          }
+
+          await c.env.site_research_queue.send(queuePayload);
+          // Publication state is NOT touched here. This used to flip the site to
+          // "draft", which 404'd a live site for the whole job and kept it offline
+          // afterwards (success or failure) until a developer re-activated it. A
+          // never-published site is already draft; a live site stays live and the
+          // assembler only replaces it with output that passes its publication gate.
+          return c.json(
+            { success: true, data: { jobId, message: "Site generation started" } },
+            202
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Site generation failed";
+          if (jobId) {
+            try {
+              await updateGenerationJob(c.env.DB, jobId, { status: "failed", error: msg });
+              await c.env.KV.put(
+                `job:${jobId}`,
+                JSON.stringify({
+                  status: "failed",
+                  stage: "research",
+                  shopSlug: shop.slug,
+                  error: msg,
+                }),
+                { expirationTtl: 60 * 60 * 48 }
+              );
+            } catch {
+              /* best effort */
+            }
+          }
+          return c.json({ success: false, error: msg }, 400);
+        }
+      },
+      (res) => ({
+        outcome: res.status < 400 ? "succeeded" : "failed",
+        reason: res.status < 400 ? null : `HTTP ${res.status}`,
+        details: { job_id: jobId },
+      })
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
 });
 

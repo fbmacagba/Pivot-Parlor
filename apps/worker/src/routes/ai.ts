@@ -1,13 +1,16 @@
 import { Hono } from "hono";
 import { safeJsonParse } from "@repo/utils";
+import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { auditFor, auditRefused } from "../audit/context.js";
 import {
   generateShopTheme,
   persistShopTheme,
   validateBrandConfig,
+  type BrandConfig,
   type ThemePalette,
 } from "../services/ai-generator.js";
 import {
@@ -19,6 +22,8 @@ import {
 } from "../services/model-registry.js";
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
+/** Shape guard for an /apply-theme model_id: bounded length, no registry check (Ruling 18). */
+const MODEL_ID_SHAPE = /^[A-Za-z0-9._:/@-]+$/;
 
 /** Owner palette from a request body — honoured only as a complete, valid pair. */
 function parsePalette(body: { color_primary?: unknown; color_accent?: unknown }): ThemePalette | undefined {
@@ -70,7 +75,21 @@ ai.post("/chatbot-model", async (c) => {
   const model = await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text");
   if (!model) return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
   const record = { model_id: modelId, updated_at: new Date().toISOString() };
-  await c.env.KV.put(CHATBOT_MODEL_KV_KEY, JSON.stringify(record));
+  const previous = safeJsonParse<{ model_id?: unknown }>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+  try {
+    await auditFor(c).run(
+      {
+        action: "ai.chatbot_model.set",
+        entityType: "platform_setting",
+        entityId: "chatbot_model",
+        changes: { chatbot_model: [typeof previous?.model_id === "string" ? previous.model_id : null, modelId] },
+      },
+      () => c.env.KV.put(CHATBOT_MODEL_KV_KEY, JSON.stringify(record))
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
   return c.json({ success: true, data: record });
 });
 
@@ -126,33 +145,31 @@ ai.post("/generate-theme", async (c) => {
 
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  // Return cached theme unless regenerate=true. A corrupt cache/stored value
-  // falls through to regeneration rather than crashing.
-  if (!body.regenerate) {
-    const cached = safeJsonParse(await c.env.KV.get(`shop:theme:${shop.id}`));
-    if (cached) {
-      return c.json({ success: true, data: cached, cached: true, model_used: modelId });
+  const audit = auditFor(c);
+  try {
+    // Return cached theme unless regenerate=true. A corrupt cache/stored value
+    // falls through to regeneration rather than crashing.
+    if (!body.regenerate) {
+      const cached = safeJsonParse(await c.env.KV.get(`shop:theme:${shop.id}`)) ?? safeJsonParse(shop.ai_theme);
+      if (cached) {
+        await audit.write({ action: "theme.generate", outcome: "succeeded", shopId: shop.id, entityType: "theme", entityId: shop.id, details: { cached: true, model: modelId } });
+        return c.json({ success: true, data: cached, cached: true, model_used: modelId });
+      }
     }
-    const stored = safeJsonParse(shop.ai_theme);
-    if (stored) {
-      return c.json({ success: true, data: stored, cached: true, model_used: modelId });
-    }
+    const theme = await audit.run(
+      { action: "theme.generate", shopId: shop.id, entityType: "theme", entityId: shop.id, details: { model: modelId, preview: body.preview === true } },
+      () =>
+        generateShopTheme(shop.id, shop.name, shop.type, modelId, body.style_keywords, effort, c.env.DB, c.env.KV, providerKeysFromEnv(c.env), {
+          palette: parsePalette(body),
+          persist: body.preview !== true,
+          audit,
+        })
+    );
+    return c.json({ success: true, data: theme, cached: false, model_used: modelId });
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-
-  const theme = await generateShopTheme(
-    shop.id,
-    shop.name,
-    shop.type,
-    modelId,
-    body.style_keywords,
-    effort,
-    c.env.DB,
-    c.env.KV,
-    providerKeysFromEnv(c.env),
-    { palette: parsePalette(body), persist: body.preview !== true }
-  );
-
-  return c.json({ success: true, data: theme, cached: false, model_used: modelId });
 });
 
 // ─── POST /api/ai/apply-theme — persist a previously previewed theme ──────────
@@ -173,8 +190,23 @@ ai.post("/apply-theme", async (c) => {
     .first<{ id: string }>();
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  const modelId = typeof body.model_id === "string" && body.model_id.trim() ? body.model_id.trim() : "manual";
-  await persistShopTheme(c.env.DB, c.env.KV, shop.id, modelId, theme);
+  const rawModelId = typeof body.model_id === "string" && body.model_id.trim() ? body.model_id.trim() : "";
+  // Shape-only, never a registry check (Ruling 18): a delisted model must
+  // still be re-appliable, so this only guards against arbitrary/unbounded
+  // input being locked into the 6-year audit trail, not against an id the
+  // live registry no longer lists.
+  if (rawModelId && (rawModelId.length > 100 || !MODEL_ID_SHAPE.test(rawModelId))) {
+    return c.json({ success: false, error: "model_id is invalid" }, 400);
+  }
+  const modelId = rawModelId || "manual";
+  try {
+    // The server cannot know whether the client's previewed theme was itself
+    // a fallback (Ruling 19) — say so honestly rather than claim false.
+    await persistShopTheme(c.env.DB, c.env.KV, shop.id, modelId, theme, { recorder: auditFor(c), fallback: null });
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
   return c.json({ success: true, data: theme });
 });
 
@@ -211,35 +243,51 @@ ai.post("/compare", async (c) => {
 
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
+  const keys = providerKeysFromEnv(c.env);
+  // Never log the raw request-body model ids verbatim (Ruling 14): only a
+  // listed model's own id, or null when it isn't one. The unvalidated raw
+  // id is still used below to actually drive generation — an unknown side
+  // fails on its own inside generateShopTheme (Unknown model), reported as
+  // that side's `error`, same as before this task.
+  const auditModelId = async (id: unknown): Promise<string | null> => {
+    if (typeof id !== "string") return null;
+    const model = await getModel(c.env.KV, keys, id, "text");
+    return model ? model.id : null;
+  };
+  const [modelAForAudit, modelBForAudit] = await Promise.all([
+    auditModelId(body.model_a_id),
+    auditModelId(body.model_b_id),
+  ]);
+
   // Comparisons are ALWAYS previews: persisting both sides made the slower
   // model silently win. The caller applies its pick via /api/ai/apply-theme.
-  const options = { palette: parsePalette(body), persist: false as const };
-  const [resultA, resultB] = await Promise.allSettled([
-    generateShopTheme(
-      shop.id,
-      shop.name,
-      shop.type,
-      body.model_a_id,
-      body.style_keywords,
-      effort,
-      c.env.DB,
-      c.env.KV,
-      providerKeysFromEnv(c.env),
-      options
-    ),
-    generateShopTheme(
-      shop.id,
-      shop.name,
-      shop.type,
-      body.model_b_id,
-      body.style_keywords,
-      effort,
-      c.env.DB,
-      c.env.KV,
-      providerKeysFromEnv(c.env),
-      options
-    ),
-  ]);
+  const audit = auditFor(c);
+  const options = { palette: parsePalette(body), persist: false as const, audit };
+  let resultA: PromiseSettledResult<BrandConfig>;
+  let resultB: PromiseSettledResult<BrandConfig>;
+  try {
+    [resultA, resultB] = await audit.run(
+      { action: "theme.compare", shopId: shop.id, entityType: "theme", entityId: shop.id, details: { model_a: modelAForAudit, model_b: modelBForAudit } },
+      async () => {
+        const settled = await Promise.allSettled([
+          generateShopTheme(shop.id, shop.name, shop.type, body.model_a_id!, body.style_keywords, effort, c.env.DB, c.env.KV, keys, options),
+          generateShopTheme(shop.id, shop.name, shop.type, body.model_b_id!, body.style_keywords, effort, c.env.DB, c.env.KV, keys, options),
+        ]);
+        // allSettled swallows a rejection, including an AuditWriteError from
+        // either side's own "ai.call" audit write (Ruling 9): surface it so
+        // this whole comparison refuses (503) instead of a silent 200 that
+        // hides an unrecorded audit attempt.
+        const auditFailure = settled.find(
+          (r): r is PromiseRejectedResult => r.status === "rejected" && r.reason instanceof AuditWriteError
+        );
+        if (auditFailure) throw auditFailure.reason;
+        return settled;
+      }
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 
   return c.json({
     success: true,

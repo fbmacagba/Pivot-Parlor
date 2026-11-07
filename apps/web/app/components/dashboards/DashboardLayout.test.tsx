@@ -41,6 +41,7 @@ vi.mock("lucide-react", () => {
     Package: Icon,
     Receipt: Icon,
     Scissors: Icon,
+    ScrollText: Icon,
     Settings: Icon,
     ShoppingBag: Icon,
     ShoppingCart: Icon,
@@ -100,12 +101,23 @@ describe("DashboardLayout: server markup", () => {
     expect(bar).not.toContain('aria-current="page"');
   });
 
-  it("developer: all five destinations are tabs and there is no More", () => {
+  // Ruling 50: the owner locked developer's phone tab bar to its original
+  // five destinations on 2026-09-12, before Activity (Task 12) existed.
+  // DEV_TAB_HREFS (MobileTabBar.tsx) pins that set regardless of how many
+  // items DEV_NAV grows to — Activity is a desk-oriented tool, reached
+  // from the drawer/sidebar only, never from a new "More" tab.
+  it("developer: the original five tabs, still no More, and Activity absent from the tab bar", () => {
     pathname = "/dev/shops";
-    const bar = tabBar(ssr({ role: "developer", topBarTitle: "Pivot Parlor Platform" }));
+    const html = ssr({ role: "developer", topBarTitle: "Pivot Parlor Platform" });
+    const bar = tabBar(html);
     expect(bar.match(/<a /g)).toHaveLength(5);
     expect(bar).toContain('href="/dev/shops" aria-current="page"');
     expect(bar).not.toContain("More");
+    expect(bar).not.toContain('href="/dev/activity"');
+    // Activity is still reachable — present in the full nav (the desktop
+    // rail and the phone drawer both render the same Sidebar/NAV_MAP),
+    // just not as a bottom tab.
+    expect(html).toContain('href="/dev/activity"');
   });
 });
 
@@ -116,9 +128,14 @@ describe("mobileTabsFor", () => {
     expect(more).toBe(true);
   });
 
+  it("developer: the curated DEV_TAB_HREFS keeps the original five tabs and no More (Ruling 50)", () => {
+    const { tabs, more } = mobileTabsFor("developer");
+    expect(tabs.map((t) => t.href)).toEqual(["/dev", "/dev/shops", "/dev/revenue", "/dev/ai-deploy", "/dev/enquiries"]);
+    expect(more).toBe(false);
+  });
+
   it("gives small roles every destination and no More", () => {
     expect(mobileTabsFor("staff").more).toBe(false);
-    expect(mobileTabsFor("developer").tabs).toHaveLength(5);
     expect(mobileTabsFor("customer").tabs).toHaveLength(0);
   });
 });

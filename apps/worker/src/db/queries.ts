@@ -261,6 +261,16 @@ export function getShopById(db: D1Database, id: string) {
     .first<DBShop>();
 }
 
+/** A shop's id from either its id or its slug (both uniquely indexed); null
+ *  when neither matches. */
+export async function getShopIdByIdOrSlug(db: D1Database, idOrSlug: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT id FROM shops WHERE id = ?1 OR slug = ?1 LIMIT 1")
+    .bind(idOrSlug)
+    .first<{ id: string }>();
+  return row?.id ?? null;
+}
+
 export function getShopBySlug(db: D1Database, slug: string) {
   return db
     .prepare("SELECT * FROM shops WHERE slug = ? LIMIT 1")
@@ -766,17 +776,15 @@ export function createShopSite(
     .run();
 }
 
-export function updateShopSiteWebsiteStatus(
-  db: D1Database,
-  shopId: string,
-  websiteStatus: string,
-) {
+/** Prepared (unexecuted) website_status update, for batching with an audit entry. */
+export function shopSiteWebsiteStatusStatement(db: D1Database, shopId: string, websiteStatus: string) {
   return db
-    .prepare(
-      "UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'",
-    )
-    .bind(websiteStatus, shopId)
-    .run();
+    .prepare("UPDATE shop_sites SET website_status = ? WHERE shop_id = ? AND status = 'active'")
+    .bind(websiteStatus, shopId);
+}
+
+export function updateShopSiteWebsiteStatus(db: D1Database, shopId: string, websiteStatus: string) {
+  return shopSiteWebsiteStatusStatement(db, shopId, websiteStatus).run();
 }
 
 /** Ensure the shop has a shop_sites row to write image URLs onto, creating a
