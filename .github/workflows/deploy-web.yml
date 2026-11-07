@@ -14,6 +14,15 @@ on:
       - "package-lock.json"
       - ".github/workflows/deploy-web.yml"
 
+# Serialize production deploys. Without this, two merges seconds apart deploy
+# in parallel and whichever upload finishes last becomes production, which can
+# be the OLDER commit. With a group, runs go one at a time; a newer push
+# replaces any run still waiting, and each run deploys the whole of main at
+# its commit, so the last deploy is always the newest code.
+concurrency:
+  group: deploy-web-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to Cloudflare Pages

@@ -14,6 +14,15 @@ on:
       - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
 
+# Serialize production deploys, and with them the D1 migrations each run
+# applies. Without this, two merges seconds apart run migrate.mjs and deploy in
+# parallel, and the older commit can land last. With a group, runs go one at a
+# time; a newer push replaces any run still waiting, and each run deploys main
+# at its commit, so the last deploy is always the newest code.
+concurrency:
+  group: deploy-worker-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy Cloudflare Worker
