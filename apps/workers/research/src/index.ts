@@ -11,7 +11,7 @@ import {
   type DesignSpec,
   type ComposerId,
 } from "./design-spec";
-import { chatComplete, type ProviderKeys } from "@repo/llm";
+import { chatComplete, recordAiUsage, type ProviderKeys } from "@repo/llm";
 import {
   alignServiceCopy,
   factSignals,
@@ -342,14 +342,17 @@ You MUST include exactly ${msg.services.length} strings in image_prompts.catalog
 }
 
 /** One JSON-only completion through the shared client; HTTP retries and the
- *  effort retry live in the client, output validity is judged by the caller. */
+ *  effort retry live in the client, output validity is judged by the caller.
+ *  Every answered call is written to the cost log, valid output or not: the
+ *  tokens were spent either way. */
 async function researchJson(
   jobId: string,
   keys: ProviderKeys,
   model: string,
   system: string,
   user: string,
-  effort?: TextEffort
+  effort: TextEffort | undefined,
+  costLog: { env: Pick<Env, "DB" | "KV">; shopId: string }
 ): Promise<string> {
   const result = await chatComplete(
     {
@@ -366,6 +369,14 @@ async function researchJson(
   console.log(
     `[${jobId}] [pivot-parlor-research] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
   );
+  await recordAiUsage(costLog.env, {
+    shopId: costLog.shopId,
+    workerName: "pivot-parlor-research",
+    modelId: model,
+    usageType: "site_research",
+    usage: result.usage,
+    jobId,
+  });
   return result.text;
 }
 
@@ -603,7 +614,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       }
       let rawText: string;
       try {
-        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort);
+        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort, { env, shopId });
       } catch (e) {
         lastError = `model call failed: ${errorMessage(e)}`;
         console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${attempts.length} ${lastError}`);

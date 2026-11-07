@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import type { AIModel } from "@repo/types";
 import { MODEL_SNAPSHOT, catalogModels } from "@repo/utils";
+import { costFromModelList } from "@repo/llm";
 import {
   anthropicCanonical,
   buildRegistry,
@@ -130,6 +131,34 @@ describe("rankOpenRouterText", () => {
     const ranked = rankOpenRouterText(feed);
     expect(ranked[0]).toBe("google/gemini-3.1-flash-lite-preview");
     expect(ranked).toContain("anthropic/claude-sonnet-5");
+  });
+});
+
+// The research and text workers price their calls for the cost log by reading
+// this list back out of KV (packages/llm/src/usage.ts). Guard the contract
+// between the two shapes, and that the cost matches the audit's ai.call figure.
+describe("cost log pricing from the served list", () => {
+  const stored = (models: AIModel[]): unknown => JSON.parse(JSON.stringify(models));
+  const auditCost = (m: AIModel, input: number, output: number) =>
+    Math.round(((input * m.costPer1MInput + output * m.costPer1MOutput) / 1_000_000) * 1_000_000) / 1_000_000;
+
+  it("prices a live-priced model the same way the audit entry does", () => {
+    const { models } = buildRegistry(allOk());
+    const astra = models.find((m) => m.id === "openai-api/gpt-6-astra")!;
+    expect(costFromModelList(stored(models), astra.id, { inputTokens: 12_345, outputTokens: 6_789 })).toEqual({
+      costUsd: auditCost(astra, 12_345, 6_789),
+      basis: "live",
+    });
+  });
+
+  it("labels a snapshot-priced model catalog", () => {
+    const { models } = buildRegistry({ ...allOk(), openrouter: { ok: false, reason: "fetch-failed" } });
+    const snap = models.find((m) => !m.livePricing && (m.costPer1MInput > 0 || m.costPer1MOutput > 0));
+    expect(snap, "expected a snapshot-priced model when the feed is down").toBeDefined();
+    expect(costFromModelList(stored(models), snap!.id, { inputTokens: 1_000, outputTokens: 1_000 })).toEqual({
+      costUsd: auditCost(snap!, 1_000, 1_000),
+      basis: "catalog",
+    });
   });
 });
 
