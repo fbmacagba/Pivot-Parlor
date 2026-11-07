@@ -149,10 +149,12 @@ Confirm both workflow runs finish green before treating either environment as do
 **The audit trail's own end-to-end test only runs if you ask for it.** On every pull request,
 `e2e.yml` runs only its quick SMOKE tier (sign-in and public booking). The audit-trail test
 (`tests/e2e/audit-trail.spec.ts`) is in the FULL tier, which runs only when the pull request has
-the **`e2e` label** (or when someone runs the workflow by hand). Add that label to run it. Be
-aware that FULL also runs the site-generation test, which drives the AI pipeline on staging and
-**spends AI credits**, and the audit-trail test alone waits about two and a half minutes for
-sealing and archiving.
+the **`e2e` label** (or when someone runs the workflow by hand). Add that label to run it. The
+audit-trail test alone waits about two and a half minutes for sealing and archiving. FULL also
+includes the site-generation spec, but it does not spend AI credits on staging: its tests that
+wait for a real generated site are skipped unless `E2E_SITE_GENERATION=1` is set (the workflow
+does not set it), and the one that submits a real generation request only puts a job on
+`site-research-queue-staging`, which no staging worker consumes.
 
 ## 4. Verify
 
