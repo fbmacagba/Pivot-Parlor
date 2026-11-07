@@ -5,10 +5,10 @@ import { StarRow } from "~/components/site/sections/bits";
 /** Trust "chips": the signal band as tactile pill chips instead of one dot-
  *  separated line. Keeps the #stats-bar id — the hero scroll cue targets it. */
 export function TrustChipsSection({ ctx, density }: { ctx: SiteRenderContext; density: Density }) {
+  // Fallbacks are true of every shop on the platform; "Instant confirmation"
+  // and "Same-day slots" were not (deposits, full diaries).
   const signals =
-    ctx.trustSignals.length > 0
-      ? ctx.trustSignals
-      : ["Online booking", "Instant confirmation", "Same-day slots when available"];
+    ctx.trustSignals.length > 0 ? ctx.trustSignals : ["Book online, any time", "No account needed to book"];
   return (
     <section
       id="stats-bar"
@@ -17,7 +17,7 @@ export function TrustChipsSection({ ctx, density }: { ctx: SiteRenderContext; de
       <ul className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-3 px-4 md:px-6">
         {ctx.hasSocialProof ? (
           <li className="inline-flex min-h-11 items-center gap-2 rounded-full border border-[color:var(--st-accent-50)] bg-[color:var(--st-accent-10)] px-5 text-sm font-semibold text-[color:var(--st-ink-90)]">
-            <StarRow rating={typeof ctx.site.rating === "number" ? ctx.site.rating : 5} className="text-sm" />
+            <StarRow rating={Number(ctx.statsRating)} className="text-sm" />
             <span>
               {ctx.statsRating}★ from {ctx.reviewCount} review{ctx.reviewCount === 1 ? "" : "s"}
             </span>

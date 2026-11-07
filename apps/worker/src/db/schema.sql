@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS staff (
   display_name TEXT NOT NULL,
   bio          TEXT,
   avatar_url   TEXT,
+  speciality   TEXT,
   is_active    INTEGER NOT NULL DEFAULT 1
 );
 
@@ -433,3 +434,13 @@ END;
 
 -- 047_audit_started_index
 CREATE INDEX IF NOT EXISTS idx_audit_log_started ON audit_log (occurred_at) WHERE phase = 'started';
+
+-- Owner review for regenerated public sites (migration 049): one unpublished
+-- candidate per shop, written by the assembler, published or discarded by the
+-- owner or a developer.
+CREATE TABLE IF NOT EXISTS shop_site_candidates (
+  shop_id      TEXT PRIMARY KEY REFERENCES shops(id) ON DELETE CASCADE,
+  job_id       TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);

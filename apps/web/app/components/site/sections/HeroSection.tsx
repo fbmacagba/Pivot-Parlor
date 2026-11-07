@@ -47,35 +47,35 @@ export function HeroSection({
           <div className="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/15 bg-black/35 px-4 py-2 text-sm text-white/95 backdrop-blur-md">
             {ctx.hasSocialProof ? (
               <>
-                <StarRow rating={typeof ctx.site.rating === "number" ? ctx.site.rating : 5} className="text-sm" />
+                <StarRow rating={Number(ctx.statsRating)} className="text-sm" />
                 <span>{ctx.statsRating}★ from {ctx.reviewCount} review{ctx.reviewCount === 1 ? "" : "s"}</span>
               </>
             ) : (
               <>
                 <span className="text-[color:var(--color-accent)]" aria-hidden>✓</span>
-                <span>Online booking · Instant confirmation</span>
+                <span>Online booking, any time</span>
               </>
             )}
           </div>
 
-          <h1 className={`mt-8 max-w-[700px] text-5xl font-bold leading-[1.08] tracking-tight text-white md:text-7xl${centered ? " mx-auto" : ""}`}>
+          <h1 className={`mt-8 max-w-[700px] text-[clamp(2.6rem,9vw,4.5rem)] font-bold leading-[1.06] tracking-[-0.02em] text-white [text-wrap:balance]${centered ? " mx-auto" : ""}`}>
             {ctx.heroHeadline}
           </h1>
           {ctx.heroTagline ? (
-            <h2 className={`mt-4 max-w-2xl text-[clamp(1.05rem,2.5vw,1.35rem)] font-normal font-light leading-relaxed text-white/75${centered ? " mx-auto" : ""}`}>
+            <p className={`mt-4 max-w-2xl text-[clamp(1.05rem,2.5vw,1.35rem)] font-light leading-relaxed text-white/80${centered ? " mx-auto" : ""}`}>
               {ctx.heroTagline}
-            </h2>
+            </p>
           ) : null}
 
           {/* Hero sits over a dark image scrim in both schemes, so its copy
               stays literal white — only accent-filled controls tokenize. */}
           <div className={`mt-10 flex flex-wrap gap-4${centered ? " justify-center" : ""}`}>
             <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-black/30 transition hover:brightness-110 active:scale-[0.98]">
-              {ctx.bookLabel} →
+              {ctx.bookLabel}<span aria-hidden>&nbsp;→</span>
             </Link>
             <button type="button" onClick={() => ctx.scrollToId("services")}
               className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] border-2 border-white/50 bg-transparent px-8 pp-heading text-base font-semibold text-white transition hover:border-[color:var(--color-accent)] hover:text-[color:var(--color-accent)]">
-              See Our Services
+              View services
             </button>
           </div>
 

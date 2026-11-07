@@ -10,7 +10,9 @@ let commitMsg = "deploy";
 try {
   const raw = execSync("git log -1 --pretty=%s", { encoding: "utf8" }).trim();
   commitMsg = raw
-    .replace(/[^\x00-\x7F]/g, "")
+    // Every UTF-16 code unit above 0x7F: the same set as [^\x00-\x7F], written
+    // without a control character in the class.
+    .replace(/[\u0080-\uffff]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 200)

@@ -11,19 +11,22 @@ import {
   getProductById,
   getServiceProducts,
   setServiceProducts,
+  getShopSiteByShopId,
 } from "../db/queries.js";
+import { normalizeServiceName, serviceDescriptionsByName } from "../lib/serviceCopy.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
 const services = new Hono<{ Bindings: Bindings }>();
 
-/** Public API shape for booking UI (@repo/types Service). Money is pence (WS-4). */
-function toPublicService(row: DBService) {
+/** Public API shape for booking UI (@repo/types Service). Money is pence (WS-4).
+ *  The description is the generated copy for this service name, if any. */
+export function toPublicService(row: DBService, descriptions?: Map<string, string>) {
   return {
     id: row.id,
     shopId: row.shop_id,
     name: row.name,
-    description: "",
+    description: descriptions?.get(normalizeServiceName(row.name)) ?? "",
     durationMinutes: row.duration_min,
     price_pence: row.price_pence,
     category: row.category ?? "",
@@ -55,7 +58,11 @@ services.get("/", async (c) => {
     list.length
   );
 
-  return c.json({ success: true, data: list.map(toPublicService) });
+  // One extra read joins the generated copy; a shop with no site yet simply
+  // gets empty descriptions, exactly as before.
+  const site = await getShopSiteByShopId(c.env.DB, shop.id);
+  const descriptions = serviceDescriptionsByName(site?.services_json);
+  return c.json({ success: true, data: list.map((row) => toPublicService(row, descriptions)) });
 });
 
 // ─── GET /api/shops/:shopId/services/:serviceId ───────────────────────────────

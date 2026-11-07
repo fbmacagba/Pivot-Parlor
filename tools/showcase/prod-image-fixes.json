@@ -1,0 +1,11 @@
+{
+  "reviewed": "2026-11-06",
+  "note": "Fixes from the review of the first production generation (jobs 555c507e for FerdyM's, 6311de94 for Linden & Lark). A service fix uploads that service's vetted showcase image (tools/showcase/assets, provenance in PROVENANCE.json) as a custom photo, which wins over the generated one and survives regeneration. A remove fix clears the generated image so the site uses its typeset fallback.",
+  "fixes": [
+    { "shop": "ferdyms", "remove": "logo", "why": "generated badge reads 'EST. 2023', a founding date the owner never gave, plus a dangling 'SINCE'" },
+    { "shop": "ferdyms", "service": "Kids' cut (under 12)", "why": "a background sign reads 'THE GROOM ROOM', another shop's name" },
+    { "shop": "ferdyms", "service": "Hot towel shave", "why": "shows a stubbled client in a cape, with no towel and no shave" },
+    { "shop": "linden", "service": "Restyle consultation & cut", "why": "a 'STYLE' sign is legible in the background" },
+    { "shop": "linden", "remove": "logo", "why": "at header size (about 40px) the generated tile renders as a pale square whose lettering cannot be read; the typeset monogram is clearer" }
+  ]
+}

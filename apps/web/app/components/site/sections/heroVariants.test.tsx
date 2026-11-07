@@ -49,13 +49,15 @@ describe("hero variants", () => {
     expect(html).toContain("linear-gradient");
   });
 
-  it("editorial renders the eyebrow and a wide image band below the type", () => {
+  it("editorial leads with the headline (no eyebrow) and a wide image band below the type", () => {
     const html = renderToStaticMarkup(
       <HeroEditorialSection ctx={ctx} density="airy" motif="dot-grid" motionClass="" parallax={false} />,
     );
     expect(html).toContain("aspect-[21/9]");
-    expect(html).toContain("uppercase");
-    expect(html).toContain("Walk-ins welcome");
+    expect(html).not.toContain("uppercase");
+    // The small print follows the calls to action instead of sitting above the h1.
+    expect(html.indexOf("Walk-ins welcome")).toBeGreaterThan(html.indexOf("View services"));
+    expect(html.indexOf("<h1")).toBeLessThan(html.indexOf("Walk-ins welcome"));
   });
 
   it("minimal never renders imagery", () => {

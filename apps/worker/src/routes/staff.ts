@@ -4,7 +4,7 @@ import {
   getStaffByShop, getStaffById, createStaffMember, updateStaffMember,
   addStaffService, getStaffServices, createUser, getUserByEmail,
 } from "../db/queries.js";
-import { authMiddleware, getUser } from "../middleware/auth.js";
+import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { hashPassword } from "../lib/password.js";
 
@@ -106,12 +106,23 @@ staff.put("/:staffId", requireShopRole("admin"), async (c) => {
   const body = await c.req.json<{
     display_name?: string;
     bio?: string | null;
+    speciality?: string | null;
     service_ids?: string[];
   }>();
+
+  // Specialism is a short public label ("Skin fades & beard work"); empty
+  // clears it, anything else is trimmed and capped.
+  const speciality =
+    body.speciality === undefined
+      ? undefined
+      : typeof body.speciality === "string" && body.speciality.trim()
+        ? body.speciality.trim().slice(0, 80)
+        : null;
 
   await updateStaffMember(c.env.DB, staffId, {
     display_name: body.display_name,
     bio: body.bio,
+    speciality,
   });
 
   if (body.service_ids) {
@@ -172,7 +183,9 @@ staff.post("/:staffId/avatar", requireShopRole("admin"), async (c) => {
 
   let base = (c.env.ASSET_BASE_URL ?? "").trim().replace(/\/$/, "");
   if (!base) base = `https://assets.pivot-parlor.com`;
-  const avatarUrl = `${base}/${key}`;
+  // The key is fixed per member, so a replacement photo would sit behind the
+  // old one's day-long cache; the version makes each upload a new URL.
+  const avatarUrl = `${base}/${key}?v=${Date.now().toString(36)}`;
 
   await updateStaffMember(c.env.DB, staffId, { avatar_url: avatarUrl });
 

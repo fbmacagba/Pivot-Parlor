@@ -13,6 +13,13 @@ export function parseHours(json?: string): HoursRecord | null {
   }
 }
 
+/** At least one day carries opening times ("" and "closed" mean closed). */
+export function hasOpenDay(json?: string): boolean {
+  const hours = parseHours(json);
+  if (!hours) return false;
+  return Object.values(hours).some((v) => typeof v === "string" && v.trim() !== "" && v.trim().toLowerCase() !== "closed");
+}
+
 export function formatReviewDate(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -62,7 +69,9 @@ export function HoursTable({ hoursJson }: { hoursJson?: string }) {
       <tbody>
         {rows.map(({ k, label }) => {
           const v = hours?.[k];
-          const text = v == null || v === "" ? "Closed" : String(v);
+          const raw = v == null ? "" : String(v).trim();
+          // "09:00-18:00" reads as a range; an empty or "closed" day reads Closed.
+          const text = !raw || raw.toLowerCase() === "closed" ? "Closed" : raw.replace(/\s*-\s*/, " to ");
           return (
             <tr key={k} className="border-b border-[color:var(--st-line-10)]">
               <th className="py-3 pr-4 font-medium text-[color:var(--st-ink-90)]">{label}</th>

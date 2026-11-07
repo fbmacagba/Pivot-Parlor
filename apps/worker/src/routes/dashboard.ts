@@ -7,12 +7,9 @@ import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
 import {
   getBookingById,
-  getBookingsByShop,
   getPlatformRevenueByMonth,
   getRevenueByShop,
   getShopById,
-  getStaffByShop,
-  getWaitlistByShop,
 } from "../db/queries.js";
 import { notifyWaitlistForOpenedSlot } from "../services/waitlist-notify.js";
 import { reportError } from "../services/report-error.js";

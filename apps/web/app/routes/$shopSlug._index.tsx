@@ -3,10 +3,19 @@ import type { MetaFunction } from "@remix-run/cloudflare";
 import { useState, useEffect } from "react";
 import CommercialTemplate, { type SiteData } from "~/components/CommercialTemplate";
 import { ReviewModal } from "~/components/ReviewModal";
+import { isPortfolioDemoShop } from "@repo/utils";
 import type { loader as shopLoader } from "./$shopSlug";
 import type { ShopSiteData } from "./$shopSlug";
 
-export const meta: MetaFunction<typeof shopLoader> = ({ data }) => {
+export const meta: MetaFunction = ({ matches, params }) => {
+  // This index reads the parent loader, not a loader of its own.
+  const data = matches.find(m => m.id === "routes/$shopSlug")?.data as
+    | { shop?: { name?: string }; site?: ShopSiteData; preview?: unknown }
+    | undefined;
+  // A fictional demo shop must never be indexed as if it were a business, and
+  // neither may an unpublished version under review.
+  const demo = isPortfolioDemoShop(params.shopSlug);
+  const preview = Boolean(data?.preview);
   const shopName = data?.shop?.name ?? "Book your appointment";
   const title =
     data?.site?.seo_title?.trim() ||
@@ -15,11 +24,12 @@ export const meta: MetaFunction<typeof shopLoader> = ({ data }) => {
   const description =
     data?.site?.seo_description?.trim() ||
     data?.site?.about?.trim() ||
-    `Book appointments at ${shopName} — powered by Pivot Parlor.`;
+    `Book appointments at ${shopName}. Powered by Pivot Parlor.`;
   const image = data?.site?.hero_image_url || data?.site?.logo_url || "";
 
   return [
-    { title },
+    { title: preview ? `Preview: ${title}` : demo ? `${title} (demo)` : title },
+    ...(demo || preview ? [{ name: "robots", content: "noindex, nofollow" }] : []),
     { name: "description", content: description },
     { property: "og:title", content: title },
     { property: "og:description", content: description },
@@ -45,7 +55,7 @@ export default function ShopLanding() {
 
   const [searchParams] = useSearchParams();
   const [reviewOpen, setReviewOpen] = useState(false);
-  const reviewBookingId = searchParams.get("review");
+  const reviewBookingId = isPortfolioDemoShop(data?.slug) ? null : searchParams.get("review");
 
   useEffect(() => {
     if (reviewBookingId) setReviewOpen(true);
@@ -116,6 +126,9 @@ export default function ShopLanding() {
     heading_style:
       typeof s.heading_style === "string" && s.heading_style.trim() ? s.heading_style.trim() : undefined,
     design_spec: s.design_spec ?? undefined,
+    gallery_images: Array.isArray(s.gallery_images)
+      ? s.gallery_images.filter((u): u is string => typeof u === "string" && u.trim().length > 0)
+      : undefined,
   };
 
   return (

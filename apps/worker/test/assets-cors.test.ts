@@ -26,6 +26,20 @@ describe("public asset CORP (cross-origin embedding)", () => {
     expect(res.headers.get("Cross-Origin-Resource-Policy")).toBe("cross-origin");
   });
 
+  it("serves a staff portrait (200) with Cross-Origin-Resource-Policy: cross-origin", async () => {
+    await env.ASSETS.put("staff/test-corp-shop/st-1/avatar.webp", new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer, {
+      httpMetadata: { contentType: "image/webp" },
+    });
+    const res = await dispatch("GET", "/staff/test-corp-shop/st-1/avatar.webp?v=1");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cross-Origin-Resource-Policy")).toBe("cross-origin");
+  });
+
+  it("keeps Cross-Origin-Resource-Policy: same-origin on the staff API (portrait fix is targeted)", async () => {
+    const res = await dispatch("GET", "/api/staff/me");
+    expect(res.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+  });
+
   it("keeps Cross-Origin-Resource-Policy: same-origin on non-asset routes (fix is targeted)", async () => {
     const res = await dispatch("GET", "/health");
     expect(res.status).toBe(200);

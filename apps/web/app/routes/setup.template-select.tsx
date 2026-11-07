@@ -138,14 +138,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
 type JobStatusPayload = {
   success?: boolean;
-  data?: { status?: string; stage?: string; shopSlug?: string; error?: string };
+  data?: { status?: string; stage?: string; shopSlug?: string; error?: string; outcome?: string };
   error?: string;
 };
 
-function progressCopy(stage: string | undefined, status: string | undefined): string {
+function progressCopy(stage: string | undefined, status: string | undefined, outcome?: string): string {
   if (status === "failed") return "";
   if (stage === "done" || status === "complete") {
-    return "Your site is ready! Redirecting...";
+    // A site that is already live is not replaced: the new version waits for
+    // review on the dashboard (migration 049).
+    return outcome === "candidate"
+      ? "Your new version is ready to review. Your live site has not changed. Redirecting..."
+      : "Your site is ready! Redirecting...";
   }
   switch (stage) {
     case "queued":
@@ -173,6 +177,7 @@ export default function TemplateSelect() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStage, setJobStage] = useState<string>("");
   const [jobStatus, setJobStatus] = useState<string>("");
+  const [jobOutcome, setJobOutcome] = useState<string | undefined>(undefined);
   const [jobError, setJobError] = useState<string | null>(null);
   const [redirecting, setRedirecting] = useState(false);
   const [formKey, setFormKey] = useState(0);
@@ -209,9 +214,10 @@ export default function TemplateSelect() {
           setJobId(null);
           return;
         }
-        const { stage, status, error } = j.data;
+        const { stage, status, error, outcome } = j.data;
         setJobStage(stage ?? "");
         setJobStatus(status ?? "");
+        setJobOutcome(outcome);
         if (status === "failed" || stage === "failed") {
           setJobError(error ?? "Generation failed");
           setJobId(null);
@@ -246,6 +252,7 @@ export default function TemplateSelect() {
     setJobError(null);
     setJobStage("");
     setJobStatus("");
+    setJobOutcome(undefined);
     setRedirecting(false);
     if (redirectTimer.current) clearTimeout(redirectTimer.current);
     setSelectedTemplate("auto");
@@ -265,7 +272,7 @@ export default function TemplateSelect() {
         {showProgress && (
           <div className="mt-8 rounded-xl border border-gold/40 bg-gold/10 px-6 py-5">
             <p className="text-sm font-medium text-gold">
-              {progressCopy(jobStage, jobStatus)}
+              {progressCopy(jobStage, jobStatus, jobOutcome)}
             </p>
             <p className="mt-1 text-xs text-white/50">
               Stage: {jobStage || "…"} · Status: {jobStatus || "…"}

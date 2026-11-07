@@ -25,6 +25,7 @@ interface Staff {
   id: string;
   display_name: string;
   bio?: string | null;
+  speciality?: string | null;
   avatar_url?: string | null;
   is_active: boolean;
   user_email?: string;
@@ -101,6 +102,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const staffId = String(form.get("staffId") ?? "").trim();
     const displayName = String(form.get("display_name") ?? "").trim();
     const bio = String(form.get("bio") ?? "").trim() || null;
+    const speciality = String(form.get("speciality") ?? "").trim() || null;
     const serviceIdsRaw = form.get("service_ids");
     const serviceIds = serviceIdsRaw ? String(serviceIdsRaw).split(",").filter(Boolean) : undefined;
     if (!staffId || !displayName) return json({ error: "Staff ID and name required" }, { status: 400 });
@@ -108,6 +110,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       await api.put(`/api/shops/${shopId}/staff/${staffId}`, {
         display_name: displayName,
         bio,
+        speciality,
         ...(serviceIds !== undefined && { service_ids: serviceIds }),
       });
       return json({ ok: true, intent: "edit" });
@@ -172,6 +175,15 @@ function EditStaffModal({
       <input type="hidden" name="service_ids" value={Array.from(selectedServices).join(",")} />
 
       <Input label="Name" name="display_name" defaultValue={member.display_name} required />
+
+      <Input
+        label="Speciality (optional)"
+        name="speciality"
+        defaultValue={member.speciality ?? ""}
+        maxLength={80}
+        placeholder="e.g. Skin fades and beard work"
+      />
+      <p className="-mt-3 text-xs text-white/60">Shown under their name on your site and in booking, and used when your site is generated.</p>
 
       <div>
         <label className="block text-sm font-medium text-white/80 mb-1.5">Bio (optional)</label>

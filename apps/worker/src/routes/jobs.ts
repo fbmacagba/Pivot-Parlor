@@ -59,9 +59,15 @@ jobs.get("/:jobId/status", authMiddleware, async (c) => {
     }
   }
 
+  // What a finished regeneration did, read from D1 only (the source of
+  // truth): a live or paused site gets a version waiting for review (stage
+  // "review", migration 049); a draft or new site is written directly.
+  const outcome =
+    job.status === "complete" ? (job.stage === "review" ? "candidate" : "published") : undefined;
+
   return c.json({
     success: true,
-    data: { status, stage, shopSlug, error },
+    data: { status, stage, shopSlug, error, outcome },
   });
 });
 

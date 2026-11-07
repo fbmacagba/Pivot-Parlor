@@ -34,11 +34,11 @@ export function HeroMinimalSection({
         ) : null}
         <div className="mt-10 flex flex-wrap items-center justify-center gap-5">
           <Link to={`/${ctx.shopSlug}/book`} className="inline-flex min-h-[3.25rem] items-center justify-center rounded-[var(--st-r-md)] bg-[color:var(--color-accent)] px-8 pp-heading text-base font-semibold text-[color:var(--st-on-accent)] shadow-lg shadow-[color:var(--st-shadow-25)] transition hover:brightness-110 active:scale-[0.98]">
-            {ctx.bookLabel} →
+            {ctx.bookLabel}<span aria-hidden>&nbsp;→</span>
           </Link>
           <button type="button" onClick={() => ctx.scrollToId("services")}
             className="inline-flex min-h-11 items-center pp-heading text-base font-semibold text-[color:var(--st-ink-80)] underline decoration-[color:var(--st-accent-40)] underline-offset-8 transition hover:text-[color:var(--st-accent-text)]">
-            See Our Services
+            View services
           </button>
         </div>
         <p className="mt-10 text-sm text-[color:var(--st-ink-55)]">Book in under a minute · No account needed</p>

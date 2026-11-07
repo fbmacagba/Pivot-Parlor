@@ -20,6 +20,9 @@ export default defineConfig({
     cloudflareDevProxyVitePlugin(),
     remix({
       future: {
+        // Stay on classic data requests: turbo-stream 2.x has an upstream
+        // single-fetch advisory. Reassess before enabling this feature.
+        v3_singleFetch: false,
         v3_fetcherPersist: true,
         v3_relativeSplatPath: true,
         v3_throwAbortReason: true,

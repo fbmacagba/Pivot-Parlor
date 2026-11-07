@@ -100,15 +100,15 @@
   position: fixed;
   z-index: 60;
   right: max(1.5rem, env(safe-area-inset-right, 0px));
-  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + var(--pp-bar-lift));
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px) + max(var(--pp-bar-lift), var(--pp-cookie-lift, 0px)));
   transition: bottom 250ms ease-out;
 }
 .pp-chat-panel {
   position: fixed;
   z-index: 60;
   right: max(1.5rem, env(safe-area-inset-right, 0px));
-  bottom: calc(6rem + env(safe-area-inset-bottom, 0px) + var(--pp-bar-lift));
-  height: min(480px, calc(100vh - 7.5rem - env(safe-area-inset-bottom, 0px) - var(--pp-bar-lift)));
+  bottom: calc(6rem + env(safe-area-inset-bottom, 0px) + max(var(--pp-bar-lift), var(--pp-cookie-lift, 0px)));
+  height: min(480px, calc(100vh - 7.5rem - env(safe-area-inset-bottom, 0px) - max(var(--pp-bar-lift), var(--pp-cookie-lift, 0px))));
   overscroll-behavior: contain;
 }
 
@@ -117,4 +117,37 @@
   .pp-chat-fab {
     transition: none;
   }
+}
+
+/* The single disclosure strip on a portfolio demo. It sits in the page flow
+   under the header and leaves the generated design itself untouched (the
+   hero used to be collapsed for demos, hiding the shop's own composition). */
+.pp-demo-notice { border-bottom: 1px solid var(--st-line-15); color: var(--st-ink-80); background: var(--st-card); font-size: 0.875rem; line-height: 1.5; }
+.pp-demo-notice p { margin: 0 auto; max-width: 80rem; padding: 0.625rem 1rem; text-wrap: pretty; }
+@media (min-width: 768px) { .pp-demo-notice p { padding-inline: 1.5rem; } }
+.pp-demo-notice strong { font-weight: 600; color: var(--st-ink); }
+/* Phone: one tappable line (44px target) carrying the disclosure; wide: the
+   full sentence. Only one variant is displayed, so assistive tech reads one. */
+.pp-demo-full { display: none; }
+.pp-demo-folded summary {
+  display: flex; align-items: center; gap: 0.75rem;
+  margin: 0 auto; max-width: 80rem; min-height: 44px; padding: 0.5rem 1rem;
+  cursor: pointer; list-style: none; text-wrap: pretty;
+}
+.pp-demo-folded summary::-webkit-details-marker { display: none; }
+/* A drawn chevron (geometry, not a glyph) that turns when open. */
+.pp-demo-folded summary::after {
+  content: ""; flex: none; margin-left: auto; width: 0.5rem; height: 0.5rem;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg); transition: transform 0.2s ease-out;
+}
+.pp-demo-folded[open] summary::after { transform: translateY(2px) rotate(-135deg); }
+.pp-demo-folded summary:focus-visible { outline: 2px solid var(--st-ink); outline-offset: -2px; }
+.pp-demo-folded > p { padding-top: 0; }
+@media (min-width: 768px) {
+  .pp-demo-full { display: block; }
+  .pp-demo-folded { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-demo-folded summary::after { transition: none; }
 }

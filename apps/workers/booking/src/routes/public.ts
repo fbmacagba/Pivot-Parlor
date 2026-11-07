@@ -23,7 +23,7 @@ import { runBookingSideEffects } from "../services/booking-side-effects.js";
 import { reportError } from "../services/report-error.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { createCheckoutSession } from "../lib/stripe.js";
-import { addMinutes, calculateCommissionPence } from "@repo/utils";
+import { addMinutes, calculateCommissionPence, isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 
 function toDateString(iso: string): string {
   return iso.slice(0, 10); // "YYYY-MM-DD"
@@ -126,6 +126,11 @@ publicRoutes.post(
       : await getShopBySlug(c.env.DB, shop_slug!);
     if (!shop || !shop.is_active)
       return c.json({ success: false, error: "Shop not found" }, 404);
+
+    // Enforced on the resolved shop, so using its original ID cannot bypass the demo boundary.
+    if (isPortfolioDemoShopRecord(shop)) {
+      return c.json({ success: false, error: PORTFOLIO_DEMO_ERROR }, 403);
+    }
 
     // Validate service
     const service = await getServiceById(c.env.DB, service_id);

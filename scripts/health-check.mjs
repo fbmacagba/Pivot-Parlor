@@ -60,14 +60,6 @@ async function expectUnauth(url, method = "GET") {
   return { note: `→ ${res.status} auth guarded` };
 }
 
-async function expectJson(url) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-  const ct = res.headers.get("content-type") ?? "";
-  if (!ct.includes("json")) throw new Error(`Not JSON: ${ct}`);
-  const data = await res.json();
-  return { note: `→ ${res.status}`, data };
-}
-
 // ─── Test suites ─────────────────────────────────────────────────────────────
 
 async function testWorker() {
@@ -97,7 +89,7 @@ async function testWorker() {
   });
 
   await check("POST /api/bookings (public — missing fields → 400)", async () => {
-    const res = await post(`${WORKER_URL}/api/bookings`, {}, 400);
+    await post(`${WORKER_URL}/api/bookings`, {}, 400);
     return { note: "→ 400 validation working" };
   });
 

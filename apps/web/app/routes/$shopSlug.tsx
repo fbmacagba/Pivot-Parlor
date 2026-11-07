@@ -1,8 +1,13 @@
-import { Outlet } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { Outlet, useLoaderData } from "@remix-run/react";
+import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
+import { decodeToken, getSessionToken } from "~/lib/auth";
 import { ErrorScreen } from "~/components/ErrorScreen";
+import { CandidatePreviewBar } from "~/components/CandidatePreviewBar";
+import { skipRevalidationForWizardParams } from "~/lib/bookingUrl";
+import { PORTFOLIO_DEMO_SLUG, portfolioDemoForSlug, shopDataKeyForSlug } from "@repo/utils";
+import { getPortfolioDemoData } from "~/lib/portfolioDemo";
 import type {
   Review,
   Service,
@@ -134,12 +139,61 @@ export interface ShopSiteData {
   /** Site Design v3 (Design Director) composition spec — see @repo/utils DesignSpec.
    *  NULL for v1/v2 sites. */
   design_spec?: unknown;
+  /** Generated "the space" photos (interior, tools, detail); migration 048. */
+  gallery_images?: string[];
 }
 
-export async function loader({ params, context }: LoaderFunctionArgs) {
+/** The version waiting for owner review, as GET /api/shops/:id/site-candidate returns it. */
+type SiteCandidateApi = {
+  job_id: string;
+  created_at: string;
+  services_unchanged: boolean;
+  site: ShopSiteData;
+  services: ApiPublicService[];
+};
+
+/** Shown on a ?preview=candidate page: which version this is and where to act on it. */
+export type CandidatePreview = {
+  created_at: string;
+  services_unchanged: boolean;
+  dashboard_href: string;
+};
+
+/** A preview is private to the reviewer: never cached, never indexed. */
+export const PREVIEW_HEADERS = {
+  "Cache-Control": "private, no-store",
+  "X-Robots-Tag": "noindex, nofollow",
+} as const;
+
+// Document responses take headers only from a route that exports `headers`;
+// the shop's child pages have none, so they inherit these.
+export const headers: HeadersFunction = ({ loaderHeaders, parentHeaders }) => {
+  const out = new Headers(parentHeaders);
+  for (const name of Object.keys(PREVIEW_HEADERS)) {
+    const value = loaderHeaders.get(name);
+    if (value) out.set(name, value);
+  }
+  return out;
+};
+
+// The booking wizard records its place in the URL (lib/bookingUrl); that must
+// not reload the shop, its site or its menu.
+export const shouldRevalidate = skipRevalidationForWizardParams;
+
+export async function loader({ params, context, request }: LoaderFunctionArgs) {
+  const slug = params.shopSlug!;
+  // A portfolio demo renders its FICTIONAL backing shop, read by fixed id with
+  // public GETs only, so the alias URL can never show a real tenant's records.
+  // Until that shop is provisioned and live, the barber alias keeps serving
+  // the static fixture so the published demo URL never 404s.
+  const demo = portfolioDemoForSlug(slug);
+  const key = shopDataKeyForSlug(slug);
+  const demoFallback = () => {
+    if (slug === PORTFOLIO_DEMO_SLUG) return json(getPortfolioDemoData());
+    throw new Response("Shop not found", { status: 404 });
+  };
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
-  const slug = params.shopSlug!;
 
   type ShopPublic = {
     id: string;
@@ -150,19 +204,52 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   };
   let shop: ShopPublic | null = null;
   try {
-    shop = await api.get<ShopPublic>(`/api/shops/${slug}`);
+    shop = await api.get<ShopPublic>(`/api/shops/${key}`);
   } catch {
+    if (demo) return demoFallback();
     throw new Response("Shop not found", { status: 404 });
   }
+  if (demo && shop.id !== demo.shopId) return demoFallback();
 
   let site: ShopSiteData | null = null;
   try {
-    site = await api.get<ShopSiteData>(`/api/shops/${slug}/site`);
+    site = await api.get<ShopSiteData>(`/api/shops/${key}/site`);
   } catch {
     /* Coming Soon */
   }
+  if (demo && (site?.website_status ?? "draft").toLowerCase() !== "live") return demoFallback();
 
-  if (site) {
+  // Owner review (migration 049): ?preview=candidate shows the version waiting
+  // for review. The Worker decides who may read it (a developer, or this
+  // shop's own admin); for anyone else, or when nothing is waiting, the
+  // request falls back to the public site exactly as if the flag were absent.
+  // Portfolio demos preview too (they are regenerated and published like any
+  // shop); without a session they still make no request beyond their GETs.
+  let preview: CandidatePreview | null = null;
+  let previewServices: ApiPublicService[] | null = null;
+  const token = new URL(request.url).searchParams.get("preview") === "candidate" ? getSessionToken(request) : null;
+  if (token) {
+    try {
+      const candidate = await createApiClient(env.API_URL, token).get<SiteCandidateApi>(
+        `/api/shops/${encodeURIComponent(shop.id)}/site-candidate`
+      );
+      if (candidate?.site && candidate.job_id) {
+        site = candidate.site;
+        previewServices = Array.isArray(candidate.services) ? candidate.services : [];
+        const role = decodeToken(token)?.role; // display only: picks the dashboard link
+        preview = {
+          created_at: candidate.created_at,
+          services_unchanged: candidate.services_unchanged !== false,
+          dashboard_href: role === "developer" ? `/dev/shops/${encodeURIComponent(shop.id)}` : "/admin",
+        };
+      }
+    } catch {
+      /* not allowed, nothing waiting, or unavailable: show the public site */
+    }
+  }
+
+  // The reviewer previews a paused site too; the public gates apply otherwise.
+  if (site && !preview) {
     const ws = (site.website_status ?? "draft").toLowerCase();
     if (ws === "paused") {
       throw new Response(
@@ -181,7 +268,8 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   const catalog = site?.catalog_images ?? [];
   let commercialServices: Service[] = [];
   try {
-    const apiRows = await api.get<ApiPublicService[]>(`/api/shops/${slug}/services`);
+    // A preview carries the services with its own descriptions.
+    const apiRows = previewServices ?? (await api.get<ApiPublicService[]>(`/api/shops/${key}/services`));
     if (Array.isArray(apiRows) && apiRows.length > 0) {
       commercialServices = mapApiServicesToCommercial(apiRows, catalog);
     }
@@ -202,9 +290,10 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
   }
 
   const [staffR, reviewsR, settingsR] = await Promise.allSettled([
-    api.get<StaffMember[]>(`/api/shops/${slug}/booking-staff`),
-    api.get<Review[]>(`/api/shops/${slug}/reviews`),
-    api.get<ShopSettings>(`/api/shops/${slug}/settings`),
+    api.get<StaffMember[]>(`/api/shops/${key}/booking-staff`),
+    // A demo shows no reviews: any review on a fictional shop would be invented.
+    demo ? Promise.resolve([] as Review[]) : api.get<Review[]>(`/api/shops/${key}/reviews`),
+    api.get<ShopSettings>(`/api/shops/${key}/settings`),
   ]);
 
   const staff = staffR.status === "fulfilled" ? staffR.value : [];
@@ -214,25 +303,36 @@ export async function loader({ params, context }: LoaderFunctionArgs) {
     settings = { ...settings, phone: shop.phone };
   }
 
-  return json({
-    slug,
-    shop: {
-      id: shop.id,
-      name: shop.name,
-      slug: shop.slug,
-      phone: shop.phone,
-      created_at: shop.created_at,
+  return json(
+    {
+      slug,
+      shop: {
+        id: shop.id,
+        name: shop.name,
+        slug: shop.slug,
+        phone: shop.phone,
+        created_at: shop.created_at,
+      },
+      site,
+      commercialServices,
+      staff,
+      reviews,
+      settings,
+      preview,
     },
-    site,
-    commercialServices,
-    staff,
-    reviews,
-    settings,
-  });
+    preview ? { headers: PREVIEW_HEADERS } : undefined
+  );
 }
 
 export default function ShopLayout() {
-  return <Outlet />;
+  const data = useLoaderData<typeof loader>();
+  const preview = data && "preview" in data ? data.preview : null;
+  return (
+    <>
+      {preview ? <CandidatePreviewBar {...preview} /> : null}
+      <Outlet />
+    </>
+  );
 }
 
 // Branded fallback for a missing/unavailable shop or a failed load,
