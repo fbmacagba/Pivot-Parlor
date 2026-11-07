@@ -20,7 +20,6 @@ import {
   getServicesByShop,
   getServiceById,
   getShopSiteImages,
-  updateShopSiteWebsiteStatus,
   shopSiteWebsiteStatusStatement,
   getSiteCandidate,
   deleteSiteCandidate,

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { chainHash, type AuditRow } from "@repo/audit";
+import { chainHash } from "@repo/audit";
 import { runSealer } from "../src/audit/sealer";
 import { systemAudit } from "../src/audit/context";
 

@@ -23,7 +23,7 @@ import {
 
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 /** Shape guard for an /apply-theme model_id: bounded length, no registry check (Ruling 18). */
-const MODEL_ID_SHAPE = /^[A-Za-z0-9._:\/@-]+$/;
+const MODEL_ID_SHAPE = /^[A-Za-z0-9._:/@-]+$/;
 
 /** Owner palette from a request body — honoured only as a complete, valid pair. */
 function parsePalette(body: { color_primary?: unknown; color_accent?: unknown }): ThemePalette | undefined {

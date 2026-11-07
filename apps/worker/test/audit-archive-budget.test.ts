@@ -114,7 +114,9 @@ describe("archive-object budget (Ruling 54)", () => {
     const state = await sealState();
     expect(state!.last_verified_seq).toBe(10); // the capped range's last fully verified seq
     expect(state!.walk_cursor_seq).toBe(0); // walk did not run, cursor untouched
-  });
+    // ~0.8s alone, but it seals 22 batches and runs the nightly; under a saturated full-suite
+    // run it has crossed the 5s default. Same allowance as audit-nightly-walk-wrap.test.ts.
+  }, 20_000);
 
   it("gives the walk whatever budget the incremental range left over", async () => {
     // Next night: incremental covers 11..30 (20 objects), walk gets 5 of a 25 budget.
