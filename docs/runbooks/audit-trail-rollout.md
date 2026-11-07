@@ -323,6 +323,12 @@ need follow-up. After restoring, expect alert emails the next morning and forwar
 - **Code:** redeploy the previous worker version with `npx wrangler rollback`. The audit tables,
   the archive bucket contents, and every entry already written stay exactly as they are;
   nothing needs to be undone or cleaned up.
+- **The once-a-minute schedule survives a rollback.** Cloudflare keeps schedules on the Worker
+  itself, not in a version, so `wrangler rollback` leaves `* * * * *` in place. That's harmless:
+  the pre-audit code logs `[Cron] Unknown schedule: * * * * *` and does nothing else (checked
+  against `scheduled()` on main before this change). If the log line bothers you, the schedules
+  can be reset with `npx wrangler triggers deploy` (check `--help` for the flags first); the next
+  normal `wrangler deploy` also resets them from `wrangler.toml`.
 - **Migrations:** leave `046` and `047` applied even on a code rollback. They only add tables,
   columns and triggers; nothing in the rest of the app depends on them being absent, so there is
   no reason to reverse them.
