@@ -123,6 +123,8 @@ Browser → Cloudflare Pages (Remix) → Cloudflare Workers (Hono API) → Cloud
 
 The Remix frontend acts as a BFF (Backend-for-Frontend). It proxies authenticated requests to the Hono Worker using `createApiClient(env.API_URL, token)`. Some routes also proxy directly in loaders/actions using `fetch` with a Bearer token.
 
+Those calls travel over the `API` service binding (`apps/web/wrangler.toml`), not the public internet. `functions/_middleware.ts` reroutes every server-side `fetch` to `env.API_URL`'s origin through it, carrying the visitor's `CF-Connecting-IP` (`app/lib/apiTransport.ts`). Sent over the internet, a Pages-to-Worker call is cross-zone, and Cloudflare stamps every such call with one fixed address (`2a06:98c0:3600::103`), so all visitors would share the API's per-IP rate limits. Keep new BFF calls on `env.API_URL`; don't hard-code an API host.
+
 ### Auth Flow
 
 - JWT signed with `JWT_SECRET` (shared between Pages and Worker).

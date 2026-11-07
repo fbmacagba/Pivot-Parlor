@@ -40,6 +40,11 @@ import { acknowledgePlatformCookieNotice } from "./e2e-cookies";
 
 const E2E_SHOP_SLUG = "e2e-bookable-shop";
 
+// What Cloudflare puts in CF-Connecting-IP on any cross-zone Worker
+// subrequest, whoever the visitor was (developers.cloudflare.com/fundamentals/
+// reference/http-headers/#cf-connecting-ip-in-worker-subrequests).
+const CLOUDFLARE_CROSS_ZONE_IP = "2a06:98c0:3600::103";
+
 async function login(page: Page): Promise<void> {
   const password = process.env.DEV_PASSWORD;
   if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
@@ -103,6 +108,20 @@ test.describe("Audit trail — staging", () => {
 
       await page.getByRole("button", { name: "Check now" }).click();
       await expect(page.getByRole("status")).toContainText("intact");
+
+      // The pause above went through the website, which reaches the API over
+      // a service binding carrying the visitor's IP (apps/web/app/lib/
+      // apiTransport.ts). Over the public internet every visitor reached the
+      // API as Cloudflare's one cross-zone address, so all of them shared every
+      // per-IP rate limit (bookings, sign-in, sign-up). Guard that it stays fixed.
+      await pauseEntry.locator("summary").click();
+      const ipLine = pauseEntry.getByText(/^IP: /);
+      await expect(ipLine).toBeVisible();
+      const ip = ((await ipLine.textContent()) ?? "").replace(/^IP:\s*/, "").trim();
+      expect(ip, "the entry recorded no usable IP").toMatch(/^[0-9a-f.:]{3,}$/i);
+      expect(ip, "the API saw Cloudflare's shared cross-zone address, not the visitor's IP").not.toBe(
+        CLOUDFLARE_CROSS_ZONE_IP
+      );
     } finally {
       // Nothing in this block may throw, or it would replace (mask) a
       // pending failure from the try block above -- that's plain JS

@@ -11,6 +11,15 @@ APP_DOMAIN = "pivotparlor.com"
 #   JWT_SECRET
 #   OPENROUTER_API_KEY   ← used by marketing chatbot (/api/chat) and worker AI routes
 
+# The website's server code reaches the API over this binding, not the public
+# internet, so the API sees each visitor's IP (functions/_middleware.ts and
+# app/lib/apiTransport.ts). Over the internet every visitor arrived as one
+# Cloudflare address and shared one set of rate limits.
+# scripts/ci-set-web-staging-vars.mjs points it at the staging worker.
+[[services]]
+binding = "API"
+service = "pivot-parlor-api"
+
 # KV binding — shared with worker for rate limiting the marketing chatbot
 [[kv_namespaces]]
 binding = "KV"
