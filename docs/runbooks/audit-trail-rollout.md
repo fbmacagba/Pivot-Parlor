@@ -27,15 +27,24 @@ assumption): "May I create and drop a throwaway table and trigger on the STAGING
 prove D1 accepts triggers?" Only on a yes, run this from `apps/worker`:
 
 ```bash
-npx wrangler d1 execute pivot-parlor-db-staging --remote --command "CREATE TABLE zz_trigger_probe (x INTEGER)"
-npx wrangler d1 execute pivot-parlor-db-staging --remote --command "CREATE TRIGGER zz_trigger_probe_nd BEFORE DELETE ON zz_trigger_probe BEGIN SELECT RAISE(ABORT, 'probe blocked'); END"
-npx wrangler d1 execute pivot-parlor-db-staging --remote --command "INSERT INTO zz_trigger_probe VALUES (1)"
-npx wrangler d1 execute pivot-parlor-db-staging --remote --command "DELETE FROM zz_trigger_probe"
-npx wrangler d1 execute pivot-parlor-db-staging --remote --command "DROP TABLE zz_trigger_probe"
+npx wrangler d1 execute pivot-parlor-db-staging --env staging --remote --command "CREATE TABLE zz_trigger_probe (x INTEGER)"
+npx wrangler d1 execute pivot-parlor-db-staging --env staging --remote --command "CREATE TRIGGER zz_trigger_probe_nd BEFORE DELETE ON zz_trigger_probe BEGIN SELECT RAISE(ABORT, 'probe blocked'); END"
+npx wrangler d1 execute pivot-parlor-db-staging --env staging --remote --command "INSERT INTO zz_trigger_probe VALUES (1)"
+npx wrangler d1 execute pivot-parlor-db-staging --env staging --remote --command "DELETE FROM zz_trigger_probe"
+npx wrangler d1 execute pivot-parlor-db-staging --env staging --remote --command "DROP TABLE zz_trigger_probe"
 ```
 
-Expected: the `DELETE` command fails and prints `probe blocked`; that's the trigger doing its
-job. `DROP TABLE` should then succeed and remove everything cleanly.
+`--env staging` is required: the staging database is only declared under `[env.staging]` in
+`wrangler.toml`, and without it wrangler sends the database *name* where Cloudflare expects
+its id, which comes back as a misleading "Authentication error [code: 10000]".
+
+Expected: the `DELETE` command fails and prints `probe blocked` (in full:
+`probe blocked: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_TRIGGER)`); that's the trigger
+doing its job. `DROP TABLE` should then succeed and remove everything cleanly.
+
+**Done 2026-11-07 on staging:** `CREATE TRIGGER` succeeded, the `DELETE` failed with exactly
+the message above, the row was still there afterwards, and `DROP TABLE` left no
+`zz_trigger_probe` objects behind.
 
 **If `CREATE TRIGGER` itself fails or errors**, stop here: do not go on to Step 1 and do not
 open the pull request. Tell the developer, with the exact error text. The branch as written
