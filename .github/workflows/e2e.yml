@@ -8,8 +8,9 @@ name: E2E (staging)
 #   - SMOKE: runs on EVERY pull request — dev-login + public booking, the
 #     critical auth + revenue flows. Fast and unconditional.
 #   - FULL: opt-in via the `e2e` label or manual dispatch — the complete suite,
-#     including site-generation (drives the AI pipeline on staging, which costs
-#     credits) and the dev-shop-delete repro.
+#     including site-generation, the dev-shop-delete repro and the audit trail.
+#     Real AI generation stays off unless E2E_SITE_GENERATION=1 (not set here),
+#     and staging has no consumer for its research queue, so FULL costs no credits.
 #
 # Required repo secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, DEV_PASSWORD.
 
