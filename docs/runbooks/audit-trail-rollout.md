@@ -53,11 +53,18 @@ merge.
 
 ```bash
 npx wrangler r2 bucket create pivot-parlor-audit
-npx wrangler r2 bucket lock add pivot-parlor-audit --name retain-6y --retention-days 2192
+npx wrangler r2 bucket lock add pivot-parlor-audit retain-6y --retention-days 2192
 npx wrangler r2 bucket create pivot-parlor-audit-staging
-npx wrangler r2 bucket lock add pivot-parlor-audit-staging --name retain-6y --retention-days 2192
+npx wrangler r2 bucket lock add pivot-parlor-audit-staging retain-6y --retention-days 2192
 npx wrangler r2 bucket lock list pivot-parlor-audit
+npx wrangler r2 bucket lock list pivot-parlor-audit-staging
 ```
+
+The rule name (`retain-6y`) is a positional argument in wrangler 4.105 (checked with
+`npx wrangler r2 bucket lock add --help`). Each `lock add` then asks two questions: first
+"Enter a prefix for the bucket lock rule": press Enter to leave it empty; then whether to add
+the rule "without a prefix", which defaults to **no**: type `y`. The whole bucket is the intent.
+Answering no cancels with "Add cancelled." and adds no lock, so check the `lock list` output.
 
 Archive files expire at the same age as database entries (spec 6.2), which is 2192 days (6
 years). Add a lifecycle rule a few days past the lock so objects are actually removed once they
@@ -69,6 +76,8 @@ upload"):
 npx wrangler r2 bucket lifecycle add pivot-parlor-audit expire-6y --expire-days 2200
 npx wrangler r2 bucket lifecycle add pivot-parlor-audit-staging expire-6y --expire-days 2200
 ```
+
+Each `lifecycle add` asks for a prefix ("leave empty for all prefixes"): press Enter.
 
 Anchor files (stored under `anchors/` in the same bucket) are covered by the same lock and
 lifecycle rules; nothing extra to do for them.
