@@ -250,55 +250,86 @@ shops.get("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), a
   });
 });
 
+/** Version ids are server-made generation job ids. Bound what a request can
+ *  put into an audit entry, which is hashed and kept for 6 years (Ruling 14),
+ *  before anything is recorded. */
+const CANDIDATE_JOB_ID = /^[A-Za-z0-9-]{1,64}$/;
+
+/** Audit outcome for a site-candidate response: 4xx is a refusal and 5xx a
+ *  failure, the same split the gap guard uses. */
+const candidateOutcome = (jobId: string) => (res: Response) => ({
+  outcome: res.status >= 500 ? ("failed" as const) : res.status >= 400 ? ("refused" as const) : ("succeeded" as const),
+  reason: res.status < 400 ? null : `HTTP ${res.status}`,
+  details: { job_id: jobId },
+});
+
 shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("admin"), async (c) => {
   const shop = await shopForReview(c);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
   const body = (await c.req.json().catch(() => ({}))) as { job_id?: unknown };
   const jobId = typeof body.job_id === "string" ? body.job_id.trim() : "";
   if (!jobId) return c.json({ success: false, error: "job_id is required: publish the version you previewed" }, 400);
+  if (!CANDIDATE_JOB_ID.test(jobId)) return c.json({ success: false, error: "job_id is not a valid version id" }, 400);
 
-  const candidate = await getSiteCandidate(c.env.DB, shop.id);
-  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
-  if (candidate.job_id !== jobId) {
-    return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
-  }
-  const payload = parseCandidatePayload(candidate.payload_json);
-  if (!payload) {
-    return c.json({ success: false, error: "This version cannot be published by this release. Regenerate the site." }, 409);
-  }
-  const site = await getShopSiteByShopId(c.env.DB, shop.id);
-  if (!site) return c.json({ success: false, error: "The shop has no published site to update." }, 409);
-  const rows = await getServicesByShop(c.env.DB, shop.id);
-  if (!servicesUnchanged(payload.service_names, rows.map((r) => r.name))) {
-    return c.json({ success: false, error: SERVICES_CHANGED }, 409);
-  }
-
-  const columns = withoutLockedImages(payload.columns, (site as { locked_images_json?: string | null }).locked_images_json);
-  const entries = Object.entries(columns) as Array<[CandidateColumn, string | number | null]>;
-  const results = await c.env.DB.batch(
-    publishSiteCandidateStatements(c.env.DB, {
-      shopId: shop.id,
-      jobId,
-      columns: entries,
-      ownerPalette: payload.owner_palette,
-    }),
-  );
-  // The last statement removes the candidate. If it removed nothing, a newer
-  // regeneration replaced this one mid-publish and every write was skipped.
-  const removed = results[results.length - 1]?.meta?.changes ?? 0;
-  if (removed === 0) {
-    return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
-  }
   try {
-    await c.env.KV.delete(`site:${shop.slug}`);
-  } catch (err) {
-    // /site re-reads services, status, images and design intent from D1 on
-    // every request; only headline, tagline, about, colours, fonts and SEO
-    // would stay on the cached copy until its 24h expiry.
-    console.error(`[site-candidate] KV bust failed shop=${shop.id}`, err);
+    return await auditFor(c).run(
+      {
+        action: "site.candidate.publish",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: { job_id: jobId },
+      },
+      async (): Promise<Response> => {
+        const candidate = await getSiteCandidate(c.env.DB, shop.id);
+        if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+        if (candidate.job_id !== jobId) {
+          return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
+        }
+        const payload = parseCandidatePayload(candidate.payload_json);
+        if (!payload) {
+          return c.json({ success: false, error: "This version cannot be published by this release. Regenerate the site." }, 409);
+        }
+        const site = await getShopSiteByShopId(c.env.DB, shop.id);
+        if (!site) return c.json({ success: false, error: "The shop has no published site to update." }, 409);
+        const rows = await getServicesByShop(c.env.DB, shop.id);
+        if (!servicesUnchanged(payload.service_names, rows.map((r) => r.name))) {
+          return c.json({ success: false, error: SERVICES_CHANGED }, 409);
+        }
+
+        const columns = withoutLockedImages(payload.columns, (site as { locked_images_json?: string | null }).locked_images_json);
+        const entries = Object.entries(columns) as Array<[CandidateColumn, string | number | null]>;
+        const results = await c.env.DB.batch(
+          publishSiteCandidateStatements(c.env.DB, {
+            shopId: shop.id,
+            jobId,
+            columns: entries,
+            ownerPalette: payload.owner_palette,
+          }),
+        );
+        // The last statement removes the candidate. If it removed nothing, a newer
+        // regeneration replaced this one mid-publish and every write was skipped.
+        const removed = results[results.length - 1]?.meta?.changes ?? 0;
+        if (removed === 0) {
+          return c.json({ success: false, error: "A newer version replaced the one you previewed. Preview it before publishing." }, 409);
+        }
+        try {
+          await c.env.KV.delete(`site:${shop.slug}`);
+        } catch (err) {
+          // /site re-reads services, status, images and design intent from D1 on
+          // every request; only headline, tagline, about, colours, fonts and SEO
+          // would stay on the cached copy until its 24h expiry.
+          console.error(`[site-candidate] KV bust failed shop=${shop.id}`, err);
+        }
+        console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
+        return c.json({ success: true, data: { published: true, job_id: jobId } });
+      },
+      candidateOutcome(jobId),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
-  return c.json({ success: true, data: { published: true, job_id: jobId } });
 });
 
 shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), async (c) => {
@@ -306,14 +337,33 @@ shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin")
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
   const jobId = (c.req.query("job_id") ?? "").trim();
   if (!jobId) return c.json({ success: false, error: "job_id is required: discard the version you previewed" }, 400);
-  const candidate = await getSiteCandidate(c.env.DB, shop.id);
-  if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
-  if (candidate.job_id !== jobId) {
-    return c.json({ success: false, error: "A newer version replaced the one you previewed." }, 409);
+  if (!CANDIDATE_JOB_ID.test(jobId)) return c.json({ success: false, error: "job_id is not a valid version id" }, 400);
+
+  try {
+    return await auditFor(c).run(
+      {
+        action: "site.candidate.discard",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: { job_id: jobId },
+      },
+      async (): Promise<Response> => {
+        const candidate = await getSiteCandidate(c.env.DB, shop.id);
+        if (!candidate) return c.json({ success: false, error: "No new version is waiting for review" }, 404);
+        if (candidate.job_id !== jobId) {
+          return c.json({ success: false, error: "A newer version replaced the one you previewed." }, 409);
+        }
+        await deleteSiteCandidate(c.env.DB, shop.id, jobId);
+        console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
+        return c.json({ success: true, data: { discarded: true, job_id: jobId } });
+      },
+      candidateOutcome(jobId),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  await deleteSiteCandidate(c.env.DB, shop.id, jobId);
-  console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
-  return c.json({ success: true, data: { discarded: true, job_id: jobId } });
 });
 
 // ─── GET /api/shops/:shopId/booking-staff — public staff list for customer booking (no emails) ─

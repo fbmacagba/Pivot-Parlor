@@ -42,6 +42,8 @@ const LABELS: Record<string, string> = {
   "site.activate": "Site made live",
   "site.pause": "Site paused",
   "site.regenerate.request": "Site regeneration requested",
+  "site.candidate.publish": "New site version published",
+  "site.candidate.discard": "New site version discarded",
   "theme.generate": "Theme generated",
   "theme.apply": "Theme applied",
   "theme.compare": "Themes compared",

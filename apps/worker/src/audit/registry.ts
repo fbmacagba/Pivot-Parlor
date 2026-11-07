@@ -11,6 +11,10 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops/:shopId/activate": "site.activate",
   "POST /api/shops/:shopId/pause": "site.pause",
   "POST /api/shops/:shopId/generate-site": "site.regenerate.request",
+  // Owner review of a regenerated site (#111), added when the audit trail
+  // was merged with it: publishing replaces what a live site shows.
+  "POST /api/shops/:shopId/site-candidate/publish": "site.candidate.publish",
+  "DELETE /api/shops/:shopId/site-candidate": "site.candidate.discard",
   "POST /api/ai/apply-theme": "theme.apply",
   "POST /api/ai/chatbot-model": "ai.chatbot_model.set",
   "POST /api/ai/compare": "theme.compare",

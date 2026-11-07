@@ -1,6 +1,7 @@
 /** Fixed action catalogue (spec 3.3). Add actions here, never inline strings. */
 export const AUDIT_ACTIONS = [
   "site.activate", "site.pause", "site.regenerate.request", "site.regenerate.complete", "site.edit",
+  "site.candidate.publish", "site.candidate.discard",
   "theme.generate", "theme.apply", "theme.compare",
   "shop.create", "shop.update", "shop.delete", "shop.settings.update",
   "service.create", "service.update", "service.delete",

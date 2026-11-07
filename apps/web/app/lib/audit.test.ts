@@ -27,6 +27,8 @@ describe("audit page helpers", () => {
   });
   it("labels actions in plain words", () => {
     expect(actionLabel("site.pause")).toBe("Site paused");
+    expect(actionLabel("site.candidate.publish")).toBe("New site version published");
+    expect(actionLabel("site.candidate.discard")).toBe("New site version discarded");
     expect(actionLabel("brand.new")).toBe("brand.new");
     // Ruling 57: the nightly now writes audit.anchor after its emails.
     expect(actionLabel("audit.anchor")).toBe("Daily fingerprint emailed");

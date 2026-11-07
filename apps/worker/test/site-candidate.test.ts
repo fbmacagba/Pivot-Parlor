@@ -13,6 +13,7 @@ import { dispatch } from "./request";
 import { authHeaders, seedShop, seedUser, tokenFor } from "./helpers";
 import { CANDIDATE_COLUMNS, parseCandidatePayload } from "../src/lib/siteCandidate";
 import { publishSiteCandidateStatements } from "../src/db/queries";
+import { AUDIT_REFUSED_MESSAGE } from "../src/audit/context";
 import {
   CANDIDATE_COLUMNS as ASSEMBLER_COLUMNS,
   buildCandidatePayload,
@@ -367,5 +368,105 @@ describe("GET /api/jobs/:jobId/status outcome", () => {
     expect(await outcome(await addJob(shopId, "complete", "complete"))).toBe("published");
     expect(await outcome(await addJob(shopId, "running", "parallel"))).toBeUndefined();
     expect(await outcome(await addJob(shopId, "failed", "assemble"))).toBeUndefined();
+  });
+});
+
+describe("site-candidate routes are audited", () => {
+  const auditRows = (shopId: string, action: string) =>
+    env.DB.prepare("SELECT * FROM audit_log WHERE shop_id = ? AND action = ? ORDER BY occurred_at, phase DESC")
+      .bind(shopId, action)
+      .all<Record<string, unknown>>()
+      .then((r) => r.results ?? []);
+
+  const phasesAndOutcomes = (rows: Array<Record<string, unknown>>) => rows.map((r) => [r.phase, r.outcome]);
+
+  it("publish records started + succeeded with the job id, and no gap entry", async () => {
+    const shopId = await reviewFixture();
+    const res = await dispatch("POST", `/api/shops/${shopId}/site-candidate/publish`, {
+      headers: authHeaders(await devToken()),
+      body: { job_id: "job-A" },
+    });
+    expect(res.status).toBe(200);
+    const rows = await auditRows(shopId, "site.candidate.publish");
+    expect(phasesAndOutcomes(rows)).toEqual([["started", null], ["outcome", "succeeded"]]);
+    const outcome = rows.find((r) => r.phase === "outcome")!;
+    expect(outcome).toMatchObject({ actor_type: "developer", entity_type: "shop_site", entity_id: shopId });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ job_id: "job-A" });
+    const gaps = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.gap' AND request_id = ?")
+      .bind(outcome.request_id)
+      .first<{ n: number }>();
+    expect(gaps!.n).toBe(0);
+  });
+
+  it("publish of a stale version is recorded as refused, and the live site is unchanged", async () => {
+    const shopId = await reviewFixture();
+    const res = await dispatch("POST", `/api/shops/${shopId}/site-candidate/publish`, {
+      headers: authHeaders(await devToken()),
+      body: { job_id: "job-OLD" },
+    });
+    expect(res.status).toBe(409);
+    const rows = await auditRows(shopId, "site.candidate.publish");
+    expect(phasesAndOutcomes(rows)).toEqual([["started", null], ["outcome", "refused"]]);
+    expect(rows.find((r) => r.phase === "outcome")!.reason).toBe("HTTP 409");
+    expect((await publicSite(shopId)).headline).toBe(LIVE_HEADLINE);
+  });
+
+  it("publish changes nothing (503) when the audit entry cannot be written", async () => {
+    const shopId = await reviewFixture();
+    const token = await devToken();
+    await env.DB.prepare("ALTER TABLE audit_log RENAME TO audit_log_off").run();
+    try {
+      const res = await dispatch("POST", `/api/shops/${shopId}/site-candidate/publish`, {
+        headers: authHeaders(token),
+        body: { job_id: "job-A" },
+      });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ success: false, error: AUDIT_REFUSED_MESSAGE });
+    } finally {
+      await env.DB.prepare("ALTER TABLE audit_log_off RENAME TO audit_log").run();
+    }
+    expect(await candidateCount(shopId)).toBe(1);
+    expect((await publicSite(shopId)).headline).toBe(LIVE_HEADLINE);
+  });
+
+  it("never writes a malformed job id into the trail", async () => {
+    const shopId = await reviewFixture();
+    const token = await devToken();
+    const bad = "<script>job</script>";
+    const publish = await dispatch("POST", `/api/shops/${shopId}/site-candidate/publish`, {
+      headers: authHeaders(token),
+      body: { job_id: bad },
+    });
+    expect(publish.status).toBe(400);
+    const discard = await dispatch("DELETE", `/api/shops/${shopId}/site-candidate?job_id=${encodeURIComponent(bad)}`, {
+      headers: authHeaders(token),
+    });
+    expect(discard.status).toBe(400);
+    const leaked = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE details_json LIKE ?")
+      .bind("%<script>%")
+      .first<{ n: number }>();
+    expect(leaked!.n).toBe(0);
+    expect(await candidateCount(shopId)).toBe(1);
+  });
+
+  it("discard records succeeded, and a stale discard is refused and keeps the candidate", async () => {
+    const shopId = await reviewFixture();
+    const token = await devToken();
+    const stale = await dispatch("DELETE", `/api/shops/${shopId}/site-candidate?job_id=job-OLD`, {
+      headers: authHeaders(token),
+    });
+    expect(stale.status).toBe(409);
+    expect(await candidateCount(shopId)).toBe(1);
+
+    const ok = await dispatch("DELETE", `/api/shops/${shopId}/site-candidate?job_id=job-A`, {
+      headers: authHeaders(token),
+    });
+    expect(ok.status).toBe(200);
+    expect(await candidateCount(shopId)).toBe(0);
+
+    const rows = await auditRows(shopId, "site.candidate.discard");
+    const outcomes = rows.filter((r) => r.phase === "outcome").map((r) => [r.outcome, r.reason]);
+    expect(outcomes).toEqual([["refused", "HTTP 409"], ["succeeded", null]]);
+    expect(rows.filter((r) => r.phase === "started")).toHaveLength(2);
   });
 });
