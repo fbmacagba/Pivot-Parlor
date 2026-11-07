@@ -171,7 +171,12 @@ does not set it), and the one that submits a real generation request only puts a
    starts **Pending**, then **Sealed**, then **Archived**. You may never see **Sealed**: the
    same once-a-minute run that seals an entry usually archives it straight away, so going
    directly from Pending to Archived is normal. (Allow up to about two minutes on either
-   environment, and refresh the page to see the badge change.)
+   environment, and refresh the page to see the badge change.) **Right after the first deploy
+   of this change, allow up to 15 minutes instead:** the once-a-minute schedule is new to each
+   environment, and Cloudflare can take several minutes to start running a newly added
+   schedule. On staging (2026-11-07) the first seal came about 6 minutes after the deploy;
+   everything written in between stayed Pending and was then sealed and archived together.
+   Nothing is lost while it waits.
 4. Press **Check now** (top of the Activity page). A message appears below the buttons; once
    something has actually been sealed, it reads "Checked N entries (X to Y): the trail is
    intact." (If nothing has sealed yet, e.g. you check within the first minute, it instead
