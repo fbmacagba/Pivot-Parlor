@@ -14,6 +14,8 @@ import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { createConnectAccount, createAccountLink, getAccount } from "../lib/stripe.js";
 import { reportError } from "../services/report-error.js";
+import { AuditWriteError, type AuditRunResult } from "@repo/audit";
+import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -48,34 +50,52 @@ r.post("/:shopId/connect/onboard", async (c) => {
     return c.json({ success: false, error: "return_url and refresh_url must be https URLs" }, 400);
   }
 
-  const shop = await c.env.DB
-    .prepare("SELECT stripe_connect_account_id, owner_email FROM shops WHERE id = ? LIMIT 1")
-    .bind(shopId)
-    .first<{ stripe_connect_account_id: string | null; owner_email: string }>();
+  // Only the boolean is recorded: never the account id, the link URL, the
+  // return/refresh URLs or the owner email.
+  let accountCreated = false;
+  try {
+    return await auditFor(c).run(
+      { action: "payment.connect.onboard", shopId, entityType: "shop", entityId: shopId },
+      async (): Promise<Response> => {
+        const shop = await c.env.DB
+          .prepare("SELECT stripe_connect_account_id, owner_email FROM shops WHERE id = ? LIMIT 1")
+          .bind(shopId)
+          .first<{ stripe_connect_account_id: string | null; owner_email: string }>();
 
-  let accountId = shop?.stripe_connect_account_id?.trim() || null;
-  if (!accountId) {
-    const account = await createConnectAccount({
-      secret: c.env.STRIPE_SECRET_KEY,
-      email: shop?.owner_email ?? "",
-      shopId,
-      idempotencyKey: `connect-account:${shopId}`,
-    });
-    accountId = account.id;
-    await c.env.DB
-      .prepare("UPDATE shops SET stripe_connect_account_id = ? WHERE id = ?")
-      .bind(accountId, shopId)
-      .run();
+        let accountId = shop?.stripe_connect_account_id?.trim() || null;
+        if (!accountId) {
+          const account = await createConnectAccount({
+            secret: c.env.STRIPE_SECRET_KEY,
+            email: shop?.owner_email ?? "",
+            shopId,
+            idempotencyKey: `connect-account:${shopId}`,
+          });
+          accountId = account.id;
+          accountCreated = true;
+          await c.env.DB
+            .prepare("UPDATE shops SET stripe_connect_account_id = ? WHERE id = ?")
+            .bind(accountId, shopId)
+            .run();
+        }
+
+        const link = await createAccountLink({
+          secret: c.env.STRIPE_SECRET_KEY,
+          account: accountId,
+          returnUrl,
+          refreshUrl,
+        });
+
+        return c.json({ success: true, data: { account_id: accountId, url: link.url } });
+      },
+      statusOutcome(() => ({ details: { account_created: accountCreated } })),
+      // A throw after the account was created (e.g. createAccountLink failing)
+      // still records that it was: only the boolean, never the account id.
+      { describeError: () => ({ details: { account_created: accountCreated } }) }
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-
-  const link = await createAccountLink({
-    secret: c.env.STRIPE_SECRET_KEY,
-    account: accountId,
-    returnUrl,
-    refreshUrl,
-  });
-
-  return c.json({ success: true, data: { account_id: accountId, url: link.url } });
 });
 
 // GET /:shopId/connect/status
@@ -103,14 +123,43 @@ r.get("/:shopId/connect/status", async (c) => {
   if (accountId && !onboarded) {
     try {
       const acct = await getAccount(c.env.STRIPE_SECRET_KEY, accountId);
-      chargesEnabled = acct.charges_enabled;
-      payoutsEnabled = acct.payouts_enabled;
       if (acct.charges_enabled && acct.details_submitted) {
-        onboarded = true;
-        await c.env.DB
-          .prepare("UPDATE shops SET stripe_connect_onboarded = 1 WHERE id = ?")
-          .bind(shopId)
-          .run();
+        // Pattern T around a guarded flip. The account.updated webhook can set
+        // the flag between the read above and this write (the normal
+        // onboarding return), so the change is recorded only when this UPDATE
+        // flipped it; otherwise the outcome is refused, already_onboarded.
+        // Either way the shop is onboarded and the answer is the success one.
+        // If the started entry cannot be written (decision 8), the sync is
+        // skipped and this GET answers from the persisted columns, as it does
+        // when Stripe's poll fails.
+        let synced = false;
+        try {
+          await auditFor(c).run(
+            { action: "payment.connect.sync", shopId, entityType: "shop", entityId: shopId },
+            async (): Promise<boolean> => {
+              const flip = await c.env.DB
+                .prepare("UPDATE shops SET stripe_connect_onboarded = 1 WHERE id = ? AND stripe_connect_onboarded = 0")
+                .bind(shopId)
+                .run();
+              return (flip.meta?.changes ?? 0) === 1;
+            },
+            (flipped): AuditRunResult =>
+              flipped
+                ? { changes: { stripe_connect_onboarded: [0, 1] } }
+                : { outcome: "refused", reason: "already_onboarded" }
+          );
+          synced = true;
+        } catch (e) {
+          if (!(e instanceof AuditWriteError)) throw e;
+        }
+        if (synced) {
+          chargesEnabled = acct.charges_enabled;
+          payoutsEnabled = acct.payouts_enabled;
+          onboarded = true;
+        }
+      } else {
+        chargesEnabled = acct.charges_enabled;
+        payoutsEnabled = acct.payouts_enabled;
       }
     } catch (err) {
       // Non-fatal: report and fall back to the persisted columns.

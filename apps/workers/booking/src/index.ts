@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import type { ExecutionContext, ScheduledController } from "@cloudflare/workers-types";
 import type { Env } from "./types.js";
 import { assertBookingSchema } from "./db/ensure-schema.js";
+import { requestId } from "./audit/request-id.js";
+import { auditGapGuard } from "./audit/gap-guard.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { requireShopAccess, requireDeveloper } from "./middleware/shop-access.js";
 import setupRoutes from "./routes/setup.js";
@@ -16,6 +18,11 @@ import { sweepExpiredDepositBookings } from "./services/deposit-sweep.js";
 import { reportError } from "./services/report-error.js";
 
 const root = new Hono<{ Bindings: Env }>();
+
+// Request id, then the audit gap guard, BEFORE the schema middleware so even a
+// schema-assert failure response carries a request id and passes the guard.
+root.use("*", requestId);
+root.use("*", auditGapGuard());
 
 let schemaOnce: Promise<void> | null = null;
 root.use("*", async (c, next) => {
@@ -61,6 +68,8 @@ root.route("/public", publicRoutes);
 root.route("/webhooks", stripeWebhookRoutes);
 
 root.get("/health", (c) => c.json({ ok: true, worker: "pivot-parlor-booking" }));
+
+export { root as app };
 
 export default {
   fetch: root.fetch,

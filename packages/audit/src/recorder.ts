@@ -33,6 +33,24 @@ export interface AuditRunResult {
   details?: Record<string, unknown> | null;
   changes?: Record<string, [unknown, unknown]> | null;
   entityId?: string | null;
+  /** Known only after the work ran (e.g. a webhook's shop); the started row keeps the input's. */
+  shopId?: string | null;
+  entityType?: string | null;
+}
+
+/** What a THROWN body had already committed, for its failed outcome. Never
+ *  `changes` (a failure records no change), an outcome or a reason. */
+export type AuditRunErrorResult = Partial<Pick<AuditRunResult, "details" | "shopId" | "entityType" | "entityId">>;
+
+export interface AuditRunOptions {
+  /**
+   * Called only when the body throws, with the thrown value. Its `details`
+   * merge over the input's on the failed outcome; `shopId`, `entityType` and
+   * `entityId` replace the input's when set. Only those four keys are read.
+   * A hook that throws is ignored (the outcome is recorded as without it),
+   * and the original error is always rethrown unchanged.
+   */
+  describeError?: (err: unknown) => AuditRunErrorResult;
 }
 
 export interface AuditRecorder {
@@ -49,7 +67,8 @@ export interface AuditRecorder {
   run<T>(
     input: Omit<AuditEntryInput, "outcome" | "phase">,
     fn: () => Promise<T>,
-    describe?: (result: T) => AuditRunResult
+    describe?: (result: T) => AuditRunResult,
+    options?: AuditRunOptions
   ): Promise<T>;
 }
 
@@ -87,6 +106,27 @@ function errorReason(err: unknown): string {
       ? (err as { status: number }).status
       : undefined;
   return status !== undefined ? `${name} (HTTP ${status})` : name;
+}
+
+/** The effects `describeError` reports for a thrown body: only its four
+ *  keys are copied (a cast cannot smuggle `changes` in), and a hook that
+ *  throws or returns a non-object reports nothing. */
+function errorEffects(options: AuditRunOptions | undefined, err: unknown): AuditRunErrorResult {
+  if (!options?.describeError) return {};
+  let out: unknown;
+  try {
+    out = options.describeError(err);
+  } catch {
+    return {};
+  }
+  if (!out || typeof out !== "object") return {};
+  const e = out as AuditRunErrorResult;
+  return {
+    details: e.details && typeof e.details === "object" ? e.details : undefined,
+    shopId: e.shopId,
+    entityType: e.entityType,
+    entityId: e.entityId,
+  };
 }
 
 export function createAuditRecorder(base: RecorderBase): AuditRecorder {
@@ -228,14 +268,28 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
     async run<T>(
       input: Omit<AuditEntryInput, "outcome" | "phase">,
       fn: () => Promise<T>,
-      describe?: (result: T) => AuditRunResult
+      describe?: (result: T) => AuditRunResult,
+      options?: AuditRunOptions
     ): Promise<T> {
       const startedId = await write({ ...input, phase: "started" });
       let result: T;
       try {
         result = await fn();
       } catch (err) {
-        await writeOutcome({ ...input, phase: "outcome", outcome: "failed", reason: errorReason(err), parentId: startedId });
+        // Without a describeError hook (or with one that reports nothing) this
+        // is exactly the input plus the failure, as before the hook existed.
+        const effects = errorEffects(options, err);
+        await writeOutcome({
+          ...input,
+          phase: "outcome",
+          outcome: "failed",
+          reason: errorReason(err),
+          details: effects.details ? { ...input.details, ...effects.details } : input.details,
+          shopId: effects.shopId ?? input.shopId,
+          entityType: effects.entityType ?? input.entityType,
+          entityId: effects.entityId ?? input.entityId,
+          parentId: startedId,
+        });
         throw err;
       }
       const extra = describe ? describe(result) : {};
@@ -247,6 +301,8 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
         details: extra.details ?? input.details ?? null,
         changes: extra.changes ?? input.changes ?? null,
         entityId: extra.entityId ?? input.entityId ?? null,
+        shopId: extra.shopId ?? input.shopId ?? null,
+        entityType: extra.entityType ?? input.entityType ?? null,
         parentId: startedId,
       });
       return result;

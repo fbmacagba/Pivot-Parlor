@@ -119,6 +119,15 @@ const LABELS: Record<string, string> = {
   "subject.redact": "Personal details blanked",
   "subject.erase_request": "Erasure requested",
   "data.export": "Personal data exported",
+  "shop.setup.complete": "Shop setup completed",
+  "day.open": "Shop opened for the day",
+  "day.close": "Shop closed for the day",
+  "booking.check_in": "Customer checked in",
+  "booking.checkout": "Appointment checked out",
+  "pos.void": "Till sale voided",
+  "payment.connect.onboard": "Payout account setup started",
+  "payment.connect.sync": "Payout account confirmed",
+  "platform.alert.resolve": "Platform alert resolved",
 };
 
 export function actionLabel(action: string): string {
@@ -193,6 +202,9 @@ export const ACTION_GROUPS: { value: string; label: string }[] = [
   { value: "walkin.", label: "Walk-ins" },
   { value: "waitlist.", label: "Waitlist" },
   { value: "payment.", label: "Payments" },
+  { value: "pos.", label: "Till" },
+  { value: "day.", label: "Opening and closing" },
+  { value: "platform.", label: "Platform alerts" },
   { value: "account.", label: "Accounts" },
   { value: "auth.", label: "Sign-ins" },
   { value: "review.", label: "Reviews" },

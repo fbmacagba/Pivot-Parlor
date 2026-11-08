@@ -90,14 +90,14 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PUT /api/shops/:shopId/suppliers/:supplierId": "inventory.supplier.update",
   "PUT /api/staff/me/bookings/:bookingId/status": "booking.status",
 
-  // Plan 3: forwarded to the booking worker; the booking worker records them, and the hop becomes exempt then.
-  "POST /api/bookings": "pending",
-  "POST /api/bookings/:bookingId/abandon": "pending",
-  "ALL /api/shops/:shopId/connect/:action": "pending",
-  "ALL /api/shops/:shopId/sales": "pending",
-  "ALL /api/shops/:shopId/sales/:saleId": "pending",
-  "ALL /api/shops/:shopId/sales/:saleId/void": "pending",
-  "ALL /api/shops/:shopId/sales/:saleId/refund": "pending",
+  // Plan 3: forwarded to the booking worker, which records each change itself, so the hop is exempt.
+  "POST /api/bookings": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
+  "POST /api/bookings/:bookingId/abandon": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
+  "ALL /api/shops/:shopId/connect/:action": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
+  "ALL /api/shops/:shopId/sales": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
+  "ALL /api/shops/:shopId/sales/:saleId": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
+  "ALL /api/shops/:shopId/sales/:saleId/void": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
+  "ALL /api/shops/:shopId/sales/:saleId/refund": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
 };
 
 export const CRON_AUDIT: Record<string, AuditDeclaration> = {
@@ -112,5 +112,5 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
   "pivot-parlor-reminders-staging": "booking.reminder",
 };
 
-/** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 7;
+/** Ratchet: only ever lowered (Plans 2 and 3 brought it to 0). */
+export const PENDING_CEILING = 0;

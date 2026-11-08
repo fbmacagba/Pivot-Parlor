@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { d1Rows } from "../lib/d1-helpers.js";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -30,18 +32,42 @@ r.get("/alerts", async (c) => {
 r.post("/alerts/:alertId/resolve", async (c) => {
   const alertId = c.req.param("alertId");
   const existing = await c.env.DB
-    .prepare("SELECT id FROM bw_platform_alerts WHERE id = ? AND resolved = 0 LIMIT 1")
+    .prepare("SELECT id, shop_id FROM bw_platform_alerts WHERE id = ? LIMIT 1")
     .bind(alertId)
-    .first<{ id: string }>();
+    .first<{ id: string; shop_id: string | null }>();
   if (!existing) {
+    // Unknown id: the 404 stays outside run(), so it writes no entry and the
+    // URL param never reaches an audit column.
     return c.json({ success: false, error: "Alert not found or already resolved" }, 404);
   }
-  const now = new Date().toISOString();
-  await c.env.DB
-    .prepare("UPDATE bw_platform_alerts SET resolved = 1, resolved_at = ? WHERE id = ?")
-    .bind(now, alertId)
-    .run();
-  return c.json({ success: true, alertId, resolvedAt: now });
+  let changes: Record<string, [unknown, unknown]> | null = null;
+  try {
+    return await auditFor(c).run(
+      {
+        action: "platform.alert.resolve",
+        shopId: existing.shop_id,
+        entityType: "platform_alert",
+        entityId: existing.id,
+      },
+      async (): Promise<Response> => {
+        const now = new Date().toISOString();
+        const res = await c.env.DB
+          .prepare("UPDATE bw_platform_alerts SET resolved = 1, resolved_at = ? WHERE id = ? AND resolved = 0")
+          .bind(now, existing.id)
+          .run();
+        if (Number(res.meta?.changes ?? 0) === 0) {
+          // Already resolved (earlier, or by a concurrent request): same 404, refused.
+          return c.json({ success: false, error: "Alert not found or already resolved" }, 404);
+        }
+        changes = { resolved: [0, 1] };
+        return c.json({ success: true, alertId, resolvedAt: now });
+      },
+      statusOutcome(() => ({ changes }))
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 export default r;

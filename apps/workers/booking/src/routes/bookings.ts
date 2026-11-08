@@ -16,6 +16,8 @@ import {
 } from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
 import { calculateCommissionPence } from "@repo/utils";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -66,6 +68,16 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   // items or Stripe calls. A concurrent double-submit loses this UPDATE
   // (changes === 0) and cannot double-charge or duplicate items. On a Stripe
   // failure below the status is reverted so the checkout can be retried.
+  //
+  // Audit (Plan 3, pattern T): everything from the claim to the response runs
+  // inside `run`, so a lost claim (409) records refused and a Stripe failure
+  // (500) records failed. The body below is the original, not re-indented.
+  let auditSaleId: string | null = null;
+  let auditDepositCaptured = false;
+  try {
+    return await auditFor(c).run(
+      { action: "booking.checkout", shopId, entityType: "booking", entityId: bookingId },
+      async (): Promise<Response> => {
   const claim = await db
     .prepare("UPDATE bookings SET status = 'completed' WHERE id = ? AND shop_id = ? AND status = 'confirmed'")
     .bind(bookingId, shopId)
@@ -239,6 +251,7 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   // Generated before the Stripe calls so the balance PI can carry it in
   // metadata — payment_intent.succeeded settles the sale by saleId.
   const saleId = crypto.randomUUID();
+  auditSaleId = saleId;
 
   try {
     if (piId && captureFromHoldPence > 0) {
@@ -248,6 +261,9 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         ...(captureFromHoldPence < depositPence ? { amountPence: captureFromHoldPence } : {}),
         idempotencyKey: `capture:${bookingId}`,
       });
+      // Set only once Stripe has taken the money: a later failure below
+      // still records the capture (a failed capture never does).
+      auditDepositCaptured = true;
       stripeChargeId = String((cap.latest_charge as string) ?? "");
     }
 
@@ -369,6 +385,25 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     await releaseSaleStock(db, shopId, stockClaim.claims);
     return c.json({ success: false, error: e instanceof Error ? e.message : "Checkout failed" }, 500);
   }
+      },
+      statusOutcome((res) => {
+        if (res.status < 400) {
+          return {
+            changes: { status: ["confirmed", "completed"] },
+            details: { sale_id: auditSaleId, deposit_captured: auditDepositCaptured },
+          };
+        }
+        // Captured, then the balance PI or the persist batch failed: the
+        // deposit is taken in Stripe though the booking reverted. No sale_id,
+        // since the sale never persisted; changes stay null (a failure).
+        if (res.status >= 500 && auditDepositCaptured) return { details: { deposit_captured: true } };
+        return {};
+      })
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 r.post("/:shopId/bookings", async (c) => {
@@ -452,6 +487,15 @@ r.post("/:shopId/bookings", async (c) => {
   // Atomic slot claim BEFORE the PaymentIntent (WS-2, ABUSE-1): of two
   // concurrent requests for the same slot exactly one sees changes === 1;
   // the loser never reaches Stripe. Released on every failure path below.
+  //
+  // Audit (Plan 3, pattern T): from the slot claim to the response runs inside
+  // `run`. The body below is the original, not re-indented. The booking id is
+  // generated up front so the entry names the row this request creates.
+  const bookingId = crypto.randomUUID();
+  try {
+    return await auditFor(c).run(
+      { action: "booking.create", shopId, entityType: "booking", entityId: bookingId },
+      async (): Promise<Response> => {
   const claim = await db
     .prepare(
       `UPDATE bw_availability SET is_booked = 1
@@ -470,8 +514,6 @@ r.post("/:shopId/bookings", async (c) => {
       )
       .bind(shopId, body.staffId, body.slotDate, body.slotTime)
       .run();
-
-  const bookingId = crypto.randomUUID();
 
   let clientSecret = "";
   let paymentIntentId = "";
@@ -600,6 +642,20 @@ r.post("/:shopId/bookings", async (c) => {
     depositAmountPence: depositPence,
     qrCodeData,
   });
+      },
+      statusOutcome((res) =>
+        res.status < 400
+          ? {
+              changes: { status: [null, "confirmed"] },
+              details: { channel: "staff", deposit_required: true },
+            }
+          : {}
+      )
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 r.post("/:shopId/walk-ins", async (c) => {
@@ -647,6 +703,13 @@ r.post("/:shopId/walk-ins", async (c) => {
 
   // Atomic claim of the selected slot (WS-2): a concurrent walk-in that
   // selected the same earliest slot loses this UPDATE and gets a 409 to retry.
+  //
+  // Audit (Plan 3, pattern T): from the slot claim to the response runs inside
+  // `run`. The body below is the original, not re-indented.
+  try {
+    return await auditFor(c).run(
+      { action: "booking.create", shopId, entityType: "booking", entityId: bookingId },
+      async (): Promise<Response> => {
   const claim = await db
     .prepare("UPDATE bw_availability SET is_booked = 1, booking_id = ? WHERE id = ? AND is_booked = 0")
     .bind(bookingId, slot.id)
@@ -730,6 +793,17 @@ r.post("/:shopId/walk-ins", async (c) => {
     estimatedWaitMinutes: 15,
     assignedSlotTime: slot.slot_time,
   });
+      },
+      statusOutcome((res) =>
+        res.status < 400
+          ? { changes: { status: [null, "confirmed"] }, details: { channel: "walk_in" } }
+          : {}
+      )
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 r.post("/:shopId/check-in", async (c) => {
@@ -777,14 +851,28 @@ r.post("/:shopId/check-in", async (c) => {
 
   // checked_in_at lives in bw_booking_state only. Upsert so bookings created
   // before a state row existed still record their check-in.
-  await db
-    .prepare(
-      `INSERT INTO bw_booking_state (booking_id, shop_id, checked_in_at, updated_at)
-       VALUES (?, ?, datetime('now'), datetime('now'))
-       ON CONFLICT(booking_id) DO UPDATE SET checked_in_at = datetime('now'), updated_at = datetime('now')`
-    )
-    .bind(parsed.bookingId, shopId)
-    .run();
+  // Audit (Plan 3, pattern B): the upsert and its entry commit together.
+  const refused = await batchWithAudit(
+    c,
+    [
+      db
+        .prepare(
+          `INSERT INTO bw_booking_state (booking_id, shop_id, checked_in_at, updated_at)
+           VALUES (?, ?, datetime('now'), datetime('now'))
+           ON CONFLICT(booking_id) DO UPDATE SET checked_in_at = datetime('now'), updated_at = datetime('now')`
+        )
+        .bind(parsed.bookingId, shopId),
+    ],
+    {
+      action: "booking.check_in",
+      shopId,
+      entityType: "booking",
+      entityId: parsed.bookingId,
+      outcome: "succeeded",
+      details: { already_checked_in: Boolean(preCheck?.checked_in_at) },
+    }
+  );
+  if (refused) return refused;
 
   const rowIn = await db
     .prepare("SELECT checked_in_at FROM bw_booking_state WHERE booking_id = ? AND shop_id = ?")
@@ -893,18 +981,35 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   // cancelled booking skips the flip — that is the recovery path for deposits
   // stranded by the customer self-cancel, and it acts only on an explicit
   // refund request (or a stranded hold, which can only be voided).
+  //
+  // Audit (Plan 3, pattern T, decision 10): from the flip to the response runs
+  // inside `run`, so the early 4xx answers record refused. The body below is
+  // the original, not re-indented. `changes` is set only when a flip happened.
   const priorStatus = String(booking.status);
   let flipped = false;
+  let auditBeforeStatus = priorStatus;
+  let auditDeposit: "refunded" | "voided" | "kept" | "none" = "none";
+  try {
+    return await auditFor(c).run(
+      { action: "booking.cancel", shopId, entityType: "booking", entityId: bookingId },
+      async (): Promise<Response> => {
   if (priorStatus !== "cancelled") {
-    const claim = await db
-      .prepare(
-        "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('pending', 'confirmed')"
-      )
-      .bind(bookingId, shopId)
-      .run();
-    if ((claim.meta?.changes ?? 0) !== 1) {
+    // The before-status for the audit entry is read in the SAME batch (one D1
+    // transaction) as the flip, so it is the status the UPDATE actually found,
+    // not the earlier pre-read (a settle webhook may have confirmed it since).
+    const [beforeRead, claim] = await db.batch([
+      db.prepare("SELECT status FROM bookings WHERE id = ? AND shop_id = ?").bind(bookingId, shopId),
+      db
+        .prepare(
+          "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('pending', 'confirmed')"
+        )
+        .bind(bookingId, shopId),
+    ]);
+    if ((claim?.meta?.changes ?? 0) !== 1) {
       return c.json({ success: false, error: "Booking was modified by another request" }, 409);
     }
+    const found = (beforeRead?.results?.[0] as { status?: string } | undefined)?.status;
+    if (typeof found === "string") auditBeforeStatus = found;
     flipped = true;
   } else if (!refundExplicit || !(chargedDeposit || holdDeposit)) {
     const reason = alreadyRefunded ? "Deposit already refunded" : "Booking is already cancelled";
@@ -1015,6 +1120,16 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
     depositAction = "hold_voided";
   }
 
+  // Every disposition the handler can take, mapped onto the audit enum.
+  // A Record keyed on the disposition type: a new value is a compile error.
+  const DEPOSIT_AUDIT: Record<typeof depositAction, "refunded" | "voided" | "kept" | "none"> = {
+    refunded: "refunded",
+    kept: "kept",
+    hold_voided: "voided",
+    none: "none",
+  };
+  auditDeposit = DEPOSIT_AUDIT[depositAction];
+
   return c.json({
     success: true,
     data: {
@@ -1024,6 +1139,22 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
       refund_pence: refundPence,
     },
   });
+      },
+      statusOutcome((res) =>
+        res.status < 400
+          ? {
+              ...(flipped ? { changes: { status: [auditBeforeStatus, "cancelled"] as [unknown, unknown] } } : {}),
+              // `deposit_action`, not `deposit`: the API worker's own
+              // deposit-cancel hop entry uses `deposit` as a boolean.
+              details: { deposit_action: auditDeposit },
+            }
+          : {}
+      )
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 export default r;

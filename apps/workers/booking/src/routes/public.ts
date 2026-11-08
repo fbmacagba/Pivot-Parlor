@@ -17,12 +17,15 @@ import {
   getStaffById,
   createBooking,
   checkSlotConflict,
+  cancelPendingBookingStmts,
 } from "../db/queries.js";
 import { getAvailableSlots } from "../services/slots.js";
 import { runBookingSideEffects } from "../services/booking-side-effects.js";
 import { reportError } from "../services/report-error.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { createCheckoutSession } from "../lib/stripe.js";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 import { addMinutes, calculateCommissionPence, isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 
 function toDateString(iso: string): string {
@@ -229,145 +232,200 @@ publicRoutes.post(
       shop.commission_rate,
     );
     const id = crypto.randomUUID();
+    let depositRequired = false;
 
+    // From the first write to the response: one started/outcome pair. The
+    // validation, 404s and the slot pre-check above change nothing, so they
+    // write nothing. A 409 (slot taken) is recorded refused, a 502 (no
+    // Checkout Session) failed. Personal data and the Checkout URL are never
+    // recorded: only structured values.
     try {
-      await createBooking(c.env.DB, {
-        id,
-        shop_id: shop.id,
-        staff_id: resolvedStaffId,
-        service_id,
-        customer_name,
-        customer_email,
-        customer_phone: body.customer_phone ?? null,
-        booking_date: bookingDate,
-        start_time: startISO,
-        end_time: endISO,
-        notes: body.notes ?? null,
-        amount_pence: service.price_pence,
-        commission_pence,
-      });
-    } catch (err) {
-      // idx_bookings_active_slot (migration 018): a concurrent request won the
-      // slot between checkSlotConflict and this INSERT.
-      if (
-        err instanceof Error &&
-        err.message.includes("UNIQUE constraint failed")
-      ) {
-        return c.json(
-          { success: false, error: "This time slot is no longer available" },
-          409,
-        );
-      }
-      throw err;
-    }
-
-    // Customer-facing deposit (migration 041): when the shop has enabled
-    // deposits AND has a working Connect account, the booking stays 'pending'
-    // and the customer is sent to a hosted Stripe Checkout page. The
-    // payment_intent.succeeded webhook flips it to 'confirmed' and runs the
-    // side effects; an expired/abandoned session frees the slot (webhook +
-    // cron sweep). Everything else keeps today's free booking flow.
-    const connectId = shop.stripe_connect_account_id?.trim();
-    const depositCfg = await c.env.DB.prepare(
-      "SELECT deposits_enabled, deposit_percent, deposit_min_pence FROM shop_settings WHERE shop_id = ? LIMIT 1",
-    )
-      .bind(shop.id)
-      .first<{
-        deposits_enabled: number | null;
-        deposit_percent: number | null;
-        deposit_min_pence: number | null;
-      }>();
-    const depositsOn =
-      depositCfg?.deposits_enabled === 1 &&
-      Boolean(connectId) &&
-      shop.stripe_connect_onboarded === 1;
-
-    if (depositsOn) {
-      const pct = Math.min(
-        100,
-        Math.max(1, Math.round(Number(depositCfg?.deposit_percent ?? 50))),
-      );
-      const minPence = Math.max(
-        0,
-        Math.round(Number(depositCfg?.deposit_min_pence ?? 500)),
-      );
-      // Deposit never exceeds the service price; a high minimum becomes full prepay.
-      const depositPence = Math.min(
-        service.price_pence,
-        Math.max(Math.round((service.price_pence * pct) / 100), minPence),
-      );
-
-      if (depositPence > 0) {
-        // Platform fee on the deposit portion only — the appointment checkout
-        // collects the remaining commission on the balance charge (it reads
-        // deposit_application_fee_pence back to stay exact).
-        const depositFeePence = calculateCommissionPence(
-          depositPence,
-          shop.commission_rate,
-        ).commission_pence;
-        const webUrl = (c.env.WEB_URL ?? "").replace(/\/$/, "");
-
-        let session: { id: string; url: string };
+      return await auditFor(c).run(
+        { action: "booking.create", shopId: shop.id, entityType: "booking", entityId: id },
+        async (): Promise<Response> => {
         try {
-          session = await createCheckoutSession({
-            secret: c.env.STRIPE_SECRET_KEY,
-            amountPence: depositPence,
-            currency: "gbp",
-            productName: `Booking deposit — ${service.name} at ${shop.name}`,
-            destinationAccount: connectId!,
-            applicationFeePence: depositFeePence,
-            metadata: {
-              shopId: shop.id,
-              bookingId: id,
-              type: "booking_deposit",
-            },
-            successUrl: `${webUrl}/${shop.slug}/confirm?id=${id}&paid=1`,
-            cancelUrl: `${webUrl}/${shop.slug}/book?payment=cancelled&booking=${id}`,
-            idempotencyKey: `deposit:${id}`,
-            // Stripe minimum is 30 min from creation; 31 keeps clock skew safe.
-            expiresAtEpochS: Math.floor(Date.now() / 1000) + 31 * 60,
+          await createBooking(c.env.DB, {
+            id,
+            shop_id: shop.id,
+            staff_id: resolvedStaffId,
+            service_id,
+            customer_name,
+            customer_email,
+            customer_phone: body.customer_phone ?? null,
+            booking_date: bookingDate,
+            start_time: startISO,
+            end_time: endISO,
+            notes: body.notes ?? null,
+            amount_pence: service.price_pence,
+            commission_pence,
           });
-        } catch (e) {
-          // No session, no booking: release the slot instead of stranding a
-          // pending row the customer can never pay for.
-          reportError("booking.deposit_session_create", e, {
-            shopId: shop.id,
-            bookingId: id,
-          });
-          await c.env.DB.prepare(
-            "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
-          )
-            .bind(id)
-            .run();
-          return c.json(
-            { success: false, error: "Could not start the deposit payment" },
-            502,
-          );
+        } catch (err) {
+          // idx_bookings_active_slot (migration 018): a concurrent request won the
+          // slot between checkSlotConflict and this INSERT.
+          if (
+            err instanceof Error &&
+            err.message.includes("UNIQUE constraint failed")
+          ) {
+            return c.json(
+              { success: false, error: "This time slot is no longer available" },
+              409,
+            );
+          }
+          throw err;
         }
 
-        const nowIso = new Date().toISOString();
-        await c.env.DB.batch([
-          c.env.DB.prepare(
-            `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount_pence,
-               stripe_checkout_session_id, deposit_application_fee_pence, slot_time, updated_at)
-             VALUES (?, ?, 'online', ?, ?, ?, ?, ?)`,
-          ).bind(
-            id,
-            shop.id,
-            depositPence,
-            session.id,
-            depositFeePence,
-            startISO.slice(11, 16),
-            nowIso,
-          ),
-          c.env.DB.prepare(
-            `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
-             VALUES (?, ?, ?, 'deposit', ?, 'pending', ?)`,
-          ).bind(crypto.randomUUID(), id, shop.id, depositPence, session.id),
-        ]);
+        // Customer-facing deposit (migration 041): when the shop has enabled
+        // deposits AND has a working Connect account, the booking stays 'pending'
+        // and the customer is sent to a hosted Stripe Checkout page. The
+        // payment_intent.succeeded webhook flips it to 'confirmed' and runs the
+        // side effects; an expired/abandoned session frees the slot (webhook +
+        // cron sweep). Everything else keeps today's free booking flow.
+        const connectId = shop.stripe_connect_account_id?.trim();
+        const depositCfg = await c.env.DB.prepare(
+          "SELECT deposits_enabled, deposit_percent, deposit_min_pence FROM shop_settings WHERE shop_id = ? LIMIT 1",
+        )
+          .bind(shop.id)
+          .first<{
+            deposits_enabled: number | null;
+            deposit_percent: number | null;
+            deposit_min_pence: number | null;
+          }>();
+        const depositsOn =
+          depositCfg?.deposits_enabled === 1 &&
+          Boolean(connectId) &&
+          shop.stripe_connect_onboarded === 1;
 
-        // No confirmation email / reminder yet — the webhook sends them once
-        // the deposit settles.
+        if (depositsOn) {
+          const pct = Math.min(
+            100,
+            Math.max(1, Math.round(Number(depositCfg?.deposit_percent ?? 50))),
+          );
+          const minPence = Math.max(
+            0,
+            Math.round(Number(depositCfg?.deposit_min_pence ?? 500)),
+          );
+          // Deposit never exceeds the service price; a high minimum becomes full prepay.
+          const depositPence = Math.min(
+            service.price_pence,
+            Math.max(Math.round((service.price_pence * pct) / 100), minPence),
+          );
+
+          if (depositPence > 0) {
+            // Only a booking that really goes to Checkout needs a deposit; a
+            // zero deposit takes the free path below.
+            depositRequired = true;
+            // Platform fee on the deposit portion only — the appointment checkout
+            // collects the remaining commission on the balance charge (it reads
+            // deposit_application_fee_pence back to stay exact).
+            const depositFeePence = calculateCommissionPence(
+              depositPence,
+              shop.commission_rate,
+            ).commission_pence;
+            const webUrl = (c.env.WEB_URL ?? "").replace(/\/$/, "");
+
+            let session: { id: string; url: string };
+            try {
+              session = await createCheckoutSession({
+                secret: c.env.STRIPE_SECRET_KEY,
+                amountPence: depositPence,
+                currency: "gbp",
+                productName: `Booking deposit: ${service.name} at ${shop.name}`,
+                destinationAccount: connectId!,
+                applicationFeePence: depositFeePence,
+                metadata: {
+                  shopId: shop.id,
+                  bookingId: id,
+                  type: "booking_deposit",
+                },
+                successUrl: `${webUrl}/${shop.slug}/confirm?id=${id}&paid=1`,
+                cancelUrl: `${webUrl}/${shop.slug}/book?payment=cancelled&booking=${id}`,
+                idempotencyKey: `deposit:${id}`,
+                // Stripe minimum is 30 min from creation; 31 keeps clock skew safe.
+                expiresAtEpochS: Math.floor(Date.now() / 1000) + 31 * 60,
+              });
+            } catch (e) {
+              // No session, no booking: release the slot instead of stranding a
+              // pending row the customer can never pay for.
+              reportError("booking.deposit_session_create", e, {
+                shopId: shop.id,
+                bookingId: id,
+              });
+              await c.env.DB.prepare(
+                "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
+              )
+                .bind(id)
+                .run();
+              return c.json(
+                { success: false, error: "Could not start the deposit payment" },
+                502,
+              );
+            }
+
+            const nowIso = new Date().toISOString();
+            await c.env.DB.batch([
+              c.env.DB.prepare(
+                `INSERT INTO bw_booking_state (booking_id, shop_id, booking_type, deposit_amount_pence,
+                   stripe_checkout_session_id, deposit_application_fee_pence, slot_time, updated_at)
+                 VALUES (?, ?, 'online', ?, ?, ?, ?, ?)`,
+              ).bind(
+                id,
+                shop.id,
+                depositPence,
+                session.id,
+                depositFeePence,
+                startISO.slice(11, 16),
+                nowIso,
+              ),
+              c.env.DB.prepare(
+                `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
+                 VALUES (?, ?, ?, 'deposit', ?, 'pending', ?)`,
+              ).bind(crypto.randomUUID(), id, shop.id, depositPence, session.id),
+            ]);
+
+            // No confirmation email / reminder yet — the webhook sends them once
+            // the deposit settles.
+            return c.json(
+              {
+                success: true,
+                data: {
+                  id,
+                  shop_id: shop.id,
+                  staff_id: resolvedStaffId,
+                  service_id,
+                  customer_name,
+                  customer_email,
+                  booking_date: bookingDate,
+                  start_time: startISO,
+                  end_time: endISO,
+                  status: "pending",
+                  amount_pence: service.price_pence,
+                  commission_pence,
+                  deposit_pence: depositPence,
+                  checkout_url: session.url,
+                },
+              },
+              201,
+            );
+          }
+        }
+
+        // Free booking (no deposit): side effects run immediately, as before.
+        await runBookingSideEffects(c.env, {
+          bookingId: id,
+          shopId: shop.id,
+          shopName: shop.name,
+          shopSlug: shop.slug,
+          customerName: customer_name,
+          customerEmail: customer_email,
+          serviceName: service.name,
+          staffName: bookedStaff.display_name ?? "your specialist",
+          bookingDate,
+          startISO,
+          timezone: shop.timezone ?? "Europe/London",
+          durationMin: service.duration_min,
+          amountPence: service.price_pence,
+        });
+
         return c.json(
           {
             success: true,
@@ -384,52 +442,24 @@ publicRoutes.post(
               status: "pending",
               amount_pence: service.price_pence,
               commission_pence,
-              deposit_pence: depositPence,
-              checkout_url: session.url,
             },
           },
           201,
         );
-      }
-    }
-
-    // Free booking (no deposit): side effects run immediately, as before.
-    await runBookingSideEffects(c.env, {
-      bookingId: id,
-      shopId: shop.id,
-      shopName: shop.name,
-      shopSlug: shop.slug,
-      customerName: customer_name,
-      customerEmail: customer_email,
-      serviceName: service.name,
-      staffName: bookedStaff.display_name ?? "your specialist",
-      bookingDate,
-      startISO,
-      timezone: shop.timezone ?? "Europe/London",
-      durationMin: service.duration_min,
-      amountPence: service.price_pence,
-    });
-
-    return c.json(
-      {
-        success: true,
-        data: {
-          id,
-          shop_id: shop.id,
-          staff_id: resolvedStaffId,
-          service_id,
-          customer_name,
-          customer_email,
-          booking_date: bookingDate,
-          start_time: startISO,
-          end_time: endISO,
-          status: "pending",
-          amount_pence: service.price_pence,
-          commission_pence,
         },
-      },
-      201,
-    );
+        statusOutcome((res) =>
+          res.status < 400
+            ? {
+                changes: { status: [null, "pending"] },
+                details: { channel: "online", deposit_required: depositRequired },
+              }
+            : {}
+        )
+      );
+    } catch (e) {
+      if (e instanceof AuditWriteError) return auditRefused(c);
+      throw e;
+    }
   },
 );
 
@@ -483,21 +513,38 @@ publicRoutes.post(
   async (c) => {
     const bookingId = c.req.param("bookingId");
     const st = await c.env.DB.prepare(
-      `SELECT booking_id FROM bw_booking_state
+      `SELECT booking_id, shop_id FROM bw_booking_state
          WHERE booking_id = ? AND stripe_checkout_session_id IS NOT NULL AND deposit_paid_at IS NULL LIMIT 1`,
     )
       .bind(bookingId)
-      .first<{ booking_id: string }>();
+      .first<{ booking_id: string; shop_id: string }>();
     if (!st) return c.json({ success: false, error: "Booking not found" }, 404);
 
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'",
-      ).bind(bookingId),
-      c.env.DB.prepare(
-        "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'",
-      ).bind(bookingId),
-    ]);
+    // Guarded batch: the cancel and its entry commit together, and only while
+    // the booking is still pending. If the sweep or the expiry webhook won the
+    // race the guard rolls the batch back, the answer stays what it always
+    // was, and the trail records the refused attempt.
+    const entity = { shopId: st.shop_id, entityType: "booking", entityId: bookingId };
+    try {
+      await auditFor(c).batch(cancelPendingBookingStmts(c.env.DB, bookingId), {
+        action: "booking.cancel",
+        outcome: "succeeded",
+        ...entity,
+        changes: { status: ["pending", "cancelled"] },
+        details: { reason: "abandoned" },
+      });
+    } catch (e) {
+      if (e instanceof AuditWriteError) return auditRefused(c);
+      const now = await c.env.DB.prepare("SELECT status FROM bookings WHERE id = ?")
+        .bind(bookingId)
+        .first<{ status: string }>();
+      if (now?.status === "pending") throw e;
+      try {
+        await auditFor(c).write({ action: "booking.cancel", outcome: "refused", reason: "not_pending", ...entity });
+      } catch {
+        // Best effort: a failure to record the refusal never changes the answer.
+      }
+    }
     return c.json({ success: true });
   },
 );

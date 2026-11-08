@@ -18,6 +18,18 @@ describe("filterChanges", () => {
       filterChanges("shop", { name: ["a", "b"], slug: ["x", "y"], phone: ["1", "2"], commission_rate: [0.1, 0.2] })
     ).toEqual({ commission_rate: [0.1, 0.2] });
   });
+  it("keeps the Plan 3 fields", () => {
+    expect(filterChanges("sale", { status: ["completed", "voided"], customer_name: ["A", "B"] })).toEqual({
+      status: ["completed", "voided"],
+    });
+    expect(filterChanges("platform_alert", { resolved: [0, 1], message: ["a", "b"] })).toEqual({ resolved: [0, 1] });
+    expect(filterChanges("business_day", { status: ["open", "closed"] })).toEqual({ status: ["open", "closed"] });
+    expect(filterChanges("shop", { setup_completed: [0, 1], operational_status: ["a", "b"], stripe_connect_onboarded: [0, 1] })).toEqual({
+      setup_completed: [0, 1],
+      operational_status: ["a", "b"],
+      stripe_connect_onboarded: [0, 1],
+    });
+  });
   it("every new entity type keeps only structured fields", () => {
     expect(filterChanges("staff", { display_name: ["A", "B"], is_active: [1, 0] })).toEqual({ is_active: [1, 0] });
     expect(filterChanges("supplier", { email: ["a@x", "b@x"] })).toBeNull();

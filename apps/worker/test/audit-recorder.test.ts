@@ -88,6 +88,30 @@ describe("audit recorder", () => {
     }
   });
 
+  it("run() outcome carries the shop and entity type its result names", async () => {
+    const shopId = await seedShop("Rec Outcome Shop");
+    const requestId = `req-outcome-${crypto.randomUUID()}`;
+    await createAuditRecorder({
+      db: env.DB as never,
+      worker: "test",
+      via: "api",
+      actor: { type: "anonymous", ip: null },
+      requestId,
+    }).run(
+      { action: "booking.create", shopId: null, entityType: null },
+      async () => "ok",
+      () => ({ shopId, entityType: "booking", entityId: "b-1" })
+    );
+    const rows = await env.DB.prepare("SELECT phase, shop_id, entity_type, entity_id FROM audit_log WHERE request_id = ?")
+      .bind(requestId)
+      .all<{ phase: string; shop_id: string | null; entity_type: string | null; entity_id: string | null }>();
+    expect(rows.results).toHaveLength(2);
+    const started = rows.results!.find((r) => r.phase === "started")!;
+    const outcome = rows.results!.find((r) => r.phase === "outcome")!;
+    expect([started.shop_id, started.entity_type]).toEqual([null, null]);
+    expect([outcome.shop_id, outcome.entity_type, outcome.entity_id]).toEqual([shopId, "booking", "b-1"]);
+  });
+
   it("rejects an unknown action", async () => {
     await expect(recorder(null).write({ action: "nope" as never, outcome: "succeeded" })).rejects.toBeInstanceOf(AuditWriteError);
   });

@@ -7,7 +7,8 @@ export const CHANGE_ALLOWLIST: Record<string, readonly string[]> = {
   // name, slug and phone are deliberately excluded (Ruling 17): they are
   // personal data (sole traders trade under their own name). Record their
   // field names in details.fields instead.
-  shop: ["type", "plan", "status", "is_active", "commission_rate", "retail_commission_rate", "stripe_payment_status"],
+  shop: ["type", "plan", "status", "is_active", "commission_rate", "retail_commission_rate", "stripe_payment_status",
+    "setup_completed", "operational_status", "stripe_connect_onboarded"],
   // heroHeadline and tagline are deliberately excluded (Ruling 20): generated
   // copy routinely carries the shop name (personal data) and, applied via
   // /apply-theme, is unbounded client text — both locked forever once hashed.
@@ -42,6 +43,10 @@ export const CHANGE_ALLOWLIST: Record<string, readonly string[]> = {
     "show_linkedin", "show_google_business",
   ],
   platform_user: ["role", "email_verified"],
+  // Plan 3 (booking worker): statuses and flags only.
+  business_day: ["status"],
+  sale: ["status"],
+  platform_alert: ["resolved"],
 };
 
 export function filterChanges(

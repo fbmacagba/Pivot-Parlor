@@ -3,6 +3,8 @@ import type { D1Database } from "@cloudflare/workers-types";
 import type { Env } from "../types.js";
 import { countWhere } from "../lib/d1-helpers.js";
 import { shopExists } from "../middleware/shop-access.js";
+import { batchWithAudit } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -128,7 +130,24 @@ r.post("/:shopId/complete-setup", async (c) => {
       400
     );
   }
-  await c.env.DB.prepare("UPDATE shops SET setup_completed = 1 WHERE id = ?").bind(shopId).run();
+  const before = await c.env.DB
+    .prepare("SELECT setup_completed FROM shops WHERE id = ?")
+    .bind(shopId)
+    .first<{ setup_completed: number | null }>();
+  const refused = await batchWithAudit(
+    c,
+    [c.env.DB.prepare("UPDATE shops SET setup_completed = 1 WHERE id = ?").bind(shopId)],
+    {
+      action: "shop.setup.complete",
+      outcome: "succeeded",
+      shopId,
+      entityType: "shop",
+      entityId: shopId,
+      // A repeat (already 1) records succeeded with no changes.
+      changes: fieldChanges({ setup_completed: Number(before?.setup_completed ?? 0) }, { setup_completed: 1 }).changes,
+    }
+  );
+  if (refused) return refused;
   return c.json({ success: true, shopId, setup_completed: true });
 });
 
