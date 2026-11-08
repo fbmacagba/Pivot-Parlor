@@ -1681,7 +1681,7 @@ export function getProductCategoryById(db: D1Database, id: string) {
     .first<DBProductCategory>();
 }
 
-export function createProductCategory(
+export function createProductCategoryStmt(
   db: D1Database,
   cat: { id: string; shop_id: string; name: string; sort_order?: number },
 ) {
@@ -1689,11 +1689,11 @@ export function createProductCategory(
     .prepare(
       "INSERT INTO product_categories (id, shop_id, name, sort_order) VALUES (?, ?, ?, ?)",
     )
-    .bind(cat.id, cat.shop_id, cat.name, cat.sort_order ?? 0)
-    .run();
+    .bind(cat.id, cat.shop_id, cat.name, cat.sort_order ?? 0);
 }
 
-export function updateProductCategory(
+/** Prepared UPDATE for a category, or null when no field is set. */
+export function updateProductCategoryStmt(
   db: D1Database,
   id: string,
   fields: { name?: string; sort_order?: number; is_active?: number },
@@ -1712,12 +1712,11 @@ export function updateProductCategory(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE product_categories SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 export async function getSuppliersByShop(db: D1Database, shopId: string) {
@@ -1737,7 +1736,7 @@ export function getSupplierById(db: D1Database, id: string) {
     .first<DBSupplier>();
 }
 
-export function createSupplier(
+export function createSupplierStmt(
   db: D1Database,
   sup: {
     id: string;
@@ -1759,11 +1758,11 @@ export function createSupplier(
       sup.email ?? null,
       sup.phone ?? null,
       sup.notes ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateSupplier(
+/** Prepared UPDATE for a supplier, or null when no field is set. */
+export function updateSupplierStmt(
   db: D1Database,
   id: string,
   fields: {
@@ -1796,12 +1795,11 @@ export function updateSupplier(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE suppliers SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 /** Products with total on-hand quantity summed across their stock rows (base + variants). */
@@ -1830,7 +1828,7 @@ export function getProductById(db: D1Database, id: string) {
     .first<DBProduct>();
 }
 
-export function createProduct(
+export function createProductStmt(
   db: D1Database,
   p: {
     id: string;
@@ -1872,11 +1870,11 @@ export function createProduct(
       p.is_professional ?? 0,
       p.track_stock ?? 1,
       p.image_url ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateProduct(
+/** Prepared UPDATE for a product, or null when no field is set. */
+export function updateProductStmt(
   db: D1Database,
   id: string,
   fields: {
@@ -1954,12 +1952,11 @@ export function updateProduct(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE products SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 export async function getVariantsByProduct(db: D1Database, productId: string) {
@@ -1979,7 +1976,7 @@ export function getProductVariantById(db: D1Database, id: string) {
     .first<DBProductVariant>();
 }
 
-export function createProductVariant(
+export function createProductVariantStmt(
   db: D1Database,
   v: {
     id: string;
@@ -2009,11 +2006,11 @@ export function createProductVariant(
       v.cost_price_pence ?? 0,
       v.retail_price_pence ?? 0,
       v.attributes_json ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateProductVariant(
+/** Prepared UPDATE for a variant, or null when no field is set. */
+export function updateProductVariantStmt(
   db: D1Database,
   id: string,
   fields: {
@@ -2056,12 +2053,11 @@ export function updateProductVariant(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE product_variants SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 // ─── Inventory: stock (WS-3 Phase 0) ──────────────────────────────────────────

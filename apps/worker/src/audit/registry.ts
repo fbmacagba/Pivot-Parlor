@@ -24,8 +24,8 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/audit/subjects/:userId/erase": "subject.erase_request",
 
   // Plan 2
-  "DELETE /api/shops/:shopId/products/:productId": "pending",
-  "DELETE /api/shops/:shopId/products/:productId/variants/:variantId": "pending",
+  "DELETE /api/shops/:shopId/products/:productId": "product.delete",
+  "DELETE /api/shops/:shopId/products/:productId/variants/:variantId": "product.delete",
   "DELETE /api/shops/:shopId/services/:serviceId": "service.delete",
   "DELETE /api/shops/:shopId/staff/:staffId": "staff.delete",
   "DELETE /api/shops/:shopId/walkin": "pending",
@@ -40,9 +40,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops": "pending",
   "POST /api/shops/:shopId/generate-image": "pending",
   "POST /api/shops/:shopId/inventory/movements": "pending",
-  "POST /api/shops/:shopId/products": "pending",
-  "POST /api/shops/:shopId/products/:productId/variants": "pending",
-  "POST /api/shops/:shopId/products/categories": "pending",
+  "POST /api/shops/:shopId/products": "product.create",
+  "POST /api/shops/:shopId/products/:productId/variants": "product.create",
+  "POST /api/shops/:shopId/products/categories": "product.create",
   "POST /api/shops/:shopId/purchase-orders": "pending",
   "POST /api/shops/:shopId/purchase-orders/:poId/cancel": "pending",
   "POST /api/shops/:shopId/purchase-orders/:poId/order": "pending",
@@ -57,7 +57,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops/:shopId/stock-takes": "pending",
   "POST /api/shops/:shopId/stock-takes/:stockTakeId/cancel": "pending",
   "POST /api/shops/:shopId/stock-takes/:stockTakeId/complete": "pending",
-  "POST /api/shops/:shopId/suppliers": "pending",
+  "POST /api/shops/:shopId/suppliers": "inventory.supplier.create",
   "POST /api/shops/:shopId/upload-image": "pending",
   "POST /api/staff/me/time-off": "staff.time_off.request",
   "POST /api/waitlist": "pending",
@@ -72,16 +72,16 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /contact": "pending",
   "PUT /api/shops/:shopId/bookings/:bookingId/status": "pending",
   "PUT /api/shops/:shopId/inventory/reorder": "pending",
-  "PUT /api/shops/:shopId/products/:productId": "pending",
-  "PUT /api/shops/:shopId/products/:productId/variants/:variantId": "pending",
-  "PUT /api/shops/:shopId/products/categories/:categoryId": "pending",
+  "PUT /api/shops/:shopId/products/:productId": "product.update",
+  "PUT /api/shops/:shopId/products/:productId/variants/:variantId": "product.update",
+  "PUT /api/shops/:shopId/products/categories/:categoryId": "product.update",
   "PUT /api/shops/:shopId/purchase-orders/:poId": "pending",
   "PUT /api/shops/:shopId/schedule": "schedule.update",
   "PUT /api/shops/:shopId/services/:serviceId": "service.update",
   "PUT /api/shops/:shopId/services/:serviceId/products": "service.update",
   "PUT /api/shops/:shopId/staff/:staffId": "staff.update",
   "PUT /api/shops/:shopId/stock-takes/:stockTakeId/items": "pending",
-  "PUT /api/shops/:shopId/suppliers/:supplierId": "pending",
+  "PUT /api/shops/:shopId/suppliers/:supplierId": "inventory.supplier.update",
   "PUT /api/staff/me/bookings/:bookingId/status": "booking.status",
 
   // Plan 3: forwarded to the booking worker; the booking worker records them, and the hop becomes exempt then.
@@ -107,4 +107,4 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 60;
+export const PENDING_CEILING = 50;
