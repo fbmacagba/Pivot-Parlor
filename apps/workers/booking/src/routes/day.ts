@@ -115,6 +115,7 @@ r.post("/:shopId/close", async (c) => {
   let holdsCaptured = 0;
   let holdsFailed = 0;
   let closeDetails: Record<string, number> | undefined;
+  let dayClosedHere = false;
   try {
     return await auditFor(c).run(
       { action: "day.close", shopId, entityType: "business_day", entityId: businessDayId },
@@ -371,13 +372,17 @@ r.post("/:shopId/close", async (c) => {
           holds_failed: holdsFailed,
         };
 
+        // Guarded on 'open': a concurrent close that committed first keeps its
+        // summary, and this close then records refused, not a second change.
         const closedAt = new Date().toISOString();
-        await db
+        const closeFlip = await db
           .prepare(
-            `UPDATE bw_business_days SET status = 'closed', closed_at = ?, summary_json = ?, performance_json = ? WHERE id = ?`
+            `UPDATE bw_business_days SET status = 'closed', closed_at = ?, summary_json = ?, performance_json = ?
+             WHERE id = ? AND status = 'open'`
           )
           .bind(closedAt, JSON.stringify(eodSummary), JSON.stringify(signals), businessDayId)
           .run();
+        dayClosedHere = (closeFlip.meta?.changes ?? 0) === 1;
 
         await db.prepare("UPDATE shops SET operational_status = 'closed' WHERE id = ?").bind(shopId).run();
 
@@ -399,9 +404,14 @@ r.post("/:shopId/close", async (c) => {
 
         return c.json({ success: true, summary: eodSummary, signals, businessDayId });
       },
-      statusOutcome((res) =>
-        res.status < 400 ? { changes: { status: ["open", "closed"] }, details: closeDetails } : {}
-      ),
+      statusOutcome((res) => {
+        if (res.status >= 400) return {};
+        // The response is the same either way; only a close whose guarded
+        // UPDATE flipped the day records the change.
+        return dayClosedHere
+          ? { changes: { status: ["open", "closed"] }, details: closeDetails }
+          : { outcome: "refused", reason: "not_open", details: closeDetails };
+      }),
       // No-show captures commit in Stripe before later work can throw, and a
       // retry then counts holds_captured 0, so a thrown close records the
       // running counts it had reached (details only, never changes).

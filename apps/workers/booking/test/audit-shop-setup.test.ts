@@ -1,10 +1,23 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import worker from "../src/index";
 import { seedScheduleDay, seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
 import { entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
 
 const REFUSAL = { success: false, error: "Could not record this action; nothing was changed." };
+
+/** GET (no body) through the real worker, on a substituted env (e.g. a Proxy over DB). */
+async function getWith(testEnv: typeof env, path: string, headers: Record<string, string>): Promise<Response> {
+  const ctx = createExecutionContext();
+  const response = await worker.fetch(
+    new Request(`https://booking.test${path}`, { method: "GET", headers }) as never,
+    testEnv as never,
+    ctx as never
+  );
+  await waitOnExecutionContext(ctx);
+  return response as unknown as Response;
+}
 
 async function authed(role: string, shopId: string): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${await tokenFor(role, shopId)}` };
@@ -299,20 +312,61 @@ describe("Connect status sync audit", () => {
     return Number(row?.v ?? 0);
   }
 
+  /** Today's success answer for a synced shop (the fake Stripe enables both). */
+  const SYNCED = {
+    success: true,
+    data: { account_id: "acct_sync_1", onboarded: true, charges_enabled: true, payouts_enabled: true },
+  };
+
   it("the status poll that confirms onboarding records payment.connect.sync", async () => {
     const shopId = await seedWithAccount();
     const res = await dispatch("GET", `/booking/shops/${shopId}/connect/status`, {
       headers: await authed("admin", shopId),
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { onboarded: boolean } };
-    expect(body.data.onboarded).toBe(true);
+    expect(await res.json()).toEqual(SYNCED);
     expect(await onboardedFlag(shopId)).toBe(1);
+    // Pattern T: a started row, then the outcome with the guarded write's change.
     const rows = await entriesFor({ action: "payment.connect.sync", shopId });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ outcome: "succeeded", entity_type: "shop", entity_id: shopId, actor_type: "admin" });
-    expect(JSON.parse(rows[0]!.changes_json as string)).toEqual({ stripe_connect_onboarded: [0, 1] });
-    expectNoPersonalData(rows[0]!, ["acct_sync_1"]);
+    expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
+    const outcome = rows[1]!;
+    expect(outcome).toMatchObject({ outcome: "succeeded", entity_type: "shop", entity_id: shopId, actor_type: "admin" });
+    expect(JSON.parse(outcome.changes_json as string)).toEqual({ stripe_connect_onboarded: [0, 1] });
+    for (const row of rows) expectNoPersonalData(row, ["acct_sync_1"]);
+  });
+
+  it("a sync that loses the flip to the account.updated webhook records refused already_onboarded", async () => {
+    const shopId = await seedWithAccount();
+    // The webhook sets the flag after this poll read it as 0. Staged once, on
+    // batch #1 (the started entry under run()), just before the guarded UPDATE.
+    let calls = 0;
+    let fired = false;
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "batch") {
+          return async (stmts: D1PreparedStatement[]) => {
+            calls += 1;
+            if (calls === 1 && !fired) {
+              fired = true;
+              await target.prepare("UPDATE shops SET stripe_connect_onboarded = 1 WHERE id = ?").bind(shopId).run();
+            }
+            return target.batch(stmts);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    const res = await getWith({ ...env, DB: db }, `/booking/shops/${shopId}/connect/status`, await authed("admin", shopId));
+    expect(fired, "the started entry never ran, so the race was never staged").toBe(true);
+    // Not a refusal of the read: the shop is onboarded, so the answer is today's success.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(SYNCED);
+    const rows = await entriesFor({ action: "payment.connect.sync", shopId });
+    expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
+    expect(rows[1]).toMatchObject({ outcome: "refused", reason: "already_onboarded", entity_id: shopId });
+    expect(rows[1]!.changes_json).toBeNull();
+    expect(rows.filter((r) => r.changes_json !== null)).toHaveLength(0);
   });
 
   it("a status poll that changes nothing writes no entry", async () => {
@@ -328,11 +382,14 @@ describe("Connect status sync audit", () => {
     const shopId = await seedWithAccount();
     const headers = await authed("admin", shopId);
     const res = await withAuditOff(() => dispatch("GET", `/booking/shops/${shopId}/connect/status`, { headers }));
+    // Decision 8: the started entry fails, so the sync is skipped and the GET
+    // answers from the persisted columns, as when Stripe's poll fails.
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { success: boolean; data: { account_id: string; onboarded: boolean } };
-    expect(body.success).toBe(true);
-    expect(body.data.account_id).toBe("acct_sync_1");
-    expect(body.data.onboarded).toBe(false);
+    expect(await res.json()).toEqual({
+      success: true,
+      data: { account_id: "acct_sync_1", onboarded: false, charges_enabled: null, payouts_enabled: null },
+    });
     expect(await onboardedFlag(shopId)).toBe(0);
+    expect(await entriesFor({ action: "payment.connect.sync", shopId })).toHaveLength(0);
   });
 });

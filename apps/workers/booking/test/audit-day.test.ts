@@ -232,6 +232,53 @@ describe("day close audit", () => {
     expect(details.holds_failed).toBe(0);
   });
 
+  it("a close that loses the day to a concurrent close records refused not_open, never a second change", async () => {
+    const { shopId } = await seedOpenableShop();
+    const headers = await authed("admin", shopId);
+    const open = (await (await dispatch("POST", `/booking/shops/${shopId}/open`, { headers })).json()) as {
+      businessDayId: string;
+    };
+    // This close has already read the day as open. A concurrent close commits
+    // before its final UPDATE: staged once, on batch #1 (the started entry
+    // under run()), which runs after the pre-read and before that UPDATE.
+    let calls = 0;
+    let fired = false;
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "batch") {
+          return async (stmts: D1PreparedStatement[]) => {
+            calls += 1;
+            if (calls === 1 && !fired) {
+              fired = true;
+              await target
+                .prepare("UPDATE bw_business_days SET status = 'closed', summary_json = 'concurrent' WHERE id = ?")
+                .bind(open.businessDayId)
+                .run();
+            }
+            return target.batch(stmts);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    const res = await postWith({ ...env, DB: db }, `/booking/shops/${shopId}/close`, headers);
+    expect(fired, "the started entry never ran, so the race was never staged").toBe(true);
+    // The response is the same success answer as ever.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true, businessDayId: open.businessDayId });
+    // The guarded UPDATE did not overwrite the concurrent close.
+    const day = await env.DB.prepare("SELECT status, summary_json FROM bw_business_days WHERE id = ?")
+      .bind(open.businessDayId)
+      .first<{ status: string; summary_json: string }>();
+    expect(day).toEqual({ status: "closed", summary_json: "concurrent" });
+    const rows = await entriesFor({ action: "day.close", shopId });
+    expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
+    expect(rows[1]).toMatchObject({ outcome: "refused", reason: "not_open", entity_id: open.businessDayId });
+    expect(rows[1]!.changes_json).toBeNull();
+    expect(rows.filter((r) => r.changes_json !== null)).toHaveLength(0);
+  });
+
   it("a close with no open day records nothing", async () => {
     const { shopId } = await seedOpenableShop();
     const res = await dispatch("POST", `/booking/shops/${shopId}/close`, { headers: await authed("admin", shopId) });

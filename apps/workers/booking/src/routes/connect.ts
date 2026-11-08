@@ -14,8 +14,8 @@ import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { createConnectAccount, createAccountLink, getAccount } from "../lib/stripe.js";
 import { reportError } from "../services/report-error.js";
-import { AuditWriteError } from "@repo/audit";
-import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { AuditWriteError, type AuditRunResult } from "@repo/audit";
+import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -124,22 +124,35 @@ r.get("/:shopId/connect/status", async (c) => {
     try {
       const acct = await getAccount(c.env.STRIPE_SECRET_KEY, accountId);
       if (acct.charges_enabled && acct.details_submitted) {
-        // The flag flip and its audit entry commit together. If the entry
-        // cannot be prepared, the sync is skipped and this GET answers from
-        // the persisted columns, as it does when Stripe's poll fails.
-        const refused = await batchWithAudit(
-          c,
-          [c.env.DB.prepare("UPDATE shops SET stripe_connect_onboarded = 1 WHERE id = ?").bind(shopId)],
-          {
-            action: "payment.connect.sync",
-            outcome: "succeeded",
-            shopId,
-            entityType: "shop",
-            entityId: shopId,
-            changes: { stripe_connect_onboarded: [0, 1] },
-          }
-        );
-        if (!refused) {
+        // Pattern T around a guarded flip. The account.updated webhook can set
+        // the flag between the read above and this write (the normal
+        // onboarding return), so the change is recorded only when this UPDATE
+        // flipped it; otherwise the outcome is refused, already_onboarded.
+        // Either way the shop is onboarded and the answer is the success one.
+        // If the started entry cannot be written (decision 8), the sync is
+        // skipped and this GET answers from the persisted columns, as it does
+        // when Stripe's poll fails.
+        let synced = false;
+        try {
+          await auditFor(c).run(
+            { action: "payment.connect.sync", shopId, entityType: "shop", entityId: shopId },
+            async (): Promise<boolean> => {
+              const flip = await c.env.DB
+                .prepare("UPDATE shops SET stripe_connect_onboarded = 1 WHERE id = ? AND stripe_connect_onboarded = 0")
+                .bind(shopId)
+                .run();
+              return (flip.meta?.changes ?? 0) === 1;
+            },
+            (flipped): AuditRunResult =>
+              flipped
+                ? { changes: { stripe_connect_onboarded: [0, 1] } }
+                : { outcome: "refused", reason: "already_onboarded" }
+          );
+          synced = true;
+        } catch (e) {
+          if (!(e instanceof AuditWriteError)) throw e;
+        }
+        if (synced) {
           chargesEnabled = acct.charges_enabled;
           payoutsEnabled = acct.payouts_enabled;
           onboarded = true;
