@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
-  getScheduleByShop, getScheduleByStaff, upsertSchedule, deactivateScheduleDay,
+  getScheduleByShop, getScheduleByStaff, upsertScheduleStmt, deactivateScheduleDayStmt,
   getStaffById,
 } from "../db/queries.js";
+import type { D1PreparedStatement } from "@cloudflare/workers-types";
+import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
@@ -71,35 +73,74 @@ schedule.put("/", requireShopRole("admin"), async (c) => {
 
   const DAYS = [0, 1, 2, 3, 4, 5, 6];
 
-  await Promise.all(
-    body.entries.map(async (entry) => {
-      if (!DAYS.includes(entry.day_of_week) || !entry.staff_id) return;
+  // Read the existing (staff, day) rows first, then build every statement and
+  // commit them with the audit entry in one batch.
+  const existingIds = new Map<string, string>();
+  const placeholders = staffIds.map(() => "?").join(", ");
+  if (staffIds.length > 0) {
+    const { results } = await c.env.DB
+      .prepare(`SELECT id, staff_id, day_of_week FROM schedules WHERE staff_id IN (${placeholders}) ORDER BY rowid`)
+      .bind(...staffIds)
+      .all<{ id: string; staff_id: string; day_of_week: number }>();
+    for (const r of results) {
+      const key = `${r.staff_id}:${r.day_of_week}`;
+      if (!existingIds.has(key)) existingIds.set(key, r.id);
+    }
+  }
 
-      if (entry.off) {
-        await deactivateScheduleDay(c.env.DB, entry.staff_id, entry.day_of_week);
-        return;
-      }
+  const stmts: D1PreparedStatement[] = [];
+  let upserts = 0;
+  let daysOff = 0;
+  for (const entry of body.entries) {
+    if (!DAYS.includes(entry.day_of_week) || !entry.staff_id) continue;
 
-      if (!entry.start_time || !entry.end_time) return;
+    if (entry.off) {
+      stmts.push(deactivateScheduleDayStmt(c.env.DB, entry.staff_id, entry.day_of_week));
+      daysOff++;
+      continue;
+    }
 
-      // Check for existing row to reuse ID, or create new
-      const existing = await c.env.DB
-        .prepare("SELECT id FROM schedules WHERE staff_id = ? AND day_of_week = ? LIMIT 1")
-        .bind(entry.staff_id, entry.day_of_week)
-        .first<{ id: string }>();
+    if (!entry.start_time || !entry.end_time) continue;
 
-      const id = existing?.id ?? crypto.randomUUID();
+    // Reuse the existing row id, or create one (shared by a repeat of the same day).
+    const key = `${entry.staff_id}:${entry.day_of_week}`;
+    let id = existingIds.get(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      existingIds.set(key, id);
+    }
 
-      await upsertSchedule(c.env.DB, {
+    stmts.push(
+      upsertScheduleStmt(c.env.DB, {
         id,
         shop_id: shopId,
         staff_id: entry.staff_id,
         day_of_week: entry.day_of_week,
         start_time: entry.start_time,
         end_time: entry.end_time,
-      });
-    })
-  );
+      }),
+    );
+    upserts++;
+  }
+
+  // With no staff entries nothing above checks the shop, and developers pass
+  // requireShopRole without a shop check: the entry records the shop only
+  // once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
+  const refused = await batchWithAudit(c, stmts, {
+    action: "schedule.update",
+    outcome: "succeeded",
+    shopId: auditShop,
+    entityType: "schedule",
+    entityId: auditShop,
+    details: {
+      entries: upserts,
+      staff_ids: [...staffIds].sort(),
+      days_off: daysOff,
+      ...(auditShop ? {} : UNRESOLVED_SHOP),
+    },
+  });
+  if (refused) return refused;
 
   const updated = await getScheduleByShop(c.env.DB, shopId);
   return c.json({ success: true, data: updated });

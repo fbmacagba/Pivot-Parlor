@@ -12,6 +12,7 @@ import {
   ensureE2ePlaywrightInviteReady,
   E2E_PLAYWRIGHT_INVITE_TOKEN,
 } from "../db/queries.js";
+import { actorForUser, batchWithAudit, requestIp } from "../audit/context.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { hashPassword } from "../lib/password.js";
 import {
@@ -143,28 +144,50 @@ invites.post("/:token/accept", async (c) => {
 
   // Create the account, record the legal acceptance, consume the invite, and
   // activate the shop atomically — the acceptance record must never go missing
-  // for an onboarded account (the exact gap this closes).
-  await c.env.DB.batch([
-    createUserStmt(c.env.DB, {
-      id: userId,
-      name: body.name.trim(),
-      email: invite.email,
-      password_hash,
-      role: invite.role,
-      shop_id: invite.shop_id,
-      // Accepting a token that was emailed to this address proves ownership (SEC-3).
-      email_verified: 1,
-    }),
-    recordLegalAcceptanceStmt(c.env.DB, {
-      id: crypto.randomUUID(),
-      shop_id: invite.shop_id,
-      user_id: userId,
-      document,
-      version: LEGAL_DOC_VERSION,
-    }),
-    markInviteUsedStmt(c.env.DB, token),
-    activateShopStmt(c.env.DB, invite.shop_id),
-  ]);
+  // for an onboarded account (the exact gap this closes). The audit entry
+  // joins the same batch, so an acceptance that cannot be recorded leaves
+  // none of the four writes behind. The new user is the actor: the batch
+  // creates the account before the entry's subject row reads it.
+  const refused = await batchWithAudit(
+    c,
+    [
+      createUserStmt(c.env.DB, {
+        id: userId,
+        name: body.name.trim(),
+        email: invite.email,
+        password_hash,
+        role: invite.role,
+        shop_id: invite.shop_id,
+        // Accepting a token that was emailed to this address proves ownership (SEC-3).
+        email_verified: 1,
+      }),
+      recordLegalAcceptanceStmt(c.env.DB, {
+        id: crypto.randomUUID(),
+        shop_id: invite.shop_id,
+        user_id: userId,
+        document,
+        version: LEGAL_DOC_VERSION,
+      }),
+      markInviteUsedStmt(c.env.DB, token),
+      activateShopStmt(c.env.DB, invite.shop_id),
+    ],
+    {
+      action: "account.invite.accept",
+      outcome: "succeeded",
+      // From the invite row; never the token, the email or the name.
+      shopId: invite.shop_id,
+      entityType: "invite",
+      entityId: invite.id,
+      details: { user_id: userId, role: invite.role, document, version: LEGAL_DOC_VERSION },
+    },
+    {
+      actor: actorForUser(
+        { id: userId, role: invite.role, shop_id: invite.shop_id },
+        requestIp(c),
+      ),
+    },
+  );
+  if (refused) return refused;
 
   // Issue session JWT so the user is logged in immediately
   const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_S;

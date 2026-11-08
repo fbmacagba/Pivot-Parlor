@@ -1,18 +1,19 @@
 import { Hono } from "hono";
+import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
+import { auditFor, auditRefused, batchWithAudit } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import {
   getWaitlistByShop,
-  createWaitlistEntry,
+  createWaitlistEntryStmt,
   getShopById,
   getShopBySlug,
   getWaitlistEntryById,
-  claimWaitlistNotification,
-  revertWaitlistNotification,
 } from "../db/queries.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
-import { sendWaitlistSlotOpen } from "../services/email.js";
 import { reportError } from "../services/report-error.js";
+import { notifyWaitlistEntry, WaitlistSendError } from "../services/waitlist-claim.js";
 import { isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
@@ -85,16 +86,32 @@ waitlist.post(
     }
 
     const id = crypto.randomUUID();
-    await createWaitlistEntry(c.env.DB, {
-      id,
-      shop_id: shop.id,
-      staff_id: body.staff_id ?? null,
-      service_id: body.service_id ?? null,
-      customer_name: name,
-      customer_email: email,
-      customer_phone: phone || null,
-      preferred_date: preferredDate || null,
-    });
+    // Pattern B: the entry joins the insert's batch. Anonymous actor + IP;
+    // every submitted field is personal, so the entry carries none of them.
+    const refused = await batchWithAudit(
+      c,
+      [
+        createWaitlistEntryStmt(c.env.DB, {
+          id,
+          shop_id: shop.id,
+          staff_id: body.staff_id ?? null,
+          service_id: body.service_id ?? null,
+          customer_name: name,
+          customer_email: email,
+          customer_phone: phone || null,
+          preferred_date: preferredDate || null,
+        }),
+      ],
+      {
+        action: "waitlist.join",
+        outcome: "succeeded",
+        shopId: shop.id,
+        entityType: "waitlist_entry",
+        entityId: id,
+        changes: fieldChanges(null, { status: "waiting" }).changes,
+      },
+    );
+    if (refused) return refused;
 
     return c.json({ success: true, data: { id } }, 201);
   }
@@ -134,16 +151,25 @@ waitlist.patch("/:id/status", authMiddleware, async (c) => {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);
   }
   const entry = await c.env.DB
-    .prepare("SELECT shop_id FROM waitlist WHERE id = ?")
+    .prepare("SELECT shop_id, status FROM waitlist WHERE id = ?")
     .bind(id)
-    .first<{ shop_id: string }>();
+    .first<{ shop_id: string; status: string }>();
   if (!entry || (user.role !== "developer" && user.shop_id !== entry.shop_id)) {
     return c.json({ success: false, error: "Not found" }, 404);
   }
-  await c.env.DB
-    .prepare("UPDATE waitlist SET status = ? WHERE id = ?")
-    .bind(body.status, id)
-    .run();
+  const refused = await batchWithAudit(
+    c,
+    [c.env.DB.prepare("UPDATE waitlist SET status = ? WHERE id = ?").bind(body.status, id)],
+    {
+      action: "waitlist.update",
+      outcome: "succeeded",
+      shopId: entry.shop_id,
+      entityType: "waitlist_entry",
+      entityId: id,
+      changes: fieldChanges(entry, { status: body.status }).changes,
+    },
+  );
+  if (refused) return refused;
   return c.json({ success: true });
 });
 
@@ -166,21 +192,53 @@ waitlist.post("/:id/notify", authMiddleware, async (c) => {
   }
 
   if (entry.status === "notified") {
+    // A 200 that changes nothing still records itself (no silent 2xx on a
+    // declared route). Best effort: if it cannot be written, the answer is
+    // the same and the gap guard attempts its own floor row.
+    try {
+      await auditFor(c).write({
+        action: "waitlist.notify",
+        outcome: "refused",
+        reason: "already_notified",
+        shopId: entry.shop_id,
+        entityType: "waitlist_entry",
+        entityId: id,
+        details: { trigger: "manual" },
+      });
+    } catch (e) {
+      if (!(e instanceof AuditWriteError)) throw e;
+    }
     return c.json({ success: true, data: { notified: false, already_notified: true } });
   }
   if (entry.status !== "waiting") {
     return c.json({ success: false, error: "Only waiting entries can be notified" }, 400);
   }
   // An explicit admin action must not silently mark notified with no email.
-  if (!c.env.RESEND_API_KEY) {
+  const apiKey = c.env.RESEND_API_KEY;
+  if (!apiKey) {
     return c.json({ success: false, error: "Email sending is not configured" }, 503);
   }
 
   const shop = await getShopById(c.env.DB, entry.shop_id);
   if (!shop) return c.json({ success: false, error: "Not found" }, 404);
 
-  const claim = await claimWaitlistNotification(c.env.DB, id);
-  if (!claim.meta || claim.meta.changes === 0) {
+  // The started entry commits before the claim (notifyWaitlistEntry), so a
+  // notification that cannot be recorded is never claimed or sent.
+  let result: "sent" | "lost";
+  try {
+    result = await notifyWaitlistEntry(c.env.DB, apiKey, shop, entry, auditFor(c), "manual");
+  } catch (err) {
+    if (err instanceof AuditWriteError) return auditRefused(c);
+    if (err instanceof WaitlistSendError) {
+      // The send failed: the claim is already reverted and the outcome recorded.
+      reportError("waitlist.notify_email", err.original, { entryId: id, shopId: entry.shop_id });
+      return c.json({ success: false, error: "Failed to send notification email" }, 502);
+    }
+    // A database failure (claim or revert): a 500, as before (the outcome is recorded `failed`).
+    throw err;
+  }
+
+  if (result === "lost") {
     // Lost the race: re-read to report accurately. A concurrent click that
     // already sent leaves it notified; a concurrent booked/expired transition
     // means it can no longer be notified.
@@ -189,21 +247,6 @@ waitlist.post("/:id/notify", authMiddleware, async (c) => {
       return c.json({ success: true, data: { notified: false, already_notified: true } });
     }
     return c.json({ success: false, error: "Only waiting entries can be notified" }, 400);
-  }
-
-  try {
-    await sendWaitlistSlotOpen(c.env.RESEND_API_KEY, {
-      customer_name: entry.customer_name,
-      customer_email: entry.customer_email,
-      shop_name: shop.name,
-      shop_slug: shop.slug,
-      service_name: entry.service_name,
-      preferred_date: entry.preferred_date,
-    });
-  } catch (err) {
-    await revertWaitlistNotification(c.env.DB, id);
-    reportError("waitlist.notify_email", err, { entryId: id, shopId: entry.shop_id });
-    return c.json({ success: false, error: "Failed to send notification email" }, 502);
   }
 
   return c.json({ success: true, data: { notified: true } });

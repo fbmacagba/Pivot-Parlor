@@ -2,9 +2,12 @@
 // Adds the missing dashboard endpoints identified in DASHBOARD_SPEC.md
 
 import { Hono } from "hono";
+import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import {
   getBookingById,
   getPlatformRevenueByMonth,
@@ -471,18 +474,28 @@ staffMeRouter.put("/bookings/:bookingId/status", async (c) => {
 
   // Verify booking belongs to this staff member
   const existing = await c.env.DB
-    .prepare("SELECT id FROM bookings WHERE id = ? AND staff_id = ? LIMIT 1")
+    .prepare("SELECT id, status FROM bookings WHERE id = ? AND staff_id = ? LIMIT 1")
     .bind(bookingId, staffId)
-    .first<{ id: string }>();
+    .first<{ id: string; status: string }>();
 
   if (!existing) {
     return c.json({ success: false, error: "Booking not found" }, 404);
   }
 
-  await c.env.DB
-    .prepare("UPDATE bookings SET status = ? WHERE id = ?")
-    .bind(body.status, bookingId)
-    .run();
+  // Unconditional UPDATE, so Pattern B: the entry joins the same batch.
+  const refused = await batchWithAudit(
+    c,
+    [c.env.DB.prepare("UPDATE bookings SET status = ? WHERE id = ?").bind(body.status, bookingId)],
+    {
+      action: "booking.status",
+      outcome: "succeeded",
+      shopId,
+      entityType: "booking",
+      entityId: bookingId,
+      changes: fieldChanges(existing, { status: body.status }).changes,
+    },
+  );
+  if (refused) return refused;
 
   return c.json({ success: true });
 });
@@ -509,6 +522,14 @@ staffMeRouter.get("/schedule", async (c) => {
 
   return c.json({ success: true, data: results });
 });
+
+/** UTC midnight of a YYYY-MM-DD date, or null when it is not a real calendar
+ *  date (month 13, Feb 30): the parsed date must print back as the input. */
+function calendarDateMs(date: string): number | null {
+  const ms = Date.parse(`${date}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10) === date ? ms : null;
+}
 
 /**
  * POST /api/staff/me/time-off
@@ -544,14 +565,34 @@ staffMeRouter.post("/time-off", async (c) => {
   }
 
   const id = crypto.randomUUID();
+  // Inclusive day count (a one-day request is 1); dates and reason stay out of the entry.
+  // Only for real calendar dates: the format check above passes 2027-13-01
+  // and 2027-02-30 (which Date.parse rolls over to March), so the count is
+  // null unless both dates round-trip. The response is unchanged either way.
+  const fromMs = calendarDateMs(body.from_date);
+  const toMs = calendarDateMs(body.to_date);
+  const days = fromMs !== null && toMs !== null ? Math.round((toMs - fromMs) / 86_400_000) + 1 : null;
 
-  await c.env.DB
-    .prepare(
-      `INSERT INTO staff_time_off (id, shop_id, staff_id, from_date, to_date, reason)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .bind(id, shopId, staffId, body.from_date, body.to_date, body.reason ?? null)
-    .run();
+  const refused = await batchWithAudit(
+    c,
+    [
+      c.env.DB
+        .prepare(
+          `INSERT INTO staff_time_off (id, shop_id, staff_id, from_date, to_date, reason)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(id, shopId, staffId, body.from_date, body.to_date, body.reason ?? null),
+    ],
+    {
+      action: "staff.time_off.request",
+      outcome: "succeeded",
+      shopId,
+      entityType: "staff_time_off",
+      entityId: id,
+      details: { days },
+    },
+  );
+  if (refused) return refused;
 
   return c.json({ success: true, data: { id } }, 201);
 });
@@ -770,41 +811,66 @@ meRouter.post("/bookings/:bookingId/cancel", async (c) => {
     );
   }
 
-  const atomicResult = await c.env.DB
-    .prepare(
-      "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')"
-    )
-    .bind(bookingId)
-    .run();
+  // Pattern G: the atomic UPDATE is the only gate, so a racing second cancel
+  // that reaches it records `refused` (its 409); the pre-checks above change
+  // nothing and record nothing.
+  let res: Response;
+  try {
+    res = await auditFor(c).run(
+      { action: "booking.cancel", shopId: booking.shop_id, entityType: "booking", entityId: bookingId },
+      async (): Promise<Response> => {
+        const atomicResult = await c.env.DB
+          .prepare(
+            "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')"
+          )
+          .bind(bookingId)
+          .run();
 
-  if (!atomicResult.success || atomicResult.meta?.changes === 0) {
-    return c.json(
-      {
-        success: false,
-        error:
-          "This booking was modified by another request and could not be cancelled. Please refresh and try again.",
+        if (!atomicResult.success || atomicResult.meta?.changes === 0) {
+          return c.json(
+            {
+              success: false,
+              error:
+                "This booking was modified by another request and could not be cancelled. Please refresh and try again.",
+            },
+            409
+          );
+        }
+        return c.json({ success: true });
       },
-      409
+      statusOutcome((r) =>
+        r.status < 400
+          ? { changes: fieldChanges(booking as unknown as Record<string, unknown>, { status: "cancelled" }).changes }
+          : {}
+      ),
     );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
+  if (res.status >= 400) return res;
 
   // The freed slot may match waiting waitlist entries. Non-fatal: the
-  // cancellation stands even if the notification emails fail.
+  // cancellation stands even if the notification emails fail. Each email is
+  // recorded with this customer as the actor.
   if (c.env.RESEND_API_KEY) {
     try {
       const shop = await getShopById(c.env.DB, booking.shop_id);
       if (shop) {
-        await notifyWaitlistForOpenedSlot(c.env.DB, c.env.RESEND_API_KEY, shop, {
-          bookingDate: booking.booking_date,
-          staffId: booking.staff_id,
-        });
+        await notifyWaitlistForOpenedSlot(
+          c.env.DB,
+          c.env.RESEND_API_KEY,
+          shop,
+          { bookingDate: booking.booking_date, staffId: booking.staff_id },
+          auditFor(c),
+        );
       }
     } catch (err) {
       reportError("me.cancel_waitlist_notify", err, { bookingId });
     }
   }
 
-  return c.json({ success: true });
+  return res;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -890,10 +956,30 @@ meRouter.patch("/profile", async (c) => {
   if (phone !== undefined) { sets.push("phone = ?"); vals.push(phone || null); }
   vals.push(user.sub);
 
-  await c.env.DB
-    .prepare(`UPDATE platform_users SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+  // Only the columns this handler writes, with the values it writes, so a
+  // stray body key never shows and "" over a stored null is no change. Both
+  // are personal: the entry names the changed fields, never their values.
+  const before = await c.env.DB
+    .prepare("SELECT name, phone FROM platform_users WHERE id = ? LIMIT 1")
+    .bind(user.sub)
+    .first<{ name: string | null; phone: string | null }>();
+  const { fields } = fieldChanges(before, {
+    name: name === undefined ? undefined : name || null,
+    phone: phone === undefined ? undefined : phone || null,
+  });
+
+  const refused = await batchWithAudit(
+    c,
+    [c.env.DB.prepare(`UPDATE platform_users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals)],
+    {
+      action: "account.update",
+      outcome: "succeeded",
+      entityType: "platform_user",
+      entityId: user.sub,
+      details: fields.length > 0 ? { fields } : null,
+    },
+  );
+  if (refused) return refused;
 
   return c.json({ success: true });
 });

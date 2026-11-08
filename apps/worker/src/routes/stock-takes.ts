@@ -9,6 +9,9 @@ import {
   getCurrentQuantity,
   stockMovementStatements,
 } from "../db/queries.js";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, auditShopId, batchWithAudit, statusOutcome, UNRESOLVED_SHOP } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
@@ -59,10 +62,27 @@ r.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
 
   const id = crypto.randomUUID();
   const notes = typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 1000) : null;
-  await c.env.DB
-    .prepare("INSERT INTO stock_takes (id, shop_id, status, notes, created_by) VALUES (?, ?, 'open', ?, ?)")
-    .bind(id, shopId, notes, user.sub)
-    .run();
+  // Developers pass requireShopRole without a shop check: the entry records
+  // the shop only once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
+  const refused = await batchWithAudit(
+    c,
+    [
+      c.env.DB
+        .prepare("INSERT INTO stock_takes (id, shop_id, status, notes, created_by) VALUES (?, ?, 'open', ?, ?)")
+        .bind(id, shopId, notes, user.sub),
+    ],
+    {
+      action: "inventory.stock_take.open",
+      outcome: "succeeded",
+      shopId: auditShop,
+      entityType: "stock_take",
+      entityId: id,
+      changes: fieldChanges(null, { status: "open" }).changes,
+      ...(auditShop ? {} : { details: UNRESOLVED_SHOP }),
+    },
+  );
+  if (refused) return refused;
   return c.json({ success: true, data: { id } }, 201);
 });
 
@@ -129,67 +149,119 @@ r.put("/:stockTakeId/items", authMiddleware, requireShopRole("admin", "staff"), 
     );
   }
 
-  await c.env.DB.batch(stmts);
+  const refused = await batchWithAudit(c, stmts, {
+    action: "inventory.stock_take.count",
+    outcome: "succeeded",
+    shopId,
+    entityType: "stock_take",
+    entityId: st.id,
+    // Count lines in the request (every one passed validation to reach here).
+    // The handler does not dedupe: a product listed twice is two lines, the
+    // later upsert winning, so this is lines submitted, not distinct products.
+    details: { items: body.items.length },
+  });
+  if (refused) return refused;
   return c.json({ success: true });
 });
 
 // ─── POST /api/shops/:shopId/stock-takes/:stockTakeId/complete ────────────────
 
 r.post("/:stockTakeId/complete", authMiddleware, requireShopRole("admin"), async (c) => {
-  const shopId = c.req.param("shopId")!;
-  const stockTakeId = c.req.param("stockTakeId")!;
   const user = getUser(c);
+  const notOpen = () => c.json({ success: false, error: "This stock take is not open" }, 400);
+  // Read first, so the entry carries the row's own id and shop id, never URL
+  // text. An unknown stock take (or shop) answers exactly as the claim alone
+  // did and records nothing; the conditional claim below stays the only gate.
+  const st = await getStockTakeById(c.env.DB, c.req.param("shopId")!, c.req.param("stockTakeId")!);
+  if (!st) return notOpen();
+  const shopId = st.shop_id;
+  const stockTakeId = st.id;
 
-  const claim = await c.env.DB
-    .prepare(
-      "UPDATE stock_takes SET status = 'completed', completed_at = datetime('now') WHERE id = ? AND shop_id = ? AND status = 'open'"
-    )
-    .bind(stockTakeId, shopId)
-    .run();
-  if ((claim.meta?.changes ?? 0) !== 1) {
-    return c.json({ success: false, error: "This stock take is not open" }, 400);
-  }
+  // Claim-first (Plan decision 3): started entry, then the claim, then the
+  // movements batch, all inside run(). If the movements batch throws, run()
+  // writes outcome `failed` (reason: the error name) and rethrows, so the
+  // response is a 500 and the stock take stays `completed` with no
+  // adjustments. Only an isolate death between the claim and the outcome
+  // leaves a started entry with no outcome, which reads as unknown.
+  let itemsCounted = 0;
+  let itemsAdjusted = 0;
+  try {
+    return await auditFor(c).run(
+      { action: "inventory.stock_take.complete", shopId, entityType: "stock_take", entityId: stockTakeId },
+      async (): Promise<Response> => {
+        const claim = await c.env.DB
+          .prepare(
+            "UPDATE stock_takes SET status = 'completed', completed_at = datetime('now') WHERE id = ? AND shop_id = ? AND status = 'open'"
+          )
+          .bind(stockTakeId, shopId)
+          .run();
+        if ((claim.meta?.changes ?? 0) !== 1) return notOpen();
 
-  const items = await getStockTakeItems(c.env.DB, stockTakeId);
-  const stmts = [];
-  let adjusted = 0;
-  for (const item of items) {
-    const current = await getCurrentQuantity(c.env.DB, shopId, item.product_id, item.variant_id);
-    const delta = item.counted_qty - current;
-    if (delta === 0) continue;
-    adjusted++;
-    stmts.push(
-      ...stockMovementStatements(c.env.DB, {
-        id: crypto.randomUUID(),
-        shop_id: shopId,
-        product_id: item.product_id,
-        variant_id: item.variant_id,
-        type: "adjustment",
-        quantity_delta: delta,
-        reference_type: "stock_take",
-        reference_id: stockTakeId,
-        staff_id: null,
-        note: `Stock take count ${item.counted_qty} (was ${current}) by ${user.sub}`,
-      })
+        const items = await getStockTakeItems(c.env.DB, stockTakeId);
+        const stmts = [];
+        let adjusted = 0;
+        for (const item of items) {
+          const current = await getCurrentQuantity(c.env.DB, shopId, item.product_id, item.variant_id);
+          const delta = item.counted_qty - current;
+          if (delta === 0) continue;
+          adjusted++;
+          stmts.push(
+            ...stockMovementStatements(c.env.DB, {
+              id: crypto.randomUUID(),
+              shop_id: shopId,
+              product_id: item.product_id,
+              variant_id: item.variant_id,
+              type: "adjustment",
+              quantity_delta: delta,
+              reference_type: "stock_take",
+              reference_id: stockTakeId,
+              staff_id: null,
+              note: `Stock take count ${item.counted_qty} (was ${current}) by ${user.sub}`,
+            })
+          );
+        }
+        if (stmts.length > 0) await c.env.DB.batch(stmts);
+
+        itemsCounted = items.length;
+        itemsAdjusted = adjusted;
+        return c.json({ success: true, data: { items_counted: items.length, items_adjusted: adjusted } });
+      },
+      statusOutcome((res) =>
+        res.status < 400 ? { details: { items_counted: itemsCounted, items_adjusted: itemsAdjusted } } : {}
+      ),
     );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  if (stmts.length > 0) await c.env.DB.batch(stmts);
-
-  return c.json({ success: true, data: { items_counted: items.length, items_adjusted: adjusted } });
 });
 
 // ─── POST /api/shops/:shopId/stock-takes/:stockTakeId/cancel ──────────────────
 
 r.post("/:stockTakeId/cancel", authMiddleware, requireShopRole("admin"), async (c) => {
-  const shopId = c.req.param("shopId")!;
-  const res = await c.env.DB
-    .prepare("UPDATE stock_takes SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status = 'open'")
-    .bind(c.req.param("stockTakeId")!, shopId)
-    .run();
-  if ((res.meta?.changes ?? 0) !== 1) {
-    return c.json({ success: false, error: "This stock take is not open" }, 400);
+  const notOpen = () => c.json({ success: false, error: "This stock take is not open" }, 400);
+  // Read first, so the entry carries the row's own id and shop id, never URL
+  // text. An unknown stock take (or shop) answers exactly as the UPDATE alone
+  // did and records nothing; the conditional UPDATE below stays the only gate.
+  const st = await getStockTakeById(c.env.DB, c.req.param("shopId")!, c.req.param("stockTakeId")!);
+  if (!st) return notOpen();
+  try {
+    return await auditFor(c).run(
+      { action: "inventory.stock_take.cancel", shopId: st.shop_id, entityType: "stock_take", entityId: st.id },
+      async (): Promise<Response> => {
+        const res = await c.env.DB
+          .prepare("UPDATE stock_takes SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status = 'open'")
+          .bind(st.id, st.shop_id)
+          .run();
+        if ((res.meta?.changes ?? 0) !== 1) return notOpen();
+        return c.json({ success: true });
+      },
+      statusOutcome((res) => (res.status < 400 ? { changes: { status: ["open", "cancelled"] } } : {})),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  return c.json({ success: true });
 });
 
 export { r as stockTakesRouter };

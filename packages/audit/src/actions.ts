@@ -16,6 +16,16 @@ export const AUDIT_ACTIONS = [
   "audit.gap", "audit.anchor", "audit.import.historical",
   "ai.call", "ai.chatbot_model.set", "ai.registry.refresh",
   "subject.redact", "subject.erase_request",
+  // Plan 2: API worker routes, crons and the reminder queue.
+  "inventory.movement", "inventory.reorder",
+  "inventory.supplier.create", "inventory.supplier.update",
+  "inventory.po.create", "inventory.po.update", "inventory.po.order", "inventory.po.cancel", "inventory.po.receive",
+  "inventory.stock_take.open", "inventory.stock_take.count", "inventory.stock_take.complete", "inventory.stock_take.cancel",
+  "account.create", "account.update", "account.verify_email", "account.verification.send", "account.invite.accept",
+  "auth.login", "auth.logout",
+  "waitlist.join", "waitlist.update", "waitlist.notify",
+  "review.create", "enquiry.create", "staff.time_off.request",
+  "booking.reminder", "booking.eod_summary", "data.retention",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -8,9 +8,15 @@ import {
   getShopBySlug,
   ensureE2eBookableShop,
   E2E_BOOKABLE_SLUG,
-  createShop,
+  createShopStmt,
+  createInviteStmt,
+  upsertShopSubjectStmt,
+  updateShopFieldsStmt,
+  getShopSettingsRow,
+  ensureShopSettingsRowStmt,
+  updateShopSettingsStmt,
+  createReviewStmt,
   getNextShopNumber,
-  createInvite,
   getShopSiteByShopId,
   getShopSiteFacts,
   updateShopStripeSession,
@@ -40,7 +46,8 @@ import {
   buildServiceImagePrompt,
 } from "@repo/utils";
 import { AuditWriteError, userSubjectId } from "@repo/audit";
-import { auditFor, auditRefused, batchWithAudit } from "../audit/context.js";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
 import { buildSiteData, siteDesignIntent, siteWebsiteStatus } from "../lib/siteData.js";
@@ -106,6 +113,24 @@ function toSlug(name: string): string {
     .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
+}
+
+type VisualTarget = NonNullable<ReturnType<typeof parseVisualType>>;
+
+/** "logo", "hero" or "service:<id>": the only form in which a visual reaches an entry. */
+function visualLabel(target: VisualTarget): string {
+  return target.kind === "service" ? `service:${target.serviceId}` : target.kind;
+}
+
+/** The started-entry input shared by the site image edits (never a URL, file name or R2 key). */
+function siteEditInput(shopId: string, op: "upload" | "save" | "remove", target: VisualTarget) {
+  return {
+    action: "site.edit" as const,
+    shopId,
+    entityType: "shop_site",
+    entityId: shopId,
+    details: { op, visual: visualLabel(target) },
+  };
 }
 
 // ─── GET /api/shops — list all shops (developer) ─────────────────────────────
@@ -254,14 +279,6 @@ shops.get("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), a
  *  before anything is recorded. */
 const CANDIDATE_JOB_ID = /^[A-Za-z0-9-]{1,64}$/;
 
-/** Audit outcome for a site-candidate response: 4xx is a refusal and 5xx a
- *  failure, the same split the gap guard uses. */
-const candidateOutcome = (jobId: string) => (res: Response) => ({
-  outcome: res.status >= 500 ? ("failed" as const) : res.status >= 400 ? ("refused" as const) : ("succeeded" as const),
-  reason: res.status < 400 ? null : `HTTP ${res.status}`,
-  details: { job_id: jobId },
-});
-
 shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("admin"), async (c) => {
   const shop = await shopForReview(c);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
@@ -323,7 +340,7 @@ shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("a
         console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
         return c.json({ success: true, data: { published: true, job_id: jobId } });
       },
-      candidateOutcome(jobId),
+      statusOutcome(() => ({ details: { job_id: jobId } })),
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
@@ -357,7 +374,7 @@ shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin")
         console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
         return c.json({ success: true, data: { discarded: true, job_id: jobId } });
       },
-      candidateOutcome(jobId),
+      statusOutcome(() => ({ details: { job_id: jobId } })),
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
@@ -512,12 +529,22 @@ shops.post(
     if (existing) return c.json({ success: false, error: "Review already submitted for this booking" }, 409);
 
     const id = crypto.randomUUID();
-    await c.env.DB
-      .prepare(
-        "INSERT INTO reviews (id, shop_id, customer_name, rating, body, booking_id) VALUES (?, ?, ?, ?, ?, ?)"
-      )
-      .bind(id, shop.id, name, rating, text, bookingId)
-      .run();
+    // Anonymous actor + visitor IP (auditFor's default for a request with no
+    // session). The entry never carries the reviewer's name or the review text.
+    const refused = await batchWithAudit(
+      c,
+      [createReviewStmt(c.env.DB, { id, shop_id: shop.id, customer_name: name, rating, body: text, booking_id: bookingId })],
+      {
+        action: "review.create",
+        outcome: "succeeded",
+        shopId: shop.id,
+        entityType: "review",
+        entityId: id,
+        changes: fieldChanges(null, { rating }).changes,
+        details: { booking_id: bookingId },
+      },
+    );
+    if (refused) return refused;
 
     return c.json({ success: true, data: { id } }, 201);
   } catch (e) {
@@ -683,20 +710,30 @@ shops.patch("/:shopId/settings", authMiddleware, async (c) => {
     return c.json({ success: false, error: "No valid fields to update" }, 400);
   }
 
-  const sets = patchKeys.map((k) => `${k} = ?`).join(", ");
-  const vals = patchKeys.map((k) => coerceShopSettingValue(k, body[k]));
+  // Only the columns the handler writes, after coercion.
+  const coerced: Record<string, string | number | null> = {};
+  for (const k of patchKeys) coerced[k] = coerceShopSettingValue(k, body[k]);
 
   try {
-    const upd = await c.env.DB.prepare(`UPDATE shop_settings SET ${sets} WHERE shop_id = ?`)
-      .bind(...vals, shop.id)
-      .run();
-    const changes = Number((upd.meta as { changes?: number }).changes ?? 0);
-    if (changes === 0) {
-      await c.env.DB.prepare("INSERT INTO shop_settings (shop_id) VALUES (?)").bind(shop.id).run();
-      await c.env.DB.prepare(`UPDATE shop_settings SET ${sets} WHERE shop_id = ?`)
-        .bind(...vals, shop.id)
-        .run();
-    }
+    const current = await getShopSettingsRow(c.env.DB, shop.id);
+    const { changes, fields } = fieldChanges(current, coerced);
+    // One batch: create the row if absent, then write the fields (previously
+    // update, then insert and update again when the first matched nothing).
+    // Address, contact and free-text settings reach the entry as names only.
+    const refused = await batchWithAudit(
+      c,
+      [ensureShopSettingsRowStmt(c.env.DB, shop.id), updateShopSettingsStmt(c.env.DB, shop.id, coerced)],
+      {
+        action: "shop.settings.update",
+        outcome: "succeeded",
+        shopId: shop.id,
+        entityType: "shop_setting",
+        entityId: shop.id,
+        changes,
+        details: { fields },
+      },
+    );
+    if (refused) return refused;
     return c.json({ success: true, data: { updated: patchKeys } });
   } catch (e) {
     console.error("[shops] PATCH settings", e);
@@ -806,18 +843,45 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
     return c.json({ success: false, error: `Unknown composer: ${composerIn}` }, 400);
   }
 
-  await c.env.KV.put(
-    genSettingsKvKey(shop.id),
-    JSON.stringify({
-      design_notes: typeof body.design_notes === "string" ? body.design_notes : "",
-      text_model: textModelIn,
-      text_effort: parseTextEffort(body.text_effort) ?? "",
-      image_model: imageModelIn,
-      composer: composerIn || undefined,
-    }),
-    { expirationTtl: 60 * 60 * 24 }
-  );
-  return c.json({ ok: true });
+  const designNotes = typeof body.design_notes === "string" ? body.design_notes : "";
+  const textEffort = parseTextEffort(body.text_effort) ?? "";
+
+  try {
+    return await auditFor(c).run(
+      {
+        action: "shop.settings.update",
+        shopId: shop.id,
+        entityType: "generation_prefs",
+        entityId: shop.id,
+        // Model ids and enums only; never the design notes text.
+        details: {
+          text_model: textModelIn || null,
+          image_model: imageModelIn || null,
+          composer: composerIn || null,
+          text_effort: textEffort || null,
+          design_notes_set: designNotes.trim() !== "",
+        },
+      },
+      async (): Promise<Response> => {
+        await c.env.KV.put(
+          genSettingsKvKey(shop.id),
+          JSON.stringify({
+            design_notes: designNotes,
+            text_model: textModelIn,
+            text_effort: textEffort,
+            image_model: imageModelIn,
+            composer: composerIn || undefined,
+          }),
+          { expirationTtl: 60 * 60 * 24 }
+        );
+        return c.json({ ok: true });
+      },
+      statusOutcome(),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 // ─── POST /api/shops/:shopId/generate-image — OpenRouter → R2 (developer-only) ───
@@ -901,7 +965,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     typeof body.design_notes === "string" ? body.design_notes.trim() : "";
 
   const shopTypeLabel = shop.type.replace(/_/g, " ");
-  const typeLabel = target.kind === "service" ? `service:${target.serviceId}` : target.kind;
+  const typeLabel = visualLabel(target);
 
   const prompt =
     target.kind === "service"
@@ -914,35 +978,67 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
   const filename = customVisualFilename(target);
   const key = `shops/${shop.slug}/${filename}`;
 
+  // Pattern T: the site.edit started entry is written before anything
+  // effectful (the model call included); the ai.call pair nests inside it.
+  // Neither carries the prompt, the design notes, the URL or the R2 key.
   try {
-    const buf = await generateOpenRouterImageBuffer(
-      prompt,
-      aspectRatio,
-      apiKey,
-      `[shop-generate-image][${typeLabel}]`,
-      imageModel
+    return await auditFor(c).run(
+      {
+        action: "site.edit",
+        shopId: shop.id,
+        entityType: "shop_site",
+        entityId: shop.id,
+        details: { op: "generate", visual: typeLabel, image_model: imageModel },
+      },
+      async (): Promise<Response> => {
+        try {
+          const buf = await auditFor(c).run(
+            {
+              action: "ai.call",
+              shopId: shop.id,
+              entityType: "shop_site",
+              entityId: shop.id,
+              details: { purpose: "image", model: imageModel, visual: typeLabel },
+            },
+            () =>
+              generateOpenRouterImageBuffer(
+                prompt,
+                aspectRatio,
+                apiKey,
+                `[shop-generate-image][${typeLabel}]`,
+                imageModel
+              )
+          );
+          await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType: "image/png" } });
+          const imageUrl = assetPublicUrl(c, shop.slug, filename);
+
+          await persistVisualImage(c.env.DB, c.env.KV, {
+            shopId: shop.id,
+            slug: shop.slug,
+            target,
+            imageUrl,
+          });
+
+          return c.json({ imageUrl });
+        } catch (err) {
+          // An entry that cannot be written is a refusal, not an image error.
+          if (err instanceof AuditWriteError) throw err;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[generate-image] image generation or upload failed", {
+            shopId: shop.id,
+            slug: shop.slug,
+            type: typeLabel,
+            imageModel,
+            error: msg,
+          });
+          return c.json({ error: msg || "Image generation failed" }, 500);
+        }
+      },
+      statusOutcome(),
     );
-    await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType: "image/png" } });
-    const imageUrl = assetPublicUrl(c, shop.slug, filename);
-
-    await persistVisualImage(c.env.DB, c.env.KV, {
-      shopId: shop.id,
-      slug: shop.slug,
-      target,
-      imageUrl,
-    });
-
-    return c.json({ imageUrl });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[generate-image] image generation or upload failed", {
-      shopId: shop.id,
-      slug: shop.slug,
-      type: typeLabel,
-      imageModel,
-      error: msg,
-    });
-    return c.json({ error: msg || "Image generation failed" }, 500);
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
 });
 
@@ -984,15 +1080,28 @@ shops.post("/:shopId/upload-image", authMiddleware, async (c) => {
 
   const filename = customVisualFilename(target);
   const key = `shops/${shop.slug}/${filename}`;
-  const buf = await file.arrayBuffer();
   const ext = file.name.match(/\.(png|jpg|jpeg|webp)$/i)?.[1] ?? "png";
   const contentType =
     file.type ||
     (ext === "jpg" || ext === "jpeg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png");
 
-  await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType } });
-  const imageUrl = assetPublicUrl(c, shop.slug, filename);
-  return c.json({ imageUrl });
+  // Pattern T around the R2 put. The entry names the visual only: no file
+  // name, URL or R2 key.
+  try {
+    return await auditFor(c).run(
+      siteEditInput(shop.id, "upload", target),
+      async (): Promise<Response> => {
+        const buf = await file.arrayBuffer();
+        await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType } });
+        const imageUrl = assetPublicUrl(c, shop.slug, filename);
+        return c.json({ imageUrl });
+      },
+      statusOutcome(),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 // ─── POST /api/shops/:shopId/save-image — persist URL on shop_sites ───
@@ -1023,15 +1132,27 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
     }
   }
 
-  // persistVisualImage sets the URL, locks hero/logo, and busts the site cache.
-  await persistVisualImage(c.env.DB, c.env.KV, {
-    shopId: shop.id,
-    slug: shop.slug,
-    target,
-    imageUrl,
-  });
-
-  return c.json({ ok: true });
+  // persistVisualImage sets the URL, locks hero/logo, and busts the site
+  // cache: several D1 writes plus a KV delete, so Pattern T. The entry never
+  // carries the submitted URL.
+  try {
+    return await auditFor(c).run(
+      siteEditInput(shop.id, "save", target),
+      async (): Promise<Response> => {
+        await persistVisualImage(c.env.DB, c.env.KV, {
+          shopId: shop.id,
+          slug: shop.slug,
+          target,
+          imageUrl,
+        });
+        return c.json({ ok: true });
+      },
+      statusOutcome(),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 // ─── POST /api/shops/:shopId/remove-image — clear a visual (developer-only) ───
@@ -1059,12 +1180,23 @@ shops.post("/:shopId/remove-image", authMiddleware, async (c) => {
     }
   }
 
-  await clearVisualImage(c.env.DB, c.env.KV, {
-    shopId: shop.id,
-    slug: shop.slug,
-    target,
-  });
-  return c.json({ ok: true });
+  try {
+    return await auditFor(c).run(
+      siteEditInput(shop.id, "remove", target),
+      async (): Promise<Response> => {
+        await clearVisualImage(c.env.DB, c.env.KV, {
+          shopId: shop.id,
+          slug: shop.slug,
+          target,
+        });
+        return c.json({ ok: true });
+      },
+      statusOutcome(),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 // ─── GET /api/shops/:shopId/visuals — Visual Editor read model ────────────────
@@ -1167,14 +1299,7 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
   // referenced from the entry by id.
   const shopSubjectRef = `subj_shop_${shop.id}`;
   try {
-    await c.env.DB.prepare(
-      `INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at)
-       VALUES (?, 'shop', ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, shop_id = excluded.shop_id
-       WHERE audit_subjects.redacted_at IS NULL`
-    )
-      .bind(shopSubjectRef, shop.id, `${shop.name} (${shop.slug})`, new Date().toISOString())
-      .run();
+    await upsertShopSubjectStmt(c.env.DB, shop).run();
   } catch (e) {
     console.error("[shops.delete] subject upsert failed", e);
     return auditRefused(c);
@@ -1614,6 +1739,12 @@ async function markContactOnboarded(
     .run();
 }
 
+/** shops.type CHECK values (schema.sql); anything else is recorded as null. */
+const KNOWN_SHOP_TYPES: readonly string[] = ["beauty_parlor", "barber_shop", "both"];
+/** `plan` is free text with no CHECK; in practice it is always "standard".
+ *  Any other value is recorded as `plan: null, plan_custom: true`, never verbatim. */
+const KNOWN_SHOP_PLANS: readonly string[] = ["standard"];
+
 shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
   const body = await c.req.json<{
     name?: string;
@@ -1648,108 +1779,132 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
   const useStripe =
     !!c.env.STRIPE_SECRET_KEY && !e2eMockAllowed(c.env, c.req.header("X-E2E-Test-Mock"));
 
-  if (useStripe) {
-    await createShop(c.env.DB, {
-      id: shopId,
-      shop_number: shopNumber,
-      slug,
-      name: body.name.trim(),
-      owner_email: body.owner_email.trim().toLowerCase(),
-      type: body.type ?? "beauty_parlor",
-      plan: body.plan ?? "standard",
-      status: "awaiting_payment",
-      stripe_payment_status: "unpaid",
-    });
+  const shopName = body.name.trim();
+  const ownerEmail = body.owner_email.trim().toLowerCase();
+  const shopType = body.type ?? "beauty_parlor";
+  const shopPlan = body.plan ?? "standard";
+  const knownPlan = typeof shopPlan === "string" && KNOWN_SHOP_PLANS.includes(shopPlan);
 
-    await createInvite(c.env.DB, {
-      id: inviteId,
-      email: body.owner_email.trim().toLowerCase(),
-      shop_id: shopId,
-      role: "admin",
-      token,
-      expires_at: expiresAt,
-      active: 0,
-    });
-
-    const stripe = new Stripe(c.env.STRIPE_SECRET_KEY!, {
-      httpClient: Stripe.createFetchHttpClient(),
-    });
-
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "gbp",
-            unit_amount: 10000,
-            product_data: {
-              name: "Pivot Parlor Setup Fee",
-              description: `One-time setup fee for ${body.name.trim()}`,
-            },
-          },
-          quantity: 1,
-        },
-      ],
-      success_url: `https://pivotparlor.com/onboarding/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: "https://pivotparlor.com/onboarding/payment-cancelled",
-      metadata: { shop_id: shopId, invite_id: inviteId },
-    });
-
-    await updateShopStripeSession(c.env.DB, shopId, session.id, session.url);
-
-    if (body.contact_email?.trim()) {
-      try {
-        await markContactOnboarded(c.env.DB, shopId, body.contact_email);
-      } catch (e) {
-        console.error("[shops POST] markContactOnboarded failed", e);
-      }
-    }
-
-    return c.json({
-      success: true,
-      data: {
-        shop: { id: shopId, slug, name: body.name.trim() },
-        checkout_url: session.url,
+  // Pattern T: Stripe Checkout is external. Validation and the slug
+  // pre-check stay above, so a 400 or 409 writes nothing. The entry carries
+  // the subject ref only: the shop name and slug (personal data, Ruling 17)
+  // live in the redactable audit_subjects row, and the owner email, invite
+  // token and Stripe ids never enter it.
+  try {
+    return await auditFor(c).run(
+      {
+        action: "shop.create",
+        shopId,
+        entityType: "shop",
+        entityId: shopId,
+        // No details on the started row (or a failed outcome): `type` and
+        // `plan` are caller input and are recorded only on success, and only
+        // when they are known values.
       },
-    }, 201);
+      async (): Promise<Response> => {
+        // The D1 writes made before Stripe, as one batch.
+        await c.env.DB.batch([
+          createShopStmt(c.env.DB, {
+            id: shopId,
+            shop_number: shopNumber,
+            slug,
+            name: shopName,
+            owner_email: ownerEmail,
+            type: shopType,
+            plan: shopPlan,
+            status: useStripe ? "awaiting_payment" : "pending",
+            ...(useStripe ? { stripe_payment_status: "unpaid" } : {}),
+          }),
+          createInviteStmt(c.env.DB, {
+            id: inviteId,
+            email: ownerEmail,
+            shop_id: shopId,
+            role: "admin",
+            token,
+            expires_at: expiresAt,
+            ...(useStripe ? { active: 0 } : {}),
+          }),
+          upsertShopSubjectStmt(c.env.DB, { id: shopId, name: shopName, slug }),
+        ]);
+
+        if (useStripe) {
+          const stripe = new Stripe(c.env.STRIPE_SECRET_KEY!, {
+            httpClient: Stripe.createFetchHttpClient(),
+          });
+
+          const session = await stripe.checkout.sessions.create({
+            mode: "payment",
+            line_items: [
+              {
+                price_data: {
+                  currency: "gbp",
+                  unit_amount: 10000,
+                  product_data: {
+                    name: "Pivot Parlor Setup Fee",
+                    description: `One-time setup fee for ${shopName}`,
+                  },
+                },
+                quantity: 1,
+              },
+            ],
+            success_url: `https://pivotparlor.com/onboarding/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: "https://pivotparlor.com/onboarding/payment-cancelled",
+            metadata: { shop_id: shopId, invite_id: inviteId },
+          });
+
+          await updateShopStripeSession(c.env.DB, shopId, session.id, session.url);
+
+          if (body.contact_email?.trim()) {
+            try {
+              await markContactOnboarded(c.env.DB, shopId, body.contact_email);
+            } catch (e) {
+              console.error("[shops POST] markContactOnboarded failed", e);
+            }
+          }
+
+          return c.json({
+            success: true,
+            data: {
+              shop: { id: shopId, slug, name: shopName },
+              checkout_url: session.url,
+            },
+          }, 201);
+        }
+
+        // Legacy flow (no Stripe)
+        if (body.contact_email?.trim()) {
+          try {
+            await markContactOnboarded(c.env.DB, shopId, body.contact_email);
+          } catch (e) {
+            console.error("[shops POST] markContactOnboarded failed", e);
+          }
+        }
+
+        return c.json({
+          success: true,
+          data: {
+            shop: { id: shopId, slug, name: shopName },
+            invite_token: token,
+          },
+        }, 201);
+      },
+      statusOutcome((res) =>
+        res.status < 400
+          ? {
+              details: {
+                shop_subject: `subj_shop_${shopId}`,
+                flow: useStripe ? "stripe" : "invite",
+                type: typeof shopType === "string" && KNOWN_SHOP_TYPES.includes(shopType) ? shopType : null,
+                ...(knownPlan ? { plan: shopPlan } : { plan: null, plan_custom: true }),
+              },
+            }
+          : {},
+      ),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-
-  // Legacy flow (no Stripe)
-  await createShop(c.env.DB, {
-    id: shopId,
-    shop_number: shopNumber,
-    slug,
-    name: body.name.trim(),
-    owner_email: body.owner_email.trim().toLowerCase(),
-    type: body.type ?? "beauty_parlor",
-    plan: body.plan ?? "standard",
-    status: "pending",
-  });
-
-  await createInvite(c.env.DB, {
-    id: inviteId,
-    email: body.owner_email.trim().toLowerCase(),
-    shop_id: shopId,
-    role: "admin",
-    token,
-    expires_at: expiresAt,
-  });
-
-  if (body.contact_email?.trim()) {
-    try {
-      await markContactOnboarded(c.env.DB, shopId, body.contact_email);
-    } catch (e) {
-      console.error("[shops POST] markContactOnboarded failed", e);
-    }
-  }
-
-  return c.json({
-    success: true,
-    data: {
-      shop: { id: shopId, slug, name: body.name.trim() },
-      invite_token: token,
-    },
-  }, 201);
 });
 
 // ─── PATCH /api/shops/:shopId — update shop (developer/admin) ────────────────
@@ -1779,20 +1934,62 @@ shops.patch("/:shopId", authMiddleware, requireShopRole("admin"), async (c) => {
     }
   }
 
-  const sets: string[] = [];
-  const vals: unknown[] = [];
-  if (body.name !== undefined) { sets.push("name = ?"); vals.push(body.name); }
-  if (body.phone !== undefined) { sets.push("phone = ?"); vals.push(body.phone); }
-  if (body.is_active !== undefined) { sets.push("is_active = ?"); vals.push(body.is_active); }
-  if (body.commission_rate !== undefined) { sets.push("commission_rate = ?"); vals.push(body.commission_rate); }
-  if (body.retail_commission_rate !== undefined) { sets.push("retail_commission_rate = ?"); vals.push(body.retail_commission_rate); }
+  // Only the columns this handler writes (undefined means not submitted).
+  const applied: Record<string, unknown> = {
+    ...(body.name !== undefined ? { name: body.name } : {}),
+    ...(body.phone !== undefined ? { phone: body.phone } : {}),
+    ...(body.is_active !== undefined ? { is_active: body.is_active } : {}),
+    ...(body.commission_rate !== undefined ? { commission_rate: body.commission_rate } : {}),
+    ...(body.retail_commission_rate !== undefined ? { retail_commission_rate: body.retail_commission_rate } : {}),
+  };
 
-  if (sets.length > 0) {
-    vals.push(shopId);
-    await c.env.DB.prepare(`UPDATE shops SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  const before = await getShopById(c.env.DB, shopId);
+  if (!before) {
+    // Nothing exists to change; the answer stays as it was (200, data null).
+    // A 2xx must still leave an entry, so a best-effort refusal is recorded.
+    // It names no shop: the URL parameter is not a resolved id.
+    try {
+      await auditFor(c).write({ action: "shop.update", outcome: "refused", reason: "shop_not_found" });
+    } catch (e) {
+      if (!(e instanceof AuditWriteError)) throw e;
+    }
+    return c.json({ success: true, data: null });
   }
 
-  const shop = await getShopById(c.env.DB, shopId);
+  // `name` and `phone` are personal data: allow-listed out of `changes`, so
+  // they reach the entry as field names in details.fields only.
+  // is_active has no CHECK and the handler writes it as submitted; for the
+  // entry only, true/1 and false/0 are normalised and anything else is named
+  // in details.fields without its value.
+  const forAudit: Record<string, unknown> = { ...applied };
+  let oddIsActive = false;
+  if ("is_active" in forAudit) {
+    const v = forAudit.is_active;
+    if (v === true || v === 1) forAudit.is_active = 1;
+    else if (v === false || v === 0) forAudit.is_active = 0;
+    else {
+      delete forAudit.is_active;
+      oddIsActive = true;
+    }
+  }
+  const diff = fieldChanges(before as unknown as Record<string, unknown>, forAudit);
+  const changes = diff.changes;
+  const fields = oddIsActive ? [...diff.fields, "is_active"].sort() : diff.fields;
+  const update = updateShopFieldsStmt(c.env.DB, before.id, applied);
+  // Always called, even with no applicable field (then changes is empty and
+  // details is { fields: [] }): a 2xx must leave an entry.
+  const refused = await batchWithAudit(c, update ? [update] : [], {
+    action: "shop.update",
+    outcome: "succeeded",
+    shopId: before.id,
+    entityType: "shop",
+    entityId: before.id,
+    changes,
+    details: { fields },
+  });
+  if (refused) return refused;
+
+  const shop = await getShopById(c.env.DB, before.id);
   return c.json({ success: true, data: shop });
 });
 

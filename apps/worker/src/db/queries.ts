@@ -1,4 +1,4 @@
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { CANDIDATE_COLUMNS } from "../lib/siteCandidate.js";
 
 const CANDIDATE_COLUMN_SET = new Set<string>(CANDIDATE_COLUMNS);
@@ -248,10 +248,6 @@ export function createUserStmt(db: D1Database, user: NewUser) {
     );
 }
 
-export function createUser(db: D1Database, user: NewUser) {
-  return createUserStmt(db, user).run();
-}
-
 // ─── Shops ────────────────────────────────────────────────────────────────────
 
 export function getShopById(db: D1Database, id: string) {
@@ -313,24 +309,23 @@ export async function getNextShopNumber(db: D1Database): Promise<number> {
   return row?.next ?? 1;
 }
 
-export function createShop(
-  db: D1Database,
-  shop: {
-    id: string;
-    shop_number: number;
-    slug: string;
-    name: string;
-    owner_email: string;
-    type?: string;
-    owner_name?: string;
-    phone?: string;
-    commission_rate?: number;
-    status?: string;
-    plan?: string;
-    stripe_checkout_session_id?: string | null;
-    stripe_payment_status?: string;
-  },
-) {
+type NewShop = {
+  id: string;
+  shop_number: number;
+  slug: string;
+  name: string;
+  owner_email: string;
+  type?: string;
+  owner_name?: string;
+  phone?: string;
+  commission_rate?: number;
+  status?: string;
+  plan?: string;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_status?: string;
+};
+
+export function createShopStmt(db: D1Database, shop: NewShop): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO shops
@@ -352,24 +347,103 @@ export function createShop(
       shop.plan ?? "standard",
       shop.stripe_checkout_session_id ?? null,
       shop.stripe_payment_status ?? "unpaid",
+    );
+}
+
+export function createShop(db: D1Database, shop: NewShop) {
+  return createShopStmt(db, shop).run();
+}
+
+/**
+ * The redactable audit_subjects row for a shop. Ruling 17: shop name and slug
+ * are personal data and never enter an entry's hashed columns; the entry
+ * carries `subj_shop_<id>` and this row holds the name (erasable).
+ * Never overwrites a row that has already been redacted.
+ */
+export function upsertShopSubjectStmt(
+  db: D1Database,
+  shop: { id: string; name: string; slug: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at)
+       VALUES (?, 'shop', ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, shop_id = excluded.shop_id
+       WHERE audit_subjects.redacted_at IS NULL`,
     )
-    .run();
+    .bind(`subj_shop_${shop.id}`, shop.id, `${shop.name} (${shop.slug})`, new Date().toISOString());
+}
+
+/** Applies a PATCH /api/shops/:id to the columns the handler allows. Null when empty. */
+export function updateShopFieldsStmt(
+  db: D1Database,
+  shopId: string,
+  fields: Record<string, unknown>,
+): D1PreparedStatement | null {
+  const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+  if (keys.length === 0) return null;
+  return db
+    .prepare(`UPDATE shops SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`)
+    .bind(...keys.map((k) => fields[k]), shopId);
+}
+
+/** The shop_settings row as stored, or null when the shop has none yet. */
+export function getShopSettingsRow(db: D1Database, shopId: string) {
+  return db
+    .prepare("SELECT * FROM shop_settings WHERE shop_id = ? LIMIT 1")
+    .bind(shopId)
+    .first<Record<string, unknown>>();
+}
+
+/**
+ * Creates the shop's settings row if absent. Guarded with NOT EXISTS rather
+ * than ON CONFLICT(shop_id): production's shop_settings predates the migration
+ * chain (its PK is a legacy `id`), so a UNIQUE(shop_id) is not guaranteed there.
+ */
+export function ensureShopSettingsRowStmt(db: D1Database, shopId: string): D1PreparedStatement {
+  return db
+    .prepare(
+      "INSERT INTO shop_settings (shop_id) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM shop_settings WHERE shop_id = ?)",
+    )
+    .bind(shopId, shopId);
+}
+
+/** Column names must come from the caller's allow-list (SHOP_SETTINGS_PATCH_FIELDS). */
+export function updateShopSettingsStmt(
+  db: D1Database,
+  shopId: string,
+  fields: Record<string, string | number | null>,
+): D1PreparedStatement {
+  const keys = Object.keys(fields);
+  return db
+    .prepare(`UPDATE shop_settings SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE shop_id = ?`)
+    .bind(...keys.map((k) => fields[k]), shopId);
+}
+
+export function createReviewStmt(
+  db: D1Database,
+  review: { id: string; shop_id: string; customer_name: string; rating: number; body: string; booking_id: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      "INSERT INTO reviews (id, shop_id, customer_name, rating, body, booking_id) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(review.id, review.shop_id, review.customer_name, review.rating, review.body, review.booking_id);
 }
 
 // ─── Invites ──────────────────────────────────────────────────────────────────
 
-export function createInvite(
-  db: D1Database,
-  invite: {
-    id: string;
-    email: string;
-    shop_id: string;
-    role: string;
-    token: string;
-    expires_at: string;
-    active?: number;
-  },
-) {
+type NewInvite = {
+  id: string;
+  email: string;
+  shop_id: string;
+  role: string;
+  token: string;
+  expires_at: string;
+  active?: number;
+};
+
+export function createInviteStmt(db: D1Database, invite: NewInvite): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO invites (id, email, shop_id, role, token, expires_at, active)
@@ -383,8 +457,11 @@ export function createInvite(
       invite.token,
       invite.expires_at,
       invite.active ?? 1,
-    )
-    .run();
+    );
+}
+
+export function createInvite(db: D1Database, invite: NewInvite) {
+  return createInviteStmt(db, invite).run();
 }
 
 /** Matches tests/e2e/shop-onboarding-routes.ts (Playwright dev/shops POST mock). */
@@ -577,20 +654,21 @@ export function getShopByCheckoutSessionId(
     .first<DBShop>();
 }
 
-export function updateShopPaymentComplete(db: D1Database, shopId: string) {
+/** Prepared UPDATE marking a shop paid (Stripe checkout) — use in a db.batch(). */
+export function updateShopPaymentCompleteStmt(db: D1Database, shopId: string) {
   return db
     .prepare(
       "UPDATE shops SET stripe_payment_status = 'paid', status = 'pending' WHERE id = ?",
     )
-    .bind(shopId)
-    .run();
+    .bind(shopId);
 }
 
-export function setInviteActive(db: D1Database, inviteId: string) {
+/** Prepared UPDATE activating an invite once its shop has paid — use in a db.batch().
+ *  Scoped to that shop, so an invite id naming another shop's invite matches nothing. */
+export function setInviteActiveStmt(db: D1Database, inviteId: string, shopId: string) {
   return db
-    .prepare("UPDATE invites SET active = 1 WHERE id = ?")
-    .bind(inviteId)
-    .run();
+    .prepare("UPDATE invites SET active = 1 WHERE id = ? AND shop_id = ?")
+    .bind(inviteId, shopId);
 }
 
 /** Prepared UPDATE activating a shop — use in a db.batch(). */
@@ -1042,17 +1120,16 @@ export function getServiceById(db: D1Database, id: string) {
     .first<DBService>();
 }
 
-export function createService(
-  db: D1Database,
-  svc: {
-    id: string;
-    shop_id: string;
-    name: string;
-    duration_min: number;
-    price_pence: number;
-    category?: string | null;
-  },
-) {
+type NewService = {
+  id: string;
+  shop_id: string;
+  name: string;
+  duration_min: number;
+  price_pence: number;
+  category?: string | null;
+};
+
+export function createServiceStmt(db: D1Database, svc: NewService) {
   return db
     .prepare(
       "INSERT INTO services (id, shop_id, name, duration_min, price_pence, category) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1064,21 +1141,19 @@ export function createService(
       svc.duration_min,
       svc.price_pence,
       svc.category ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateService(
-  db: D1Database,
-  id: string,
-  fields: {
-    name?: string;
-    duration_min?: number;
-    price_pence?: number;
-    category?: string | null;
-    is_active?: number;
-  },
-) {
+type ServiceUpdateFields = {
+  name?: string;
+  duration_min?: number;
+  price_pence?: number;
+  category?: string | null;
+  is_active?: number;
+};
+
+/** Null when no field is set (nothing to update). */
+export function updateServiceStmt(db: D1Database, id: string, fields: ServiceUpdateFields) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.name !== undefined) {
@@ -1101,12 +1176,11 @@ export function updateService(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE services SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
@@ -1132,16 +1206,16 @@ export function getStaffById(db: D1Database, id: string) {
     .first<DBStaff>();
 }
 
-export function createStaffMember(
-  db: D1Database,
-  member: {
-    id: string;
-    shop_id: string;
-    user_id: string;
-    display_name: string;
-    bio?: string | null;
-  },
-) {
+type NewStaffMember = {
+  id: string;
+  shop_id: string;
+  user_id: string;
+  display_name: string;
+  bio?: string | null;
+};
+
+/** Prepared INSERT for a staff row, for a db.batch() (audit Pattern B). */
+export function createStaffMemberStmt(db: D1Database, member: NewStaffMember) {
   return db
     .prepare(
       "INSERT INTO staff (id, shop_id, user_id, display_name, bio) VALUES (?, ?, ?, ?, ?)",
@@ -1152,21 +1226,19 @@ export function createStaffMember(
       member.user_id,
       member.display_name,
       member.bio ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateStaffMember(
-  db: D1Database,
-  id: string,
-  fields: {
-    display_name?: string;
-    bio?: string | null;
-    is_active?: number;
-    avatar_url?: string | null;
-    speciality?: string | null;
-  },
-) {
+type StaffUpdateFields = {
+  display_name?: string;
+  bio?: string | null;
+  is_active?: number;
+  avatar_url?: string | null;
+  speciality?: string | null;
+};
+
+/** Prepared UPDATE for a staff row, or null when no field is set. */
+export function updateStaffMemberStmt(db: D1Database, id: string, fields: StaffUpdateFields) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.speciality !== undefined) {
@@ -1189,25 +1261,19 @@ export function updateStaffMember(
     sets.push("avatar_url = ?");
     vals.push(fields.avatar_url);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE staff SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
-export function addStaffService(
-  db: D1Database,
-  staffId: string,
-  serviceId: string,
-) {
+export function addStaffServiceStmt(db: D1Database, staffId: string, serviceId: string) {
   return db
     .prepare(
       "INSERT OR IGNORE INTO staff_services (staff_id, service_id) VALUES (?, ?)",
     )
-    .bind(staffId, serviceId)
-    .run();
+    .bind(staffId, serviceId);
 }
 
 export async function getStaffServices(db: D1Database, staffId: string) {
@@ -1244,17 +1310,16 @@ export async function getScheduleByStaff(db: D1Database, staffId: string) {
   return results;
 }
 
-export function upsertSchedule(
-  db: D1Database,
-  schedule: {
-    id: string;
-    shop_id: string;
-    staff_id: string;
-    day_of_week: number;
-    start_time: string;
-    end_time: string;
-  },
-) {
+type ScheduleUpsert = {
+  id: string;
+  shop_id: string;
+  staff_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+};
+
+export function upsertScheduleStmt(db: D1Database, schedule: ScheduleUpsert) {
   return db
     .prepare(
       `INSERT INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time)
@@ -1268,11 +1333,10 @@ export function upsertSchedule(
       schedule.day_of_week,
       schedule.start_time,
       schedule.end_time,
-    )
-    .run();
+    );
 }
 
-export function deactivateScheduleDay(
+export function deactivateScheduleDayStmt(
   db: D1Database,
   staffId: string,
   dayOfWeek: number,
@@ -1281,8 +1345,7 @@ export function deactivateScheduleDay(
     .prepare(
       "UPDATE schedules SET is_active = 0 WHERE staff_id = ? AND day_of_week = ?",
     )
-    .bind(staffId, dayOfWeek)
-    .run();
+    .bind(staffId, dayOfWeek);
 }
 
 // ─── Bookings ─────────────────────────────────────────────────────────────────
@@ -1393,15 +1456,22 @@ export function getBookingById(db: D1Database, id: string) {
 // createBooking moved to apps/workers/booking/src/db/queries.ts (WS-1) — the
 // booking worker is the sole writer of public booking creation.
 
-export function updateBookingStatus(
+export function updateBookingStatusStmt(
   db: D1Database,
   id: string,
   status: string,
-) {
+): D1PreparedStatement {
   return db
     .prepare("UPDATE bookings SET status = ? WHERE id = ?")
-    .bind(status, id)
-    .run();
+    .bind(status, id);
+}
+
+/** A booking's current status, or null when there is no such booking. */
+export function getBookingStatus(db: D1Database, id: string) {
+  return db
+    .prepare("SELECT status FROM bookings WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<{ status: string }>();
 }
 
 /**
@@ -1419,11 +1489,24 @@ export function cancelBookingIfOpen(db: D1Database, id: string) {
     .run();
 }
 
-export function markReminderSent(db: D1Database, id: string) {
+/**
+ * The cancel fallback for a booking that is no longer open (completed,
+ * no_show, in_progress): cancel it unless it is already cancelled. The
+ * caller checks meta.changes: 1 means this request changed the status, 0
+ * means it was already cancelled (SQLite counts a matched row even when the
+ * value is unchanged, hence the explicit `status <> 'cancelled'`).
+ */
+export function cancelBookingIfNotCancelled(db: D1Database, id: string, shopId: string) {
   return db
-    .prepare("UPDATE bookings SET reminder_sent = 1 WHERE id = ?")
-    .bind(id)
+    .prepare(
+      "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status <> 'cancelled'",
+    )
+    .bind(id, shopId)
     .run();
+}
+
+export function markReminderSentStmt(db: D1Database, id: string): D1PreparedStatement {
+  return db.prepare("UPDATE bookings SET reminder_sent = 1 WHERE id = ?").bind(id);
 }
 
 // checkSlotConflict moved to apps/workers/booking/src/db/queries.ts (WS-1).
@@ -1444,7 +1527,7 @@ export async function getWaitlistByShop(db: D1Database, shopId: string) {
   return results;
 }
 
-export function createWaitlistEntry(
+export function createWaitlistEntryStmt(
   db: D1Database,
   entry: {
     id: string;
@@ -1456,7 +1539,7 @@ export function createWaitlistEntry(
     customer_phone?: string | null;
     preferred_date?: string | null;
   },
-) {
+): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO waitlist
@@ -1473,8 +1556,7 @@ export function createWaitlistEntry(
       entry.customer_email,
       entry.customer_phone ?? null,
       entry.preferred_date ?? null,
-    )
-    .run();
+    );
 }
 
 export function getWaitlistEntryById(db: D1Database, id: string) {
@@ -1598,10 +1680,29 @@ export async function getPlatformRevenueByMonth(
 // (processReminder) sends reminders, so this catch-all should return a small
 // straggler set; a full page signals the queue is not keeping up (the caller
 // logs it). Reminders past the page are picked up on a later run.
+export interface DueReminder {
+  id: string;
+  shop_id: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string | null;
+  start_time: string;
+  booking_date: string;
+  notes: string | null;
+  amount_pence: number;
+  service_name: string;
+  duration_min: number;
+  staff_name: string;
+  shop_name: string;
+  shop_slug: string;
+  shop_timezone: string | null;
+  shop_address: string | null;
+}
+
 export async function getBookingsDueForReminder(db: D1Database, limit: number) {
   const { results } = await db
     .prepare(
-      `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
+      `SELECT b.id, b.shop_id, b.customer_name, b.customer_email, b.customer_phone,
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
@@ -1618,23 +1719,7 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
        LIMIT ?`,
     )
     .bind(limit)
-    .all<{
-      id: string;
-      customer_name: string;
-      customer_email: string;
-      customer_phone: string | null;
-      start_time: string;
-      booking_date: string;
-      notes: string | null;
-      amount_pence: number;
-      service_name: string;
-      duration_min: number;
-      staff_name: string;
-      shop_name: string;
-      shop_slug: string;
-      shop_timezone: string | null;
-      shop_address: string | null;
-    }>();
+    .all<DueReminder>();
   return results;
 }
 
@@ -1660,7 +1745,7 @@ export function getProductCategoryById(db: D1Database, id: string) {
     .first<DBProductCategory>();
 }
 
-export function createProductCategory(
+export function createProductCategoryStmt(
   db: D1Database,
   cat: { id: string; shop_id: string; name: string; sort_order?: number },
 ) {
@@ -1668,11 +1753,11 @@ export function createProductCategory(
     .prepare(
       "INSERT INTO product_categories (id, shop_id, name, sort_order) VALUES (?, ?, ?, ?)",
     )
-    .bind(cat.id, cat.shop_id, cat.name, cat.sort_order ?? 0)
-    .run();
+    .bind(cat.id, cat.shop_id, cat.name, cat.sort_order ?? 0);
 }
 
-export function updateProductCategory(
+/** Prepared UPDATE for a category, or null when no field is set. */
+export function updateProductCategoryStmt(
   db: D1Database,
   id: string,
   fields: { name?: string; sort_order?: number; is_active?: number },
@@ -1691,12 +1776,11 @@ export function updateProductCategory(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE product_categories SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 export async function getSuppliersByShop(db: D1Database, shopId: string) {
@@ -1716,7 +1800,7 @@ export function getSupplierById(db: D1Database, id: string) {
     .first<DBSupplier>();
 }
 
-export function createSupplier(
+export function createSupplierStmt(
   db: D1Database,
   sup: {
     id: string;
@@ -1738,11 +1822,11 @@ export function createSupplier(
       sup.email ?? null,
       sup.phone ?? null,
       sup.notes ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateSupplier(
+/** Prepared UPDATE for a supplier, or null when no field is set. */
+export function updateSupplierStmt(
   db: D1Database,
   id: string,
   fields: {
@@ -1775,12 +1859,11 @@ export function updateSupplier(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE suppliers SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 /** Products with total on-hand quantity summed across their stock rows (base + variants). */
@@ -1809,7 +1892,7 @@ export function getProductById(db: D1Database, id: string) {
     .first<DBProduct>();
 }
 
-export function createProduct(
+export function createProductStmt(
   db: D1Database,
   p: {
     id: string;
@@ -1851,11 +1934,11 @@ export function createProduct(
       p.is_professional ?? 0,
       p.track_stock ?? 1,
       p.image_url ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateProduct(
+/** Prepared UPDATE for a product, or null when no field is set. */
+export function updateProductStmt(
   db: D1Database,
   id: string,
   fields: {
@@ -1933,12 +2016,11 @@ export function updateProduct(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE products SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 export async function getVariantsByProduct(db: D1Database, productId: string) {
@@ -1958,7 +2040,7 @@ export function getProductVariantById(db: D1Database, id: string) {
     .first<DBProductVariant>();
 }
 
-export function createProductVariant(
+export function createProductVariantStmt(
   db: D1Database,
   v: {
     id: string;
@@ -1988,11 +2070,11 @@ export function createProductVariant(
       v.cost_price_pence ?? 0,
       v.retail_price_pence ?? 0,
       v.attributes_json ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateProductVariant(
+/** Prepared UPDATE for a variant, or null when no field is set. */
+export function updateProductVariantStmt(
   db: D1Database,
   id: string,
   fields: {
@@ -2035,19 +2117,19 @@ export function updateProductVariant(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE product_variants SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
 }
 
 // ─── Inventory: stock (WS-3 Phase 0) ──────────────────────────────────────────
 //
 // stock_levels is the current quantity; stock_movements is the append-only
-// audit trail. Every quantity change goes through applyStockMovement, which
-// writes both rows in one atomic D1 batch — never UPDATE stock_levels.quantity
+// audit trail. Every quantity change goes through stockMovementStatements,
+// run in ONE atomic D1 batch together with its audit entry (batchWithAudit,
+// or inside an audited run()) — never UPDATE stock_levels.quantity
 // directly. The paired ON CONFLICT targets match the two partial unique
 // indexes from migration 034 (variant vs no-variant rows).
 
@@ -2068,7 +2150,7 @@ export interface StockMovementInput {
 /**
  * The movement + level-upsert statement pair, for callers that need several
  * movements inside ONE db.batch (PO receiving, stock-take close). Single
- * movements should keep using applyStockMovement.
+ * movements as well: pass the statements to batchWithAudit with the entry.
  */
 export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
   const variantId = m.variant_id ?? null;
@@ -2118,15 +2200,38 @@ export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
   return [movement, level];
 }
 
-export async function applyStockMovement(
+export type ReorderLevels = {
+  reorder_point: number;
+  reorder_qty: number;
+};
+
+/** Current reorder thresholds for a product (variantId null) or variant, or null. */
+export function getReorderLevels(
   db: D1Database,
-  m: StockMovementInput,
-) {
-  await db.batch(stockMovementStatements(db, m));
+  shopId: string,
+  productId: string,
+  variantId: string | null,
+): Promise<ReorderLevels | null> {
+  if (variantId === null) {
+    return db
+      .prepare(
+        "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1",
+      )
+      .bind(shopId, productId)
+      .first<ReorderLevels>();
+  }
+  return db
+    .prepare(
+      "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
+    )
+    .bind(shopId, productId, variantId)
+    .first<ReorderLevels>();
 }
 
-/** Reorder thresholds are configuration, not stock: set them without a movement row. */
-export function setReorderLevels(
+/** Reorder thresholds are configuration, not stock: set them without a movement row.
+ *  A builder, so the route can batch it with its audit entry (the old executing
+ *  helper had this one caller and is gone). */
+export function setReorderLevelsStmt(
   db: D1Database,
   args: {
     shop_id: string;
@@ -2152,8 +2257,7 @@ export function setReorderLevels(
         args.product_id,
         args.reorder_point,
         args.reorder_qty,
-      )
-      .run();
+      );
   }
   return db
     .prepare(
@@ -2170,8 +2274,7 @@ export function setReorderLevels(
       variantId,
       args.reorder_point,
       args.reorder_qty,
-    )
-    .run();
+    );
 }
 
 export async function getStockLevelsByProduct(
@@ -2386,13 +2489,13 @@ export async function getServiceProducts(
 }
 
 /** Replace a service's BOM wholesale — delete + insert in one batch. */
-export async function setServiceProducts(
+export function setServiceProductsStmts(
   db: D1Database,
   shopId: string,
   serviceId: string,
   entries: Array<{ product_id: string; quantity: number }>,
-) {
-  const stmts = [
+): D1PreparedStatement[] {
+  return [
     db
       .prepare(
         "DELETE FROM service_products WHERE shop_id = ? AND service_id = ?",
@@ -2406,7 +2509,6 @@ export async function setServiceProducts(
         .bind(serviceId, e.product_id, shopId, e.quantity),
     ),
   ];
-  await db.batch(stmts);
 }
 
 export function getStockTakeById(

@@ -1,6 +1,8 @@
 import type { D1Database } from "@cloudflare/workers-types";
-import { getBookingsDueForReminder, markReminderSent } from "../db/queries.js";
-import { sendBookingReminder } from "./email.js";
+import type { AuditRecorder } from "@repo/audit";
+import { getBookingsDueForReminder, type DueReminder } from "../db/queries.js";
+import { systemAudit } from "../audit/context.js";
+import { deliverReminder } from "./reminder-deliver.js";
 import { reportError } from "./report-error.js";
 
 export interface ReminderPayload {
@@ -13,16 +15,18 @@ export interface ReminderPayload {
 
 /**
  * Process a single reminder payload (called from the Queue consumer).
- * Extend to integrate Resend / SendGrid / Twilio.
+ * `recorder` defaults to a system recorder via "queue"; the consumer passes
+ * one carrying the message id as the entry's request id.
  */
 export async function processReminder(
   payload: ReminderPayload,
   db: D1Database,
   resendApiKey?: string,
+  recorder: AuditRecorder = systemAudit(db, "queue"),
 ): Promise<void> {
   const booking = await db
     .prepare(
-      `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
+      `SELECT b.id, b.shop_id, b.customer_name, b.customer_email, b.customer_phone,
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
@@ -37,62 +41,17 @@ export async function processReminder(
        LIMIT 1`,
     )
     .bind(payload.bookingId)
-    .first<{
-      id: string;
-      customer_name: string;
-      customer_email: string;
-      customer_phone: string | null;
-      start_time: string;
-      booking_date: string;
-      notes: string | null;
-      amount_pence: number;
-      service_name: string;
-      duration_min: number;
-      staff_name: string;
-      shop_name: string;
-      shop_slug: string;
-      shop_timezone: string | null;
-      shop_address: string | null;
-    }>();
+    .first<DueReminder>();
 
   if (!booking) return; // already sent or cancelled
 
-  // Send reminder email via Resend
-  if (resendApiKey) {
-    try {
-      await sendBookingReminder(resendApiKey, {
-        customer_name: booking.customer_name,
-        customer_email: booking.customer_email,
-        service_name: booking.service_name,
-        staff_name: booking.staff_name,
-        shop_name: booking.shop_name,
-        shop_slug: booking.shop_slug,
-        booking_date: booking.booking_date,
-        start_time: booking.start_time,
-        timezone: booking.shop_timezone ?? "Europe/London",
-        shop_address: booking.shop_address,
-        duration_min: booking.duration_min,
-        amount_pence: booking.amount_pence,
-        booking_id: booking.id,
-      });
-    } catch (err) {
-      // Non-fatal, but the reminder is still marked sent below and will not
-      // retry — a failure here means the customer gets no reminder.
-      reportError("reminder.email_send", err, { bookingId: booking.id });
-    }
-  } else {
-    console.log(
-      `[Reminder] ${booking.customer_name} <${booking.customer_email}> — ` +
-        `${booking.service_name} at ${booking.shop_name} on ${booking.booking_date}`,
-    );
-  }
-
-  await markReminderSent(db, booking.id);
+  await deliverReminder(db, resendApiKey, booking, recorder);
 }
 
 // Bound one cron run so the fan-out below can never approach the Workers
-// subrequest ceiling (each booking costs one Resend send + one markReminderSent
-// = 2 subrequests), and cap how many sends are in flight at once — the runtime
+// subrequest ceiling (each booking costs one Resend send + one D1 batch that
+// marks it sent and records the audit entry = 2 subrequests), and cap how many
+// sends are in flight at once — the runtime
 // allows only 6 simultaneous outbound connections, and an unbounded Promise.all
 // over every due booking stampedes that and the email provider's rate limit.
 // miniflare enforces neither, so the unbounded version passes tests and only
@@ -108,6 +67,7 @@ export const REMINDER_CONCURRENCY = 20;
 export async function sendPendingReminders(
   db: D1Database,
   resendApiKey?: string,
+  recorder: AuditRecorder = systemAudit(db, "cron"),
 ): Promise<void> {
   const bookings = await getBookingsDueForReminder(db, REMINDER_MAX_PER_RUN);
 
@@ -125,35 +85,7 @@ export async function sendPendingReminders(
   for (let i = 0; i < bookings.length; i += REMINDER_CONCURRENCY) {
     const wave = bookings.slice(i, i + REMINDER_CONCURRENCY);
     await Promise.all(
-      wave.map(async (b) => {
-        if (resendApiKey) {
-          try {
-            await sendBookingReminder(resendApiKey, {
-              customer_name: b.customer_name,
-              customer_email: b.customer_email,
-              service_name: b.service_name,
-              staff_name: b.staff_name,
-              shop_name: b.shop_name,
-              shop_slug: b.shop_slug,
-              booking_date: b.booking_date,
-              start_time: b.start_time,
-              timezone: b.shop_timezone ?? "Europe/London",
-              shop_address: b.shop_address,
-              duration_min: b.duration_min,
-              amount_pence: b.amount_pence,
-              booking_id: b.id,
-            });
-          } catch (err) {
-            // Non-fatal, but marked sent below — no retry for this booking.
-            reportError("reminder.cron_email_send", err, { bookingId: b.id });
-          }
-        } else {
-          console.log(
-            `[Cron Reminder] ${b.customer_name} — ${b.service_name} at ${b.shop_name}`,
-          );
-        }
-        await markReminderSent(db, b.id);
-      }),
+      wave.map((b) => deliverReminder(db, resendApiKey, b, recorder, "reminder.cron_email_send")),
     );
   }
 }

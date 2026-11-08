@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import {
-  getStaffByShop, getStaffById, createStaffMember, updateStaffMember,
-  addStaffService, getStaffServices, createUser, getUserByEmail,
+  getStaffByShop, getStaffById, createStaffMemberStmt, updateStaffMemberStmt,
+  addStaffServiceStmt, getStaffServices, createUserStmt, getUserByEmail,
 } from "../db/queries.js";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, auditShopId, batchWithAudit, statusOutcome, UNRESOLVED_SHOP } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { hashPassword } from "../lib/password.js";
@@ -59,7 +62,7 @@ staff.post("/", requireShopRole("admin"), async (c) => {
   }
 
   // Reject a duplicate email up front with a clear 409 instead of letting the
-  // createUser unique-constraint violation surface as an opaque 500.
+  // platform_users email unique-constraint violation surface as an opaque 500.
   const existingUser = await getUserByEmail(c.env.DB, body.email);
   if (existingUser) {
     return c.json({ success: false, error: "Email already registered" }, 409);
@@ -71,22 +74,50 @@ staff.post("/", requireShopRole("admin"), async (c) => {
 
   const password_hash = await hashPassword(tempPassword);
 
-  // email_verified: the account is provisioned by the shop admin (operator-vouched).
-  await createUser(c.env.DB, { id: userId, email: body.email, password_hash, role: "staff", shop_id: shopId, email_verified: 1 });
-
   const staffId = crypto.randomUUID();
-  await createStaffMember(c.env.DB, {
-    id: staffId,
-    shop_id: shopId,
-    user_id: userId,
-    display_name: body.display_name,
-    bio: body.bio ?? null,
-  });
+  // The pre-audit gate (`service_ids?.length`): a value with no length, such
+  // as 5 or {}, links nothing and still answers 201. Null members are dropped
+  // (INSERT OR IGNORE skipped them anyway), so `services` counts the links
+  // actually written; a string or other non-array with a length still fails
+  // as it always did (500), now with nothing written.
+  const serviceIds = body.service_ids?.length ? [...new Set(body.service_ids.filter((s) => s != null))] : [];
+  // Developers pass requireShopRole without a shop check: the entry records
+  // the shop only once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
 
-  // Assign services if provided
-  if (body.service_ids?.length) {
-    await Promise.all(body.service_ids.map((sid) => addStaffService(c.env.DB, staffId, sid)));
-  }
+  // One batch: the user, the staff row, the service links and the audit entry
+  // commit together or not at all (no orphan platform_users row).
+  // email_verified: the account is provisioned by the shop admin (operator-vouched).
+  const refused = await batchWithAudit(
+    c,
+    [
+      createUserStmt(c.env.DB, { id: userId, email: body.email, password_hash, role: "staff", shop_id: shopId, email_verified: 1 }),
+      createStaffMemberStmt(c.env.DB, {
+        id: staffId,
+        shop_id: shopId,
+        user_id: userId,
+        display_name: body.display_name,
+        bio: body.bio ?? null,
+      }),
+      ...serviceIds.map((sid) => addStaffServiceStmt(c.env.DB, staffId, sid)),
+    ],
+    {
+      action: "staff.create",
+      outcome: "succeeded",
+      shopId: auditShop,
+      entityType: "staff",
+      entityId: staffId,
+      changes: { is_active: [null, 1] },
+      // Ids and counts only: never the name, email, bio or temporary password.
+      details: {
+        user_id: userId,
+        services: serviceIds.length,
+        temp_password_issued: !body.password,
+        ...(auditShop ? {} : UNRESOLVED_SHOP),
+      },
+    },
+  );
+  if (refused) return refused;
 
   return c.json({
     success: true,
@@ -119,16 +150,37 @@ staff.put("/:staffId", requireShopRole("admin"), async (c) => {
         ? body.speciality.trim().slice(0, 80)
         : null;
 
-  await updateStaffMember(c.env.DB, staffId, {
-    display_name: body.display_name,
-    bio: body.bio,
-    speciality,
-  });
+  // Only the columns the update writes, so a stray body key never shows as changed.
+  const columns = { display_name: body.display_name, bio: body.bio, speciality };
+  const { changes, fields: changed } = fieldChanges(member as unknown as Record<string, unknown>, columns);
+  // The pre-audit gate (truthiness): a truthy non-array still fails as it
+  // always did (500), now with nothing written; never mapped to [], which
+  // would wipe the member's services. Null members are dropped, so
+  // `services` counts the links actually written.
+  const serviceIds = body.service_ids ? [...new Set(body.service_ids.filter((s) => s != null))] : null;
 
-  if (body.service_ids) {
-    await c.env.DB.prepare("DELETE FROM staff_services WHERE staff_id = ?").bind(staffId).run();
-    await Promise.all(body.service_ids.map((sid) => addStaffService(c.env.DB, staffId, sid)));
-  }
+  const stmts = [
+    updateStaffMemberStmt(c.env.DB, staffId, columns),
+    ...(serviceIds
+      ? [
+          c.env.DB.prepare("DELETE FROM staff_services WHERE staff_id = ?").bind(staffId),
+          ...serviceIds.map((sid) => addStaffServiceStmt(c.env.DB, staffId, sid)),
+        ]
+      : []),
+  ].filter((s) => s !== null);
+  const details: Record<string, unknown> = {};
+  if (changed.length > 0) details.fields = changed;
+  if (serviceIds) details.services = serviceIds.length;
+  const refused = await batchWithAudit(c, stmts, {
+    action: "staff.update",
+    outcome: "succeeded",
+    shopId,
+    entityType: "staff",
+    entityId: staffId,
+    changes,
+    details: Object.keys(details).length > 0 ? details : null,
+  });
+  if (refused) return refused;
 
   const updated = await getStaffById(c.env.DB, staffId);
   return c.json({ success: true, data: updated });
@@ -142,7 +194,16 @@ staff.delete("/:staffId", requireShopRole("admin"), async (c) => {
   if (!member || member.shop_id !== shopId) {
     return c.json({ success: false, error: "Staff member not found" }, 404);
   }
-  await updateStaffMember(c.env.DB, staffId, { is_active: 0 });
+  const refused = await batchWithAudit(c, [updateStaffMemberStmt(c.env.DB, staffId, { is_active: 0 })!], {
+    action: "staff.delete",
+    outcome: "succeeded",
+    shopId,
+    entityType: "staff",
+    entityId: staffId,
+    // Diffed, so deleting an already inactive member records no change.
+    changes: fieldChanges(member as unknown as Record<string, unknown>, { is_active: 0 }).changes,
+  });
+  if (refused) return refused;
   return c.json({ success: true });
 });
 
@@ -178,18 +239,38 @@ staff.post("/:staffId/avatar", requireShopRole("admin"), async (c) => {
     (ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg");
 
   const key = `staff/${shopId}/${staffId}/avatar.${ext}`;
-  const buf = await file.arrayBuffer();
-  await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType } });
 
-  let base = (c.env.ASSET_BASE_URL ?? "").trim().replace(/\/$/, "");
-  if (!base) base = `https://assets.pivot-parlor.com`;
-  // The key is fixed per member, so a replacement photo would sit behind the
-  // old one's day-long cache; the version makes each upload a new URL.
-  const avatarUrl = `${base}/${key}?v=${Date.now().toString(36)}`;
+  // Pattern T: the started entry commits before the R2 write, so an upload
+  // that cannot be recorded never happens (503, nothing written).
+  try {
+    return await auditFor(c).run(
+      {
+        action: "staff.update",
+        shopId,
+        entityType: "staff",
+        entityId: staffId,
+        details: { fields: ["avatar_url"] },
+      },
+      async (): Promise<Response> => {
+        const buf = await file.arrayBuffer();
+        await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType } });
 
-  await updateStaffMember(c.env.DB, staffId, { avatar_url: avatarUrl });
+        let base = (c.env.ASSET_BASE_URL ?? "").trim().replace(/\/$/, "");
+        if (!base) base = `https://assets.pivot-parlor.com`;
+        // The key is fixed per member, so a replacement photo would sit behind the
+        // old one's day-long cache; the version makes each upload a new URL.
+        const avatarUrl = `${base}/${key}?v=${Date.now().toString(36)}`;
 
-  return c.json({ success: true, avatarUrl });
+        await updateStaffMemberStmt(c.env.DB, staffId, { avatar_url: avatarUrl })!.run();
+
+        return c.json({ success: true, avatarUrl });
+      },
+      statusOutcome(),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 export default staff;

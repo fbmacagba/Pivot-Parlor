@@ -6,13 +6,10 @@
 // in PR #54), and notifying a bounded batch per freed slot avoids spamming a
 // long waitlist for a single opening.
 
-import {
-  claimWaitlistNotification,
-  getWaitingEntriesForOpenedSlot,
-  revertWaitlistNotification,
-} from "../db/queries.js";
-import { sendWaitlistSlotOpen } from "./email.js";
+import { AuditWriteError, type AuditRecorder } from "@repo/audit";
+import { getWaitingEntriesForOpenedSlot } from "../db/queries.js";
 import { reportError } from "./report-error.js";
+import { notifyWaitlistEntry, WaitlistSendError } from "./waitlist-claim.js";
 
 export const WAITLIST_NOTIFY_CAP = 3;
 
@@ -22,12 +19,20 @@ export const WAITLIST_NOTIFY_CAP = 3;
  * (status waiting → notified) before sending so concurrent cancellations
  * never double-email; a failed send reverts the claim so the entry is not
  * stranded as notified with no email. Returns the number actually emailed.
+ *
+ * Each email is recorded through `recorder` (`waitlist.notify`, trigger
+ * `slot_opened`); callers pass the cancelling request's recorder, so the
+ * entry names the person whose cancel freed the slot. An email whose entry
+ * cannot be written is skipped like a failed send. Any other error (a D1
+ * failure) rejects, and both callers catch and report it: the cancellation
+ * that freed the slot always stands.
  */
 export async function notifyWaitlistForOpenedSlot(
   db: D1Database,
   apiKey: string | undefined,
   shop: { id: string; name: string; slug: string },
   slot: { bookingDate: string; staffId: string },
+  recorder: AuditRecorder,
 ): Promise<number> {
   if (!apiKey) return 0;
 
@@ -53,25 +58,19 @@ export async function notifyWaitlistForOpenedSlot(
       if (sent >= WAITLIST_NOTIFY_CAP) break;
       tried.add(entry.id);
 
-      const claim = await claimWaitlistNotification(db, entry.id);
-      if (!claim.meta || claim.meta.changes === 0) continue; // lost the race
-
       try {
-        await sendWaitlistSlotOpen(apiKey, {
-          customer_name: entry.customer_name,
-          customer_email: entry.customer_email,
-          shop_name: shop.name,
-          shop_slug: shop.slug,
-          service_name: entry.service_name,
-          preferred_date: entry.preferred_date,
-        });
-        sent++;
+        // "lost" means another invocation claimed it first: try the next one.
+        if ((await notifyWaitlistEntry(db, apiKey, shop, entry, recorder, "slot_opened")) === "sent") sent++;
       } catch (err) {
-        reportError("waitlist.slot_open_email", err, {
+        // A failed send (already reverted by the helper) or an entry that
+        // could not be recorded (never claimed): report it and move on.
+        // Anything else (a D1 error in the claim or the revert) aborts the
+        // fan-out into the caller's catch, as it always did.
+        if (!(err instanceof WaitlistSendError) && !(err instanceof AuditWriteError)) throw err;
+        reportError("waitlist.slot_open_email", err instanceof WaitlistSendError ? err.original : err, {
           entryId: entry.id,
           shopId: shop.id,
         });
-        await revertWaitlistNotification(db, entry.id);
       }
     }
   }

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
+import { batchWithAudit } from "../audit/context.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 
 const contact = new Hono<{ Bindings: Bindings }>();
@@ -58,20 +59,33 @@ contact.post(
 
     const id = crypto.randomUUID();
 
-    await c.env.DB.prepare(
-      `INSERT INTO contacts (id, full_name, shop_name, shop_type, email, phone, message)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        id,
-        body.full_name.trim(),
-        body.shop_name.trim(),
-        body.shop_type.trim(),
-        body.email.trim().toLowerCase(),
-        body.phone?.trim() ?? null,
-        body.message?.trim() ?? null
-      )
-      .run();
+    // The enquiry and its entry commit together. The entry names only the
+    // validated shop type: never the name, shop name, email, phone or message.
+    const refused = await batchWithAudit(
+      c,
+      [
+        c.env.DB.prepare(
+          `INSERT INTO contacts (id, full_name, shop_name, shop_type, email, phone, message)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          id,
+          body.full_name.trim(),
+          body.shop_name.trim(),
+          body.shop_type.trim(),
+          body.email.trim().toLowerCase(),
+          body.phone?.trim() ?? null,
+          body.message?.trim() ?? null
+        ),
+      ],
+      {
+        action: "enquiry.create",
+        outcome: "succeeded",
+        entityType: "contact",
+        entityId: id,
+        details: { shop_type: validShopTypes.includes(body.shop_type) ? body.shop_type : null },
+      }
+    );
+    if (refused) return refused;
 
     console.log("[worker contact] stored enquiry", { id });
 
