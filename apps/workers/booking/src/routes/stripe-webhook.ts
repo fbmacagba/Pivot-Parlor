@@ -182,9 +182,11 @@ r.post("/stripe", async (c) => {
     entityType: null as string | null,
     entityId: null as string | null,
     changes: null as Record<string, [unknown, unknown]> | null,
-    // `handled` turns true where a case resolved a stored row it acted on;
+    // `resolved` turns true where a case resolved a stored row it acted on;
     // an unhandled type, or an event whose tx or row is unknown, stays false.
-    details: { handled: false } as Record<string, unknown>,
+    // (Not `handled`: the API worker's webhook uses that key for "event type
+    // handled", a different fact.)
+    details: { resolved: false } as Record<string, unknown>,
   };
   const baseDetails = { event_id: stripeToken(event.id), event_type: stripeToken(event.type) };
 
@@ -235,7 +237,7 @@ r.post("/stripe", async (c) => {
               audit.shopId = shop.id;
               audit.entityType = "shop";
               audit.entityId = shop.id;
-              audit.details.handled = true;
+              audit.details.resolved = true;
               const before = Number(shop.stripe_connect_onboarded ?? 0);
               if (before !== onboarded) {
                 audit.changes = {
@@ -268,7 +270,7 @@ r.post("/stripe", async (c) => {
               audit.shopId = saleShop;
               audit.entityType = "sale";
               audit.entityId = saleId;
-              audit.details.handled = true;
+              audit.details.resolved = true;
               if (settled.flipped) {
                 audit.changes = { status: ["pending", "completed"] };
               }
@@ -285,7 +287,7 @@ r.post("/stripe", async (c) => {
               audit.shopId = bookingShop;
               audit.entityType = "booking";
               audit.entityId = bookingId;
-              audit.details.handled = true;
+              audit.details.resolved = true;
             }
           }
 
@@ -408,7 +410,7 @@ r.post("/stripe", async (c) => {
               audit.shopId = refundedSaleShop;
               audit.entityType = "sale";
               audit.entityId = saleId;
-              audit.details.handled = true;
+              audit.details.resolved = true;
             }
             const pending = await db
               .prepare(
@@ -593,7 +595,7 @@ r.post("/stripe", async (c) => {
               audit.shopId = refundedBookingShop;
               audit.entityType = "booking";
               audit.entityId = marked.bookingId;
-              audit.details.handled = true;
+              audit.details.resolved = true;
             }
             // Never poison a real sale's commission record: if the booking has
             // since been resurrected and checked out, its ledger row belongs to
@@ -653,7 +655,7 @@ r.post("/stripe", async (c) => {
               audit.shopId = expiredShop;
               audit.entityType = "booking";
               audit.entityId = bookingId;
-              audit.details.handled = true;
+              audit.details.resolved = true;
             }
             const results = await db.batch([
               db
@@ -683,8 +685,9 @@ r.post("/stripe", async (c) => {
           if (marked.saleId) await setSaleStatus(db, marked.saleId, "disputed");
           if (marked.bookingId)
             await setLedgerStatus(db, marked.bookingId, null, "disputed");
-          // Ruling P14: a dispute is handled. Resolve the sale first, then the
-          // booking, from the tx's stored ids; details only (no changes).
+          // Ruling P14: a dispute changes stored rows, so it is resolved like
+          // charge.refunded. Resolve the sale first, then the booking, from
+          // the tx's stored ids; details only (no changes).
           const disputedSaleShop = marked.saleId
             ? await shopOfSale(db, marked.saleId)
             : null;
@@ -692,14 +695,14 @@ r.post("/stripe", async (c) => {
             audit.shopId = disputedSaleShop;
             audit.entityType = "sale";
             audit.entityId = marked.saleId;
-            audit.details.handled = true;
+            audit.details.resolved = true;
           } else if (marked.bookingId) {
             const disputedBookingShop = await shopOfBooking(db, marked.bookingId);
             if (disputedBookingShop) {
               audit.shopId = disputedBookingShop;
               audit.entityType = "booking";
               audit.entityId = marked.bookingId;
-              audit.details.handled = true;
+              audit.details.resolved = true;
             }
           }
           break;
@@ -738,7 +741,7 @@ r.post("/stripe", async (c) => {
         // Ruling P15: a 4xx/5xx outcome carries no changes. If a guarded flip
         // committed and a LATER write in the same handler failed, the outcome
         // is failed with changes dropped; details keep booking_flipped and
-        // handled. Stripe's retry then records no change, because the flip is
+        // resolved. Stripe's retry then records no change, because the flip is
         // already done.
         changes: res.status < 400 ? audit.changes : null,
       }))

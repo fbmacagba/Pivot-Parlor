@@ -146,7 +146,10 @@ describe("Stripe webhook audit", () => {
       entity_id: s.shop,
     });
     expect(json(row.changes_json)).toEqual({ stripe_connect_onboarded: [0, 1] });
-    expect(json(row.details_json)).toMatchObject({ event_id: id, event_type: "account.updated", handled: true });
+    expect(json(row.details_json)).toMatchObject({ event_id: id, event_type: "account.updated", resolved: true });
+    // The booking worker's key is `resolved` ("resolved a stored row"); the
+    // API worker's webhook uses `handled` for "event type handled".
+    expect(json(row.details_json)).not.toHaveProperty("handled");
     expectNoPersonalData(row, [acct]);
   });
 
@@ -167,7 +170,7 @@ describe("Stripe webhook audit", () => {
     expect(row.changes_json).toBeNull();
   });
 
-  it("account.updated for an unknown account records no shop and handled false", async () => {
+  it("account.updated for an unknown account records no shop and resolved false", async () => {
     const id = evtId();
     const res = await postSignedEvent({
       id,
@@ -178,7 +181,7 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row.shop_id).toBeNull();
     expect(row.entity_id).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ handled: false });
+    expect(json(row.details_json)).toMatchObject({ resolved: false });
     expectNoPersonalData(row, ["acct_nobody_here"]);
   });
 
@@ -205,7 +208,7 @@ describe("Stripe webhook audit", () => {
       entity_id: bookingId,
     });
     expect(json(row.changes_json)).toEqual({ status: ["pending", "confirmed"] });
-    expect(json(row.details_json)).toMatchObject({ event_type: "payment_intent.succeeded", handled: true });
+    expect(json(row.details_json)).toMatchObject({ event_type: "payment_intent.succeeded", resolved: true });
     expectNoPersonalData(row, [piId, WHO.name, WHO.email, SHOP_NAME]);
   });
 
@@ -224,7 +227,7 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row).toMatchObject({ outcome: "succeeded", shop_id: s.shop, entity_type: "booking", entity_id: bookingId });
     expect(row.changes_json).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ handled: true, booking_flipped: false });
+    expect(json(row.details_json)).toMatchObject({ resolved: true, booking_flipped: false });
   });
 
   it("a sale payment_intent.succeeded records the sale settling", async () => {
@@ -278,7 +281,7 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row).toMatchObject({ outcome: "succeeded", shop_id: s.shop, entity_type: "sale", entity_id: saleId });
     expect(row.changes_json).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ event_type: "charge.refunded", handled: true });
+    expect(json(row.details_json)).toMatchObject({ event_type: "charge.refunded", resolved: true });
     expectNoPersonalData(row, [piId, "ch_1"]);
   });
 
@@ -296,7 +299,7 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row).toMatchObject({ shop_id: s.shop, entity_type: "booking", entity_id: bookingId });
     expect(row.changes_json).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ handled: true });
+    expect(json(row.details_json)).toMatchObject({ resolved: true });
   });
 
   it("checkout.session.expired records the cancel", async () => {
@@ -362,7 +365,7 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row).toMatchObject({ outcome: "succeeded", shop_id: s.shop, entity_type: "sale", entity_id: saleId });
     expect(row.changes_json).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ event_type: "charge.dispute.created", handled: true });
+    expect(json(row.details_json)).toMatchObject({ event_type: "charge.dispute.created", resolved: true });
     expectNoPersonalData(row, [piId, chargeId]);
   });
 
@@ -382,18 +385,19 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row).toMatchObject({ outcome: "succeeded", shop_id: s.shop, entity_type: "booking", entity_id: bookingId });
     expect(row.changes_json).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ event_type: "charge.dispute.created", handled: true });
+    expect(json(row.details_json)).toMatchObject({ event_type: "charge.dispute.created", resolved: true });
     expectNoPersonalData(row, [piId, chargeId]);
   });
 
-  it("a dispute on an unknown tx and unhandled types record handled false with no entity", async () => {
+  it("a dispute on an unknown tx and unhandled types record resolved false with no entity", async () => {
     for (const type of ["charge.dispute.created", "customer.created"]) {
       const id = evtId();
       const res = await postSignedEvent({ id, type, data: { object: { id: "dp_1", payment_intent: "pi_none" } } });
       expect(res.status).toBe(200);
       const row = await outcomeOf(id);
       expect(row).toMatchObject({ via: "webhook", actor_type: "system", outcome: "succeeded", shop_id: null, entity_id: null });
-      expect(json(row.details_json)).toMatchObject({ event_type: type, handled: false });
+      expect(json(row.details_json)).toMatchObject({ event_type: type, resolved: false });
+      expect(json(row.details_json)).not.toHaveProperty("handled");
     }
   });
 
@@ -494,7 +498,7 @@ describe("Stripe webhook audit", () => {
     const row = await outcomeOf(id);
     expect(row).toMatchObject({ outcome: "failed", reason: "HTTP 500", shop_id: s.shop, entity_id: bookingId });
     expect(row.changes_json).toBeNull();
-    expect(json(row.details_json)).toMatchObject({ booking_flipped: true, handled: true });
+    expect(json(row.details_json)).toMatchObject({ booking_flipped: true, resolved: true });
   });
 
   it("an event whose started entry cannot be written answers 503 and is not deduped", async () => {

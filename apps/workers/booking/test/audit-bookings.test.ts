@@ -424,7 +424,7 @@ describe("staff cancel audit", () => {
       body,
     });
 
-  it("records booking.cancel with the status change and deposit none", async () => {
+  it("records booking.cancel with the status change and deposit_action none", async () => {
     const s = await setup();
     const bookingId = await seedBooking(s);
     const res = await cancel(s.shop, bookingId);
@@ -438,18 +438,20 @@ describe("staff cancel audit", () => {
       entity_id: bookingId,
     });
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "none" });
+    // `deposit_action`, the refunded/voided/kept/none enum: not the API
+    // worker's boolean `deposit` on its own deposit-cancel hop entry.
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "none" });
     expectNoPersonalData(outcome, [WHO.name, WHO.email, SHOP_NAME]);
     expect(await gapRowsFor(res.headers.get("X-Request-Id")!)).toBe(0);
   });
 
-  it("maps a voided hold to details.deposit voided", async () => {
+  it("maps a voided hold to details.deposit_action voided", async () => {
     const s = await setup();
     const bookingId = await seedBooking(s, { piId: "pi_hold_void", depositPence: 1250, depositTx: "pending" });
     const res = await cancel(s.shop, bookingId);
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "voided" });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "voided" });
     expectNoPersonalData(outcome, ["pi_hold_void"]);
   });
 
@@ -479,7 +481,7 @@ describe("staff cancel audit", () => {
     const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
     expect(outcome.outcome).toBe("succeeded");
     expect(outcome.changes_json).toBeNull();
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "voided" });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "voided" });
   });
 
   /** A charged (paid) deposit: PI recorded, deposit_paid_at stamped, tx captured. */
@@ -494,24 +496,24 @@ describe("staff cancel audit", () => {
     return bookingId;
   }
 
-  it("maps a refunded charged deposit to details.deposit refunded", async () => {
+  it("maps a refunded charged deposit to details.deposit_action refunded", async () => {
     const s = await setup();
     const bookingId = await seedChargedDeposit(s);
     const res = await cancel(s.shop, bookingId, { refundDeposit: true });
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "refunded" });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "refunded" });
     expectNoPersonalData(outcome, ["pi_charged_1"]);
   });
 
-  it("maps a kept charged deposit to details.deposit kept", async () => {
+  it("maps a kept charged deposit to details.deposit_action kept", async () => {
     const s = await setup();
     const bookingId = await seedChargedDeposit(s);
     const res = await cancel(s.shop, bookingId, { refundDeposit: false });
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "kept" });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "kept" });
   });
 
   it("records the status the flip found, not the earlier pre-read", async () => {

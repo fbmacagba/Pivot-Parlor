@@ -1144,7 +1144,9 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
         res.status < 400
           ? {
               ...(flipped ? { changes: { status: [auditBeforeStatus, "cancelled"] as [unknown, unknown] } } : {}),
-              details: { deposit: auditDeposit },
+              // `deposit_action`, not `deposit`: the API worker's own
+              // deposit-cancel hop entry uses `deposit` as a boolean.
+              details: { deposit_action: auditDeposit },
             }
           : {}
       )
