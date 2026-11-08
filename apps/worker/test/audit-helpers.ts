@@ -26,8 +26,11 @@ export async function entriesFor(filter: {
   return r.results ?? [];
 }
 
-/** How many audit.gap rows one request left (read its id from X-Request-Id). */
+/** How many audit.gap rows one request left (read its id from X-Request-Id).
+ *  A missing id fails the test: it would match nothing, so every "no gap
+ *  row" assertion built on it would pass vacuously. */
 export async function gapRowsFor(requestId: string): Promise<number> {
+  expect(requestId, "gapRowsFor needs the response's X-Request-Id").toMatch(/.+/);
   const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'audit.gap' AND request_id = ?")
     .bind(requestId)
     .first<{ n: number }>();
@@ -48,19 +51,29 @@ export async function withAuditOff<T>(fn: () => Promise<T>): Promise<T> {
 const HASHED_TEXT_COLUMNS = ["changes_json", "details_json", "reason", "entity_id"] as const;
 
 /** Assert that none of the submitted personal or free-text `values` reached a
- *  hashed, 6-year column of `row`. A value is also looked for in its
- *  JSON-escaped form, since the JSON columns store it escaped. Empty strings
- *  are ignored (every column "contains" one). */
+ *  hashed, 6-year column of `row` (a full audit_log row, e.g. SELECT *).
+ *
+ *  Fails closed:
+ *  - every checked column must be a key of `row` (null is fine; an absent key
+ *    means the caller passed the wrong row shape);
+ *  - the comparison is case-insensitive, on trimmed values, and also looks
+ *    for each value's JSON-escaped form (the JSON columns store it escaped);
+ *  - values that are empty after trimming are skipped, but at least one
+ *    non-empty value is required, since an empty list proves nothing. */
 export function expectNoPersonalData(row: Record<string, unknown>, values: string[]): void {
-  for (const value of values) {
-    if (value === "") continue;
-    const forms = [value, JSON.stringify(value).slice(1, -1)];
+  for (const column of HASHED_TEXT_COLUMNS) {
+    expect(column in row, `row has no ${column} column: pass a full audit_log row`).toBe(true);
+  }
+  const needles = values.map((v) => v.trim().toLowerCase()).filter((v) => v !== "");
+  expect(needles.length, "expectNoPersonalData needs at least one non-empty value to look for").toBeGreaterThan(0);
+  for (const needle of needles) {
+    const forms = [needle, JSON.stringify(needle).slice(1, -1)];
     for (const column of HASHED_TEXT_COLUMNS) {
       const cell = row[column];
       if (cell === null || cell === undefined) continue;
-      const text = String(cell);
+      const text = String(cell).toLowerCase();
       for (const form of forms) {
-        expect(text.includes(form), `${column} carries the submitted value ${JSON.stringify(value)}`).toBe(false);
+        expect(text.includes(form), `${column} carries the submitted value ${JSON.stringify(needle)}`).toBe(false);
       }
     }
   }

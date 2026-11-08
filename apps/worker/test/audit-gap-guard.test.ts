@@ -3,12 +3,13 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { Via } from "@repo/audit";
 import { seedShop } from "./helpers";
+import { dispatch } from "./request";
 import { expectNoPersonalData, gapRowsFor } from "./audit-helpers";
 import type { Bindings } from "../src/bindings.js";
 import { requestId } from "../src/audit/request-id.js";
 import { auditGapGuard } from "../src/audit/gap-guard.js";
 import { batchWithAudit } from "../src/audit/context.js";
-import type { AuditDeclaration } from "../src/audit/registry.js";
+import { ROUTE_AUDIT, type AuditDeclaration } from "../src/audit/registry.js";
 
 type App = Hono<{ Bindings: Bindings }>;
 
@@ -128,6 +129,41 @@ describe("audit gap guard", () => {
     expect(row.details_json).toContain(":token");
     expect(row.details_json).not.toContain(token);
     expectNoPersonalData(row, [token]);
+  });
+
+  it("records the responding router-middleware pattern, never the leaf route or the raw path", async () => {
+    // Undeclared (empty registry), so today's gap behaviour applies. The
+    // sub-router's own .use("*") answers 401 before the leaf handler runs, so
+    // the responding pattern is that middleware's composed ".../*" path.
+    const shopId = await seedShop("Gap Responding Shop");
+    const app = fixtureApp((a) => {
+      const items = new Hono<{ Bindings: Bindings }>();
+      items.use("*", async (c, next) => {
+        if (!c.req.header("Authorization")) return c.json({ success: false }, 401);
+        await next();
+      });
+      items.put("/:id/status", (c) => c.json({ success: true }, 200));
+      a.route("/fx/shops/:shopId/items", items);
+    });
+    const itemId = `item-${crypto.randomUUID()}`;
+    const path = `/fx/shops/${shopId}/items/${itemId}/status`;
+
+    const refused = await send(app, "PUT", path);
+    expect(refused.res.status).toBe(401);
+    const row = await onlyGapFor(refused.rid, "router middleware answered 401");
+    const details = JSON.parse(row.details_json as string) as Record<string, unknown>;
+    expect(details.route).toBe("/fx/shops/:shopId/items/*");
+    expect(row.outcome).toBe("refused");
+    expect(row.shop_id, "Ruling 55: the seeded shop resolves through the middleware's own :shopId").toBe(shopId);
+    expect(details).not.toHaveProperty("shop_param");
+    expectNoPersonalData(row, [itemId, path]);
+
+    // Control: when the leaf answers, the leaf's pattern is recorded instead,
+    // so the assertion above really tells the two apart.
+    const answered = await send(app, "PUT", path, { Authorization: "Bearer fixture" });
+    expect(answered.res.status).toBe(200);
+    const leaf = await onlyGapFor(answered.rid, "leaf answered 200");
+    expect(JSON.parse(leaf.details_json as string).route).toBe("/fx/shops/:shopId/items/:id/status");
   });
 
   it("sets shopId from a :shopId route param when the matched pattern has one", async () => {
@@ -268,5 +304,23 @@ describe("audit gap guard", () => {
     const { res, rid } = await send(app, "PUT", "/fx/items/item-1/status");
     expect(res.status).toBe(403);
     expect(await rowsFor(rid)).toEqual([]);
+  });
+});
+
+describe("the real app mounts the gap guard", () => {
+  it("a pending route on the real app writes its floor row", async () => {
+    // POST /api/bookings stays pending for the whole of Plan 2 (Plan 3 owns
+    // it); the BOOKING stub in vitest.config.ts answers it 201.
+    expect(ROUTE_AUDIT["POST /api/bookings"], "this check needs a route that is still pending").toBe("pending");
+    const res = await dispatch("POST", "/api/bookings", {
+      headers: { "CF-Connecting-IP": "192.0.2.30" },
+      body: { shop_slug: "gap-guard-wiring" },
+    });
+    const rid = res.headers.get("X-Request-Id");
+    expect(rid, `POST /api/bookings answered ${res.status} with no X-Request-Id`).toMatch(/.+/);
+    expect(res.status).toBe(201);
+    const row = await onlyGapFor(rid!, `real POST /api/bookings answered ${res.status}`);
+    expect(row).toMatchObject({ outcome: "succeeded", via: "api" });
+    expect(JSON.parse(row.details_json as string)).toMatchObject({ method: "POST", route: "/api/bookings", status: 201 });
   });
 });
