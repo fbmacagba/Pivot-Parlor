@@ -339,7 +339,54 @@ describe("Stripe webhook audit", () => {
     expect(row.changes_json).toBeNull();
   });
 
-  it("charge.dispute.created and unhandled types record handled false with no entity", async () => {
+  it("charge.dispute.created for a sale records the sale, details only", async () => {
+    const s = await setup();
+    const saleId = await seedSale(s.shop, "completed");
+    const piId = `pi_disp_${saleId.slice(0, 8)}`;
+    const chargeId = `ch_disp_${saleId.slice(0, 8)}`;
+    await env.DB.prepare(
+      `INSERT INTO bw_transactions (id, sale_id, shop_id, type, amount_pence, status, stripe_id)
+       VALUES (?, ?, ?, 'balance', 2500, 'captured', ?)`
+    )
+      .bind(crypto.randomUUID(), saleId, s.shop, piId)
+      .run();
+    const id = evtId();
+    const res = await postSignedEvent({
+      id,
+      type: "charge.dispute.created",
+      data: { object: { id: chargeId, payment_intent: piId } },
+    });
+    expect(res.status).toBe(200);
+    const sale = await env.DB.prepare("SELECT status FROM sales WHERE id = ?").bind(saleId).first<{ status: string }>();
+    expect(sale?.status).toBe("disputed");
+    const row = await outcomeOf(id);
+    expect(row).toMatchObject({ outcome: "succeeded", shop_id: s.shop, entity_type: "sale", entity_id: saleId });
+    expect(row.changes_json).toBeNull();
+    expect(json(row.details_json)).toMatchObject({ event_type: "charge.dispute.created", handled: true });
+    expectNoPersonalData(row, [piId, chargeId]);
+  });
+
+  it("charge.dispute.created for a booking deposit records the booking, details only", async () => {
+    const s = await setup();
+    const bookingId = await seedBooking(s, "confirmed");
+    const piId = `pi_dispb_${bookingId.slice(0, 8)}`;
+    const chargeId = `ch_dispb_${bookingId.slice(0, 8)}`;
+    await seedDepositTx(s.shop, bookingId, piId, "captured");
+    const id = evtId();
+    const res = await postSignedEvent({
+      id,
+      type: "charge.dispute.created",
+      data: { object: { id: chargeId, payment_intent: piId } },
+    });
+    expect(res.status).toBe(200);
+    const row = await outcomeOf(id);
+    expect(row).toMatchObject({ outcome: "succeeded", shop_id: s.shop, entity_type: "booking", entity_id: bookingId });
+    expect(row.changes_json).toBeNull();
+    expect(json(row.details_json)).toMatchObject({ event_type: "charge.dispute.created", handled: true });
+    expectNoPersonalData(row, [piId, chargeId]);
+  });
+
+  it("a dispute on an unknown tx and unhandled types record handled false with no entity", async () => {
     for (const type of ["charge.dispute.created", "customer.created"]) {
       const id = evtId();
       const res = await postSignedEvent({ id, type, data: { object: { id: "dp_1", payment_intent: "pi_none" } } });
@@ -413,6 +460,41 @@ describe("Stripe webhook audit", () => {
       data: { object: { id: acct, charges_enabled: true, details_submitted: true } },
     });
     expect(retry.status).toBe(200);
+    const retried = (await rowsOf(id)).filter((r) => r.phase === "outcome").pop()!;
+    expect(retried).toMatchObject({ outcome: "succeeded", shop_id: s.shop });
+    expect(json(retried.changes_json)).toEqual({ stripe_connect_onboarded: [0, 1] });
+  });
+
+  it("a failure after the guarded flip commits drops the changes and keeps the details", async () => {
+    const s = await setup();
+    const bookingId = await seedBooking(s, "pending");
+    await seedDepositTx(s.shop, bookingId, "cs_unpaid_5");
+    const id = evtId();
+    const failingDb = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "prepare") {
+          return (sql: string) => {
+            // Runs after the booking flip has committed.
+            if (sql.includes("UPDATE bw_booking_state SET completed_at")) throw new Error("simulated late failure");
+            return target.prepare(sql);
+          };
+        }
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const res = await postWith({ ...env, DB: failingDb } as typeof env, {
+      id,
+      type: "payment_intent.succeeded",
+      data: { object: { id: "pi_late_fail", metadata: { bookingId, shopId: s.shop, type: "booking_deposit" } } },
+    });
+    expect(res.status).toBe(500);
+    expect(await bookingStatus(bookingId)).toBe("confirmed");
+    expect(await dedupeRow(id)).toBeNull();
+    const row = await outcomeOf(id);
+    expect(row).toMatchObject({ outcome: "failed", reason: "HTTP 500", shop_id: s.shop, entity_id: bookingId });
+    expect(row.changes_json).toBeNull();
+    expect(json(row.details_json)).toMatchObject({ booking_flipped: true, handled: true });
   });
 
   it("an event whose started entry cannot be written answers 503 and is not deduped", async () => {
@@ -447,7 +529,12 @@ describe("Stripe webhook audit", () => {
       body: { id, type: "customer.created", data: { object: {} } },
     });
     expect(res.status).toBe(400);
-    expect(await rowsOf(id)).toHaveLength(0);
+    const requestId = res.headers.get("X-Request-Id");
+    expect(requestId).toMatch(/.+/);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_log WHERE request_id = ?")
+      .bind(requestId!)
+      .first<{ n: number }>();
+    expect(n?.n).toBe(0);
   });
 
   it("no Stripe object id or URL reaches the trail", async () => {
@@ -476,9 +563,11 @@ describe("Stripe webhook audit", () => {
     });
     await post("charge.refunded", { id: chargeId, payment_intent: piId, amount: 1250, amount_refunded: 1250 });
     await post("checkout.session.expired", { id: sessionId, metadata: { bookingId, type: "booking_deposit" } });
+    const disputeId = `dp_secret_${bookingId.slice(0, 8)}`;
+    await post("charge.dispute.created", { id: disputeId, charge: chargeId, payment_intent: piId });
     for (const id of ids) {
       for (const row of await rowsOf(id)) {
-        expectNoPersonalData(row, [piId, sessionId, acct, chargeId, "checkout.stripe.com", WHO.name, WHO.email, SHOP_NAME]);
+        expectNoPersonalData(row, [piId, sessionId, acct, chargeId, disputeId, "checkout.stripe.com", WHO.name, WHO.email, SHOP_NAME]);
       }
     }
   });

@@ -183,7 +183,7 @@ r.post("/stripe", async (c) => {
     entityId: null as string | null,
     changes: null as Record<string, [unknown, unknown]> | null,
     // `handled` turns true where a case resolved a stored row it acted on;
-    // disputes and unhandled types stay false.
+    // an unhandled type, or an event whose tx or row is unknown, stays false.
     details: { handled: false } as Record<string, unknown>,
   };
   const baseDetails = { event_id: stripeToken(event.id), event_type: stripeToken(event.type) };
@@ -683,6 +683,25 @@ r.post("/stripe", async (c) => {
           if (marked.saleId) await setSaleStatus(db, marked.saleId, "disputed");
           if (marked.bookingId)
             await setLedgerStatus(db, marked.bookingId, null, "disputed");
+          // Ruling P14: a dispute is handled. Resolve the sale first, then the
+          // booking, from the tx's stored ids; details only (no changes).
+          const disputedSaleShop = marked.saleId
+            ? await shopOfSale(db, marked.saleId)
+            : null;
+          if (marked.saleId && disputedSaleShop) {
+            audit.shopId = disputedSaleShop;
+            audit.entityType = "sale";
+            audit.entityId = marked.saleId;
+            audit.details.handled = true;
+          } else if (marked.bookingId) {
+            const disputedBookingShop = await shopOfBooking(db, marked.bookingId);
+            if (disputedBookingShop) {
+              audit.shopId = disputedBookingShop;
+              audit.entityType = "booking";
+              audit.entityId = marked.bookingId;
+              audit.details.handled = true;
+            }
+          }
           break;
         }
 
@@ -716,7 +735,11 @@ r.post("/stripe", async (c) => {
         entityType: audit.entityType,
         entityId: audit.entityId,
         details: { ...baseDetails, ...audit.details },
-        // A failed event applied nothing the trail should claim.
+        // Ruling P15: a 4xx/5xx outcome carries no changes. If a guarded flip
+        // committed and a LATER write in the same handler failed, the outcome
+        // is failed with changes dropped; details keep booking_flipped and
+        // handled. Stripe's retry then records no change, because the flip is
+        // already done.
         changes: res.status < 400 ? audit.changes : null,
       }))
     );
