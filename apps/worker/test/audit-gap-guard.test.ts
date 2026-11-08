@@ -1,7 +1,8 @@
 import { Hono } from "hono";
-import { env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import type { Via } from "@repo/audit";
+import worker from "../src/index";
 import { seedShop } from "./helpers";
 import { dispatch } from "./request";
 import { expectNoPersonalData, gapRowsFor } from "./audit-helpers";
@@ -320,5 +321,32 @@ describe("the real app mounts the gap guard", () => {
     expect(rid, `POST /api/bookings answered ${res.status} with no X-Request-Id`).toMatch(/.+/);
     expect(res.status).toBe(201);
     expect(await gapRowsFor(rid!), "an exempt route must not write a floor row").toBe(0);
+  });
+
+  it("a declared route that answers 5xx before its own entry gets the declared action as failed", async () => {
+    // POST /api/contact parses its body inside a try whose catch answers 500
+    // before its batchWithAudit, so a body that is not JSON takes exactly that
+    // path and the handler writes nothing. Only the guard can write this row.
+    expect(ROUTE_AUDIT["POST /api/contact"]).toBe("enquiry.create");
+    const ctx = createExecutionContext();
+    const res = (await worker.fetch(
+      new Request("https://worker.test/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.131" },
+        body: "this is not json {",
+      }) as never,
+      env as never,
+      ctx as never
+    )) as unknown as Response;
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "Internal error" });
+    const rid = res.headers.get("X-Request-Id");
+    expect(rid, "the 500 carries no X-Request-Id").toMatch(/.+/);
+    const rows = await rowsFor(rid!);
+    expect(rows.map((r) => r.action), "exactly one entry, of the declared action").toEqual(["enquiry.create"]);
+    expect(rows[0]).toMatchObject({ outcome: "failed", reason: "HTTP 500", phase: "done", via: "api", shop_id: null });
+    expect(JSON.parse(rows[0]!.details_json as string)).toEqual({ method: "POST", route: "/api/contact", status: 500 });
+    expect(await gapRowsFor(rid!)).toBe(0);
   });
 });

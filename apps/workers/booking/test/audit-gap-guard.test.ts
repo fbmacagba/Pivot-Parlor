@@ -1,13 +1,14 @@
 import { Hono } from "hono";
-import { env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import worker from "../src/index";
 import { seedShop } from "./helpers";
 import { dispatch } from "./request";
 import { gapRowsFor } from "./audit-helpers";
 import type { Env } from "../src/types.js";
 import { requestId } from "../src/audit/request-id.js";
 import { auditGapGuard, resolveShopParam } from "../src/audit/gap-guard.js";
-import type { AuditDeclaration } from "../src/audit/registry.js";
+import { ROUTE_AUDIT, type AuditDeclaration } from "../src/audit/registry.js";
 
 type App = Hono<{ Bindings: Env }>;
 
@@ -125,5 +126,40 @@ describe("booking audit gap guard", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("the real booking app mounts the gap guard", () => {
+  it("a declared route that answers 5xx before its own entry gets the declared action as failed", async () => {
+    // POST /public/bookings reads its body with an unguarded c.req.json(), so
+    // a body that is not JSON throws before run() and the app answers 500
+    // (pre-existing, unchanged). Only the guard can write a row for it.
+    expect(ROUTE_AUDIT["POST /public/bookings"]).toBe("booking.create");
+    const ctx = createExecutionContext();
+    const res = (await worker.fetch(
+      new Request("https://booking.test/public/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.91" },
+        body: "this is not json {",
+      }) as never,
+      env as never,
+      ctx as never
+    )) as unknown as Response;
+    await waitOnExecutionContext(ctx);
+    expect(res.status).toBe(500);
+    const rid = res.headers.get("X-Request-Id");
+    expect(rid, "the 500 carries no X-Request-Id").toMatch(/.+/);
+    const rows = await rowsFor(rid!);
+    expect(rows.map((r) => r.action), "exactly one entry, of the declared action").toEqual(["booking.create"]);
+    expect(rows[0]).toMatchObject({
+      outcome: "failed",
+      reason: "HTTP 500",
+      phase: "done",
+      via: "api",
+      worker: "pivot-parlor-booking",
+      shop_id: null,
+    });
+    expect(JSON.parse(rows[0]!.details_json as string)).toEqual({ method: "POST", route: "/public/bookings", status: 500 });
+    expect(await gapRowsFor(rid!)).toBe(0);
   });
 });
