@@ -1,10 +1,50 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import worker from "../src/index";
 import { seedScheduleDay, seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
 import { entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
 
 const REFUSAL = { success: false, error: "Could not record this action; nothing was changed." };
+
+/** POST with no body through the real worker, on a substituted env (e.g. a Proxy over DB). */
+async function postWith(testEnv: typeof env, path: string, headers: Record<string, string>): Promise<Response> {
+  const ctx = createExecutionContext();
+  const response = await worker.fetch(
+    new Request(`https://booking.test${path}`, { method: "POST", headers }) as never,
+    testEnv as never,
+    ctx as never
+  );
+  await waitOnExecutionContext(ctx);
+  return response as unknown as Response;
+}
+
+/** A DB whose `prepare` throws once for the first SQL that includes `needle`. */
+function failingPrepare(needle: string): { db: typeof env.DB; fired: () => boolean } {
+  let fired = false;
+  const db = new Proxy(env.DB, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop);
+      if (prop === "prepare") {
+        return (sql: string) => {
+          if (!fired && sql.includes(needle)) {
+            fired = true;
+            throw new Error("staged D1 failure");
+          }
+          return target.prepare(sql);
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }) as typeof env.DB;
+  return { db, fired: () => fired };
+}
+
+async function noShowTx(bookingId: string): Promise<{ type: string; status: string } | null> {
+  return env.DB.prepare("SELECT type, status FROM bw_transactions WHERE booking_id = ?")
+    .bind(bookingId)
+    .first<{ type: string; status: string }>();
+}
 
 async function authed(role: string, shopId: string): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${await tokenFor(role, shopId)}` };
@@ -153,6 +193,43 @@ describe("day close audit", () => {
     expect(details.holds_failed).toBe(1);
     expect(details.holds_captured).toBe(0);
     expectNoPersonalData(outcome, ["pi_fail_1", "Nora Noshow"]);
+  });
+
+  it("a close that throws after capturing a no-show hold records the holds captured so far", async () => {
+    const { shopId, staffId, serviceId } = await seedOpenableShop();
+    const headers = await authed("admin", shopId);
+    await dispatch("POST", `/booking/shops/${shopId}/open`, { headers });
+    const bookingId = await seedNoShowWithHold(shopId, staffId, serviceId, "pi_ok_then_throw");
+    // The capture commits in Stripe; the next write after the hold loop throws.
+    const staged = failingPrepare("SET workflow_flag = 'flagged'");
+    const res = await postWith({ ...env, DB: staged.db }, `/booking/shops/${shopId}/close`, headers);
+    expect(staged.fired(), "the post-capture write never ran, so the throw was never staged").toBe(true);
+    expect(res.status).toBe(500);
+    expect(await noShowTx(bookingId)).toEqual({ type: "no_show_capture", status: "captured" });
+    const rows = await entriesFor({ action: "day.close", shopId });
+    expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
+    const outcome = rows[1]!;
+    expect(outcome).toMatchObject({ outcome: "failed", reason: "Error", entity_type: "business_day" });
+    expect(outcome.changes_json).toBeNull();
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ holds_captured: 1, holds_failed: 0 });
+    expectNoPersonalData(outcome, ["pi_ok_then_throw", "Nora Noshow", "nora@test.local", "Day Shop", "staged D1 failure"]);
+  });
+
+  it("a hold Stripe captured counts as captured even when its row update then fails", async () => {
+    const { shopId, staffId, serviceId } = await seedOpenableShop();
+    const headers = await authed("admin", shopId);
+    await dispatch("POST", `/booking/shops/${shopId}/open`, { headers });
+    // (No "fail" in the PI id: the fake Stripe fails any capture whose id has it.)
+    await seedNoShowWithHold(shopId, staffId, serviceId, "pi_ok_row_breaks");
+    const staged = failingPrepare("SET type = 'no_show_capture'");
+    const res = await postWith({ ...env, DB: staged.db }, `/booking/shops/${shopId}/close`, headers);
+    expect(staged.fired(), "the capture's row update never ran, so its failure was never staged").toBe(true);
+    expect(res.status).toBe(200);
+    const outcome = (await entriesFor({ action: "day.close", shopId })).find((r) => r.phase === "outcome")!;
+    expect(outcome.outcome).toBe("succeeded");
+    const details = JSON.parse(outcome.details_json as string) as Record<string, number>;
+    expect(details.holds_captured).toBe(1);
+    expect(details.holds_failed).toBe(0);
   });
 
   it("a close with no open day records nothing", async () => {

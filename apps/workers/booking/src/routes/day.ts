@@ -144,19 +144,23 @@ r.post("/:shopId/close", async (c) => {
           .bind(shopId, date)
           .all();
         for (const hold of d1Rows<{ booking_id: string; pi_id: string }>(holdRows)) {
+          let captured = false;
           try {
             await capturePaymentIntent(c.env.STRIPE_SECRET_KEY, hold.pi_id, {
               idempotencyKey: `noshow:${hold.booking_id}`,
             });
+            // Counted the moment Stripe takes the money: a failure in the row
+            // update below must not turn a real capture into a failed one.
+            captured = true;
+            holdsCaptured += 1;
             await db
               .prepare(
                 "UPDATE bw_transactions SET type = 'no_show_capture', status = 'captured' WHERE booking_id = ? AND type = 'deposit' AND stripe_id = ?"
               )
               .bind(hold.booking_id, hold.pi_id)
               .run();
-            holdsCaptured += 1;
           } catch (err) {
-            holdsFailed += 1;
+            if (!captured) holdsFailed += 1;
             reportError("day.close_noshow_capture", err, {
               shopId,
               bookingId: hold.booking_id,
@@ -359,14 +363,13 @@ r.post("/:shopId/close", async (c) => {
           staffBreakdown,
           topService: topSvc ?? null,
         };
-      closeDetails = {
-        no_shows: eodSummary.noShowCount,
-        completed: eodSummary.completedBookings,
-        walk_ins: eodSummary.walkInCount,
-        holds_captured: holdsCaptured,
-        holds_failed: holdsFailed,
-      };
-
+        closeDetails = {
+          no_shows: eodSummary.noShowCount,
+          completed: eodSummary.completedBookings,
+          walk_ins: eodSummary.walkInCount,
+          holds_captured: holdsCaptured,
+          holds_failed: holdsFailed,
+        };
 
         const closedAt = new Date().toISOString();
         await db
@@ -398,7 +401,11 @@ r.post("/:shopId/close", async (c) => {
       },
       statusOutcome((res) =>
         res.status < 400 ? { changes: { status: ["open", "closed"] }, details: closeDetails } : {}
-      )
+      ),
+      // No-show captures commit in Stripe before later work can throw, and a
+      // retry then counts holds_captured 0, so a thrown close records the
+      // running counts it had reached (details only, never changes).
+      { describeError: () => ({ details: { holds_captured: holdsCaptured, holds_failed: holdsFailed } }) }
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);

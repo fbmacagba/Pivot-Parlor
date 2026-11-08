@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { seedScheduleDay, seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
 import { entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
@@ -232,6 +232,47 @@ describe("Connect onboarding audit", () => {
       .bind(shopId)
       .first<{ stripe_connect_account_id: string | null }>();
     expect(row!.stripe_connect_account_id).toBeNull();
+  });
+
+  it("an onboard that saved a new account and then failed on the account link records account_created", async () => {
+    const shopId = await seedShop("Connect Shop Six");
+    const owner = await env.DB.prepare("SELECT owner_email FROM shops WHERE id = ?")
+      .bind(shopId)
+      .first<{ owner_email: string }>();
+    const realFetch = globalThis.fetch;
+    let linkCalls = 0;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+      if (url.endsWith("/v1/account_links")) {
+        linkCalls += 1;
+        return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+      }
+      return realFetch(input as never, init as never);
+    });
+    let res: Response;
+    try {
+      res = await dispatch("POST", `/booking/shops/${shopId}/connect/onboard`, {
+        headers: await authed("admin", shopId),
+        body: { return_url: returnUrl, refresh_url: refreshUrl },
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(linkCalls, "the account link was never attempted").toBe(1);
+    expect(res.status).toBe(500);
+    const saved = await env.DB.prepare("SELECT stripe_connect_account_id AS id FROM shops WHERE id = ?")
+      .bind(shopId)
+      .first<{ id: string | null }>();
+    expect(saved?.id, "the created account must have been saved before the link failed").toBe("acct_new_1");
+    const rows = await entriesFor({ action: "payment.connect.onboard", shopId });
+    expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
+    const outcome = rows[1]!;
+    expect(outcome).toMatchObject({ outcome: "failed", entity_type: "shop", entity_id: shopId });
+    expect(outcome.changes_json).toBeNull();
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ account_created: true });
+    for (const row of rows) {
+      expectNoPersonalData(row, ["acct_new_1", returnUrl, refreshUrl, owner!.owner_email, "stripe down"]);
+    }
   });
 
   it("validation failures (400) write no entry", async () => {

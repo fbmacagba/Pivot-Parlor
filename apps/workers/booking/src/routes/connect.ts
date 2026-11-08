@@ -87,7 +87,10 @@ r.post("/:shopId/connect/onboard", async (c) => {
 
         return c.json({ success: true, data: { account_id: accountId, url: link.url } });
       },
-      statusOutcome(() => ({ details: { account_created: accountCreated } }))
+      statusOutcome(() => ({ details: { account_created: accountCreated } })),
+      // A throw after the account was created (e.g. createAccountLink failing)
+      // still records that it was: only the boolean, never the account id.
+      { describeError: () => ({ details: { account_created: accountCreated } }) }
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
