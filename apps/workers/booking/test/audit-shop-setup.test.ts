@@ -90,8 +90,7 @@ describe("complete-setup audit", () => {
     const shopId = await seedReadyShop();
     const headers = await authed("admin", shopId);
     const res = await withAuditOff(() => dispatch("POST", `/booking/shops/${shopId}/complete-setup`, { headers }));
-    // Pattern B: the batch itself fails, so the original error propagates
-    // (Plan 1 ruling 9) instead of the 503 that a failed prepare would give.
+    // Plan 1 Ruling 9: a failed batch propagates the original error (5xx), so this is not toBe(503).
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(await setupCompleted(shopId)).toBe(0);
   });
@@ -130,10 +129,21 @@ describe("platform alert resolve audit", () => {
     expect(second.status).toBe(404);
     expect(await second.json()).toEqual({ success: false, error: "Alert not found or already resolved" });
     const secondOutcome = (await entriesForRequest(second)).find((r) => r.phase === "outcome")!;
-    expect(secondOutcome).toMatchObject({ outcome: "refused", reason: "HTTP 404", entity_id: null });
+    expect(secondOutcome).toMatchObject({ outcome: "refused", reason: "HTTP 404", entity_id: alertId });
     expect(secondOutcome.changes_json).toBeNull();
     const firstOutcome = (await entriesForRequest(first)).find((r) => r.phase === "outcome")!;
     expect(firstOutcome).toMatchObject({ outcome: "succeeded", entity_id: alertId });
+  });
+
+  it("an unknown alert id answers 404 and records nothing", async () => {
+    const unknownId = `no-such-alert-${crypto.randomUUID()}`;
+    const res = await dispatch("POST", `/booking/platform/alerts/${unknownId}/resolve`, {
+      headers: await authed("developer", "any-shop"),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ success: false, error: "Alert not found or already resolved" });
+    expect(await entriesFor({ action: "platform.alert.resolve", entityId: unknownId })).toHaveLength(0);
+    expect(await entriesForRequest(res)).toHaveLength(0);
   });
 
   it("is refused with a 503 when the entry cannot be written, and the alert stays open", async () => {

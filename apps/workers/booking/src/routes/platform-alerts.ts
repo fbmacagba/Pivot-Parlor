@@ -31,37 +31,38 @@ r.get("/alerts", async (c) => {
 
 r.post("/alerts/:alertId/resolve", async (c) => {
   const alertId = c.req.param("alertId");
-  // The shop and entity come from the row this reads (DB values), never from
-  // the URL param, so an unknown id records an entry with no entity.
-  let rowId: string | null = null;
-  let rowShopId: string | null = null;
+  const existing = await c.env.DB
+    .prepare("SELECT id, shop_id FROM bw_platform_alerts WHERE id = ? LIMIT 1")
+    .bind(alertId)
+    .first<{ id: string; shop_id: string | null }>();
+  if (!existing) {
+    // Unknown id: the 404 stays outside run(), so it writes no entry and the
+    // URL param never reaches an audit column.
+    return c.json({ success: false, error: "Alert not found or already resolved" }, 404);
+  }
   let changes: Record<string, [unknown, unknown]> | null = null;
   try {
     return await auditFor(c).run(
-      { action: "platform.alert.resolve", entityType: "platform_alert" },
+      {
+        action: "platform.alert.resolve",
+        shopId: existing.shop_id,
+        entityType: "platform_alert",
+        entityId: existing.id,
+      },
       async (): Promise<Response> => {
-        const existing = await c.env.DB
-          .prepare("SELECT id, shop_id FROM bw_platform_alerts WHERE id = ? AND resolved = 0 LIMIT 1")
-          .bind(alertId)
-          .first<{ id: string; shop_id: string | null }>();
-        if (!existing) {
-          return c.json({ success: false, error: "Alert not found or already resolved" }, 404);
-        }
-        rowId = existing.id;
-        rowShopId = existing.shop_id;
         const now = new Date().toISOString();
         const res = await c.env.DB
           .prepare("UPDATE bw_platform_alerts SET resolved = 1, resolved_at = ? WHERE id = ? AND resolved = 0")
-          .bind(now, alertId)
+          .bind(now, existing.id)
           .run();
         if (Number(res.meta?.changes ?? 0) === 0) {
-          // Resolved by someone else after the read: the same 404, refused.
+          // Already resolved (earlier, or by a concurrent request): same 404, refused.
           return c.json({ success: false, error: "Alert not found or already resolved" }, 404);
         }
         changes = { resolved: [0, 1] };
         return c.json({ success: true, alertId, resolvedAt: now });
       },
-      statusOutcome(() => ({ entityId: rowId, shopId: rowShopId, changes }))
+      statusOutcome(() => ({ changes }))
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
