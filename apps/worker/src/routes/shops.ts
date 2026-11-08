@@ -965,7 +965,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     typeof body.design_notes === "string" ? body.design_notes.trim() : "";
 
   const shopTypeLabel = shop.type.replace(/_/g, " ");
-  const typeLabel = target.kind === "service" ? `service:${target.serviceId}` : target.kind;
+  const typeLabel = visualLabel(target);
 
   const prompt =
     target.kind === "service"
@@ -1739,6 +1739,12 @@ async function markContactOnboarded(
     .run();
 }
 
+/** shops.type CHECK values (schema.sql); anything else is recorded as null. */
+const KNOWN_SHOP_TYPES: readonly string[] = ["beauty_parlor", "barber_shop", "both"];
+/** `plan` is free text with no CHECK; in practice it is always "standard".
+ *  Any other value is recorded as `plan: null, plan_custom: true`, never verbatim. */
+const KNOWN_SHOP_PLANS: readonly string[] = ["standard"];
+
 shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
   const body = await c.req.json<{
     name?: string;
@@ -1777,6 +1783,7 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
   const ownerEmail = body.owner_email.trim().toLowerCase();
   const shopType = body.type ?? "beauty_parlor";
   const shopPlan = body.plan ?? "standard";
+  const knownPlan = typeof shopPlan === "string" && KNOWN_SHOP_PLANS.includes(shopPlan);
 
   // Pattern T: Stripe Checkout is external. Validation and the slug
   // pre-check stay above, so a 400 or 409 writes nothing. The entry carries
@@ -1790,12 +1797,9 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
         shopId,
         entityType: "shop",
         entityId: shopId,
-        details: {
-          shop_subject: `subj_shop_${shopId}`,
-          flow: useStripe ? "stripe" : "invite",
-          type: shopType,
-          plan: shopPlan,
-        },
+        // No details on the started row (or a failed outcome): `type` and
+        // `plan` are caller input and are recorded only on success, and only
+        // when they are known values.
       },
       async (): Promise<Response> => {
         // The D1 writes made before Stripe, as one batch.
@@ -1884,7 +1888,18 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
           },
         }, 201);
       },
-      statusOutcome(),
+      statusOutcome((res) =>
+        res.status < 400
+          ? {
+              details: {
+                shop_subject: `subj_shop_${shopId}`,
+                flow: useStripe ? "stripe" : "invite",
+                type: typeof shopType === "string" && KNOWN_SHOP_TYPES.includes(shopType) ? shopType : null,
+                ...(knownPlan ? { plan: shopPlan } : { plan: null, plan_custom: true }),
+              },
+            }
+          : {},
+      ),
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
@@ -1943,7 +1958,23 @@ shops.patch("/:shopId", authMiddleware, requireShopRole("admin"), async (c) => {
 
   // `name` and `phone` are personal data: allow-listed out of `changes`, so
   // they reach the entry as field names in details.fields only.
-  const { changes, fields } = fieldChanges(before as unknown as Record<string, unknown>, applied);
+  // is_active has no CHECK and the handler writes it as submitted; for the
+  // entry only, true/1 and false/0 are normalised and anything else is named
+  // in details.fields without its value.
+  const forAudit: Record<string, unknown> = { ...applied };
+  let oddIsActive = false;
+  if ("is_active" in forAudit) {
+    const v = forAudit.is_active;
+    if (v === true || v === 1) forAudit.is_active = 1;
+    else if (v === false || v === 0) forAudit.is_active = 0;
+    else {
+      delete forAudit.is_active;
+      oddIsActive = true;
+    }
+  }
+  const diff = fieldChanges(before as unknown as Record<string, unknown>, forAudit);
+  const changes = diff.changes;
+  const fields = oddIsActive ? [...diff.fields, "is_active"].sort() : diff.fields;
   const update = updateShopFieldsStmt(c.env.DB, before.id, applied);
   // Always called, even with no applicable field (then changes is empty and
   // details is { fields: [] }): a 2xx must leave an entry.

@@ -63,8 +63,10 @@ describe("shop create", () => {
       shop_subject: `subj_shop_${shop.id}`,
       flow: "invite",
       type: "barber_shop",
-      plan: "pro",
+      plan: null,
+      plan_custom: true,
     });
+    expect(rows[0]!.details_json).toBeNull();
     for (const row of rows) expectNoPersonalData(row, [name, shop.slug, ownerEmail, invite_token]);
 
     const subject = await env.DB.prepare("SELECT display_name, kind, shop_id FROM audit_subjects WHERE id = ?")
@@ -96,6 +98,10 @@ describe("shop create", () => {
       type: "beauty_parlor",
       plan: "standard",
     });
+    const subject = await env.DB.prepare("SELECT display_name, kind, shop_id FROM audit_subjects WHERE id = ?")
+      .bind(`subj_shop_${shop.id}`)
+      .first<{ display_name: string; kind: string; shop_id: string }>();
+    expect(subject).toEqual({ display_name: `Stripe Flow Salon (${shop.slug})`, kind: "shop", shop_id: shop.id });
     for (const row of rows) expectNoPersonalData(row, ["Stripe Flow Salon", shop.slug, "stripe-flow@sole-trader.test", checkout_url, "cs_test_audit"]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
@@ -111,6 +117,40 @@ describe("shop create", () => {
     expect(shop!.n).toBe(0);
     const invite = await env.DB.prepare("SELECT COUNT(*) AS n FROM invites WHERE email = ?").bind(email).first<{ n: number }>();
     expect(invite!.n).toBe(0);
+    const subj = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_subjects WHERE kind = ? AND display_name LIKE ?")
+      .bind("shop", "Nothing Left Cuts%")
+      .first<{ n: number }>();
+    expect(subj!.n).toBe(0);
+  });
+
+  async function allRowsFor(requestId: string): Promise<Record<string, unknown>[]> {
+    expect(requestId).toMatch(/.+/);
+    const r = await env.DB.prepare("SELECT * FROM audit_log WHERE request_id = ? ORDER BY rowid").bind(requestId).all<Record<string, unknown>>();
+    return r.results ?? [];
+  }
+
+  it("shop create with a bogus type string or object records the value in no row", async () => {
+    const headers = await devHeaders();
+    for (const [i, bogus] of (["bogus-type-ZQX <b>", { evil: "bogus-object-ZQX" }] as unknown[]).entries()) {
+      const res = await withoutStripe(() =>
+        dispatch("POST", "/api/shops", { headers, body: { name: `Bogus Type ${i} Cuts`, owner_email: `bogus${i}@sole-trader.test`, type: bogus } }),
+      );
+      expect(res.status, await res.clone().text()).toBe(500);
+      const rows = await allRowsFor(rid(res));
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expectNoPersonalData(row, ["bogus-type-ZQX", "bogus-object-ZQX", "evil"]);
+    }
+  });
+
+  it("shop create with a custom plan records plan_custom, never the value", async () => {
+    const headers = await devHeaders();
+    const res = await withoutStripe(() =>
+      dispatch("POST", "/api/shops", { headers, body: { name: "Custom Plan Cuts", owner_email: "plan@sole-trader.test", type: "both", plan: "Platinum-Secret-Tier" } }),
+    );
+    expect(res.status, await res.clone().text()).toBe(201);
+    const rows = await allRowsFor(rid(res));
+    for (const row of rows) expectNoPersonalData(row, ["Platinum-Secret-Tier"]);
+    expect(JSON.parse(rows[rows.length - 1]!.details_json as string)).toMatchObject({ type: "both", plan: null, plan_custom: true });
   });
 });
 
@@ -159,6 +199,24 @@ describe("shop update", () => {
     expect(entry!.changes_json).toBeNull();
     expect(JSON.parse(entry!.details_json as string)).toEqual({ fields: [] });
     expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  it("shop update with an odd is_active names the field only; a boolean true on an active shop records no change", async () => {
+    const shopId = await seedShop("Audit IsActive Shop");
+    const headers = await devHeaders();
+    const cur = await env.DB.prepare("SELECT is_active FROM shops WHERE id = ?").bind(shopId).first<{ is_active: number }>();
+    expect(cur!.is_active).toBe(1);
+    const res = await dispatch("PATCH", `/api/shops/${shopId}`, { headers, body: { is_active: true } });
+    expect(res.status).toBe(200);
+    const res2 = await dispatch("PATCH", `/api/shops/${shopId}`, { headers, body: { is_active: "some-odd-text-ZQX" } });
+    const rows = await env.DB.prepare("SELECT * FROM audit_log WHERE action = ? AND shop_id = ? ORDER BY rowid").bind("shop.update", shopId).all<Record<string, unknown>>();
+    expect(rows.results).toHaveLength(2);
+    expect(rows.results[0]!.changes_json).toBeNull();
+    expect(JSON.parse(rows.results[0]!.details_json as string)).toEqual({ fields: [] });
+    expect(rows.results[1]!.changes_json).toBeNull();
+    expect(JSON.parse(rows.results[1]!.details_json as string)).toEqual({ fields: ["is_active"] });
+    for (const row of rows.results) expectNoPersonalData(row, ["some-odd-text-ZQX"]);
+    expect(res2.status).toBeLessThan(600);
   });
 
   it("shop update with an unchanged value records no false change", async () => {
@@ -269,7 +327,7 @@ describe("generation prefs", () => {
       text_effort: "high",
       design_notes_set: true,
     });
-    expectNoPersonalData(entry, [notes]);
+    for (const row of entries) expectNoPersonalData(row, [notes]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -396,7 +454,8 @@ describe("site images", () => {
       "ai.call:outcome",
       "site.edit:outcome",
     ]);
-    for (const row of [...edits, ...calls]) expectNoPersonalData(row, [notes, "velvet curtains"]);
+    const shopRow = await env.DB.prepare("SELECT name, slug FROM shops WHERE id = ?").bind(shopId).first<{ name: string; slug: string }>();
+    for (const row of [...edits, ...calls]) expectNoPersonalData(row, [notes, "velvet curtains", shopRow!.name, shopRow!.slug]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -455,7 +514,8 @@ describe("site images", () => {
     expect(rows[1]!.entity_type).toBe("shop_site");
     expect(rows[1]!.entity_id).toBe(shopId);
     expect(JSON.parse(rows[1]!.details_json as string)).toEqual({ op: "upload", visual: "logo" });
-    for (const row of rows) expectNoPersonalData(row, [imageUrl, "my-secret-photo", "custom-logo"]);
+    const upSlug = (await env.DB.prepare("SELECT slug FROM shops WHERE id = ?").bind(shopId).first<{ slug: string }>())!.slug;
+    for (const row of rows) expectNoPersonalData(row, [imageUrl, "my-secret-photo", "custom-logo", upSlug]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -489,7 +549,8 @@ describe("site images", () => {
     expect(saveRows[1]!.entity_type).toBe("shop_site");
     expect(saveRows[1]!.entity_id).toBe(shopId);
     expect(JSON.parse(saveRows[1]!.details_json as string)).toEqual({ op: "save", visual: "hero" });
-    for (const row of saveRows) expectNoPersonalData(row, [imageUrl, "some-secret-slug"]);
+    const saveSlug = (await env.DB.prepare("SELECT slug FROM shops WHERE id = ?").bind(shopId).first<{ slug: string }>())!.slug;
+    for (const row of saveRows) expectNoPersonalData(row, [imageUrl, "some-secret-slug", saveSlug]);
     expect(await gapRowsFor(rid(saved))).toBe(0);
 
     const removed = await dispatch("POST", `/api/shops/${shopId}/remove-image`, { headers, body: { type: `service:${svcId}` } });
