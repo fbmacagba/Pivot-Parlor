@@ -5,8 +5,9 @@ name: E2E (staging)
 # against the staging frontend.
 #
 # Two tiers (WS-5 — the smoke gate is mandatory, not label-gated):
-#   - SMOKE: runs on EVERY pull request — dev-login + public booking, the
-#     critical auth + revenue flows. Fast and unconditional.
+#   - SMOKE: runs on EVERY pull request — dev-login, public booking and the
+#     public walk-in queue: the critical auth + customer flows. Fast and
+#     unconditional.
 #   - FULL: opt-in via the `e2e` label or manual dispatch — the complete suite,
 #     including site-generation, the dev-shop-delete repro and the audit trail.
 #     Real AI generation stays off unless E2E_SITE_GENERATION=1 (not set here),
@@ -52,8 +53,8 @@ jobs:
       - name: Select spec tier (smoke on every PR; full with the e2e label or dispatch)
         id: specs
         run: |
-          SMOKE="tests/e2e/dev-login.spec.ts tests/e2e/booking.spec.ts"
-          FULL="tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts tests/e2e/booking.spec.ts tests/e2e/site-generation.spec.ts tests/e2e/dev-shop-delete-repro.spec.ts tests/e2e/audit-trail.spec.ts"
+          SMOKE="tests/e2e/dev-login.spec.ts tests/e2e/booking.spec.ts tests/e2e/walkin.spec.ts"
+          FULL="tests/e2e/dev-login.spec.ts tests/e2e/shop-onboarding.spec.ts tests/e2e/dev-dashboard.spec.ts tests/e2e/stripe-payment.spec.ts tests/e2e/booking.spec.ts tests/e2e/walkin.spec.ts tests/e2e/site-generation.spec.ts tests/e2e/dev-shop-delete-repro.spec.ts tests/e2e/audit-trail.spec.ts"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ contains(github.event.pull_request.labels.*.name, 'e2e') }}" = "true" ]; then
             echo "tier=full" >> "$GITHUB_OUTPUT"
             echo "specs=$FULL" >> "$GITHUB_OUTPUT"
