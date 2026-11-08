@@ -3,7 +3,7 @@ import { sign, verify } from "hono/jwt";
 import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { getUserByEmail, getUserById, createUserStmt } from "../db/queries.js";
-import { actorForUser, auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { actorForUser, auditFor, auditRefused, batchWithAudit, requestIp, statusOutcome } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, extractSessionJwt, getUser, type JWTUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
@@ -51,8 +51,6 @@ async function issueEmailVerification(
     return "send_failed";
   }
 }
-
-const requestIp = (c: Context<{ Bindings: Bindings }>): string | null => c.req.header("CF-Connecting-IP") ?? null;
 
 /**
  * A refused sign-in, recorded best-effort before today's 401 (Plan decision

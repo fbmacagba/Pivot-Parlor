@@ -663,11 +663,12 @@ export function updateShopPaymentCompleteStmt(db: D1Database, shopId: string) {
     .bind(shopId);
 }
 
-/** Prepared UPDATE activating an invite once its shop has paid — use in a db.batch(). */
-export function setInviteActiveStmt(db: D1Database, inviteId: string) {
+/** Prepared UPDATE activating an invite once its shop has paid — use in a db.batch().
+ *  Scoped to that shop, so an invite id naming another shop's invite matches nothing. */
+export function setInviteActiveStmt(db: D1Database, inviteId: string, shopId: string) {
   return db
-    .prepare("UPDATE invites SET active = 1 WHERE id = ?")
-    .bind(inviteId);
+    .prepare("UPDATE invites SET active = 1 WHERE id = ? AND shop_id = ?")
+    .bind(inviteId, shopId);
 }
 
 /** Prepared UPDATE activating a shop — use in a db.batch(). */

@@ -53,8 +53,9 @@ export async function handleCheckoutSessionCompleted(
     return { activated: false, reason: "shop_not_found" };
   }
   // The shop the checkout session belongs to, never the metadata claim: the
-  // entry describes the row this update changes.
-  const stmts = [updateShopPaymentCompleteStmt(db, shop.id), setInviteActiveStmt(db, inviteId)];
+  // entry describes the row this update changes. The metadata invite id is a
+  // claim too, so only an invite of that same shop is activated.
+  const stmts = [updateShopPaymentCompleteStmt(db, shop.id), setInviteActiveStmt(db, inviteId, shop.id)];
   if (recorder) {
     await recorder.batch(stmts, {
       action: "payment.stripe.webhook",

@@ -46,9 +46,15 @@ export function actorForUser(user: { id: string; role: string; shop_id?: string 
   };
 }
 
+/** The caller's IP for an actor's visitor subject, or null when the edge sent
+ *  none (never a placeholder such as rate-limit's "unknown"). */
+export function requestIp(c: Ctx): string | null {
+  return c.req.header("CF-Connecting-IP") ?? null;
+}
+
 export function actorFrom(c: Ctx): AuditActor {
   const user = c.get("user") as JWTUser | undefined;
-  const ip = c.req.header("CF-Connecting-IP") ?? null;
+  const ip = requestIp(c);
   if (!user) return { type: "anonymous", ip };
   return actorForUser({ id: user.sub, role: user.role, shop_id: user.shop_id }, ip);
 }

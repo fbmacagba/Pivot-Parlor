@@ -12,7 +12,7 @@ import {
   ensureE2ePlaywrightInviteReady,
   E2E_PLAYWRIGHT_INVITE_TOKEN,
 } from "../db/queries.js";
-import { actorForUser, batchWithAudit } from "../audit/context.js";
+import { actorForUser, batchWithAudit, requestIp } from "../audit/context.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { hashPassword } from "../lib/password.js";
 import {
@@ -183,7 +183,7 @@ invites.post("/:token/accept", async (c) => {
     {
       actor: actorForUser(
         { id: userId, role: invite.role, shop_id: invite.shop_id },
-        c.req.header("CF-Connecting-IP") ?? null,
+        requestIp(c),
       ),
     },
   );

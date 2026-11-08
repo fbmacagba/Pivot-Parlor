@@ -49,12 +49,49 @@ function expectClean(rows: Record<string, unknown>[], values: string[]): void {
     if (row.actor_ref !== null) expect(String(row.actor_ref)).toMatch(/^subj_user_[A-Za-z0-9-]+$/);
     if (row.ip_ref !== null) expect(String(row.ip_ref)).toMatch(/^subj_ip_[0-9a-f-]{36}$/);
     for (const v of values) {
+      const needle = v.trim().toLowerCase();
+      if (needle === "") continue;
       for (const col of ["actor_ref", "ip_ref", "shop_id", "actor_role"]) {
         if (row[col] === null) continue;
-        expect(String(row[col]).toLowerCase().includes(v.trim().toLowerCase()), `${col} carries a submitted value`).toBe(false);
+        expect(String(row[col]).toLowerCase().includes(needle), `${col} carries a submitted value`).toBe(false);
       }
     }
   }
+}
+
+/** The personal values a seeded shop row carries (Ruling 17: name and slug count). */
+async function shopValues(shopId: string): Promise<string[]> {
+  const s = await env.DB.prepare("SELECT name, slug, owner_email FROM shops WHERE id = ?")
+    .bind(shopId)
+    .first<{ name: string; slug: string; owner_email: string }>();
+  expect(s, `no shop ${shopId}`).not.toBeNull();
+  return [s!.name, s!.slug, s!.owner_email];
+}
+
+/** The personal and secret values a stored account carries: name, email and
+ *  its password hash (the seed helper's 1-character placeholder hash is
+ *  skipped, since it would match any row containing that letter). */
+async function userValues(userId: string): Promise<string[]> {
+  const u = await env.DB.prepare("SELECT name, email, password_hash FROM platform_users WHERE id = ?")
+    .bind(userId)
+    .first<{ name: string | null; email: string; password_hash: string }>();
+  expect(u, `no user ${userId}`).not.toBeNull();
+  return [u!.name ?? "", u!.email, u!.password_hash.length > 8 ? u!.password_hash : ""];
+}
+
+/** Stub the email service's outbound Resend call for one test (restored by
+ *  afterEach's vi.restoreAllMocks); any other outbound fetch fails the test. */
+function stubResend(): { key: string; sent: string[] } {
+  const key = secret("resend");
+  testEnv.RESEND_API_KEY = key;
+  const sent: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.startsWith("https://api.resend.com")) throw new Error(`unexpected outbound fetch ${url}`);
+    sent.push(String(init?.body ?? ""));
+    return Response.json({ id: "email-id" });
+  });
+  return { key, sent };
 }
 
 async function seedLoginUser(role: "customer" | "admin" = "customer", shopId: string | null = null) {
@@ -120,7 +157,7 @@ describe("login", () => {
     expect(outcome.via).toBe("api");
     expect(outcome.changes_json).toBeNull();
     expect(outcome.details_json).toBeNull();
-    expectClean(await rowsForRequest(rid(res)), [token, user.email, user.password, user.hash, user.name]);
+    expectClean(await rowsForRequest(rid(res)), [token, user.email, user.password, user.hash, user.name, ...(await shopValues(shopId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -231,7 +268,7 @@ describe("logout", () => {
     expect(outcome.actor_ref).toBe(`subj_user_${userId}`);
     expect(outcome.changes_json).toBeNull();
     expect(outcome.details_json).toBeNull();
-    expectClean(await rowsForRequest(rid(res)), [token, `${userId}@test.local`, "Test admin"]);
+    expectClean(await rowsForRequest(rid(res)), [token, ...(await userValues(userId)), ...(await shopValues(shopId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -325,12 +362,10 @@ describe("register", () => {
        WHEN NEW.action = 'account.verification.send'
        BEGIN SELECT RAISE(ABORT, 'blocked by test'); END`,
     ).run();
+    const form = { name: "Half Recorded", email: `reg-half-${crypto.randomUUID()}@sign-up.test`, password: secret("pw") };
     let res: Response;
     try {
-      res = await dispatch("POST", "/auth/register", {
-        headers: { "CF-Connecting-IP": nextIp() },
-        body: { name: "Half Recorded", email: `reg-half-${crypto.randomUUID()}@sign-up.test`, password: secret("pw") },
-      });
+      res = await dispatch("POST", "/auth/register", { headers: { "CF-Connecting-IP": nextIp() }, body: form });
     } finally {
       await env.DB.prepare("DROP TRIGGER test_block_verification_send").run();
     }
@@ -342,6 +377,7 @@ describe("register", () => {
     expect(await verifyTokenFor(body.data.id)).toBeNull();
     expect(await rowsForRequest(rid(res), "account.create")).toHaveLength(1);
     expect(await rowsForRequest(rid(res), "account.verification.send")).toHaveLength(0);
+    expectClean(await rowsForRequest(rid(res)), [form.name, form.email, form.password, ...(await userValues(body.data.id))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -372,7 +408,57 @@ describe("register", () => {
     expect(JSON.parse(rows[0]!.changes_json as string)).toEqual({ role: [null, "admin"], email_verified: [null, 1] });
     // Operator-provisioned accounts are born verified: no verification step.
     expect(await rowsForRequest(rid(res), "account.verification.send")).toHaveLength(0);
-    expectClean(await rowsForRequest(rid(res)), [name, email, password, dev.token]);
+    expectClean(await rowsForRequest(rid(res)), [
+      name,
+      email,
+      password,
+      dev.token,
+      ...(await userValues(body.data.id)),
+      ...(await userValues(dev.id)),
+      ...(await shopValues(shopId)),
+    ]);
+    expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  it("register with a working mail transport records the verification send as succeeded", async () => {
+    const resend = stubResend();
+    const name = `Sent Newcomer ${crypto.randomUUID().slice(0, 6)}`;
+    const email = `reg-sent-${crypto.randomUUID()}@sign-up.test`;
+    const password = secret("pw");
+    const res = await dispatch("POST", "/auth/register", {
+      headers: { "CF-Connecting-IP": nextIp() },
+      body: { name, email, password },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const body = (await res.json()) as { data: { id: string } };
+    const id = body.data.id;
+    expect(body).toEqual({
+      success: true,
+      data: { id, name, email, role: "customer", verification_email_sent: true },
+    });
+    expect(resend.sent).toHaveLength(1);
+
+    const created = await rowsForRequest(rid(res), "account.create");
+    expect(created).toHaveLength(1);
+    expect(created[0]!.phase).toBe("done");
+    expect(created[0]!.outcome).toBe("succeeded");
+
+    const sends = await rowsForRequest(rid(res), "account.verification.send");
+    expect(sends.map((r) => r.phase)).toEqual(["started", "outcome"]);
+    expect(sends[1]!.outcome).toBe("succeeded");
+    expect(sends[1]!.reason).toBeNull();
+    expect(sends[1]!.parent_id).toBe(sends[0]!.id);
+    expect(sends[1]!.entity_type).toBe("platform_user");
+    expect(sends[1]!.entity_id).toBe(id);
+    expect(sends[1]!.actor_type).toBe("anonymous");
+    expect(sends[1]!.changes_json).toBeNull();
+    expect(sends[1]!.details_json).toBeNull();
+    const verifyToken = await verifyTokenFor(id);
+    expect(verifyToken).not.toBeNull();
+    // The link that went out carries the token; no audit row does.
+    expect(resend.sent[0]).toContain(verifyToken!);
+
+    expectClean(await rowsForRequest(rid(res)), [name, email, password, verifyToken!, resend.key, ...(await userValues(id))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 });
@@ -404,7 +490,7 @@ describe("verify-email", () => {
     const user = await env.DB.prepare("SELECT email_verified FROM platform_users WHERE id = ?").bind(userId).first<{ email_verified: number }>();
     expect(user?.email_verified).toBe(1);
     expect(await env.KV.get(`everify:${token}`)).toBeNull();
-    expectClean(await rowsForRequest(rid(res)), [token, `${userId}@test.local`]);
+    expectClean(await rowsForRequest(rid(res)), [token, ...(await userValues(userId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -418,6 +504,7 @@ describe("verify-email", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.outcome).toBe("succeeded");
     expect(rows[0]!.changes_json).toBeNull();
+    expectClean(await rowsForRequest(rid(res)), [token, ...(await userValues(userId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -463,18 +550,11 @@ describe("resend-verification", () => {
   it("resend-verification records the session user, never the token", async () => {
     const userId = await seedUser("customer", null);
     const session = await tokenFor(userId, "customer", null);
-    testEnv.RESEND_API_KEY = secret("resend");
-    const sent: string[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input instanceof Request ? input.url : input);
-      if (!url.startsWith("https://api.resend.com")) throw new Error(`unexpected outbound fetch ${url}`);
-      sent.push(String(init?.body ?? ""));
-      return Response.json({ id: "email-id" });
-    });
+    const resend = stubResend();
     const res = await dispatch("POST", "/auth/resend-verification", { headers: authHeaders(session) });
     expect(res.status, await res.clone().text()).toBe(200);
     expect(await res.json()).toEqual({ success: true });
-    expect(sent).toHaveLength(1);
+    expect(resend.sent).toHaveLength(1);
 
     const rows = await rowsForRequest(rid(res), "account.verification.send");
     expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
@@ -487,7 +567,7 @@ describe("resend-verification", () => {
     expect(outcome.actor_ref).toBe(`subj_user_${userId}`);
     const verifyToken = await verifyTokenFor(userId);
     expect(verifyToken).not.toBeNull();
-    expectClean(await rowsForRequest(rid(res)), [session, verifyToken!, `${userId}@test.local`]);
+    expectClean(await rowsForRequest(rid(res)), [session, verifyToken!, resend.key, ...(await userValues(userId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -500,6 +580,9 @@ describe("resend-verification", () => {
     expect(rows.map((r) => r.phase)).toEqual(["started", "outcome"]);
     expect(rows[1]!.outcome).toBe("failed");
     expect(rows[1]!.reason).toBe("not_configured");
+    const verifyToken = await verifyTokenFor(userId);
+    expect(verifyToken).not.toBeNull();
+    expectClean(await rowsForRequest(rid(res)), [session, verifyToken!, ...(await userValues(userId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -570,7 +653,15 @@ describe("invite accept", () => {
       .bind(`subj_user_${user!.id}`)
       .first<{ kind: string; user_id: string }>();
     expect(subject).toEqual({ kind: "user", user_id: user!.id });
-    expectClean(await rowsForRequest(rid(res)), [name, password, invite.email, invite.token, body.data.token]);
+    expectClean(await rowsForRequest(rid(res)), [
+      name,
+      password,
+      invite.email,
+      invite.token,
+      body.data.token,
+      ...(await userValues(user!.id)),
+      ...(await shopValues(shopId)),
+    ]);
     expect(await gapRowsFor(rid(res))).toBe(0);
 
     // The same acceptance with no way to record it: none of the four writes happen.
@@ -717,7 +808,7 @@ describe("Stripe webhook", () => {
       stripe_payment_status: ["unpaid", "paid"],
     });
     expect(JSON.parse(row.details_json as string)).toEqual({ event_id: eventId, event_type: "checkout.session.completed" });
-    expectClean(rows, [sessionId, `owner-${inviteId}@webhook.test`]);
+    expectClean(rows, [sessionId, `owner-${inviteId}@webhook.test`, ...(await shopValues(shopId))]);
   });
 
   it("checkout without metadata records a refused webhook and changes nothing", async () => {
@@ -773,6 +864,31 @@ describe("Stripe webhook", () => {
     expect(rows[0]!.entity_id).toBe(shopId);
   });
 
+  it("checkout never activates an invite of a different shop named in the metadata", async () => {
+    const paying = await seedAwaitingPayment();
+    const other = await seedAwaitingPayment();
+    const eventId = `evt_${crypto.randomUUID()}`;
+    const result = await handleCheckoutSessionCompleted(
+      env.DB,
+      { id: paying.sessionId, metadata: { shop_id: paying.shopId, invite_id: other.inviteId } },
+      systemRecorder(),
+      eventId,
+    );
+    // The answer is unchanged: the paying shop is marked paid.
+    expect(result).toEqual({ activated: true });
+    expect(await paymentState(paying.shopId, paying.inviteId)).toEqual({ status: "pending", stripe_payment_status: "paid", invite_active: 0 });
+    // The other shop's invite is untouched, and so is the other shop.
+    expect(await paymentState(other.shopId, other.inviteId)).toEqual({
+      status: "awaiting_payment",
+      stripe_payment_status: "unpaid",
+      invite_active: 0,
+    });
+    const rows = await rowsForEvent(eventId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.shop_id).toBe(paying.shopId);
+    expectClean(rows, [paying.sessionId, other.sessionId, ...(await shopValues(other.shopId))]);
+  });
+
   it("a signed checkout event records one system entry and no gap", async () => {
     const { shopId, sessionId, inviteId } = await seedAwaitingPayment();
     const eventId = `evt_${crypto.randomUUID()}`;
@@ -791,12 +907,18 @@ describe("Stripe webhook", () => {
     expect(rows[0]!.via).toBe("webhook");
     expect(rows[0]!.shop_id).toBe(shopId);
     expect(JSON.parse(rows[0]!.details_json as string)).toEqual({ event_id: eventId, event_type: "checkout.session.completed" });
-    expectClean(rows, [sessionId]);
+    expectClean(rows, [sessionId, `owner-${inviteId}@webhook.test`, ...(await shopValues(shopId))]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
   it("another verified event type records handled false", async () => {
-    const res = await signed({ id: `evt_${crypto.randomUUID()}`, type: "customer.created", data: { object: { id: `cus_${crypto.randomUUID()}` } } });
+    const customerId = `cus_${crypto.randomUUID()}`;
+    const customerEmail = `stripe-customer-${crypto.randomUUID()}@webhook.test`;
+    const res = await signed({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "customer.created",
+      data: { object: { id: customerId, email: customerEmail } },
+    });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ received: true });
     const rows = await rowsForRequest(rid(res));
@@ -806,6 +928,7 @@ describe("Stripe webhook", () => {
     expect(rows[0]!.outcome).toBe("succeeded");
     expect(rows[0]!.entity_id).toBeNull();
     expect(JSON.parse(rows[0]!.details_json as string)).toEqual({ event_type: "customer.created", handled: false });
+    expectClean(rows, [customerId, customerEmail]);
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
@@ -823,7 +946,7 @@ describe("Stripe webhook", () => {
     await handleCheckoutSessionCompleted(env.DB, { id: sessionId, metadata: { shop_id: shopId, invite_id: inviteId } }, systemRecorder(), oddId);
     const entry = (await entriesFor({ action: "payment.stripe.webhook", entityId: shopId }))[0]!;
     expect(JSON.parse(entry.details_json as string)).toEqual({ event_id: null, event_type: "checkout.session.completed" });
-    expectClean([entry], [oddId]);
+    expectClean([entry], [oddId, sessionId, `owner-${inviteId}@webhook.test`, ...(await shopValues(shopId))]);
   });
 
   it("a bad signature writes nothing", async () => {

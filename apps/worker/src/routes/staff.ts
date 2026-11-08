@@ -62,7 +62,7 @@ staff.post("/", requireShopRole("admin"), async (c) => {
   }
 
   // Reject a duplicate email up front with a clear 409 instead of letting the
-  // createUser unique-constraint violation surface as an opaque 500.
+  // platform_users email unique-constraint violation surface as an opaque 500.
   const existingUser = await getUserByEmail(c.env.DB, body.email);
   if (existingUser) {
     return c.json({ success: false, error: "Email already registered" }, 409);
