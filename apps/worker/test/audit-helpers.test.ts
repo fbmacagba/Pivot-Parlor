@@ -28,7 +28,8 @@ describe("expectNoPersonalData", () => {
   });
 
   it("throws on a row missing a column", () => {
-    const { reason: _dropped, ...partial } = row();
+    const partial = row();
+    delete partial.reason;
     expect(() => expectNoPersonalData(partial, ["Jane Doe"])).toThrow();
   });
 
@@ -38,7 +39,8 @@ describe("expectNoPersonalData", () => {
   });
 
   it("throws on a row missing shop_id", () => {
-    const { shop_id: _dropped, ...partial } = row();
+    const partial = row();
+    delete partial.shop_id;
     expect(() => expectNoPersonalData(partial, ["Jane Doe"])).toThrow();
   });
 

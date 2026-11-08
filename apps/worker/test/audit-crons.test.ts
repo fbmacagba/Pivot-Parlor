@@ -62,7 +62,7 @@ async function chatExists(id: string): Promise<boolean> {
   return row !== null;
 }
 
-function parse(row: Record<string, unknown>, col: "details_json" | "changes_json"): Record<string, any> {
+function parse(row: Record<string, unknown>, col: "details_json" | "changes_json") {
   return JSON.parse(String(row[col]));
 }
 
@@ -148,7 +148,7 @@ describe("08:00 reminders", () => {
     let batches = 0;
     const db = new Proxy(env.DB, {
       get(target, prop) {
-        const value = (target as any)[prop];
+        const value = Reflect.get(target, prop);
         if (prop === "batch") {
           return (...args: unknown[]) => {
             batches++;
