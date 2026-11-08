@@ -2,7 +2,7 @@
  * pivot-parlor-text — Consumes site-text-queue: OpenRouter copy → KV gen:{jobId}:text → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
-import { chatComplete, type ProviderKeys } from "@repo/llm";
+import { chatComplete, recordAiUsage, type ProviderKeys } from "@repo/llm";
 
 export interface Env {
   DB: D1Database;
@@ -92,14 +92,16 @@ function parseStageMessage(body: unknown): StageMessage | null {
 }
 
 /** One JSON-only completion through the shared client (HTTP retries and the
- *  effort retry live there). */
+ *  effort retry live there). Every answered call is written to the cost log,
+ *  valid output or not: the tokens were spent either way. */
 async function textJson(
   jobId: string,
   keys: ProviderKeys,
   model: string,
   system: string,
   user: string,
-  effort?: TextEffort
+  effort: TextEffort | undefined,
+  costLog: { env: Pick<Env, "DB" | "KV">; shopId: string }
 ): Promise<string> {
   const result = await chatComplete(
     {
@@ -116,6 +118,14 @@ async function textJson(
   console.log(
     `[${jobId}] [pivot-parlor-text] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
   );
+  await recordAiUsage(costLog.env, {
+    shopId: costLog.shopId,
+    workerName: "pivot-parlor-text",
+    modelId: model,
+    usageType: "site_text",
+    usage: result.usage,
+    jobId,
+  });
   return result.text;
 }
 
@@ -293,7 +303,7 @@ Return JSON:
       console.warn(`[${jobId}] [pivot-parlor-text] ${textModel} failed, falling back to default model ${model}`);
     }
     try {
-      const raw = await textJson(jobId, keys, model, system, user, effort);
+      const raw = await textJson(jobId, keys, model, system, user, effort, { env, shopId: msg.shopId });
       const parsed: unknown = JSON.parse(raw);
       if (validateTextOut(parsed)) {
         parsed.services = servicesFromSource(research, parsed.services);

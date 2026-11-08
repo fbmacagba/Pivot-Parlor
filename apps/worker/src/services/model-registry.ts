@@ -21,16 +21,20 @@ import {
   type ModelKind,
   type ModelRoute,
 } from "@repo/utils";
-import { parseModelId, priceTwin, type ProviderKeys } from "@repo/llm";
+import { MODELS_KV_KEY, MODELS_LAST_GOOD_KV_KEY, parseModelId, priceTwin, type ProviderKeys } from "@repo/llm";
 
 export type { TextEffort };
 
 /** Default model for the theme generator (site pipeline default lives in shops.ts). */
 export const DEFAULT_THEME_MODEL = "anthropic/claude-sonnet-5";
 
-export const MODELS_KV_KEY = "ai:models:v3";
-/** Last successful build, no expiry: the per-group fallback when a vendor fetch fails. */
-export const MODELS_LAST_GOOD_KV_KEY = "ai:models:v3:last";
+/**
+ * KV keys for the served list. MODELS_LAST_GOOD_KV_KEY is the last successful
+ * build, with no expiry: the per-group fallback when a vendor fetch fails.
+ * Defined in @repo/llm because the research and text workers read the same
+ * list to price their calls for the cost log.
+ */
+export { MODELS_KV_KEY, MODELS_LAST_GOOD_KV_KEY };
 export const MODELS_KV_TTL = 3600; // 1h — pricing moves slowly; avoids hammering three catalogues
 export const DEGRADED_KV_TTL = 60; // feed down: retry soon, but not on every request
 const FETCH_TIMEOUT_MS = 10_000;
