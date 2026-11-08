@@ -240,17 +240,21 @@ describe("deposit sweep audit", () => {
     const s = await setupShop({ deposits: true });
     const id = await bookedId(await book(s));
     await age(id);
-    // The entry prepares, so the guarded batch fails at commit; the re-read
-    // still shows pending, so the original error propagates and the cancel
-    // rolled back with it.
-    await expect(withAuditOff(() => sweepExpiredDepositBookings(env.DB))).rejects.toThrow();
-    expect(await statusOf(id)).toBe("pending");
-    const tx = await env.DB.prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit'")
-      .bind(id)
-      .first<{ status: string }>();
-    expect(tx?.status).toBe("pending");
-    // The sweep is global: take this stale row out of play for later tests.
-    await env.DB.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(id).run();
+    try {
+      // The entry prepares, so the guarded batch fails at commit; the re-read
+      // still shows pending, so the original error propagates and the cancel
+      // rolled back with it.
+      await expect(withAuditOff(() => sweepExpiredDepositBookings(env.DB))).rejects.toThrow();
+      expect(await statusOf(id)).toBe("pending");
+      const tx = await env.DB.prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit'")
+        .bind(id)
+        .first<{ status: string }>();
+      expect(tx?.status).toBe("pending");
+    } finally {
+      // The sweep is global: take this stale row out of play for later tests,
+      // even when an assertion above failed.
+      await env.DB.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(id).run();
+    }
   });
 
   it("the sweep records a cancel per expired booking as system via cron", async () => {
