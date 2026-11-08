@@ -34,8 +34,6 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PATCH /api/shops/:shopId/settings": "pending",
   "PATCH /api/shops/:shopId/walkin/:entryId": "pending",
   "PATCH /api/waitlist/:id/status": "pending",
-  "POST /api/bookings": "pending",
-  "POST /api/bookings/:bookingId/abandon": "pending",
   "POST /api/contact": "pending",
   "POST /api/invites/:token/accept": "pending",
   "POST /api/me/bookings/:bookingId/cancel": "pending",
@@ -86,7 +84,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PUT /api/shops/:shopId/suppliers/:supplierId": "pending",
   "PUT /api/staff/me/bookings/:bookingId/status": "pending",
 
-  // .all() proxies: audit ownership (proxy hop vs booking worker) is decided in Plan 3.
+  // Plan 3: forwarded to the booking worker; the booking worker records them, and the hop becomes exempt then.
+  "POST /api/bookings": "pending",
+  "POST /api/bookings/:bookingId/abandon": "pending",
   "ALL /api/shops/:shopId/connect/:action": "pending",
   "ALL /api/shops/:shopId/sales": "pending",
   "ALL /api/shops/:shopId/sales/:saleId": "pending",

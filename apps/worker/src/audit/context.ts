@@ -7,6 +7,7 @@ import {
   type AuditActor,
   type AuditEntryInput,
   type AuditRecorder,
+  type AuditRunResult,
   type Via,
 } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
@@ -30,32 +31,59 @@ const ROLE_TO_ACTOR: Record<string, ActorType> = {
 
 type Ctx = Context<{ Bindings: Bindings }>;
 
-export function actorFrom(c: Ctx): AuditActor {
-  const user = c.get("user") as JWTUser | undefined;
-  const ip = c.req.header("CF-Connecting-IP") ?? null;
-  if (!user) return { type: "anonymous", ip };
+/** The platform itself: crons, the queue consumer, and system-driven steps. */
+export const SYSTEM_ACTOR: AuditActor = Object.freeze({ type: "system" as const });
+
+/** The actor for a known user, for routes where no session is on the context
+ *  yet (a sign-in, a registration, an invite acceptance). */
+export function actorForUser(user: { id: string; role: string; shop_id?: string | null }, ip: string | null): AuditActor {
   return {
     type: ROLE_TO_ACTOR[user.role] ?? "anonymous",
-    userId: user.sub,
+    userId: user.id,
     role: user.role,
     shopId: user.shop_id ?? null,
     ip,
   };
 }
 
-export function auditFor(c: Ctx, via: Via = "api"): AuditRecorder {
+export function actorFrom(c: Ctx): AuditActor {
+  const user = c.get("user") as JWTUser | undefined;
+  const ip = c.req.header("CF-Connecting-IP") ?? null;
+  if (!user) return { type: "anonymous", ip };
+  return actorForUser({ id: user.sub, role: user.role, shop_id: user.shop_id }, ip);
+}
+
+/** A recorder for this request. `actor`, when given, replaces the one read
+ *  from the session; `auditWritten` is still set once an entry commits. */
+export function auditFor(c: Ctx, via: Via = "api", actor?: AuditActor): AuditRecorder {
   return createAuditRecorder({
     db: c.env.DB,
     worker: WORKER_NAME,
     via,
-    actor: actorFrom(c),
+    actor: actor ?? actorFrom(c),
     requestId: c.get("requestId") ?? null,
     onWrite: () => c.set("auditWritten", true),
   });
 }
 
 export function systemAudit(db: D1Database, via: Via, requestId: string | null = null): AuditRecorder {
-  return createAuditRecorder({ db, worker: WORKER_NAME, via, actor: { type: "system" }, requestId });
+  return createAuditRecorder({ db, worker: WORKER_NAME, via, actor: SYSTEM_ACTOR, requestId });
+}
+
+/** `run()` outcome from the handler's Response, the same split the gap guard
+ *  uses: below 400 succeeded, 4xx refused, 5xx failed, with `HTTP <status>`
+ *  as the reason from 400 up. `extra(res)` merges over the result. */
+export function statusOutcome(
+  extra?: (res: Response) => Partial<AuditRunResult>
+): (res: Response) => AuditRunResult {
+  return (res) => {
+    const status = res.status;
+    return {
+      outcome: status >= 500 ? "failed" : status >= 400 ? "refused" : "succeeded",
+      reason: status >= 400 ? `HTTP ${status}` : null,
+      ...extra?.(res),
+    };
+  };
 }
 
 export function auditRefused(c: Ctx): Response {
@@ -71,10 +99,11 @@ export function auditRefused(c: Ctx): Response {
 export async function batchWithAudit(
   c: Ctx,
   changes: D1PreparedStatement[],
-  input: AuditEntryInput
+  input: AuditEntryInput,
+  opts?: { via?: Via; actor?: AuditActor }
 ): Promise<Response | null> {
   try {
-    await auditFor(c).batch(changes, input);
+    await auditFor(c, opts?.via, opts?.actor).batch(changes, input);
   } catch (err) {
     if (err instanceof AuditWriteError) return auditRefused(c);
     throw err;

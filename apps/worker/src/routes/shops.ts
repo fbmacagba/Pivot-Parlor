@@ -40,7 +40,7 @@ import {
   buildServiceImagePrompt,
 } from "@repo/utils";
 import { AuditWriteError, userSubjectId } from "@repo/audit";
-import { auditFor, auditRefused, batchWithAudit } from "../audit/context.js";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
 import { buildSiteData, siteDesignIntent, siteWebsiteStatus } from "../lib/siteData.js";
@@ -254,14 +254,6 @@ shops.get("/:shopId/site-candidate", authMiddleware, requireShopRole("admin"), a
  *  before anything is recorded. */
 const CANDIDATE_JOB_ID = /^[A-Za-z0-9-]{1,64}$/;
 
-/** Audit outcome for a site-candidate response: 4xx is a refusal and 5xx a
- *  failure, the same split the gap guard uses. */
-const candidateOutcome = (jobId: string) => (res: Response) => ({
-  outcome: res.status >= 500 ? ("failed" as const) : res.status >= 400 ? ("refused" as const) : ("succeeded" as const),
-  reason: res.status < 400 ? null : `HTTP ${res.status}`,
-  details: { job_id: jobId },
-});
-
 shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("admin"), async (c) => {
   const shop = await shopForReview(c);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
@@ -323,7 +315,7 @@ shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("a
         console.log(`[site-candidate] published job=${jobId} shop=${shop.id} columns=${entries.length}`);
         return c.json({ success: true, data: { published: true, job_id: jobId } });
       },
-      candidateOutcome(jobId),
+      statusOutcome(() => ({ details: { job_id: jobId } })),
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
@@ -357,7 +349,7 @@ shops.delete("/:shopId/site-candidate", authMiddleware, requireShopRole("admin")
         console.log(`[site-candidate] discarded job=${jobId} shop=${shop.id}`);
         return c.json({ success: true, data: { discarded: true, job_id: jobId } });
       },
-      candidateOutcome(jobId),
+      statusOutcome(() => ({ details: { job_id: jobId } })),
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
