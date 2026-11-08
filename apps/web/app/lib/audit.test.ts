@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ACTION_GROUPS,
   actionLabel,
   auditExportErrorHtml,
   auditQuery,
@@ -35,6 +36,23 @@ describe("audit page helpers", () => {
   });
   it("labels a Plan 2 action", () => {
     expect(actionLabel("inventory.po.receive")).toBe("Stock received");
+  });
+  it("labels every Plan 3 action", () => {
+    const actions = [
+      "shop.setup.complete", "day.open", "day.close", "booking.check_in", "booking.checkout",
+      "pos.void", "payment.connect.onboard", "payment.connect.sync", "platform.alert.resolve",
+    ];
+    for (const a of actions) expect(actionLabel(a), a).not.toBe(a);
+    expect(actionLabel("day.open")).toBe("Shop opened for the day");
+    expect(actionLabel("payment.connect.sync")).toBe("Payout account confirmed");
+  });
+  it("groups till, opening and closing, and platform alerts", () => {
+    const values = ACTION_GROUPS.map((g) => g.value);
+    expect(values).toEqual(expect.arrayContaining(["pos.", "day.", "platform."]));
+    expect(ACTION_GROUPS.find((g) => g.value === "pos.")!.label).toBe("Till");
+    expect(ACTION_GROUPS.find((g) => g.value === "day.")!.label).toBe("Opening and closing");
+    expect(ACTION_GROUPS.find((g) => g.value === "platform.")!.label).toBe("Platform alerts");
+    expect(values.indexOf("pos.")).toBe(values.indexOf("payment.") + 1);
   });
   it("labels sign-in and sign-out without claiming success (refused rows share the action)", () => {
     expect(actionLabel("auth.login")).toBe("Sign-in");

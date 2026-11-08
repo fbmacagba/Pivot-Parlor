@@ -26,6 +26,11 @@ export const AUDIT_ACTIONS = [
   "waitlist.join", "waitlist.update", "waitlist.notify",
   "review.create", "enquiry.create", "staff.time_off.request",
   "booking.reminder", "booking.eod_summary", "data.retention",
+  // Plan 3: booking worker routes.
+  "shop.setup.complete", "day.open", "day.close",
+  "booking.check_in", "booking.checkout", "pos.void",
+  "payment.connect.onboard", "payment.connect.sync",
+  "platform.alert.resolve",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

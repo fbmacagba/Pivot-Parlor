@@ -33,6 +33,9 @@ export interface AuditRunResult {
   details?: Record<string, unknown> | null;
   changes?: Record<string, [unknown, unknown]> | null;
   entityId?: string | null;
+  /** Known only after the work ran (e.g. a webhook's shop); the started row keeps the input's. */
+  shopId?: string | null;
+  entityType?: string | null;
 }
 
 export interface AuditRecorder {
@@ -247,6 +250,8 @@ export function createAuditRecorder(base: RecorderBase): AuditRecorder {
         details: extra.details ?? input.details ?? null,
         changes: extra.changes ?? input.changes ?? null,
         entityId: extra.entityId ?? input.entityId ?? null,
+        shopId: extra.shopId ?? input.shopId ?? null,
+        entityType: extra.entityType ?? input.entityType ?? null,
         parentId: startedId,
       });
       return result;
