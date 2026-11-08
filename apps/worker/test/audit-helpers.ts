@@ -48,10 +48,12 @@ export async function withAuditOff<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-const HASHED_TEXT_COLUMNS = ["changes_json", "details_json", "reason", "entity_id"] as const;
+const HASHED_TEXT_COLUMNS = ["changes_json", "details_json", "reason", "entity_id", "shop_id"] as const;
 
 /** Assert that none of the submitted personal or free-text `values` reached a
  *  hashed, 6-year column of `row` (a full audit_log row, e.g. SELECT *).
+ *  `shop_id` is checked too: a developer's raw `:shopId` URL text must never
+ *  land there unresolved.
  *
  *  Fails closed:
  *  - every checked column must be a key of `row` (null is fine; an absent key

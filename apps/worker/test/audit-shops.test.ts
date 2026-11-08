@@ -216,7 +216,9 @@ describe("shop update", () => {
     expect(rows.results[1]!.changes_json).toBeNull();
     expect(JSON.parse(rows.results[1]!.details_json as string)).toEqual({ fields: ["is_active"] });
     for (const row of rows.results) expectNoPersonalData(row, ["some-odd-text-ZQX"]);
-    expect(res2.status).toBeLessThan(600);
+    // Today's status: is_active has no CHECK, so the handler writes the text
+    // and answers 200, exactly as before the audit work.
+    expect(res2.status).toBe(200);
   });
 
   it("shop update with an unchanged value records no false change", async () => {

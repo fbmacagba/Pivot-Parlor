@@ -13,7 +13,7 @@ import {
   setServiceProductsStmts,
   getShopSiteByShopId,
 } from "../db/queries.js";
-import { batchWithAudit } from "../audit/context.js";
+import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { normalizeServiceName, serviceDescriptionsByName } from "../lib/serviceCopy.js";
 import { authMiddleware } from "../middleware/auth.js";
@@ -107,6 +107,17 @@ services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
 
   const id = crypto.randomUUID();
   const category = body.category ?? null;
+  // For the entry only (the insert is unchanged): duration_min is checked
+  // only for presence, so a value that is not an integer is named in
+  // details.fields and never recorded.
+  const durationOk = Number.isInteger(body.duration_min);
+  // Developers pass requireShopRole without a shop check: the entry records
+  // the shop only once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
+  const details = {
+    ...(durationOk ? {} : { fields: ["duration_min"] }),
+    ...(auditShop ? {} : UNRESOLVED_SHOP),
+  };
   const refused = await batchWithAudit(
     c,
     [
@@ -122,15 +133,16 @@ services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
     {
       action: "service.create",
       outcome: "succeeded",
-      shopId,
+      shopId: auditShop,
       entityType: "service",
       entityId: id,
       changes: fieldChanges(null, {
         name: body.name,
-        duration_min: body.duration_min,
+        ...(durationOk ? { duration_min: body.duration_min } : {}),
         price_pence: body.price_pence,
         category,
       }).changes,
+      ...(Object.keys(details).length > 0 ? { details } : {}),
     },
   );
   if (refused) return refused;
@@ -166,7 +178,28 @@ services.put("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) 
     category: body.category,
     is_active: (body as { is_active?: number }).is_active,
   };
-  const { changes, fields: changed } = fieldChanges(svc as unknown as Record<string, unknown>, fields);
+  // For the entry only (the update writes `fields` as submitted, unchanged):
+  // is_active true/1 and false/0 are normalised as in the shop PATCH, and an
+  // is_active or a duration_min of any other shape (duration_min must be an
+  // integer) is named in details.fields without its value.
+  const forAudit: Record<string, unknown> = { ...fields };
+  const namedOnly: string[] = [];
+  if (fields.is_active !== undefined) {
+    const v: unknown = fields.is_active;
+    if (v === true || v === 1) forAudit.is_active = 1;
+    else if (v === false || v === 0) forAudit.is_active = 0;
+    else {
+      delete forAudit.is_active;
+      namedOnly.push("is_active");
+    }
+  }
+  if (fields.duration_min !== undefined && !Number.isInteger(fields.duration_min)) {
+    delete forAudit.duration_min;
+    namedOnly.push("duration_min");
+  }
+  const diff = fieldChanges(svc as unknown as Record<string, unknown>, forAudit);
+  const changes = diff.changes;
+  const changed = [...diff.fields, ...namedOnly].sort();
   const refused = await batchWithAudit(
     c,
     [updateServiceStmt(c.env.DB, serviceId, fields)].filter((s) => s !== null),
@@ -253,7 +286,8 @@ services.delete("/:serviceId", authMiddleware, requireShopRole("admin"), async (
     shopId,
     entityType: "service",
     entityId: serviceId,
-    changes: { is_active: [svc.is_active, 0] },
+    // Diffed, so deleting an already inactive service records no change.
+    changes: fieldChanges(svc as unknown as Record<string, unknown>, { is_active: 0 }).changes,
   });
   if (refused) return refused;
   return c.json({ success: true });

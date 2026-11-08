@@ -4,7 +4,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { dispatch } from "./request";
 import { authHeaders, seedShop, seedStaff } from "./helpers";
-import { adminToken, entriesFor, gapRowsFor, withAuditOff } from "./audit-helpers";
+import { adminToken, entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
 
 async function setup() {
   const shopId = await seedShop("Audit Services Shop");
@@ -104,6 +104,82 @@ describe("service audit entries", () => {
     expect(entry!.entity_type).toBe("service_products");
     expect(JSON.parse(entry!.details_json as string)).toEqual({ product_count: 2 });
     expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  it("deleting an already inactive service records no change", async () => {
+    const { shopId, headers } = await setup();
+    const id = await addService(shopId);
+    await env.DB.prepare("UPDATE services SET is_active = 0 WHERE id = ?").bind(id).run();
+    const res = await dispatch("DELETE", `/api/shops/${shopId}/services/${id}`, { headers });
+    expect(res.status).toBe(200);
+    const [entry] = await entriesFor({ action: "service.delete", shopId, entityId: id });
+    expect(entry).toBeDefined();
+    expect(entry!.changes_json).toBeNull();
+  });
+
+  it("service update with is_active true on an active service records no change", async () => {
+    const { shopId, headers } = await setup();
+    const id = await addService(shopId);
+    const res = await dispatch("PUT", `/api/shops/${shopId}/services/${id}`, { headers, body: { is_active: true } });
+    expect(res.status).toBe(200);
+    const [entry] = await entriesFor({ action: "service.update", shopId, entityId: id });
+    expect(entry).toBeDefined();
+    expect(entry!.changes_json).toBeNull();
+    expect(entry!.details_json).toBeNull();
+  });
+
+  it("service update with is_active false records 1 to 0", async () => {
+    const { shopId, headers } = await setup();
+    const id = await addService(shopId);
+    const res = await dispatch("PUT", `/api/shops/${shopId}/services/${id}`, { headers, body: { is_active: false } });
+    expect(res.status).toBe(200);
+    const [entry] = await entriesFor({ action: "service.update", shopId, entityId: id });
+    expect(JSON.parse(entry!.changes_json as string)).toEqual({ is_active: [1, 0] });
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ fields: ["is_active"] });
+  });
+
+  it("service update with text in duration_min and is_active names the fields, never the text", async () => {
+    const { shopId, headers } = await setup();
+    const id = await addService(shopId);
+    const durationText = "Call Jemima on 07700900456";
+    const activeText = "Ask for Bartholomew";
+    const res = await dispatch("PUT", `/api/shops/${shopId}/services/${id}`, {
+      headers,
+      body: { duration_min: durationText, is_active: activeText },
+    });
+    // The handler writes what it is given, as it always has.
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [entry] = await entriesFor({ action: "service.update", shopId, entityId: id });
+    expect(entry).toBeDefined();
+    expect(entry!.changes_json).toBeNull();
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ fields: ["duration_min", "is_active"] });
+    expectNoPersonalData(entry!, [durationText, activeText, "Jemima", "Bartholomew"]);
+    expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  it("service update with a fractional duration_min names the field only", async () => {
+    const { shopId, headers } = await setup();
+    const id = await addService(shopId);
+    const res = await dispatch("PUT", `/api/shops/${shopId}/services/${id}`, { headers, body: { duration_min: 45.5 } });
+    expect(res.status).toBe(200);
+    const [entry] = await entriesFor({ action: "service.update", shopId, entityId: id });
+    expect(entry!.changes_json).toBeNull();
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ fields: ["duration_min"] });
+  });
+
+  it("service create with text in duration_min names the field, never the text", async () => {
+    const { shopId, headers } = await setup();
+    const durationText = "Ring Philippa 07700900789";
+    const res = await dispatch("POST", `/api/shops/${shopId}/services`, {
+      headers,
+      body: { name: "Skin fade", duration_min: durationText, price_pence: 2500 },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const [entry] = await entriesFor({ action: "service.create", shopId });
+    expect(entry).toBeDefined();
+    expect(JSON.parse(entry!.changes_json as string)).toEqual({ name: [null, "Skin fade"], price_pence: [null, 2500] });
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ fields: ["duration_min"] });
+    expectNoPersonalData(entry!, [durationText, "Philippa"]);
   });
 
   it("a 400 on a real declared route writes no row", async () => {

@@ -8,6 +8,7 @@ const row = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   details_json: JSON.stringify({ fields: ["display_name"] }),
   reason: null,
   entity_id: "staff-1",
+  shop_id: "shop-1",
   ...over,
 });
 
@@ -28,6 +29,16 @@ describe("expectNoPersonalData", () => {
 
   it("throws on a row missing a column", () => {
     const { reason: _dropped, ...partial } = row();
+    expect(() => expectNoPersonalData(partial, ["Jane Doe"])).toThrow();
+  });
+
+  it("throws on a row whose shop_id carries a value", () => {
+    const leaky = row({ shop_id: "John-Smith-07700900123" });
+    expect(() => expectNoPersonalData(leaky, ["John-Smith-07700900123"])).toThrow();
+  });
+
+  it("throws on a row missing shop_id", () => {
+    const { shop_id: _dropped, ...partial } = row();
     expect(() => expectNoPersonalData(partial, ["Jane Doe"])).toThrow();
   });
 

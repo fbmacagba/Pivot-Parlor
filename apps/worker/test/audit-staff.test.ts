@@ -130,6 +130,88 @@ describe("staff create / update / delete", () => {
     expect(n!.n).toBe(1);
   });
 
+  it("staff create with a non-array service_ids answers 201 as before and links nothing", async () => {
+    const { shopId, headers } = await setup();
+    for (const serviceIds of [5, {}, true]) {
+      const res = await dispatch("POST", `/api/shops/${shopId}/staff`, {
+        headers,
+        body: { display_name: "Odd Services", email: `odd-${crypto.randomUUID()}@quill.test`, service_ids: serviceIds },
+      });
+      expect(res.status, `service_ids ${JSON.stringify(serviceIds)}: ${await res.clone().text()}`).toBe(201);
+      const created = ((await res.json()) as { data: { id: string } }).data;
+      const [entry] = await entriesFor({ action: "staff.create", shopId, entityId: created.id });
+      expect(JSON.parse(entry!.details_json as string).services).toBe(0);
+      const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM staff_services WHERE staff_id = ?").bind(created.id).first<{ n: number }>();
+      expect(n!.n).toBe(0);
+    }
+  });
+
+  it("staff create with a string service_ids fails as before the audit work and leaves no user", async () => {
+    // Pins parity, not a wanted contract: the pre-audit handler crashed with a
+    // 500 here after creating the user and staff rows; now nothing is written.
+    const { shopId, headers } = await setup();
+    const email = `str-${crypto.randomUUID()}@quill.test`;
+    const res = await dispatch("POST", `/api/shops/${shopId}/staff`, {
+      headers,
+      body: { display_name: "String Services", email, service_ids: "abc" },
+    });
+    expect(res.status).toBe(500);
+    const users = await env.DB.prepare("SELECT COUNT(*) AS n FROM platform_users WHERE email = ?").bind(email).first<{ n: number }>();
+    expect(users!.n).toBe(0);
+  });
+
+  it("staff create drops null service ids, so the count equals the links written", async () => {
+    const { shopId, headers } = await setup();
+    const svc = await addService(shopId);
+    const res = await dispatch("POST", `/api/shops/${shopId}/staff`, {
+      headers,
+      body: { display_name: "Null Services", email: `nulls-${crypto.randomUUID()}@quill.test`, service_ids: [svc, null, svc] },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const created = ((await res.json()) as { data: { id: string } }).data;
+    const [entry] = await entriesFor({ action: "staff.create", shopId, entityId: created.id });
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM staff_services WHERE staff_id = ?").bind(created.id).first<{ n: number }>();
+    expect(n!.n).toBe(1);
+    expect(JSON.parse(entry!.details_json as string).services).toBe(n!.n);
+  });
+
+  it("staff update drops null service ids, so the count equals the links written", async () => {
+    const { shopId, headers } = await setup();
+    const staffId = await seedStaff(shopId);
+    const svc = await addService(shopId);
+    const res = await dispatch("PUT", `/api/shops/${shopId}/staff/${staffId}`, {
+      headers,
+      body: { service_ids: [null, svc, svc] },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const [entry] = await entriesFor({ action: "staff.update", shopId, entityId: staffId });
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM staff_services WHERE staff_id = ?").bind(staffId).first<{ n: number }>();
+    expect(n!.n).toBe(1);
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ services: n!.n });
+  });
+
+  it("staff update with a non-array service_ids fails as before the audit work and changes nothing", async () => {
+    // Pins parity, not a wanted contract: the pre-audit handler crashed with a
+    // 500 on a truthy non-array (after its own partial writes); this one still
+    // answers 500, and now nothing is written.
+    const { shopId, headers } = await setup();
+    const staffId = await seedStaff(shopId);
+    const svc = await addService(shopId);
+    await env.DB.prepare("INSERT INTO staff_services (staff_id, service_id) VALUES (?, ?)").bind(staffId, svc).run();
+    for (const serviceIds of [5, {}, "abc"]) {
+      const res = await dispatch("PUT", `/api/shops/${shopId}/staff/${staffId}`, {
+        headers,
+        body: { display_name: "Should Not Stick", service_ids: serviceIds },
+      });
+      expect(res.status, `service_ids ${JSON.stringify(serviceIds)}`).toBe(500);
+    }
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM staff_services WHERE staff_id = ?").bind(staffId).first<{ n: number }>();
+    expect(n!.n).toBe(1);
+    const row = await env.DB.prepare("SELECT display_name FROM staff WHERE id = ?").bind(staffId).first<{ display_name: string }>();
+    expect(row!.display_name).not.toBe("Should Not Stick");
+    expect(await entriesFor({ action: "staff.update", shopId, entityId: staffId })).toEqual([]);
+  });
+
   it("staff update changes nothing when the entry cannot be written", async () => {
     const { shopId, headers } = await setup();
     const staffId = await seedStaff(shopId);
@@ -252,6 +334,44 @@ describe("staff own requests", () => {
     expect(res.status).toBe(201);
     const [entry] = await entriesFor({ action: "staff.time_off.request", shopId });
     expect(JSON.parse(entry!.details_json as string)).toEqual({ days: 1 });
+  });
+
+  it("time off with a rolled-over date (Feb 30) records days null, not an inflated count", async () => {
+    const shopId = await seedShop("Audit Time Off Feb30");
+    const { headers } = await staffSession(shopId);
+    const res = await dispatch("POST", "/api/staff/me/time-off", {
+      headers,
+      body: { from_date: "2027-02-27", to_date: "2027-02-30" },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const [entry] = await entriesFor({ action: "staff.time_off.request", shopId });
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ days: null });
+  });
+
+  it("time off with an impossible month (13) answers 201 as before and records days null", async () => {
+    // Already null before this fix (NaN serialises as null); it guards the
+    // date check itself, which must never throw on such a value.
+    const shopId = await seedShop("Audit Time Off Month13");
+    const { headers } = await staffSession(shopId);
+    const res = await dispatch("POST", "/api/staff/me/time-off", {
+      headers,
+      body: { from_date: "2027-12-30", to_date: "2027-13-01" },
+    });
+    expect(res.status, await res.clone().text()).toBe(201);
+    const [entry] = await entriesFor({ action: "staff.time_off.request", shopId });
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ days: null });
+  });
+
+  it("time off across a month end counts calendar days", async () => {
+    const shopId = await seedShop("Audit Time Off Month End");
+    const { headers } = await staffSession(shopId);
+    const res = await dispatch("POST", "/api/staff/me/time-off", {
+      headers,
+      body: { from_date: "2027-02-27", to_date: "2027-03-02" },
+    });
+    expect(res.status).toBe(201);
+    const [entry] = await entriesFor({ action: "staff.time_off.request", shopId });
+    expect(JSON.parse(entry!.details_json as string)).toEqual({ days: 4 });
   });
 
   it("time off changes nothing when the entry cannot be written", async () => {

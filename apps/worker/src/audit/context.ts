@@ -11,6 +11,7 @@ import {
   type Via,
 } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
+import { getShopById } from "../db/queries.js";
 import type { JWTUser } from "../middleware/auth.js";
 
 declare module "hono" {
@@ -90,6 +91,22 @@ export function statusOutcome(
       ...extra?.(res),
     };
   };
+}
+
+/** `details.shop_param` for an entry whose `:shopId` param named no shop. */
+export const UNRESOLVED_SHOP = Object.freeze({ shop_param: "unresolved" as const });
+
+/**
+ * For an entry only: the shop a `:shopId` URL param names, as its DB id, or
+ * null when no shop has that id. `requireShopRole` lets developers through
+ * without checking the shop, so the raw param is caller text and must never
+ * reach `shop_id` or `entity_id` (hashed, locked for 6 years). Where this
+ * returns null, record `shopId: null` plus `UNRESOLVED_SHOP` in details.
+ * The handler's own reads and writes keep using the param, so no response
+ * changes.
+ */
+export async function auditShopId(c: Ctx, param: string): Promise<string | null> {
+  return (await getShopById(c.env.DB, param))?.id ?? null;
 }
 
 export function auditRefused(c: Ctx): Response {

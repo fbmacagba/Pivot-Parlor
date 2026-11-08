@@ -1144,10 +1144,6 @@ export function createServiceStmt(db: D1Database, svc: NewService) {
     );
 }
 
-export function createService(db: D1Database, svc: NewService) {
-  return createServiceStmt(db, svc).run();
-}
-
 type ServiceUpdateFields = {
   name?: string;
   duration_min?: number;
@@ -1185,10 +1181,6 @@ export function updateServiceStmt(db: D1Database, id: string, fields: ServiceUpd
   return db
     .prepare(`UPDATE services SET ${sets.join(", ")} WHERE id = ?`)
     .bind(...vals);
-}
-
-export function updateService(db: D1Database, id: string, fields: ServiceUpdateFields) {
-  return updateServiceStmt(db, id, fields)?.run() ?? Promise.resolve();
 }
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
@@ -1237,10 +1229,6 @@ export function createStaffMemberStmt(db: D1Database, member: NewStaffMember) {
     );
 }
 
-export function createStaffMember(db: D1Database, member: NewStaffMember) {
-  return createStaffMemberStmt(db, member).run();
-}
-
 type StaffUpdateFields = {
   display_name?: string;
   bio?: string | null;
@@ -1280,24 +1268,12 @@ export function updateStaffMemberStmt(db: D1Database, id: string, fields: StaffU
     .bind(...vals);
 }
 
-export function updateStaffMember(db: D1Database, id: string, fields: StaffUpdateFields) {
-  return updateStaffMemberStmt(db, id, fields)?.run() ?? Promise.resolve();
-}
-
 export function addStaffServiceStmt(db: D1Database, staffId: string, serviceId: string) {
   return db
     .prepare(
       "INSERT OR IGNORE INTO staff_services (staff_id, service_id) VALUES (?, ?)",
     )
     .bind(staffId, serviceId);
-}
-
-export function addStaffService(
-  db: D1Database,
-  staffId: string,
-  serviceId: string,
-) {
-  return addStaffServiceStmt(db, staffId, serviceId).run();
 }
 
 export async function getStaffServices(db: D1Database, staffId: string) {
@@ -1343,10 +1319,6 @@ type ScheduleUpsert = {
   end_time: string;
 };
 
-export function upsertSchedule(db: D1Database, schedule: ScheduleUpsert) {
-  return upsertScheduleStmt(db, schedule).run();
-}
-
 export function upsertScheduleStmt(db: D1Database, schedule: ScheduleUpsert) {
   return db
     .prepare(
@@ -1374,14 +1346,6 @@ export function deactivateScheduleDayStmt(
       "UPDATE schedules SET is_active = 0 WHERE staff_id = ? AND day_of_week = ?",
     )
     .bind(staffId, dayOfWeek);
-}
-
-export function deactivateScheduleDay(
-  db: D1Database,
-  staffId: string,
-  dayOfWeek: number,
-) {
-  return deactivateScheduleDayStmt(db, staffId, dayOfWeek).run();
 }
 
 // ─── Bookings ─────────────────────────────────────────────────────────────────
@@ -2545,15 +2509,6 @@ export function setServiceProductsStmts(
         .bind(serviceId, e.product_id, shopId, e.quantity),
     ),
   ];
-}
-
-export async function setServiceProducts(
-  db: D1Database,
-  shopId: string,
-  serviceId: string,
-  entries: Array<{ product_id: string; quantity: number }>,
-) {
-  await db.batch(setServiceProductsStmts(db, shopId, serviceId, entries));
 }
 
 export function getStockTakeById(

@@ -210,20 +210,23 @@ r.put("/:poId", authMiddleware, requireShopRole("admin"), async (c) => {
 
 r.post("/:poId/order", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const poId = c.req.param("poId")!;
+  const notDraft = () => c.json({ success: false, error: "Only draft purchase orders can be marked as ordered" }, 400);
+  // Read first, so the entry carries the row's own id and shop id, never URL
+  // text. An unknown PO (or shop) answers exactly as the UPDATE alone did and
+  // records nothing; the conditional UPDATE below stays the only gate.
+  const po = await getPurchaseOrderById(c.env.DB, shopId, c.req.param("poId")!);
+  if (!po) return notDraft();
   try {
     return await auditFor(c).run(
-      { action: "inventory.po.order", shopId, entityType: "purchase_order", entityId: poId },
+      { action: "inventory.po.order", shopId: po.shop_id, entityType: "purchase_order", entityId: po.id },
       async (): Promise<Response> => {
         const res = await c.env.DB
           .prepare(
             "UPDATE purchase_orders SET status = 'ordered', ordered_at = datetime('now') WHERE id = ? AND shop_id = ? AND status = 'draft'"
           )
-          .bind(poId, shopId)
+          .bind(po.id, po.shop_id)
           .run();
-        if ((res.meta?.changes ?? 0) !== 1) {
-          return c.json({ success: false, error: "Only draft purchase orders can be marked as ordered" }, 400);
-        }
+        if ((res.meta?.changes ?? 0) !== 1) return notDraft();
         return c.json({ success: true });
       },
       statusOutcome((res) => (res.status < 400 ? { changes: { status: ["draft", "ordered"] } } : {})),
@@ -238,13 +241,18 @@ r.post("/:poId/order", authMiddleware, requireShopRole("admin"), async (c) => {
 
 r.post("/:poId/cancel", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const poId = c.req.param("poId")!;
-  // For the entry's `changes` only. The conditional UPDATE below stays the
-  // sole gate, so a second cancel reaches it and records `refused`.
-  const prev = await getPurchaseOrderById(c.env.DB, shopId, poId);
+  const notCancellable = () =>
+    c.json({ success: false, error: "Only draft or ordered purchase orders can be cancelled" }, 400);
+  // Read first: the entry carries the row's own id and shop id (never URL
+  // text) and `changes` its prior status. An unknown PO (or shop) answers
+  // exactly as the UPDATE alone did and records nothing. The conditional
+  // UPDATE below stays the sole gate, so a second cancel reaches it and
+  // records `refused`.
+  const prev = await getPurchaseOrderById(c.env.DB, shopId, c.req.param("poId")!);
+  if (!prev) return notCancellable();
   try {
     return await auditFor(c).run(
-      { action: "inventory.po.cancel", shopId, entityType: "purchase_order", entityId: poId },
+      { action: "inventory.po.cancel", shopId: prev.shop_id, entityType: "purchase_order", entityId: prev.id },
       async (): Promise<Response> => {
         // Once stock has been received (partial/received) the PO is history, not
         // cancellable — corrections go through inventory adjustments.
@@ -252,14 +260,12 @@ r.post("/:poId/cancel", authMiddleware, requireShopRole("admin"), async (c) => {
           .prepare(
             "UPDATE purchase_orders SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('draft','ordered')"
           )
-          .bind(poId, shopId)
+          .bind(prev.id, prev.shop_id)
           .run();
-        if ((res.meta?.changes ?? 0) !== 1) {
-          return c.json({ success: false, error: "Only draft or ordered purchase orders can be cancelled" }, 400);
-        }
+        if ((res.meta?.changes ?? 0) !== 1) return notCancellable();
         return c.json({ success: true });
       },
-      statusOutcome((res) => (res.status < 400 ? { changes: { status: [prev?.status ?? null, "cancelled"] } } : {})),
+      statusOutcome((res) => (res.status < 400 ? { changes: { status: [prev.status, "cancelled"] } } : {})),
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);

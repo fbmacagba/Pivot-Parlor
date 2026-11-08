@@ -98,8 +98,9 @@ const LABELS: Record<string, string> = {
   "account.verify_email": "Email address verified",
   "account.verification.send": "Verification email sent",
   "account.invite.accept": "Invite accepted",
-  "auth.login": "Signed in",
-  "auth.logout": "Signed out",
+  // Not "Signed in": a refused sign-in records the same action.
+  "auth.login": "Sign-in",
+  "auth.logout": "Sign-out",
   "review.create": "Review submitted",
   "enquiry.create": "Enquiry submitted",
   "customer.view": "Customer details viewed",

@@ -5,7 +5,7 @@ import {
   getStaffById,
 } from "../db/queries.js";
 import type { D1PreparedStatement } from "@cloudflare/workers-types";
-import { batchWithAudit } from "../audit/context.js";
+import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
@@ -123,13 +123,22 @@ schedule.put("/", requireShopRole("admin"), async (c) => {
     upserts++;
   }
 
+  // With no staff entries nothing above checks the shop, and developers pass
+  // requireShopRole without a shop check: the entry records the shop only
+  // once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
   const refused = await batchWithAudit(c, stmts, {
     action: "schedule.update",
     outcome: "succeeded",
-    shopId,
+    shopId: auditShop,
     entityType: "schedule",
-    entityId: shopId,
-    details: { entries: upserts, staff_ids: [...staffIds].sort(), days_off: daysOff },
+    entityId: auditShop,
+    details: {
+      entries: upserts,
+      staff_ids: [...staffIds].sort(),
+      days_off: daysOff,
+      ...(auditShop ? {} : UNRESOLVED_SHOP),
+    },
   });
   if (refused) return refused;
 

@@ -5,7 +5,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { dispatch } from "./request";
 import { authHeaders, seedShop } from "./helpers";
-import { adminToken, entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
+import { adminToken, devToken, entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
 
 async function setup() {
   const shopId = await seedShop("Audit Inventory Shop");
@@ -52,6 +52,24 @@ async function makePo(shopId: string, headers: Record<string, string>, productId
 function phasesAndOutcomes(rows: Record<string, unknown>[]) {
   return rows.map((r) => [r.phase, r.outcome ?? null]);
 }
+
+/** Every audit row one request wrote, oldest first. */
+async function rowsForRequest(requestId: string): Promise<Record<string, unknown>[]> {
+  expect(requestId, "rowsForRequest needs the response's X-Request-Id").toMatch(/.+/);
+  const r = await env.DB.prepare("SELECT * FROM audit_log WHERE request_id = ? ORDER BY rowid").bind(requestId).all<Record<string, unknown>>();
+  return r.results ?? [];
+}
+
+/** Fails if any audit row at all carries `value` in a hashed column. The
+ *  caller must have written at least one row first, so this is never vacuous. */
+async function expectNoRowCarries(value: string): Promise<void> {
+  const all = await env.DB.prepare("SELECT * FROM audit_log").all<Record<string, unknown>>();
+  expect(all.results.length, "expectNoRowCarries needs at least one audit row to inspect").toBeGreaterThan(0);
+  for (const row of all.results) expectNoPersonalData(row, [value]);
+}
+
+/** Caller-supplied URL text that must never reach entity_id or shop_id. */
+const SENTINEL = "John-Smith-07700900123";
 
 describe("stock movements and reorder levels", () => {
   it("a manual movement records type and delta with the stock change", async () => {
@@ -437,4 +455,60 @@ describe("stock takes", () => {
     expect(JSON.parse(outcomes[0]!.changes_json as string)).toEqual({ status: ["open", "cancelled"] });
     expect(await gapRowsFor(rid(first))).toBe(0);
   });
+});
+
+describe("guarded transitions read the row before recording", () => {
+  const ROUTES = [
+    { kind: "po", op: "order", error: "Only draft purchase orders can be marked as ordered" },
+    { kind: "po", op: "cancel", error: "Only draft or ordered purchase orders can be cancelled" },
+    { kind: "stock_take", op: "complete", error: "This stock take is not open" },
+    { kind: "stock_take", op: "cancel", error: "This stock take is not open" },
+  ] as const;
+
+  /** A real row for the route's kind (its creation writes audit rows too). */
+  async function realRow(kind: "po" | "stock_take", shopId: string, headers: Record<string, string>) {
+    if (kind === "po") {
+      const productId = await makeProduct(shopId, headers);
+      return { base: "purchase-orders", id: (await makePo(shopId, headers, productId)).id };
+    }
+    const res = await dispatch("POST", `/api/shops/${shopId}/stock-takes`, { headers, body: {} });
+    expect(res.status, await res.clone().text()).toBe(201);
+    return { base: "stock-takes", id: ((await res.json()) as { data: { id: string } }).data.id };
+  }
+
+  for (const { kind, op, error } of ROUTES) {
+    it(`${kind} ${op}: an unknown id answers as before and records nothing`, async () => {
+      const { shopId, headers } = await setup();
+      const { base } = await realRow(kind, shopId, headers);
+      const res = await dispatch("POST", `/api/shops/${shopId}/${base}/${SENTINEL}/${op}`, { headers });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ success: false, error });
+      expect(await rowsForRequest(rid(res))).toEqual([]);
+      await expectNoRowCarries(SENTINEL);
+    });
+
+    it(`${kind} ${op}: a developer's unknown shop id answers as before and records nothing`, async () => {
+      const { shopId, headers } = await setup();
+      const { base, id } = await realRow(kind, shopId, headers);
+      const dev = authHeaders((await devToken()).token);
+      const res = await dispatch("POST", `/api/shops/${SENTINEL}/${base}/${id}/${op}`, { headers: dev });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ success: false, error });
+      expect(await rowsForRequest(rid(res))).toEqual([]);
+      await expectNoRowCarries(SENTINEL);
+    });
+
+    it(`${kind} ${op}: a success records the shop's real id and the row's id`, async () => {
+      const { shopId, headers } = await setup();
+      const { base, id } = await realRow(kind, shopId, headers);
+      const res = await dispatch("POST", `/api/shops/${shopId}/${base}/${id}/${op}`, { headers });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const rows = await rowsForRequest(rid(res));
+      expect(phasesAndOutcomes(rows)).toEqual([["started", null], ["outcome", "succeeded"]]);
+      for (const row of rows) {
+        expect(row.shop_id).toBe(shopId);
+        expect(row.entity_id).toBe(id);
+      }
+    });
+  }
 });

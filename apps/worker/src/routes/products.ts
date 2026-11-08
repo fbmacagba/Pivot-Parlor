@@ -20,7 +20,7 @@ import {
   createSupplierStmt,
   updateSupplierStmt,
 } from "../db/queries.js";
-import { batchWithAudit } from "../audit/context.js";
+import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
@@ -65,16 +65,20 @@ productsRouter.post("/categories", authMiddleware, requireShopRole("admin"), asy
 
   const id = crypto.randomUUID();
   const sortOrder = Number.isInteger(body.sort_order) ? body.sort_order : 0;
+  // Developers pass requireShopRole without a shop check: the entry records
+  // the shop only once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
   const refused = await batchWithAudit(
     c,
     [createProductCategoryStmt(c.env.DB, { id, shop_id: shopId, name, sort_order: sortOrder })],
     {
       action: "product.create",
       outcome: "succeeded",
-      shopId,
+      shopId: auditShop,
       entityType: "product_category",
       entityId: id,
       changes: fieldChanges(null, { name, sort_order: sortOrder }).changes,
+      ...(auditShop ? {} : { details: UNRESOLVED_SHOP }),
     },
   );
   if (refused) return refused;
@@ -492,17 +496,20 @@ suppliersRouter.post("/", authMiddleware, requireShopRole("admin"), async (c) =>
 
   const id = crypto.randomUUID();
   const row = { email: optStr(body.email), phone: optStr(body.phone), notes: optStr(body.notes) };
+  // Developers pass requireShopRole without a shop check: the entry records
+  // the shop only once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
   const refused = await batchWithAudit(
     c,
     [createSupplierStmt(c.env.DB, { id, shop_id: shopId, name, ...row })],
     {
       action: "inventory.supplier.create",
       outcome: "succeeded",
-      shopId,
+      shopId: auditShop,
       entityType: "supplier",
       entityId: id,
       // Names only: every supplier column except is_active is personal or free text.
-      details: { fields: fieldChanges(null, { name, ...row }).fields },
+      details: { fields: fieldChanges(null, { name, ...row }).fields, ...(auditShop ? {} : UNRESOLVED_SHOP) },
     },
   );
   if (refused) return refused;

@@ -523,6 +523,14 @@ staffMeRouter.get("/schedule", async (c) => {
   return c.json({ success: true, data: results });
 });
 
+/** UTC midnight of a YYYY-MM-DD date, or null when it is not a real calendar
+ *  date (month 13, Feb 30): the parsed date must print back as the input. */
+function calendarDateMs(date: string): number | null {
+  const ms = Date.parse(`${date}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10) === date ? ms : null;
+}
+
 /**
  * POST /api/staff/me/time-off
  * Staff submits a time-off request.
@@ -558,7 +566,12 @@ staffMeRouter.post("/time-off", async (c) => {
 
   const id = crypto.randomUUID();
   // Inclusive day count (a one-day request is 1); dates and reason stay out of the entry.
-  const days = Math.round((Date.parse(body.to_date) - Date.parse(body.from_date)) / 86_400_000) + 1;
+  // Only for real calendar dates: the format check above passes 2027-13-01
+  // and 2027-02-30 (which Date.parse rolls over to March), so the count is
+  // null unless both dates round-trip. The response is unchanged either way.
+  const fromMs = calendarDateMs(body.from_date);
+  const toMs = calendarDateMs(body.to_date);
+  const days = fromMs !== null && toMs !== null ? Math.round((toMs - fromMs) / 86_400_000) + 1 : null;
 
   const refused = await batchWithAudit(
     c,

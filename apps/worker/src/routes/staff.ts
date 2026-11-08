@@ -5,7 +5,7 @@ import {
   addStaffServiceStmt, getStaffServices, createUserStmt, getUserByEmail,
 } from "../db/queries.js";
 import { AuditWriteError } from "@repo/audit";
-import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { auditFor, auditRefused, auditShopId, batchWithAudit, statusOutcome, UNRESOLVED_SHOP } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
@@ -75,7 +75,15 @@ staff.post("/", requireShopRole("admin"), async (c) => {
   const password_hash = await hashPassword(tempPassword);
 
   const staffId = crypto.randomUUID();
-  const serviceIds = [...new Set(body.service_ids ?? [])];
+  // The pre-audit gate (`service_ids?.length`): a value with no length, such
+  // as 5 or {}, links nothing and still answers 201. Null members are dropped
+  // (INSERT OR IGNORE skipped them anyway), so `services` counts the links
+  // actually written; a string or other non-array with a length still fails
+  // as it always did (500), now with nothing written.
+  const serviceIds = body.service_ids?.length ? [...new Set(body.service_ids.filter((s) => s != null))] : [];
+  // Developers pass requireShopRole without a shop check: the entry records
+  // the shop only once it resolves (never the raw param).
+  const auditShop = await auditShopId(c, shopId);
 
   // One batch: the user, the staff row, the service links and the audit entry
   // commit together or not at all (no orphan platform_users row).
@@ -96,12 +104,17 @@ staff.post("/", requireShopRole("admin"), async (c) => {
     {
       action: "staff.create",
       outcome: "succeeded",
-      shopId,
+      shopId: auditShop,
       entityType: "staff",
       entityId: staffId,
       changes: { is_active: [null, 1] },
       // Ids and counts only: never the name, email, bio or temporary password.
-      details: { user_id: userId, services: serviceIds.length, temp_password_issued: !body.password },
+      details: {
+        user_id: userId,
+        services: serviceIds.length,
+        temp_password_issued: !body.password,
+        ...(auditShop ? {} : UNRESOLVED_SHOP),
+      },
     },
   );
   if (refused) return refused;
@@ -140,7 +153,11 @@ staff.put("/:staffId", requireShopRole("admin"), async (c) => {
   // Only the columns the update writes, so a stray body key never shows as changed.
   const columns = { display_name: body.display_name, bio: body.bio, speciality };
   const { changes, fields: changed } = fieldChanges(member as unknown as Record<string, unknown>, columns);
-  const serviceIds = body.service_ids ? [...new Set(body.service_ids)] : null;
+  // The pre-audit gate (truthiness): a truthy non-array still fails as it
+  // always did (500), now with nothing written; never mapped to [], which
+  // would wipe the member's services. Null members are dropped, so
+  // `services` counts the links actually written.
+  const serviceIds = body.service_ids ? [...new Set(body.service_ids.filter((s) => s != null))] : null;
 
   const stmts = [
     updateStaffMemberStmt(c.env.DB, staffId, columns),
