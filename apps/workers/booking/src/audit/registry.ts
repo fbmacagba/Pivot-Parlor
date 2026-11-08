@@ -26,7 +26,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /booking/shops/:shopId/sales/:saleId/refund": "payment.refund.issue",
   "POST /booking/shops/:shopId/sales/:saleId/void": "pos.void",
   // Task 7
-  "POST /webhooks/stripe": "pending",
+  "POST /webhooks/stripe": "payment.stripe.webhook",
 };
 
 export const CRON_AUDIT: Record<string, AuditDeclaration> = {
@@ -34,4 +34,4 @@ export const CRON_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plan 3 brings it to 0). */
-export const PENDING_CEILING = 1;
+export const PENDING_CEILING = 0;
