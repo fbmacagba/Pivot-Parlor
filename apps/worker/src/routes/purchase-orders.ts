@@ -18,7 +18,7 @@ import { requireShopRole } from "../middleware/rbac.js";
  * WS-3 Phase 2: purchasing. Lifecycle draft → ordered → (partial) → received,
  * or cancelled while nothing has been received. Receiving is the ONLY place
  * stock enters through a PO: each received line emits a 'receive' movement +
- * level upsert in one batch (applyStockMovement's invariant), updates the
+ * level upsert in one batch (stockMovementStatements' invariant), updates the
  * line's received_qty, refreshes the product/variant cost to the latest paid
  * cost, and recomputes the header status inside the same transaction.
  */

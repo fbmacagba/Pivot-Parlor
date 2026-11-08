@@ -5,6 +5,7 @@ import {
   getProductVariantById,
   stockMovementStatements,
   setReorderLevelsStmt,
+  getReorderLevels,
   getLowStockByShop,
   getStockMovementsByShop,
   getInventoryReport,
@@ -17,7 +18,8 @@ import { requireShopRole } from "../middleware/rbac.js";
 
 /**
  * WS-3 Phase 0: stock. Quantities only ever change through movements
- * (applyStockMovement writes the movement + level atomically). 'sale' and
+ * (stockMovementStatements writes the movement + level, batched with the audit
+ * entry so all three commit or none do). 'sale' and
  * 'consumption' movements are reserved for the POS (Phase 1) and back-bar
  * (Phase 2) flows — they carry money/BOM side-effects, so this manual
  * endpoint refuses them.
@@ -188,18 +190,7 @@ inventoryRouter.put("/reorder", authMiddleware, requireShopRole("admin"), async 
   }
 
   const variantId = body.variant_id ?? null;
-  const current = await (variantId === null
-    ? c.env.DB
-        .prepare(
-          "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1",
-        )
-        .bind(shopId, product.id)
-    : c.env.DB
-        .prepare(
-          "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
-        )
-        .bind(shopId, product.id, variantId)
-  ).first<{ reorder_point: number; reorder_qty: number }>();
+  const current = await getReorderLevels(c.env.DB, shopId, product.id, variantId);
   const { changes, fields } = fieldChanges(current, {
     reorder_point: body.reorder_point,
     reorder_qty: body.reorder_qty,

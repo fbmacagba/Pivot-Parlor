@@ -151,7 +151,10 @@ r.put("/:stockTakeId/items", authMiddleware, requireShopRole("admin", "staff"), 
     shopId,
     entityType: "stock_take",
     entityId: st.id,
-    details: { items: stmts.length },
+    // Count lines in the request (every one passed validation to reach here).
+    // The handler does not dedupe: a product listed twice is two lines, the
+    // later upsert winning, so this is lines submitted, not distinct products.
+    details: { items: body.items.length },
   });
   if (refused) return refused;
   return c.json({ success: true });
@@ -165,8 +168,11 @@ r.post("/:stockTakeId/complete", authMiddleware, requireShopRole("admin"), async
   const user = getUser(c);
 
   // Claim-first (Plan decision 3): started entry, then the claim, then the
-  // movements batch, all inside run(). A crash between the claim and the
-  // movements leaves a started entry with no outcome, which reads as unknown.
+  // movements batch, all inside run(). If the movements batch throws, run()
+  // writes outcome `failed` (reason: the error name) and rethrows, so the
+  // response is a 500 and the stock take stays `completed` with no
+  // adjustments. Only an isolate death between the claim and the outcome
+  // leaves a started entry with no outcome, which reads as unknown.
   let itemsCounted = 0;
   let itemsAdjusted = 0;
   try {

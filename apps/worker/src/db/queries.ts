@@ -2063,8 +2063,9 @@ export function updateProductVariantStmt(
 // ─── Inventory: stock (WS-3 Phase 0) ──────────────────────────────────────────
 //
 // stock_levels is the current quantity; stock_movements is the append-only
-// audit trail. Every quantity change goes through applyStockMovement, which
-// writes both rows in one atomic D1 batch — never UPDATE stock_levels.quantity
+// audit trail. Every quantity change goes through stockMovementStatements,
+// run in ONE atomic D1 batch together with its audit entry (batchWithAudit,
+// or inside an audited run()) — never UPDATE stock_levels.quantity
 // directly. The paired ON CONFLICT targets match the two partial unique
 // indexes from migration 034 (variant vs no-variant rows).
 
@@ -2085,7 +2086,7 @@ export interface StockMovementInput {
 /**
  * The movement + level-upsert statement pair, for callers that need several
  * movements inside ONE db.batch (PO receiving, stock-take close). Single
- * movements should keep using applyStockMovement.
+ * movements as well: pass the statements to batchWithAudit with the entry.
  */
 export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
   const variantId = m.variant_id ?? null;
@@ -2135,11 +2136,32 @@ export function stockMovementStatements(db: D1Database, m: StockMovementInput) {
   return [movement, level];
 }
 
-export async function applyStockMovement(
+export type ReorderLevels = {
+  reorder_point: number;
+  reorder_qty: number;
+};
+
+/** Current reorder thresholds for a product (variantId null) or variant, or null. */
+export function getReorderLevels(
   db: D1Database,
-  m: StockMovementInput,
-) {
-  await db.batch(stockMovementStatements(db, m));
+  shopId: string,
+  productId: string,
+  variantId: string | null,
+): Promise<ReorderLevels | null> {
+  if (variantId === null) {
+    return db
+      .prepare(
+        "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1",
+      )
+      .bind(shopId, productId)
+      .first<ReorderLevels>();
+  }
+  return db
+    .prepare(
+      "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
+    )
+    .bind(shopId, productId, variantId)
+    .first<ReorderLevels>();
 }
 
 /** Reorder thresholds are configuration, not stock: set them without a movement row.

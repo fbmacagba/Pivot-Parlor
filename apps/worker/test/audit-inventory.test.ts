@@ -238,6 +238,7 @@ describe("purchase orders", () => {
     const url = `/api/shops/${shopId}/purchase-orders/${id}/cancel`;
     const first = await dispatch("POST", url, { headers });
     expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ success: true });
     const second = await dispatch("POST", url, { headers });
     expect(second.status).toBe(400);
     expect(await second.json()).toEqual({ success: false, error: "Only draft or ordered purchase orders can be cancelled" });
