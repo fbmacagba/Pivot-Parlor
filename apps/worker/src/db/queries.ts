@@ -1136,16 +1136,16 @@ export function getStaffById(db: D1Database, id: string) {
     .first<DBStaff>();
 }
 
-export function createStaffMember(
-  db: D1Database,
-  member: {
-    id: string;
-    shop_id: string;
-    user_id: string;
-    display_name: string;
-    bio?: string | null;
-  },
-) {
+type NewStaffMember = {
+  id: string;
+  shop_id: string;
+  user_id: string;
+  display_name: string;
+  bio?: string | null;
+};
+
+/** Prepared INSERT for a staff row, for a db.batch() (audit Pattern B). */
+export function createStaffMemberStmt(db: D1Database, member: NewStaffMember) {
   return db
     .prepare(
       "INSERT INTO staff (id, shop_id, user_id, display_name, bio) VALUES (?, ?, ?, ?, ?)",
@@ -1156,21 +1156,23 @@ export function createStaffMember(
       member.user_id,
       member.display_name,
       member.bio ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateStaffMember(
-  db: D1Database,
-  id: string,
-  fields: {
-    display_name?: string;
-    bio?: string | null;
-    is_active?: number;
-    avatar_url?: string | null;
-    speciality?: string | null;
-  },
-) {
+export function createStaffMember(db: D1Database, member: NewStaffMember) {
+  return createStaffMemberStmt(db, member).run();
+}
+
+type StaffUpdateFields = {
+  display_name?: string;
+  bio?: string | null;
+  is_active?: number;
+  avatar_url?: string | null;
+  speciality?: string | null;
+};
+
+/** Prepared UPDATE for a staff row, or null when no field is set. */
+export function updateStaffMemberStmt(db: D1Database, id: string, fields: StaffUpdateFields) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.speciality !== undefined) {
@@ -1193,12 +1195,23 @@ export function updateStaffMember(
     sets.push("avatar_url = ?");
     vals.push(fields.avatar_url);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE staff SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
+}
+
+export function updateStaffMember(db: D1Database, id: string, fields: StaffUpdateFields) {
+  return updateStaffMemberStmt(db, id, fields)?.run() ?? Promise.resolve();
+}
+
+export function addStaffServiceStmt(db: D1Database, staffId: string, serviceId: string) {
+  return db
+    .prepare(
+      "INSERT OR IGNORE INTO staff_services (staff_id, service_id) VALUES (?, ?)",
+    )
+    .bind(staffId, serviceId);
 }
 
 export function addStaffService(
@@ -1206,12 +1219,7 @@ export function addStaffService(
   staffId: string,
   serviceId: string,
 ) {
-  return db
-    .prepare(
-      "INSERT OR IGNORE INTO staff_services (staff_id, service_id) VALUES (?, ?)",
-    )
-    .bind(staffId, serviceId)
-    .run();
+  return addStaffServiceStmt(db, staffId, serviceId).run();
 }
 
 export async function getStaffServices(db: D1Database, staffId: string) {

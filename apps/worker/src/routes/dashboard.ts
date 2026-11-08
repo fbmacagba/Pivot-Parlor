@@ -5,6 +5,8 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
+import { batchWithAudit } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import {
   getBookingById,
   getPlatformRevenueByMonth,
@@ -471,18 +473,28 @@ staffMeRouter.put("/bookings/:bookingId/status", async (c) => {
 
   // Verify booking belongs to this staff member
   const existing = await c.env.DB
-    .prepare("SELECT id FROM bookings WHERE id = ? AND staff_id = ? LIMIT 1")
+    .prepare("SELECT id, status FROM bookings WHERE id = ? AND staff_id = ? LIMIT 1")
     .bind(bookingId, staffId)
-    .first<{ id: string }>();
+    .first<{ id: string; status: string }>();
 
   if (!existing) {
     return c.json({ success: false, error: "Booking not found" }, 404);
   }
 
-  await c.env.DB
-    .prepare("UPDATE bookings SET status = ? WHERE id = ?")
-    .bind(body.status, bookingId)
-    .run();
+  // Unconditional UPDATE, so Pattern B: the entry joins the same batch.
+  const refused = await batchWithAudit(
+    c,
+    [c.env.DB.prepare("UPDATE bookings SET status = ? WHERE id = ?").bind(body.status, bookingId)],
+    {
+      action: "booking.status",
+      outcome: "succeeded",
+      shopId,
+      entityType: "booking",
+      entityId: bookingId,
+      changes: fieldChanges(existing, { status: body.status }).changes,
+    },
+  );
+  if (refused) return refused;
 
   return c.json({ success: true });
 });
@@ -544,14 +556,29 @@ staffMeRouter.post("/time-off", async (c) => {
   }
 
   const id = crypto.randomUUID();
+  // Inclusive day count (a one-day request is 1); dates and reason stay out of the entry.
+  const days = Math.round((Date.parse(body.to_date) - Date.parse(body.from_date)) / 86_400_000) + 1;
 
-  await c.env.DB
-    .prepare(
-      `INSERT INTO staff_time_off (id, shop_id, staff_id, from_date, to_date, reason)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .bind(id, shopId, staffId, body.from_date, body.to_date, body.reason ?? null)
-    .run();
+  const refused = await batchWithAudit(
+    c,
+    [
+      c.env.DB
+        .prepare(
+          `INSERT INTO staff_time_off (id, shop_id, staff_id, from_date, to_date, reason)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(id, shopId, staffId, body.from_date, body.to_date, body.reason ?? null),
+    ],
+    {
+      action: "staff.time_off.request",
+      outcome: "succeeded",
+      shopId,
+      entityType: "staff_time_off",
+      entityId: id,
+      details: { days },
+    },
+  );
+  if (refused) return refused;
 
   return c.json({ success: true, data: { id } }, 201);
 });
