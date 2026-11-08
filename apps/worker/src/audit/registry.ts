@@ -26,7 +26,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   // Plan 2
   "DELETE /api/shops/:shopId/products/:productId": "pending",
   "DELETE /api/shops/:shopId/products/:productId/variants/:variantId": "pending",
-  "DELETE /api/shops/:shopId/services/:serviceId": "pending",
+  "DELETE /api/shops/:shopId/services/:serviceId": "service.delete",
   "DELETE /api/shops/:shopId/staff/:staffId": "pending",
   "DELETE /api/shops/:shopId/walkin": "pending",
   "PATCH /api/me/profile": "pending",
@@ -50,7 +50,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops/:shopId/remove-image": "pending",
   "POST /api/shops/:shopId/reviews": "pending",
   "POST /api/shops/:shopId/save-image": "pending",
-  "POST /api/shops/:shopId/services": "pending",
+  "POST /api/shops/:shopId/services": "service.create",
   "POST /api/shops/:shopId/settings": "pending",
   "POST /api/shops/:shopId/staff": "pending",
   "POST /api/shops/:shopId/staff/:staffId/avatar": "pending",
@@ -76,9 +76,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PUT /api/shops/:shopId/products/:productId/variants/:variantId": "pending",
   "PUT /api/shops/:shopId/products/categories/:categoryId": "pending",
   "PUT /api/shops/:shopId/purchase-orders/:poId": "pending",
-  "PUT /api/shops/:shopId/schedule": "pending",
-  "PUT /api/shops/:shopId/services/:serviceId": "pending",
-  "PUT /api/shops/:shopId/services/:serviceId/products": "pending",
+  "PUT /api/shops/:shopId/schedule": "schedule.update",
+  "PUT /api/shops/:shopId/services/:serviceId": "service.update",
+  "PUT /api/shops/:shopId/services/:serviceId/products": "service.update",
   "PUT /api/shops/:shopId/staff/:staffId": "pending",
   "PUT /api/shops/:shopId/stock-takes/:stockTakeId/items": "pending",
   "PUT /api/shops/:shopId/suppliers/:supplierId": "pending",
@@ -107,4 +107,4 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 71;
+export const PENDING_CEILING = 66;

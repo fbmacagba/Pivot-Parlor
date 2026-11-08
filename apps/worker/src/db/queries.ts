@@ -1,4 +1,4 @@
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { CANDIDATE_COLUMNS } from "../lib/siteCandidate.js";
 
 const CANDIDATE_COLUMN_SET = new Set<string>(CANDIDATE_COLUMNS);
@@ -1042,17 +1042,16 @@ export function getServiceById(db: D1Database, id: string) {
     .first<DBService>();
 }
 
-export function createService(
-  db: D1Database,
-  svc: {
-    id: string;
-    shop_id: string;
-    name: string;
-    duration_min: number;
-    price_pence: number;
-    category?: string | null;
-  },
-) {
+type NewService = {
+  id: string;
+  shop_id: string;
+  name: string;
+  duration_min: number;
+  price_pence: number;
+  category?: string | null;
+};
+
+export function createServiceStmt(db: D1Database, svc: NewService) {
   return db
     .prepare(
       "INSERT INTO services (id, shop_id, name, duration_min, price_pence, category) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1064,21 +1063,23 @@ export function createService(
       svc.duration_min,
       svc.price_pence,
       svc.category ?? null,
-    )
-    .run();
+    );
 }
 
-export function updateService(
-  db: D1Database,
-  id: string,
-  fields: {
-    name?: string;
-    duration_min?: number;
-    price_pence?: number;
-    category?: string | null;
-    is_active?: number;
-  },
-) {
+export function createService(db: D1Database, svc: NewService) {
+  return createServiceStmt(db, svc).run();
+}
+
+type ServiceUpdateFields = {
+  name?: string;
+  duration_min?: number;
+  price_pence?: number;
+  category?: string | null;
+  is_active?: number;
+};
+
+/** Null when no field is set (nothing to update). */
+export function updateServiceStmt(db: D1Database, id: string, fields: ServiceUpdateFields) {
   const sets: string[] = [];
   const vals: unknown[] = [];
   if (fields.name !== undefined) {
@@ -1101,12 +1102,15 @@ export function updateService(
     sets.push("is_active = ?");
     vals.push(fields.is_active);
   }
-  if (sets.length === 0) return Promise.resolve();
+  if (sets.length === 0) return null;
   vals.push(id);
   return db
     .prepare(`UPDATE services SET ${sets.join(", ")} WHERE id = ?`)
-    .bind(...vals)
-    .run();
+    .bind(...vals);
+}
+
+export function updateService(db: D1Database, id: string, fields: ServiceUpdateFields) {
+  return updateServiceStmt(db, id, fields)?.run() ?? Promise.resolve();
 }
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
@@ -1244,17 +1248,20 @@ export async function getScheduleByStaff(db: D1Database, staffId: string) {
   return results;
 }
 
-export function upsertSchedule(
-  db: D1Database,
-  schedule: {
-    id: string;
-    shop_id: string;
-    staff_id: string;
-    day_of_week: number;
-    start_time: string;
-    end_time: string;
-  },
-) {
+type ScheduleUpsert = {
+  id: string;
+  shop_id: string;
+  staff_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+};
+
+export function upsertSchedule(db: D1Database, schedule: ScheduleUpsert) {
+  return upsertScheduleStmt(db, schedule).run();
+}
+
+export function upsertScheduleStmt(db: D1Database, schedule: ScheduleUpsert) {
   return db
     .prepare(
       `INSERT INTO schedules (id, shop_id, staff_id, day_of_week, start_time, end_time)
@@ -1268,11 +1275,10 @@ export function upsertSchedule(
       schedule.day_of_week,
       schedule.start_time,
       schedule.end_time,
-    )
-    .run();
+    );
 }
 
-export function deactivateScheduleDay(
+export function deactivateScheduleDayStmt(
   db: D1Database,
   staffId: string,
   dayOfWeek: number,
@@ -1281,8 +1287,15 @@ export function deactivateScheduleDay(
     .prepare(
       "UPDATE schedules SET is_active = 0 WHERE staff_id = ? AND day_of_week = ?",
     )
-    .bind(staffId, dayOfWeek)
-    .run();
+    .bind(staffId, dayOfWeek);
+}
+
+export function deactivateScheduleDay(
+  db: D1Database,
+  staffId: string,
+  dayOfWeek: number,
+) {
+  return deactivateScheduleDayStmt(db, staffId, dayOfWeek).run();
 }
 
 // ─── Bookings ─────────────────────────────────────────────────────────────────
@@ -2386,13 +2399,13 @@ export async function getServiceProducts(
 }
 
 /** Replace a service's BOM wholesale — delete + insert in one batch. */
-export async function setServiceProducts(
+export function setServiceProductsStmts(
   db: D1Database,
   shopId: string,
   serviceId: string,
   entries: Array<{ product_id: string; quantity: number }>,
-) {
-  const stmts = [
+): D1PreparedStatement[] {
+  return [
     db
       .prepare(
         "DELETE FROM service_products WHERE shop_id = ? AND service_id = ?",
@@ -2406,7 +2419,15 @@ export async function setServiceProducts(
         .bind(serviceId, e.product_id, shopId, e.quantity),
     ),
   ];
-  await db.batch(stmts);
+}
+
+export async function setServiceProducts(
+  db: D1Database,
+  shopId: string,
+  serviceId: string,
+  entries: Array<{ product_id: string; quantity: number }>,
+) {
+  await db.batch(setServiceProductsStmts(db, shopId, serviceId, entries));
 }
 
 export function getStockTakeById(

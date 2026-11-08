@@ -4,15 +4,17 @@ import {
   type DBService,
   getServicesByShop,
   getServiceById,
-  createService,
-  updateService,
+  createServiceStmt,
+  updateServiceStmt,
   getShopBySlug,
   getShopById,
   getProductById,
   getServiceProducts,
-  setServiceProducts,
+  setServiceProductsStmts,
   getShopSiteByShopId,
 } from "../db/queries.js";
+import { batchWithAudit } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { normalizeServiceName, serviceDescriptionsByName } from "../lib/serviceCopy.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
@@ -104,14 +106,34 @@ services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   }
 
   const id = crypto.randomUUID();
-  await createService(c.env.DB, {
-    id,
-    shop_id: shopId,
-    name: body.name,
-    duration_min: body.duration_min,
-    price_pence: body.price_pence,
-    category: body.category ?? null,
-  });
+  const category = body.category ?? null;
+  const refused = await batchWithAudit(
+    c,
+    [
+      createServiceStmt(c.env.DB, {
+        id,
+        shop_id: shopId,
+        name: body.name,
+        duration_min: body.duration_min,
+        price_pence: body.price_pence,
+        category,
+      }),
+    ],
+    {
+      action: "service.create",
+      outcome: "succeeded",
+      shopId,
+      entityType: "service",
+      entityId: id,
+      changes: fieldChanges(null, {
+        name: body.name,
+        duration_min: body.duration_min,
+        price_pence: body.price_pence,
+        category,
+      }).changes,
+    },
+  );
+  if (refused) return refused;
 
   const svc = await getServiceById(c.env.DB, id);
   return c.json({ success: true, data: svc }, 201);
@@ -135,7 +157,30 @@ services.put("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) 
     return c.json({ success: false, error: "price_pence must be a non-negative integer (pence)" }, 400);
   }
 
-  await updateService(c.env.DB, serviceId, body);
+  // Only the columns the update builder writes, so a stray body key never
+  // shows as "changed from null".
+  const fields = {
+    name: body.name,
+    duration_min: body.duration_min,
+    price_pence: body.price_pence,
+    category: body.category,
+    is_active: (body as { is_active?: number }).is_active,
+  };
+  const { changes, fields: changed } = fieldChanges(svc as unknown as Record<string, unknown>, fields);
+  const refused = await batchWithAudit(
+    c,
+    [updateServiceStmt(c.env.DB, serviceId, fields)].filter((s) => s !== null),
+    {
+      action: "service.update",
+      outcome: "succeeded",
+      shopId,
+      entityType: "service",
+      entityId: serviceId,
+      changes,
+      details: changed.length > 0 ? { fields: changed } : null,
+    },
+  );
+  if (refused) return refused;
   const updated = await getServiceById(c.env.DB, serviceId);
   return c.json({ success: true, data: updated });
 });
@@ -183,7 +228,15 @@ services.put("/:serviceId/products", authMiddleware, requireShopRole("admin"), a
     entries.push({ product_id: product.id, quantity: qty });
   }
 
-  await setServiceProducts(c.env.DB, shopId, serviceId, entries);
+  const refused = await batchWithAudit(c, setServiceProductsStmts(c.env.DB, shopId, serviceId, entries), {
+    action: "service.update",
+    outcome: "succeeded",
+    shopId,
+    entityType: "service_products",
+    entityId: serviceId,
+    details: { product_count: entries.length },
+  });
+  if (refused) return refused;
   return c.json({ success: true, data: await getServiceProducts(c.env.DB, shopId, serviceId) });
 });
 
@@ -194,7 +247,15 @@ services.delete("/:serviceId", authMiddleware, requireShopRole("admin"), async (
   const svc = await getServiceById(c.env.DB, serviceId);
   if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);
 
-  await updateService(c.env.DB, serviceId, { is_active: 0 });
+  const refused = await batchWithAudit(c, [updateServiceStmt(c.env.DB, serviceId, { is_active: 0 })!], {
+    action: "service.delete",
+    outcome: "succeeded",
+    shopId,
+    entityType: "service",
+    entityId: serviceId,
+    changes: { is_active: [svc.is_active, 0] },
+  });
+  if (refused) return refused;
   return c.json({ success: true });
 });
 
