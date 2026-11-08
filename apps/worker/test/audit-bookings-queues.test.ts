@@ -266,6 +266,7 @@ describe("admin booking status", () => {
     expect(await res.json()).toEqual({ success: true });
     const again = await dispatch("PUT", url, { headers, body: { status: "completed" } });
     expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ success: true });
 
     const rows = await entriesFor({ action: "booking.status", shopId, entityId: id });
     expect(rows).toHaveLength(2);
@@ -460,6 +461,7 @@ describe("customer self-service", () => {
     // The same values again change nothing, so no field is named.
     const again = await dispatch("PATCH", "/api/me/profile", { headers: customer.headers, body: { name, phone } });
     expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ success: true });
     const rows = await entriesFor({ action: "account.update", entityId: customer.id });
     expect(rows).toHaveLength(2);
     expect(rows[1]!.details_json).toBeNull();
@@ -763,6 +765,17 @@ describe("waitlist", () => {
     expect(rows[0]!.entity_type).toBe("waitlist_entry");
     expect(JSON.parse(rows[0]!.details_json as string)).toEqual({ trigger: "manual" });
     expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  it("an already-notified answer stands when its entry cannot be written", async () => {
+    // Best effort (Ruling 3): the no-op entry failing never turns the 200 into an error.
+    const shopId = await seedShop("Audit Notify Again Off");
+    const { token } = await adminToken(shopId);
+    const id = await seedWaitlistEntry(shopId, { status: "notified" });
+    const res = await withAuditOff(() => dispatch("POST", `/api/waitlist/${id}/notify`, { headers: authHeaders(token) }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true, data: { notified: false, already_notified: true } });
+    expect(await waitlistStatus(id)).toBe("notified");
   });
 });
 
