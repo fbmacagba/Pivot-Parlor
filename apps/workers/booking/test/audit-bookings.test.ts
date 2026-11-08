@@ -361,6 +361,24 @@ describe("staff cancel audit", () => {
     expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "voided" });
   });
 
+  it("staff cancel of an unpaid Checkout booking cancels its pending deposit transaction", async () => {
+    const s = await setup();
+    // The shape POST /public/bookings leaves for a Checkout deposit: a pending
+    // booking, no PaymentIntent yet, and a pending deposit tx keyed by session id.
+    const bookingId = await seedBooking(s, { status: "pending", piId: null, depositPence: 1250, depositTx: "pending" });
+    const res = await cancel(s.shop, bookingId);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { deposit_action: string } };
+    expect(body.data.deposit_action).toBe("none");
+    expect(await bookingStatus(bookingId)).toBe("cancelled");
+    const tx = await env.DB.prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit'")
+      .bind(bookingId)
+      .first<{ status: string }>();
+    expect(tx?.status).toBe("cancelled");
+    const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "none" });
+  });
+
   it("answers 503 and leaves the booking open when the entry cannot be written", async () => {
     const s = await setup();
     const bookingId = await seedBooking(s);
