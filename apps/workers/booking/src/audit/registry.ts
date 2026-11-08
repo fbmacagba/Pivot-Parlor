@@ -16,11 +16,11 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /public/bookings": "booking.create",
   "POST /public/bookings/:bookingId/abandon": "booking.cancel",
   // Task 5
-  "POST /booking/shops/:shopId/bookings": "pending",
-  "POST /booking/shops/:shopId/walk-ins": "pending",
-  "POST /booking/shops/:shopId/check-in": "pending",
-  "POST /booking/shops/:shopId/bookings/:bookingId/checkout": "pending",
-  "POST /booking/shops/:shopId/bookings/:bookingId/cancel": "pending",
+  "POST /booking/shops/:shopId/bookings": "booking.create",
+  "POST /booking/shops/:shopId/walk-ins": "booking.create",
+  "POST /booking/shops/:shopId/check-in": "booking.check_in",
+  "POST /booking/shops/:shopId/bookings/:bookingId/checkout": "booking.checkout",
+  "POST /booking/shops/:shopId/bookings/:bookingId/cancel": "booking.cancel",
   // Task 6
   "POST /booking/shops/:shopId/sales": "pending",
   "POST /booking/shops/:shopId/sales/:saleId/refund": "pending",
@@ -34,4 +34,4 @@ export const CRON_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plan 3 brings it to 0). */
-export const PENDING_CEILING = 9;
+export const PENDING_CEILING = 4;
