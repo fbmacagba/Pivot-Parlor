@@ -313,24 +313,23 @@ export async function getNextShopNumber(db: D1Database): Promise<number> {
   return row?.next ?? 1;
 }
 
-export function createShop(
-  db: D1Database,
-  shop: {
-    id: string;
-    shop_number: number;
-    slug: string;
-    name: string;
-    owner_email: string;
-    type?: string;
-    owner_name?: string;
-    phone?: string;
-    commission_rate?: number;
-    status?: string;
-    plan?: string;
-    stripe_checkout_session_id?: string | null;
-    stripe_payment_status?: string;
-  },
-) {
+type NewShop = {
+  id: string;
+  shop_number: number;
+  slug: string;
+  name: string;
+  owner_email: string;
+  type?: string;
+  owner_name?: string;
+  phone?: string;
+  commission_rate?: number;
+  status?: string;
+  plan?: string;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_status?: string;
+};
+
+export function createShopStmt(db: D1Database, shop: NewShop): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO shops
@@ -352,24 +351,103 @@ export function createShop(
       shop.plan ?? "standard",
       shop.stripe_checkout_session_id ?? null,
       shop.stripe_payment_status ?? "unpaid",
+    );
+}
+
+export function createShop(db: D1Database, shop: NewShop) {
+  return createShopStmt(db, shop).run();
+}
+
+/**
+ * The redactable audit_subjects row for a shop. Ruling 17: shop name and slug
+ * are personal data and never enter an entry's hashed columns; the entry
+ * carries `subj_shop_<id>` and this row holds the name (erasable).
+ * Never overwrites a row that has already been redacted.
+ */
+export function upsertShopSubjectStmt(
+  db: D1Database,
+  shop: { id: string; name: string; slug: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_subjects (id, kind, shop_id, display_name, created_at)
+       VALUES (?, 'shop', ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, shop_id = excluded.shop_id
+       WHERE audit_subjects.redacted_at IS NULL`,
     )
-    .run();
+    .bind(`subj_shop_${shop.id}`, shop.id, `${shop.name} (${shop.slug})`, new Date().toISOString());
+}
+
+/** Applies a PATCH /api/shops/:id to the columns the handler allows. Null when empty. */
+export function updateShopFieldsStmt(
+  db: D1Database,
+  shopId: string,
+  fields: Record<string, unknown>,
+): D1PreparedStatement | null {
+  const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+  if (keys.length === 0) return null;
+  return db
+    .prepare(`UPDATE shops SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`)
+    .bind(...keys.map((k) => fields[k]), shopId);
+}
+
+/** The shop_settings row as stored, or null when the shop has none yet. */
+export function getShopSettingsRow(db: D1Database, shopId: string) {
+  return db
+    .prepare("SELECT * FROM shop_settings WHERE shop_id = ? LIMIT 1")
+    .bind(shopId)
+    .first<Record<string, unknown>>();
+}
+
+/**
+ * Creates the shop's settings row if absent. Guarded with NOT EXISTS rather
+ * than ON CONFLICT(shop_id): production's shop_settings predates the migration
+ * chain (its PK is a legacy `id`), so a UNIQUE(shop_id) is not guaranteed there.
+ */
+export function ensureShopSettingsRowStmt(db: D1Database, shopId: string): D1PreparedStatement {
+  return db
+    .prepare(
+      "INSERT INTO shop_settings (shop_id) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM shop_settings WHERE shop_id = ?)",
+    )
+    .bind(shopId, shopId);
+}
+
+/** Column names must come from the caller's allow-list (SHOP_SETTINGS_PATCH_FIELDS). */
+export function updateShopSettingsStmt(
+  db: D1Database,
+  shopId: string,
+  fields: Record<string, string | number | null>,
+): D1PreparedStatement {
+  const keys = Object.keys(fields);
+  return db
+    .prepare(`UPDATE shop_settings SET ${keys.map((k) => `${k} = ?`).join(", ")} WHERE shop_id = ?`)
+    .bind(...keys.map((k) => fields[k]), shopId);
+}
+
+export function createReviewStmt(
+  db: D1Database,
+  review: { id: string; shop_id: string; customer_name: string; rating: number; body: string; booking_id: string },
+): D1PreparedStatement {
+  return db
+    .prepare(
+      "INSERT INTO reviews (id, shop_id, customer_name, rating, body, booking_id) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(review.id, review.shop_id, review.customer_name, review.rating, review.body, review.booking_id);
 }
 
 // ─── Invites ──────────────────────────────────────────────────────────────────
 
-export function createInvite(
-  db: D1Database,
-  invite: {
-    id: string;
-    email: string;
-    shop_id: string;
-    role: string;
-    token: string;
-    expires_at: string;
-    active?: number;
-  },
-) {
+type NewInvite = {
+  id: string;
+  email: string;
+  shop_id: string;
+  role: string;
+  token: string;
+  expires_at: string;
+  active?: number;
+};
+
+export function createInviteStmt(db: D1Database, invite: NewInvite): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO invites (id, email, shop_id, role, token, expires_at, active)
@@ -383,8 +461,11 @@ export function createInvite(
       invite.token,
       invite.expires_at,
       invite.active ?? 1,
-    )
-    .run();
+    );
+}
+
+export function createInvite(db: D1Database, invite: NewInvite) {
+  return createInviteStmt(db, invite).run();
 }
 
 /** Matches tests/e2e/shop-onboarding-routes.ts (Playwright dev/shops POST mock). */

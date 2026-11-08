@@ -30,8 +30,8 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "DELETE /api/shops/:shopId/staff/:staffId": "staff.delete",
   "DELETE /api/shops/:shopId/walkin": "walkin.remove",
   "PATCH /api/me/profile": "account.update",
-  "PATCH /api/shops/:shopId": "pending",
-  "PATCH /api/shops/:shopId/settings": "pending",
+  "PATCH /api/shops/:shopId": "shop.update",
+  "PATCH /api/shops/:shopId/settings": "shop.settings.update",
   // One key, two actions (walkin.serve, or walkin.remove for skipped and
   // removed); the declaration only names the guard's 5xx floor row.
   "PATCH /api/shops/:shopId/walkin/:entryId": "walkin.serve",
@@ -39,8 +39,8 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/contact": "pending",
   "POST /api/invites/:token/accept": "pending",
   "POST /api/me/bookings/:bookingId/cancel": "booking.cancel",
-  "POST /api/shops": "pending",
-  "POST /api/shops/:shopId/generate-image": "pending",
+  "POST /api/shops": "shop.create",
+  "POST /api/shops/:shopId/generate-image": "site.edit",
   "POST /api/shops/:shopId/inventory/movements": "inventory.movement",
   "POST /api/shops/:shopId/products": "product.create",
   "POST /api/shops/:shopId/products/:productId/variants": "product.create",
@@ -49,18 +49,18 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops/:shopId/purchase-orders/:poId/cancel": "inventory.po.cancel",
   "POST /api/shops/:shopId/purchase-orders/:poId/order": "inventory.po.order",
   "POST /api/shops/:shopId/purchase-orders/:poId/receive": "inventory.po.receive",
-  "POST /api/shops/:shopId/remove-image": "pending",
-  "POST /api/shops/:shopId/reviews": "pending",
-  "POST /api/shops/:shopId/save-image": "pending",
+  "POST /api/shops/:shopId/remove-image": "site.edit",
+  "POST /api/shops/:shopId/reviews": "review.create",
+  "POST /api/shops/:shopId/save-image": "site.edit",
   "POST /api/shops/:shopId/services": "service.create",
-  "POST /api/shops/:shopId/settings": "pending",
+  "POST /api/shops/:shopId/settings": "shop.settings.update",
   "POST /api/shops/:shopId/staff": "staff.create",
   "POST /api/shops/:shopId/staff/:staffId/avatar": "staff.update",
   "POST /api/shops/:shopId/stock-takes": "inventory.stock_take.open",
   "POST /api/shops/:shopId/stock-takes/:stockTakeId/cancel": "inventory.stock_take.cancel",
   "POST /api/shops/:shopId/stock-takes/:stockTakeId/complete": "inventory.stock_take.complete",
   "POST /api/shops/:shopId/suppliers": "inventory.supplier.create",
-  "POST /api/shops/:shopId/upload-image": "pending",
+  "POST /api/shops/:shopId/upload-image": "site.edit",
   "POST /api/staff/me/time-off": "staff.time_off.request",
   "POST /api/waitlist": "waitlist.join",
   "POST /api/waitlist/:id/notify": "waitlist.notify",
@@ -111,4 +111,4 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 30;
+export const PENDING_CEILING = 21;
