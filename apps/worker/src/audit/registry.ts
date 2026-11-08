@@ -102,15 +102,15 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
 
 export const CRON_AUDIT: Record<string, AuditDeclaration> = {
   "* * * * *": { exempt: "audit infrastructure: the sealer only fills the one-time sealing columns" },
-  "0 3 * * *": "pending",
-  "0 8 * * *": "pending",
-  "0 20 * * *": "pending",
+  "0 3 * * *": "data.retention",
+  "0 8 * * *": "booking.reminder",
+  "0 20 * * *": "booking.eod_summary",
 };
 
 export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
-  "pivot-parlor-reminders": "pending",
-  "pivot-parlor-reminders-staging": "pending",
+  "pivot-parlor-reminders": "booking.reminder",
+  "pivot-parlor-reminders-staging": "booking.reminder",
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 12;
+export const PENDING_CEILING = 7;

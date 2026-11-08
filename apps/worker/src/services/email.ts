@@ -41,6 +41,19 @@ export interface BookingEmailData {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** A non-2xx Resend response. `message` is unchanged ("Resend error <status>:
+ *  <text>"); `status` lets the audit trail record `HTTP <status>` without ever
+ *  storing the message. */
+export class EmailSendError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "EmailSendError";
+  }
+}
+
 async function sendEmail(
   apiKey: string,
   to: string,
@@ -58,7 +71,7 @@ async function sendEmail(
 
   if (!res.ok) {
     const err = await res.text().catch(() => res.statusText);
-    throw new Error(`Resend error ${res.status}: ${err}`);
+    throw new EmailSendError(res.status, `Resend error ${res.status}: ${err}`);
   }
 }
 

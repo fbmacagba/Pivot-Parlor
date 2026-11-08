@@ -41,6 +41,8 @@ import {
   staffMeRouter,
   meRouter,
 } from "./routes/dashboard.js";
+import { AuditWriteError } from "@repo/audit";
+import { systemAudit } from "./audit/context.js";
 import { requestId } from "./audit/request-id.js";
 import { auditGapGuard } from "./audit/gap-guard.js";
 import { runSealer } from "./audit/sealer.js";
@@ -301,13 +303,25 @@ export default {
     if (cron === "0 3 * * *") {
       try {
         console.log("[Cron 03:00] Running retention sweep...");
-        const { counts, errors } = await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
+        const { counts, errors } = await systemAudit(env.DB, "cron").run(
+          { action: "data.retention" },
+          () => runRetentionSweep(env.DB, env.AUDIT_ARCHIVE),
+          (r) => ({
+            outcome: r.errors.length > 0 ? "failed" : "succeeded",
+            // Table names only; the error strings stay out of the hashed entry.
+            details: { counts: r.counts, failed_tables: r.errors.map((e) => e.table) },
+          }),
+        );
         console.log("[Cron 03:00] Retention sweep:", JSON.stringify(counts));
         for (const e of errors) {
           console.error(`[Cron 03:00] Retention sweep failed for ${e.table}:`, e.error);
         }
       } catch (err) {
-        console.error("[Cron 03:00] Retention sweep failed:", err);
+        if (err instanceof AuditWriteError) {
+          console.error("[Cron 03:00] Retention sweep skipped: its audit entry could not be written");
+        } else {
+          console.error("[Cron 03:00] Retention sweep failed:", err);
+        }
       }
 
       try {
@@ -347,12 +361,22 @@ export default {
           .first<{ email: string }>();
 
         if (dev?.email && env.RESEND_API_KEY) {
-          await sendEodAlert(env.RESEND_API_KEY, {
+          const apiKey = env.RESEND_API_KEY;
+          const alert = {
             developer_email: dev.email,
             date: today,
             booking_count: row?.booking_count ?? 0,
             shop_count: row?.shop_count ?? 0,
-          });
+          };
+          // Recorded because it sends business data out of the platform. The
+          // entry carries counts and the date, never the recipient address.
+          await systemAudit(env.DB, "cron").run(
+            {
+              action: "booking.eod_summary",
+              details: { date: alert.date, booking_count: alert.booking_count, shop_count: alert.shop_count },
+            },
+            () => sendEodAlert(apiKey, alert),
+          );
         }
       } catch (err) {
         console.error("[Cron 20:00] EOD alert failed:", err);
@@ -384,7 +408,7 @@ export default {
             continue;
           }
 
-          await processReminder(body, env.DB, env.RESEND_API_KEY);
+          await processReminder(body, env.DB, env.RESEND_API_KEY, systemAudit(env.DB, "queue", msg.id));
           msg.ack();
         } catch (err) {
           console.error("[Queue] Failed to process reminder", msg.body, err);

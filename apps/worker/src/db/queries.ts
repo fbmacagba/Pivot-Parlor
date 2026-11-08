@@ -1541,11 +1541,8 @@ export function cancelBookingIfNotCancelled(db: D1Database, id: string, shopId: 
     .run();
 }
 
-export function markReminderSent(db: D1Database, id: string) {
-  return db
-    .prepare("UPDATE bookings SET reminder_sent = 1 WHERE id = ?")
-    .bind(id)
-    .run();
+export function markReminderSentStmt(db: D1Database, id: string): D1PreparedStatement {
+  return db.prepare("UPDATE bookings SET reminder_sent = 1 WHERE id = ?").bind(id);
 }
 
 // checkSlotConflict moved to apps/workers/booking/src/db/queries.ts (WS-1).
@@ -1719,10 +1716,29 @@ export async function getPlatformRevenueByMonth(
 // (processReminder) sends reminders, so this catch-all should return a small
 // straggler set; a full page signals the queue is not keeping up (the caller
 // logs it). Reminders past the page are picked up on a later run.
+export interface DueReminder {
+  id: string;
+  shop_id: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string | null;
+  start_time: string;
+  booking_date: string;
+  notes: string | null;
+  amount_pence: number;
+  service_name: string;
+  duration_min: number;
+  staff_name: string;
+  shop_name: string;
+  shop_slug: string;
+  shop_timezone: string | null;
+  shop_address: string | null;
+}
+
 export async function getBookingsDueForReminder(db: D1Database, limit: number) {
   const { results } = await db
     .prepare(
-      `SELECT b.id, b.customer_name, b.customer_email, b.customer_phone,
+      `SELECT b.id, b.shop_id, b.customer_name, b.customer_email, b.customer_phone,
               b.start_time, b.booking_date, b.notes, b.amount_pence,
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
@@ -1739,23 +1755,7 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
        LIMIT ?`,
     )
     .bind(limit)
-    .all<{
-      id: string;
-      customer_name: string;
-      customer_email: string;
-      customer_phone: string | null;
-      start_time: string;
-      booking_date: string;
-      notes: string | null;
-      amount_pence: number;
-      service_name: string;
-      duration_min: number;
-      staff_name: string;
-      shop_name: string;
-      shop_slug: string;
-      shop_timezone: string | null;
-      shop_address: string | null;
-    }>();
+    .all<DueReminder>();
   return results;
 }
 
