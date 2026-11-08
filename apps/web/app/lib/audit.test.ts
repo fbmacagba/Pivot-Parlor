@@ -33,6 +33,9 @@ describe("audit page helpers", () => {
     // Ruling 57: the nightly now writes audit.anchor after its emails.
     expect(actionLabel("audit.anchor")).toBe("Daily fingerprint emailed");
   });
+  it("labels a Plan 2 action", () => {
+    expect(actionLabel("inventory.po.receive")).toBe("Stock received");
+  });
   it("renders dates in UK time, not the server's or browser's zone (M6)", () => {
     // 23:30 UTC in British Summer Time is 00:30 the next day in London.
     expect(formatAuditDate("2026-07-01T23:30:00.000Z")).toBe("02/07/2026");
