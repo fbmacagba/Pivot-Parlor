@@ -28,15 +28,17 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "DELETE /api/shops/:shopId/products/:productId/variants/:variantId": "product.delete",
   "DELETE /api/shops/:shopId/services/:serviceId": "service.delete",
   "DELETE /api/shops/:shopId/staff/:staffId": "staff.delete",
-  "DELETE /api/shops/:shopId/walkin": "pending",
-  "PATCH /api/me/profile": "pending",
+  "DELETE /api/shops/:shopId/walkin": "walkin.remove",
+  "PATCH /api/me/profile": "account.update",
   "PATCH /api/shops/:shopId": "pending",
   "PATCH /api/shops/:shopId/settings": "pending",
-  "PATCH /api/shops/:shopId/walkin/:entryId": "pending",
-  "PATCH /api/waitlist/:id/status": "pending",
+  // One key, two actions (walkin.serve, or walkin.remove for skipped and
+  // removed); the declaration only names the guard's 5xx floor row.
+  "PATCH /api/shops/:shopId/walkin/:entryId": "walkin.serve",
+  "PATCH /api/waitlist/:id/status": "waitlist.update",
   "POST /api/contact": "pending",
   "POST /api/invites/:token/accept": "pending",
-  "POST /api/me/bookings/:bookingId/cancel": "pending",
+  "POST /api/me/bookings/:bookingId/cancel": "booking.cancel",
   "POST /api/shops": "pending",
   "POST /api/shops/:shopId/generate-image": "pending",
   "POST /api/shops/:shopId/inventory/movements": "inventory.movement",
@@ -60,9 +62,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops/:shopId/suppliers": "inventory.supplier.create",
   "POST /api/shops/:shopId/upload-image": "pending",
   "POST /api/staff/me/time-off": "staff.time_off.request",
-  "POST /api/waitlist": "pending",
-  "POST /api/waitlist/:id/notify": "pending",
-  "POST /api/walkin/:shopSlug/join": "pending",
+  "POST /api/waitlist": "waitlist.join",
+  "POST /api/waitlist/:id/notify": "waitlist.notify",
+  "POST /api/walkin/:shopSlug/join": "walkin.join",
   "POST /api/webhooks/stripe": "pending",
   "POST /auth/login": "pending",
   "POST /auth/logout": "pending",
@@ -70,7 +72,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /auth/resend-verification": "pending",
   "POST /auth/verify-email": "pending",
   "POST /contact": "pending",
-  "PUT /api/shops/:shopId/bookings/:bookingId/status": "pending",
+  // One key, two actions (booking.cancel for both cancel forks, else
+  // booking.status); the declaration only names the guard's 5xx floor row.
+  "PUT /api/shops/:shopId/bookings/:bookingId/status": "booking.status",
   "PUT /api/shops/:shopId/inventory/reorder": "inventory.reorder",
   "PUT /api/shops/:shopId/products/:productId": "product.update",
   "PUT /api/shops/:shopId/products/:productId/variants/:variantId": "product.update",
@@ -107,4 +111,4 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 39;
+export const PENDING_CEILING = 30;

@@ -1,6 +1,9 @@
 // apps/worker/src/routes/walkin.ts
 import { Hono } from "hono";
+import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
@@ -61,10 +64,27 @@ walkin.post(
   const position = await getNextPosition(c.env.DB, shop.id);
   const id = crypto.randomUUID();
 
-  await c.env.DB.prepare(
-    `INSERT INTO walkin_queue (id, shop_id, name, phone, service, status, position, notes)
-     VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)`
-  ).bind(id, shop.id, name, phone || null, service || null, position, notes || null).run();
+  // Pattern B: the entry joins the insert's batch. Anonymous actor + IP;
+  // name, phone, service and notes are personal or free text, so the entry
+  // carries none of them.
+  const refused = await batchWithAudit(
+    c,
+    [
+      c.env.DB.prepare(
+        `INSERT INTO walkin_queue (id, shop_id, name, phone, service, status, position, notes)
+         VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)`
+      ).bind(id, shop.id, name, phone || null, service || null, position, notes || null),
+    ],
+    {
+      action: "walkin.join",
+      outcome: "succeeded",
+      shopId: shop.id,
+      entityType: "walkin_entry",
+      entityId: id,
+      changes: fieldChanges(null, { status: "waiting" }).changes,
+    },
+  );
+  if (refused) return refused;
 
   // Cache bust queue KV
   await c.env.KV.delete(`walkin:queue:${shop.id}`);
@@ -156,9 +176,9 @@ adminWalkin.patch("/:entryId", async (c) => {
   const entryId = c.req.param("entryId")!;
 
   const entry = await c.env.DB
-    .prepare("SELECT id FROM walkin_queue WHERE id = ? AND shop_id = ? LIMIT 1")
+    .prepare("SELECT id, status FROM walkin_queue WHERE id = ? AND shop_id = ? LIMIT 1")
     .bind(entryId, shopId)
-    .first<{ id: string }>();
+    .first<{ id: string; status: string }>();
   if (!entry) return c.json({ success: false, error: "Entry not found" }, 404);
 
   const body = await c.req.json<{ status?: string }>().catch((): { status?: string } => ({}));
@@ -167,10 +187,25 @@ adminWalkin.patch("/:entryId", async (c) => {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);
   }
 
-  await c.env.DB
-    .prepare("UPDATE walkin_queue SET status = ?, updated_at = datetime('now') WHERE id = ?")
-    .bind(body.status, entryId)
-    .run();
+  // Pattern B: the status UPDATE and its entry. Positions are a derived order
+  // every PATCH recomputes, so the reorder and the KV bust stay post-steps.
+  const refused = await batchWithAudit(
+    c,
+    [
+      c.env.DB
+        .prepare("UPDATE walkin_queue SET status = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(body.status, entryId),
+    ],
+    {
+      action: body.status === "skipped" || body.status === "removed" ? "walkin.remove" : "walkin.serve",
+      outcome: "succeeded",
+      shopId,
+      entityType: "walkin_entry",
+      entityId: entryId,
+      changes: fieldChanges(entry, { status: body.status }).changes,
+    },
+  );
+  if (refused) return refused;
 
   // Reorder remaining queue
   await reorderQueue(c.env.DB, shopId);
@@ -182,12 +217,30 @@ adminWalkin.patch("/:entryId", async (c) => {
 // DELETE /api/shops/:shopId/walkin — clear entire queue (EOD)
 adminWalkin.delete("/", async (c) => {
   const shopId = c.req.param("shopId")!;
-  await c.env.DB
-    .prepare("UPDATE walkin_queue SET status = 'removed', updated_at = datetime('now') WHERE shop_id = ? AND status IN ('waiting','serving')")
-    .bind(shopId)
-    .run();
-  await c.env.KV.delete(`walkin:queue:${shopId}`);
-  return c.json({ success: true });
+  // Pattern G: how many entries were cleared is known only from meta.changes,
+  // so the count rides on the outcome entry (no entity: it is the whole queue).
+  // Developers bypass the shop check, so the entry records the param only
+  // once it resolves to a shop (never a raw caller-supplied value).
+  const resolvedShopId = (await getShopById(c.env.DB, shopId))?.id ?? null;
+  let cleared = 0;
+  try {
+    return await auditFor(c).run(
+      { action: "walkin.remove", shopId: resolvedShopId, entityType: "walkin_entry", entityId: null },
+      async (): Promise<Response> => {
+        const res = await c.env.DB
+          .prepare("UPDATE walkin_queue SET status = 'removed', updated_at = datetime('now') WHERE shop_id = ? AND status IN ('waiting','serving')")
+          .bind(shopId)
+          .run();
+        cleared = res.meta?.changes ?? 0;
+        await c.env.KV.delete(`walkin:queue:${shopId}`);
+        return c.json({ success: true });
+      },
+      statusOutcome(() => ({ details: { cleared } })),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 export { walkin as walkinRouter, adminWalkin as adminWalkinRouter };

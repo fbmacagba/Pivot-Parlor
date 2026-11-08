@@ -1414,15 +1414,22 @@ export function getBookingById(db: D1Database, id: string) {
 // createBooking moved to apps/workers/booking/src/db/queries.ts (WS-1) — the
 // booking worker is the sole writer of public booking creation.
 
+export function updateBookingStatusStmt(
+  db: D1Database,
+  id: string,
+  status: string,
+): D1PreparedStatement {
+  return db
+    .prepare("UPDATE bookings SET status = ? WHERE id = ?")
+    .bind(status, id);
+}
+
 export function updateBookingStatus(
   db: D1Database,
   id: string,
   status: string,
 ) {
-  return db
-    .prepare("UPDATE bookings SET status = ? WHERE id = ?")
-    .bind(status, id)
-    .run();
+  return updateBookingStatusStmt(db, id, status).run();
 }
 
 /**
@@ -1465,7 +1472,7 @@ export async function getWaitlistByShop(db: D1Database, shopId: string) {
   return results;
 }
 
-export function createWaitlistEntry(
+export function createWaitlistEntryStmt(
   db: D1Database,
   entry: {
     id: string;
@@ -1477,7 +1484,7 @@ export function createWaitlistEntry(
     customer_phone?: string | null;
     preferred_date?: string | null;
   },
-) {
+): D1PreparedStatement {
   return db
     .prepare(
       `INSERT INTO waitlist
@@ -1494,8 +1501,7 @@ export function createWaitlistEntry(
       entry.customer_email,
       entry.customer_phone ?? null,
       entry.preferred_date ?? null,
-    )
-    .run();
+    );
 }
 
 export function getWaitlistEntryById(db: D1Database, id: string) {

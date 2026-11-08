@@ -1,8 +1,11 @@
 import { Hono } from "hono";
+import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import {
   getBookingsByShop, getBookingById, getBookingDepositState,
-  updateBookingStatus, cancelBookingIfOpen, getServiceById, getShopById,
+  updateBookingStatus, updateBookingStatusStmt, cancelBookingIfOpen, getServiceById, getShopById,
 } from "../db/queries.js";
 import { authMiddleware, extractSessionJwt } from "../middleware/auth.js";
 import { sendReviewRequest } from "../services/email.js";
@@ -70,48 +73,75 @@ bookings.put("/:bookingId/status", async (c) => {
       ((dep.deposit_paid_at && dep.deposit_tx_status === "captured" && !dep.deposit_tx_sale_id) ||
         (!dep.deposit_paid_at && dep.deposit_tx_status === "pending"));
     if (depositRelevant) {
-      // The booking worker's auth is Bearer-only; cookie sessions carry the
-      // same JWT, so mint the header from whichever transport arrived.
-      const token = extractSessionJwt(c.req.raw.headers);
-      const fwd = new Headers({ "Content-Type": "application/json" });
-      if (token) fwd.set("Authorization", `Bearer ${token}`);
-      const res = await c.env.BOOKING.fetch(
-        new Request(`https://booking/booking/shops/${shopId}/bookings/${bookingId}/cancel`, {
-          method: "POST",
-          headers: fwd,
-          // Forward refund_deposit only when the client actually sent it: the
-          // booking worker defaults fresh cancels to refund, but its recovery
-          // path acts only on an EXPLICIT true — a bare re-cancel must never
-          // silently refund a deposit staff chose to keep.
-          body: JSON.stringify(
-            typeof body.refund_deposit === "boolean" ? { refundDeposit: body.refund_deposit } : {}
-          ),
-        })
-      );
-      const payload = (await res.json().catch(() => null)) as
-        | { success?: boolean; data?: { flipped?: boolean } }
-        | null;
+      // Pattern T: the started entry commits before the forward, so a cancel
+      // that cannot be recorded never reaches the booking worker (it owns the
+      // flip and the Stripe money movement). The outcome follows the
+      // forwarded status.
+      const refundDeposit = typeof body.refund_deposit === "boolean" ? body.refund_deposit : null;
+      let payload: { success?: boolean; data?: { flipped?: boolean } } | null = null;
+      let forwarded: Response;
+      try {
+        forwarded = await auditFor(c).run(
+          {
+            action: "booking.cancel",
+            shopId,
+            entityType: "booking",
+            entityId: bookingId,
+            details: { deposit: true, refund_deposit: refundDeposit },
+          },
+          async (): Promise<Response> => {
+            // The booking worker's auth is Bearer-only; cookie sessions carry the
+            // same JWT, so mint the header from whichever transport arrived.
+            const token = extractSessionJwt(c.req.raw.headers);
+            const fwd = new Headers({ "Content-Type": "application/json" });
+            if (token) fwd.set("Authorization", `Bearer ${token}`);
+            const res = await c.env.BOOKING.fetch(
+              new Request(`https://booking/booking/shops/${shopId}/bookings/${bookingId}/cancel`, {
+                method: "POST",
+                headers: fwd,
+                // Forward refund_deposit only when the client actually sent it: the
+                // booking worker defaults fresh cancels to refund, but its recovery
+                // path acts only on an EXPLICIT true — a bare re-cancel must never
+                // silently refund a deposit staff chose to keep.
+                body: JSON.stringify(refundDeposit !== null ? { refundDeposit } : {}),
+              })
+            );
+            payload = (await res.json().catch(() => null)) as
+              | { success?: boolean; data?: { flipped?: boolean } }
+              | null;
+            return c.json(
+              payload ?? { success: false, error: "Cancellation failed" },
+              res.status as 200
+            );
+          },
+          statusOutcome(),
+        );
+      } catch (e) {
+        if (e instanceof AuditWriteError) return auditRefused(c);
+        throw e;
+      }
 
       // Fire the waitlist fan-out only when the booking worker reports IT
       // performed the open → cancelled flip — exactly one notifier even
       // under racing cancels, and never for recovery calls.
-      if (payload?.data?.flipped === true && slotInFuture && c.env.RESEND_API_KEY) {
+      const flippedByWorker = (payload as { data?: { flipped?: boolean } } | null)?.data?.flipped === true;
+      if (flippedByWorker && slotInFuture && c.env.RESEND_API_KEY) {
         try {
           const shop = await getShopById(c.env.DB, shopId);
           if (shop) {
-            await notifyWaitlistForOpenedSlot(c.env.DB, c.env.RESEND_API_KEY, shop, {
-              bookingDate: booking.booking_date,
-              staffId: booking.staff_id,
-            });
+            await notifyWaitlistForOpenedSlot(
+              c.env.DB,
+              c.env.RESEND_API_KEY,
+              shop,
+              { bookingDate: booking.booking_date, staffId: booking.staff_id },
+              auditFor(c),
+            );
           }
         } catch (err) {
           reportError("booking.waitlist_notify", err, { shopId, bookingId });
         }
       }
-      return c.json(
-        payload ?? { success: false, error: "Cancellation failed" },
-        res.status as 200
-      );
+      return forwarded;
     }
     // An explicit refund request for a booking whose deposit is not live
     // (already refunded, credited to a sale, or never existed) must not
@@ -127,17 +157,74 @@ bookings.put("/:bookingId/status", async (c) => {
   // exactly once (only that request fires the waitlist fan-out below). Any
   // other transition, and cancelling an already-closed booking, keeps the
   // original unconditional behavior.
-  let freedSlot = false;
-  if (body.status === "cancelled") {
-    const res = await cancelBookingIfOpen(c.env.DB, bookingId);
-    freedSlot = (res.meta?.changes ?? 0) > 0;
-    if (!freedSlot) await updateBookingStatus(c.env.DB, bookingId, body.status);
-  } else {
-    await updateBookingStatus(c.env.DB, bookingId, body.status);
+  const status = body.status;
+  if (status === "cancelled") {
+    // Pattern G: whether this request performed the flip is known only from
+    // meta.changes, so it rides on the outcome entry. A status change is
+    // claimed only for the flip: on the fallback the prior status is not
+    // known at the time of the write.
+    let freedSlot = false;
+    let cancelled: Response;
+    try {
+      cancelled = await auditFor(c).run(
+        { action: "booking.cancel", shopId, entityType: "booking", entityId: bookingId },
+        async (): Promise<Response> => {
+          const res = await cancelBookingIfOpen(c.env.DB, bookingId);
+          freedSlot = (res.meta?.changes ?? 0) > 0;
+          if (!freedSlot) await updateBookingStatus(c.env.DB, bookingId, status);
+          return c.json({ success: true });
+        },
+        statusOutcome(() => ({
+          details: { flipped: freedSlot },
+          ...(freedSlot
+            ? { changes: fieldChanges(booking as unknown as Record<string, unknown>, { status: "cancelled" }).changes }
+            : {}),
+        })),
+      );
+    } catch (e) {
+      if (e instanceof AuditWriteError) return auditRefused(c);
+      throw e;
+    }
+
+    // A real open → cancelled transition frees a slot: notify matching waitlist
+    // entries. `freedSlot` comes from the atomic UPDATE above (exactly once,
+    // never on no_show/completed/re-saves), and past bookings are skipped so
+    // housekeeping cancellations of old rows never advertise a slot that is
+    // not actually available. Each email is recorded with this request's actor.
+    if (freedSlot && slotInFuture && c.env.RESEND_API_KEY) {
+      try {
+        const shop = await getShopById(c.env.DB, shopId);
+        if (shop) {
+          await notifyWaitlistForOpenedSlot(
+            c.env.DB,
+            c.env.RESEND_API_KEY,
+            shop,
+            { bookingDate: booking.booking_date, staffId: booking.staff_id },
+            auditFor(c),
+          );
+        }
+      } catch (err) {
+        // Non-fatal: the cancellation stands even if waitlist emails fail.
+        reportError("booking.waitlist_notify", err, { shopId, bookingId });
+      }
+    }
+
+    return cancelled;
   }
 
+  // Any other status: an unconditional UPDATE, so Pattern B.
+  const refused = await batchWithAudit(c, [updateBookingStatusStmt(c.env.DB, bookingId, status)], {
+    action: "booking.status",
+    outcome: "succeeded",
+    shopId,
+    entityType: "booking",
+    entityId: bookingId,
+    changes: fieldChanges(booking as unknown as Record<string, unknown>, { status }).changes,
+  });
+  if (refused) return refused;
+
   // Send review request when booking is marked completed
-  if (body.status === "completed" && c.env.RESEND_API_KEY) {
+  if (status === "completed" && c.env.RESEND_API_KEY) {
     try {
       const reviewPref = await c.env.DB
         .prepare("SELECT review_request_email FROM shop_settings WHERE shop_id = ? LIMIT 1")
@@ -160,26 +247,6 @@ bookings.put("/:bookingId/status", async (c) => {
     } catch (err) {
       // Non-fatal: the status update stands even if the review email fails.
       reportError("booking.review_request_email", err, { shopId, bookingId });
-    }
-  }
-
-  // A real open → cancelled transition frees a slot: notify matching waitlist
-  // entries. `freedSlot` comes from the atomic UPDATE above (exactly once,
-  // never on no_show/completed/re-saves), and past bookings are skipped so
-  // housekeeping cancellations of old rows never advertise a slot that is
-  // not actually available.
-  if (freedSlot && slotInFuture && c.env.RESEND_API_KEY) {
-    try {
-      const shop = await getShopById(c.env.DB, shopId);
-      if (shop) {
-        await notifyWaitlistForOpenedSlot(c.env.DB, c.env.RESEND_API_KEY, shop, {
-          bookingDate: booking.booking_date,
-          staffId: booking.staff_id,
-        });
-      }
-    } catch (err) {
-      // Non-fatal: the cancellation stands even if waitlist emails fail.
-      reportError("booking.waitlist_notify", err, { shopId, bookingId });
     }
   }
 
