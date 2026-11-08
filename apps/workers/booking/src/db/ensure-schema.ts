@@ -51,7 +51,8 @@ const REQUIRED: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
 ];
 
 /** Throws (naming every missing table/column) when the database has not had
- *  the canonical migrations applied. One batched round trip. */
+ *  the canonical migrations applied. One batched round trip for the table
+ *  checks, then one query for the bookings.status NOT NULL assertion. */
 export async function assertBookingSchema(db: D1Database): Promise<void> {
   const results = await db.batch<{ name: string }>(
     REQUIRED.map(([table]) => db.prepare(`PRAGMA table_info(${table})`))

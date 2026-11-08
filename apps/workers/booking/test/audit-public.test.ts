@@ -130,6 +130,25 @@ describe("public booking audit", () => {
     expect(booking?.status).toBe("cancelled");
   });
 
+  it("a zero-price service at a deposit shop records deposit_required false", async () => {
+    const s = await setupShop({ deposits: true });
+    await env.DB.prepare("UPDATE services SET price_pence = 0 WHERE id = ?").bind(s.service).run();
+    const res = await book(s);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: Record<string, unknown> };
+    expect(body.data.checkout_url).toBeUndefined();
+    expect(body.data.deposit_pence).toBeUndefined();
+    const id = String(body.data.id);
+    // The free path: no deposit state or transaction rows are created.
+    const st = await env.DB.prepare("SELECT COUNT(*) AS n FROM bw_booking_state WHERE booking_id = ?")
+      .bind(id)
+      .first<{ n: number }>();
+    expect(Number(st?.n)).toBe(0);
+    const outcome = (await entriesFor({ action: "booking.create", entityId: id })).find((r) => r.phase === "outcome")!;
+    expect(outcome.outcome).toBe("succeeded");
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ channel: "online", deposit_required: false });
+  });
+
   it("the deposit Checkout product name carries no dash", async () => {
     const s = await setupShop({ deposits: true, shopName: "Nameplate Cuts" });
     const realFetch = globalThis.fetch;
@@ -217,6 +236,23 @@ describe("abandon audit", () => {
 });
 
 describe("deposit sweep audit", () => {
+  it("the sweep cancels nothing when its entry cannot be written", async () => {
+    const s = await setupShop({ deposits: true });
+    const id = await bookedId(await book(s));
+    await age(id);
+    // The entry prepares, so the guarded batch fails at commit; the re-read
+    // still shows pending, so the original error propagates and the cancel
+    // rolled back with it.
+    await expect(withAuditOff(() => sweepExpiredDepositBookings(env.DB))).rejects.toThrow();
+    expect(await statusOf(id)).toBe("pending");
+    const tx = await env.DB.prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit'")
+      .bind(id)
+      .first<{ status: string }>();
+    expect(tx?.status).toBe("pending");
+    // The sweep is global: take this stale row out of play for later tests.
+    await env.DB.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(id).run();
+  });
+
   it("the sweep records a cancel per expired booking as system via cron", async () => {
     const s = await setupShop({ deposits: true });
     const a = await bookedId(await book(s, 0));
@@ -244,11 +280,16 @@ describe("deposit sweep audit", () => {
     const s = await setupShop({ deposits: true });
     const first = await bookedId(await book(s, 0));
     const second = await bookedId(await book(s, 1));
-    // The sweep drains oldest first, so `first` is booking 1's batch.
+    // Relies on the sweep's ORDER BY updated_at: `first` is older, so it is
+    // booking 1's batch, the first DB.batch() call. The Proxy flips it to
+    // confirmed just before that call, and records how every batch settled, so
+    // the test proves booking 1's batch was the one that lost the race (rolled
+    // back) and a LATER batch (booking 2's) then committed: the sweep carried on.
     await age(first, "2000-01-01T00:00:00.000Z");
     await age(second, "2000-01-02T00:00:00.000Z");
 
     let fired = false;
+    const settlements: Array<"resolved" | "rejected"> = [];
     const db = new Proxy(env.DB, {
       get(target, prop) {
         const value = Reflect.get(target, prop);
@@ -261,7 +302,14 @@ describe("deposit sweep audit", () => {
                 .bind(first)
                 .run();
             }
-            return target.batch(stmts);
+            try {
+              const out = await target.batch(stmts);
+              settlements.push("resolved");
+              return out;
+            } catch (err) {
+              settlements.push("rejected");
+              throw err;
+            }
           };
         }
         return typeof value === "function" ? value.bind(target) : value;
@@ -271,6 +319,8 @@ describe("deposit sweep audit", () => {
     const n = await sweepExpiredDepositBookings(db);
     expect(fired, "the sweep never reached a batch").toBe(true);
     expect(n).toBe(1);
+    expect(settlements[0], "booking 1's batch must have lost the race").toBe("rejected");
+    expect(settlements.slice(1), "a later batch must have committed").toContain("resolved");
     expect(await statusOf(first)).toBe("confirmed");
     expect(await statusOf(second)).toBe("cancelled");
     expect(await entriesFor({ action: "booking.cancel", entityId: first })).toHaveLength(0);

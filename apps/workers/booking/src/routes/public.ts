@@ -296,7 +296,6 @@ publicRoutes.post(
           shop.stripe_connect_onboarded === 1;
 
         if (depositsOn) {
-          depositRequired = true;
           const pct = Math.min(
             100,
             Math.max(1, Math.round(Number(depositCfg?.deposit_percent ?? 50))),
@@ -312,6 +311,9 @@ publicRoutes.post(
           );
 
           if (depositPence > 0) {
+            // Only a booking that really goes to Checkout needs a deposit; a
+            // zero deposit takes the free path below.
+            depositRequired = true;
             // Platform fee on the deposit portion only — the appointment checkout
             // collects the remaining commission on the balance charge (it reads
             // deposit_application_fee_pence back to stay exact).
