@@ -111,10 +111,12 @@ async function outcomeOf(action: string, shop: string, entityId: string): Promis
   return rows[1]!;
 }
 
+const REASON = "customer said the pomade smelled odd";
+
 const refund = async (t: Till, saleId: string, itemId: string, quantity: number) =>
   dispatch("POST", `/booking/shops/${t.shop}/sales/${saleId}/refund`, {
     headers: await authed("admin", t.shop),
-    body: { lines: [{ sale_item_id: itemId, quantity }] },
+    body: { lines: [{ sale_item_id: itemId, quantity }], reason: REASON },
   });
 
 /** A Stripe sale made refundable: completed, with a settled PaymentIntent. */
@@ -226,7 +228,7 @@ describe("refund audit", () => {
     });
     expect(outcome.changes_json).toBeNull();
     expect(JSON.parse(outcome.details_json as string)).toEqual({ lines: 1, refund_pence: 1000, via_stripe: false });
-    expectNoPersonalData(outcome, [SHOP_NAME, "Pomade"]);
+    expectNoPersonalData(outcome, [SHOP_NAME, "Pomade", REASON]);
     expect(await gapRowsFor(res.headers.get("X-Request-Id")!)).toBe(0);
   });
 
@@ -242,7 +244,7 @@ describe("refund audit", () => {
       .bind(saleId)
       .first<{ id: string }>();
     expect(ret?.id, "the return has no Stripe refund id to look for").toMatch(/.+/);
-    expectNoPersonalData(outcome, ["pi_till_settled_1", ret!.id]);
+    expectNoPersonalData(outcome, ["pi_till_settled_1", ret!.id, REASON]);
   });
 
   it("a second full refund records nothing", async () => {
@@ -254,6 +256,7 @@ describe("refund audit", () => {
     expect(before).toBe(2);
     const again = await refund(t, saleId, item, 2);
     expect(again.status).toBe(400);
+    expect(await again.json()).toEqual({ success: false, error: "Invalid quantity: 0 returnable on that line" });
     expect((await entriesFor({ action: "payment.refund.issue", shopId: t.shop })).length).toBe(before);
   });
 
@@ -286,10 +289,14 @@ describe("refund audit", () => {
       { ...env, DB: db },
       "POST",
       `/booking/shops/${t.shop}/sales/${saleId}/refund`,
-      { headers: await authed("admin", t.shop), body: { lines: [{ sale_item_id: item, quantity: 1 }] } }
+      { headers: await authed("admin", t.shop), body: { lines: [{ sale_item_id: item, quantity: 1 }], reason: REASON } }
     );
     expect(fired, "the second batch never ran, so the race was never staged").toBe(true);
     expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: "Another refund touched this sale. Reload and try again.",
+    });
     // Pins the ordering assumption: the started row exists, so the claim was
     // the second batch. If run() ever reorders, this fails instead of passing vacuously.
     const outcome = await outcomeOf("payment.refund.issue", t.shop, saleId);
@@ -309,7 +316,7 @@ describe("refund audit", () => {
     expect(outcome).toMatchObject({ outcome: "failed", reason: "HTTP 502" });
     expect(outcome.details_json).toBeNull();
     expect(await returnedQty(item)).toBe(0);
-    expectNoPersonalData(outcome, ["pi_fail_refund"]);
+    expectNoPersonalData(outcome, ["pi_fail_refund", REASON]);
   });
 
   it("uses the dash-free copy for the two refund errors", async () => {
@@ -376,6 +383,60 @@ describe("void audit", () => {
     expect((await voidIt(t, saleId)).status).toBe(200);
     expect((await voidIt(t, saleId)).status).toBe(400);
     expect((await entriesFor({ action: "pos.void", shopId: t.shop })).length).toBe(2);
+  });
+
+  /** Run a void with `stage` committed just before the flip batch. The
+   *  started entry is batch #1 under run() (Ruling P4); the flip is #2. */
+  async function voidWithRaceBeforeFlip(t: Till, saleId: string, stage: string): Promise<Response> {
+    let calls = 0;
+    let fired = false;
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "batch") {
+          return async (stmts: D1PreparedStatement[]) => {
+            calls += 1;
+            if (calls === 2 && !fired) {
+              fired = true;
+              await target.prepare(stage).bind(saleId).run();
+            }
+            return target.batch(stmts);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    const res = await dispatchWith({ ...env, DB: db }, "POST", `/booking/shops/${t.shop}/sales/${saleId}/void`, {
+      headers: await authed("admin", t.shop),
+      body: {},
+    });
+    expect(fired, "the flip batch never ran, so the race was never staged").toBe(true);
+    return res;
+  }
+
+  it("records the status the flip found, not the earlier pre-read", async () => {
+    const t = await setup();
+    // A pending Stripe sale passes the route's pre-checks. Before the flip the
+    // sale becomes completed (a settle), so the entry must say completed.
+    const saleId = await ringOk(t, "stripe", STRIPE_URLS);
+    const res = await voidWithRaceBeforeFlip(t, saleId, "UPDATE sales SET status = 'completed' WHERE id = ?");
+    expect(res.status).toBe(200);
+    expect(await saleStatus(saleId)).toBe("voided");
+    const outcome = await outcomeOf("pos.void", t.shop, saleId);
+    expect(outcome.outcome).toBe("succeeded");
+    expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["completed", "voided"] });
+  });
+
+  it("a void whose flip loses records refused not_voidable, with the response unchanged", async () => {
+    const t = await setup();
+    const saleId = await ringOk(t);
+    const res = await voidWithRaceBeforeFlip(t, saleId, "UPDATE sales SET status = 'refunded' WHERE id = ?");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(await saleStatus(saleId)).toBe("refunded");
+    const outcome = await outcomeOf("pos.void", t.shop, saleId);
+    expect(outcome).toMatchObject({ outcome: "refused", reason: "not_voidable" });
+    expect(outcome.changes_json).toBeNull();
   });
 
   it("answers 503 and leaves the sale completed when the entry cannot be written", async () => {

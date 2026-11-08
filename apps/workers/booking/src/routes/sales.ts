@@ -666,17 +666,21 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
   // Audit (Plan 3, pattern T): from the guarded flip to the response. The
   // status change is recorded only when this request's flip won the claim.
   // `sale` was read WHERE shop_id = shopId, so shopId is a resolved id.
-  let claimed = false;
+  // A lost flip (a concurrent void, or a refund that already moved the sale)
+  // keeps the route's 200 but is recorded refused, never succeeded.
+  let flip: { claimed: boolean; before: string | null } = { claimed: false, before: null };
   try {
     return await auditFor(c).run(
       { action: "pos.void", shopId, entityType: "sale", entityId: saleId },
       async (): Promise<Response> => {
-        claimed = await voidSale(db, shopId, saleId, null);
+        flip = await voidSale(db, shopId, saleId, null);
         return c.json({ success: true });
       },
-      statusOutcome((res) =>
-        res.status < 400 && claimed ? { changes: { status: [sale.status, "voided"] as [unknown, unknown] } } : {}
-      )
+      statusOutcome((res) => {
+        if (res.status >= 400) return {};
+        if (!flip.claimed) return { outcome: "refused", reason: "not_voidable" };
+        return { changes: { status: [flip.before, "voided"] as [unknown, unknown] } };
+      })
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);
@@ -689,12 +693,22 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
  * rows) voided and put decremented stock back with reversing movements, all
  * in one batch. Guarded by the atomic status flip — only one voider wins.
  */
-async function voidSale(db: Env["DB"], shopId: string, saleId: string, note: string | null): Promise<boolean> {
-  const claim = await db
-    .prepare("UPDATE sales SET status = 'voided' WHERE id = ? AND shop_id = ? AND status IN ('pending','completed')")
-    .bind(saleId, shopId)
-    .run();
-  if ((claim.meta?.changes ?? 0) !== 1) return false;
+async function voidSale(
+  db: Env["DB"],
+  shopId: string,
+  saleId: string,
+  note: string | null
+): Promise<{ claimed: boolean; before: string | null }> {
+  // The status read and the guarded flip share one batch, so `before` is the
+  // status the flip actually found, not an earlier pre-read.
+  const [read, claim] = await db.batch([
+    db.prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ?").bind(saleId, shopId),
+    db
+      .prepare("UPDATE sales SET status = 'voided' WHERE id = ? AND shop_id = ? AND status IN ('pending','completed')")
+      .bind(saleId, shopId),
+  ]);
+  const before = ((read?.results?.[0] as { status?: string } | undefined)?.status ?? null) as string | null;
+  if ((claim?.meta?.changes ?? 0) !== 1) return { claimed: false, before };
 
   const stmts = [
     db.prepare("UPDATE bw_transactions SET status = 'voided' WHERE sale_id = ?").bind(saleId),
@@ -732,7 +746,7 @@ async function voidSale(db: Env["DB"], shopId: string, saleId: string, note: str
   }
 
   await db.batch(stmts);
-  return true;
+  return { claimed: true, before };
 }
 
 export default r;
