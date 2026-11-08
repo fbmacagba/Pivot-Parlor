@@ -17,13 +17,28 @@ export interface WaitlistNotifyEntry {
 }
 
 /**
+ * The email itself could not be sent (the claim has been reverted). Named so
+ * callers can tell it from a database or audit failure, and so the recorder's
+ * structured reason is this name, never the vendor's message. The original
+ * error is kept for logging.
+ */
+export class WaitlistSendError extends Error {
+  constructor(readonly original: unknown) {
+    super("Waitlist notification email could not be sent");
+    this.name = "WaitlistSendError";
+  }
+}
+
+/**
  * Claim one waiting entry (status waiting → notified) and email it, inside
  * `recorder.run` (action `waitlist.notify`).
  *
  * - A lost claim (someone else claimed it, or it is no longer waiting)
  *   returns "lost" and records `refused` with reason `claim_lost`.
- * - A send failure reverts the claim and rethrows, so `run` records `failed`.
+ * - A send failure reverts the claim and throws WaitlistSendError, so `run`
+ *   records `failed`.
  * - An AuditWriteError from the started entry propagates before the claim.
+ * - Anything else (a D1 error in the claim or the revert) propagates as is.
  */
 export async function notifyWaitlistEntry(
   db: D1Database,
@@ -54,9 +69,10 @@ export async function notifyWaitlistEntry(
           preferred_date: entry.preferred_date,
         });
       } catch (err) {
-        // Not stranded as notified with no email.
+        // Not stranded as notified with no email. A failed revert throws its
+        // own (database) error instead.
         await revertWaitlistNotification(db, entry.id);
-        throw err;
+        throw new WaitlistSendError(err);
       }
       return "sent";
     },

@@ -5,7 +5,8 @@ import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/
 import { fieldChanges } from "../audit/diff.js";
 import {
   getBookingsByShop, getBookingById, getBookingDepositState,
-  updateBookingStatus, updateBookingStatusStmt, cancelBookingIfOpen, getServiceById, getShopById,
+  updateBookingStatusStmt, cancelBookingIfOpen, cancelBookingIfNotCancelled, getBookingStatus,
+  getServiceById, getShopById,
 } from "../db/queries.js";
 import { authMiddleware, extractSessionJwt } from "../middleware/auth.js";
 import { sendReviewRequest } from "../services/email.js";
@@ -154,31 +155,43 @@ bookings.put("/:bookingId/status", async (c) => {
 
   // Cancellation is applied atomically against the open statuses so that
   // concurrent duplicate cancels perform the open → cancelled transition
-  // exactly once (only that request fires the waitlist fan-out below). Any
-  // other transition, and cancelling an already-closed booking, keeps the
-  // original unconditional behavior.
+  // exactly once (only that request fires the waitlist fan-out below). A
+  // booking that is no longer open (completed, no_show, in_progress) is still
+  // cancelled by the fallback; one already cancelled is left as it is.
   const status = body.status;
   if (status === "cancelled") {
-    // Pattern G: whether this request performed the flip is known only from
-    // meta.changes, so it rides on the outcome entry. A status change is
-    // claimed only for the flip: on the fallback the prior status is not
-    // known at the time of the write.
+    // Pattern G. Both writes are conditional, so what this request changed is
+    // known only from their meta.changes:
+    // - `flipped` says the open path (pending/confirmed → cancelled) won: the
+    //   flip that frees a slot;
+    // - otherwise the fallback cancels a closed booking unless it is already
+    //   cancelled.
+    // `changes` is recorded only when one of the two writes changed the row,
+    // with the prior status read inside run just before that write. So a
+    // duplicate cancel that changes nothing records `succeeded` with no
+    // change, and one transition is never claimed twice.
     let freedSlot = false;
+    let changedFrom: { status: string | null } | null = null;
     let cancelled: Response;
     try {
       cancelled = await auditFor(c).run(
         { action: "booking.cancel", shopId, entityType: "booking", entityId: bookingId },
         async (): Promise<Response> => {
+          const beforeOpen = await getBookingStatus(c.env.DB, bookingId);
           const res = await cancelBookingIfOpen(c.env.DB, bookingId);
           freedSlot = (res.meta?.changes ?? 0) > 0;
-          if (!freedSlot) await updateBookingStatus(c.env.DB, bookingId, status);
+          if (freedSlot) {
+            changedFrom = beforeOpen ?? { status: null };
+          } else {
+            const beforeFallback = await getBookingStatus(c.env.DB, bookingId);
+            const fallback = await cancelBookingIfNotCancelled(c.env.DB, bookingId, shopId);
+            if ((fallback.meta?.changes ?? 0) === 1) changedFrom = beforeFallback ?? { status: null };
+          }
           return c.json({ success: true });
         },
         statusOutcome(() => ({
           details: { flipped: freedSlot },
-          ...(freedSlot
-            ? { changes: fieldChanges(booking as unknown as Record<string, unknown>, { status: "cancelled" }).changes }
-            : {}),
+          ...(changedFrom ? { changes: fieldChanges(changedFrom, { status: "cancelled" }).changes } : {}),
         })),
       );
     } catch (e) {

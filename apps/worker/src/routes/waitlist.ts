@@ -13,7 +13,7 @@ import {
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { reportError } from "../services/report-error.js";
-import { notifyWaitlistEntry } from "../services/waitlist-claim.js";
+import { notifyWaitlistEntry, WaitlistSendError } from "../services/waitlist-claim.js";
 import { isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
@@ -229,9 +229,13 @@ waitlist.post("/:id/notify", authMiddleware, async (c) => {
     result = await notifyWaitlistEntry(c.env.DB, apiKey, shop, entry, auditFor(c), "manual");
   } catch (err) {
     if (err instanceof AuditWriteError) return auditRefused(c);
-    // The send failed: the claim is already reverted and the outcome recorded.
-    reportError("waitlist.notify_email", err, { entryId: id, shopId: entry.shop_id });
-    return c.json({ success: false, error: "Failed to send notification email" }, 502);
+    if (err instanceof WaitlistSendError) {
+      // The send failed: the claim is already reverted and the outcome recorded.
+      reportError("waitlist.notify_email", err.original, { entryId: id, shopId: entry.shop_id });
+      return c.json({ success: false, error: "Failed to send notification email" }, 502);
+    }
+    // A database failure (claim or revert): a 500, as before (the outcome is recorded `failed`).
+    throw err;
   }
 
   if (result === "lost") {

@@ -113,6 +113,19 @@ async function waitlistStatus(id: string): Promise<string | undefined> {
   return row?.status;
 }
 
+/** Run `fn` while every UPDATE of a waitlist row fails with a D1 error (the
+ *  claim and the revert), and always drop the trigger afterwards. */
+async function withWaitlistWritesBlocked<T>(fn: () => Promise<T>): Promise<T> {
+  await env.DB.prepare(
+    "CREATE TRIGGER audit_test_block_waitlist BEFORE UPDATE ON waitlist BEGIN SELECT RAISE(ABORT, 'waitlist writes blocked'); END"
+  ).run();
+  try {
+    return await fn();
+  } finally {
+    await env.DB.prepare("DROP TRIGGER IF EXISTS audit_test_block_waitlist").run();
+  }
+}
+
 /** A waitlist entry with distinctive personal values, so a leak is findable. */
 async function seedNamedWaitlistEntry(
   shopId: string,
@@ -192,6 +205,66 @@ describe("admin booking status", () => {
     expect(await bookingStatus(id)).toBe("cancelled");
     expect(await gapRowsFor(rid(first))).toBe(0);
     expect(await gapRowsFor(rid(resave))).toBe(0);
+  });
+
+  it("an admin cancel of a completed booking records the fallback change", async () => {
+    const { shopId, headers } = await setup();
+    const { id } = await seedBooking(shopId, { status: "completed" });
+    const res = await dispatch("PUT", `/api/shops/${shopId}/bookings/${id}/status`, { headers, body: { status: "cancelled" } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    const rows = await entriesFor({ action: "booking.cancel", shopId, entityId: id });
+    expect(phasesAndOutcomes(rows)).toEqual([["started", null], ["outcome", "succeeded"]]);
+    // Not the open-path flip (no slot freed), but a real status change.
+    expect(JSON.parse(rows[1]!.details_json as string)).toEqual({ flipped: false });
+    expect(JSON.parse(rows[1]!.changes_json as string)).toEqual({ status: ["completed", "cancelled"] });
+    expect(await bookingStatus(id)).toBe("cancelled");
+    expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  it("an admin double-cancel records the status change once", async () => {
+    const { shopId, headers } = await setup();
+    const { id } = await seedBooking(shopId);
+    const url = `/api/shops/${shopId}/bookings/${id}/status`;
+    const responses = await Promise.all([
+      dispatch("PUT", url, { headers, body: { status: "cancelled" } }),
+      dispatch("PUT", url, { headers, body: { status: "cancelled" } }),
+    ]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200]);
+    expect(await Promise.all(responses.map((r) => r.json()))).toEqual([{ success: true }, { success: true }]);
+    const outcomes = (await entriesFor({ action: "booking.cancel", shopId, entityId: id })).filter((r) => r.phase === "outcome");
+    expect(outcomes.map((r) => r.outcome)).toEqual(["succeeded", "succeeded"]);
+    const withChanges = outcomes.filter((r) => r.changes_json !== null);
+    expect(withChanges).toHaveLength(1);
+    expect(JSON.parse(withChanges[0]!.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
+    expect(outcomes.map((r) => JSON.parse(r.details_json as string).flipped).sort()).toEqual([false, true]);
+    expect(await bookingStatus(id)).toBe("cancelled");
+    for (const r of responses) expect(await gapRowsFor(rid(r))).toBe(0);
+  });
+
+  it("a slot-open database failure reaches the caller's catch and the cancel still answers 200", async () => {
+    // Before this plan a D1 error in the claim aborted the fan-out into the
+    // route's catch; it must not be absorbed per entry like a send failure.
+    testEnv.RESEND_API_KEY = "test-key";
+    const { shopId, headers } = await setup();
+    const { id, date } = await seedBooking(shopId);
+    const first = await seedNamedWaitlistEntry(shopId, { preferredDate: date });
+    const second = await seedNamedWaitlistEntry(shopId, { preferredDate: date });
+    const res = await withWaitlistWritesBlocked(() =>
+      dispatch("PUT", `/api/shops/${shopId}/bookings/${id}/status`, { headers, body: { status: "cancelled" } }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true });
+    expect(await bookingStatus(id)).toBe("cancelled");
+    const notify = [
+      ...(await entriesFor({ action: "waitlist.notify", shopId, entityId: first.id })),
+      ...(await entriesFor({ action: "waitlist.notify", shopId, entityId: second.id })),
+    ];
+    // One attempt, then the fan-out stopped: the error did not loop on.
+    expect(phasesAndOutcomes(notify)).toEqual([["started", null], ["outcome", "failed"]]);
+    expect(resendCalls).toEqual([]);
+    expect(await waitlistStatus(first.id)).toBe("waiting");
+    expect(await waitlistStatus(second.id)).toBe("waiting");
   });
 
   it("local cancel refuses before changing when the started entry cannot be written", async () => {
@@ -736,6 +809,22 @@ describe("waitlist", () => {
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
+  it("manual notify lets a database failure through as a 500, not a send failure", async () => {
+    testEnv.RESEND_API_KEY = "test-key";
+    const shopId = await seedShop("Audit Notify DbFail");
+    const { token } = await adminToken(shopId);
+    const entry = await seedNamedWaitlistEntry(shopId);
+    const res = await withWaitlistWritesBlocked(() =>
+      dispatch("POST", `/api/waitlist/${entry.id}/notify`, { headers: authHeaders(token) }),
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "Internal server error" });
+    const rows = await entriesFor({ action: "waitlist.notify", shopId, entityId: entry.id });
+    expect(phasesAndOutcomes(rows)).toEqual([["started", null], ["outcome", "failed"]]);
+    expect(resendCalls).toEqual([]);
+    expect(await waitlistStatus(entry.id)).toBe("waiting");
+  });
+
   it("manual notify refuses before claiming when the started entry cannot be written", async () => {
     // With a key configured, a 503 here can only be the audit refusal, not
     // the "Email sending is not configured" path.
@@ -797,6 +886,27 @@ describe("slot-open fan-out", () => {
       ),
     );
     expect(sent).toBe(0);
+    expect(resendCalls).toEqual([]);
+    expect(await waitlistStatus(entry.id)).toBe("waiting");
+  });
+
+  it("a database failure in the fan-out propagates instead of being skipped", async () => {
+    testEnv.RESEND_API_KEY = "test-key";
+    const shopId = await seedShop("Audit Fanout DbFail");
+    const entry = await seedNamedWaitlistEntry(shopId);
+    const staffId = await seedStaff(shopId);
+    const slug = await slugOf(shopId);
+    await expect(
+      withWaitlistWritesBlocked(() =>
+        notifyWaitlistForOpenedSlot(
+          env.DB,
+          "test-key",
+          { id: shopId, name: "Audit Fanout DbFail", slug },
+          { bookingDate: "2027-05-01", staffId },
+          systemAudit(env.DB, "api"),
+        ),
+      ),
+    ).rejects.toThrow(/waitlist writes blocked/);
     expect(resendCalls).toEqual([]);
     expect(await waitlistStatus(entry.id)).toBe("waiting");
   });

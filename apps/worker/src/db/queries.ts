@@ -1424,12 +1424,12 @@ export function updateBookingStatusStmt(
     .bind(status, id);
 }
 
-export function updateBookingStatus(
-  db: D1Database,
-  id: string,
-  status: string,
-) {
-  return updateBookingStatusStmt(db, id, status).run();
+/** A booking's current status, or null when there is no such booking. */
+export function getBookingStatus(db: D1Database, id: string) {
+  return db
+    .prepare("SELECT status FROM bookings WHERE id = ? LIMIT 1")
+    .bind(id)
+    .first<{ status: string }>();
 }
 
 /**
@@ -1444,6 +1444,22 @@ export function cancelBookingIfOpen(db: D1Database, id: string) {
       "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')",
     )
     .bind(id)
+    .run();
+}
+
+/**
+ * The cancel fallback for a booking that is no longer open (completed,
+ * no_show, in_progress): cancel it unless it is already cancelled. The
+ * caller checks meta.changes: 1 means this request changed the status, 0
+ * means it was already cancelled (SQLite counts a matched row even when the
+ * value is unchanged, hence the explicit `status <> 'cancelled'`).
+ */
+export function cancelBookingIfNotCancelled(db: D1Database, id: string, shopId: string) {
+  return db
+    .prepare(
+      "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status <> 'cancelled'",
+    )
+    .bind(id, shopId)
     .run();
 }
 

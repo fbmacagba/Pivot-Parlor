@@ -6,10 +6,10 @@
 // in PR #54), and notifying a bounded batch per freed slot avoids spamming a
 // long waitlist for a single opening.
 
-import type { AuditRecorder } from "@repo/audit";
+import { AuditWriteError, type AuditRecorder } from "@repo/audit";
 import { getWaitingEntriesForOpenedSlot } from "../db/queries.js";
 import { reportError } from "./report-error.js";
-import { notifyWaitlistEntry } from "./waitlist-claim.js";
+import { notifyWaitlistEntry, WaitlistSendError } from "./waitlist-claim.js";
 
 export const WAITLIST_NOTIFY_CAP = 3;
 
@@ -23,8 +23,9 @@ export const WAITLIST_NOTIFY_CAP = 3;
  * Each email is recorded through `recorder` (`waitlist.notify`, trigger
  * `slot_opened`); callers pass the cancelling request's recorder, so the
  * entry names the person whose cancel freed the slot. An email whose entry
- * cannot be written is skipped like a failed send: the cancellation that
- * freed the slot always stands.
+ * cannot be written is skipped like a failed send. Any other error (a D1
+ * failure) rejects, and both callers catch and report it: the cancellation
+ * that freed the slot always stands.
  */
 export async function notifyWaitlistForOpenedSlot(
   db: D1Database,
@@ -63,7 +64,10 @@ export async function notifyWaitlistForOpenedSlot(
       } catch (err) {
         // A failed send (already reverted by the helper) or an entry that
         // could not be recorded (never claimed): report it and move on.
-        reportError("waitlist.slot_open_email", err, {
+        // Anything else (a D1 error in the claim or the revert) aborts the
+        // fan-out into the caller's catch, as it always did.
+        if (!(err instanceof WaitlistSendError) && !(err instanceof AuditWriteError)) throw err;
+        reportError("waitlist.slot_open_email", err instanceof WaitlistSendError ? err.original : err, {
           entryId: entry.id,
           shopId: shop.id,
         });
