@@ -40,7 +40,8 @@ export default function WalkIn() {
     if (!entry?.id || step === "done") return;
     const poll = async () => {
       try {
-        const res = await fetch(`https://pivot-parlor-api.bmorris0565.workers.dev/api/walkin/${shopSlug}/status/${entry.id}`);
+        // Same-origin proxy routes (api.walkin.*): the site's own API for every environment.
+        const res = await fetch(`/api/walkin/${shopSlug}/status/${entry.id}`);
         const data = await res.json() as { success: boolean; data?: QueueEntry };
         if (data.success && data.data) {
           setEntry(data.data);
@@ -58,7 +59,7 @@ export default function WalkIn() {
     if (!name.trim()) { setError("Please enter your name."); return; }
     setSubmitting(true); setError("");
     try {
-      const res = await fetch(`https://pivot-parlor-api.bmorris0565.workers.dev/api/walkin/${shopSlug}/join`, {
+      const res = await fetch(`/api/walkin/${shopSlug}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), phone: phone.trim() || undefined, service: service.trim() || undefined }),
