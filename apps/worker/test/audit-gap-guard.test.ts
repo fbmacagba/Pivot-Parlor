@@ -308,10 +308,10 @@ describe("audit gap guard", () => {
 });
 
 describe("the real app mounts the gap guard", () => {
-  it("a pending route on the real app writes its floor row", async () => {
-    // POST /api/bookings stays pending for the whole of Plan 2 (Plan 3 owns
-    // it); the BOOKING stub in vitest.config.ts answers it 201.
-    expect(ROUTE_AUDIT["POST /api/bookings"], "this check needs a route that is still pending").toBe("pending");
+  it("an exempt booking proxy on the real app writes no floor row", async () => {
+    // POST /api/bookings is a pure proxy to the booking worker, which records
+    // the change itself; the BOOKING stub in vitest.config.ts answers it 201.
+    expect(ROUTE_AUDIT["POST /api/bookings"]).toMatchObject({ exempt: expect.any(String) });
     const res = await dispatch("POST", "/api/bookings", {
       headers: { "CF-Connecting-IP": "192.0.2.30" },
       body: { shop_slug: "gap-guard-wiring" },
@@ -319,8 +319,6 @@ describe("the real app mounts the gap guard", () => {
     const rid = res.headers.get("X-Request-Id");
     expect(rid, `POST /api/bookings answered ${res.status} with no X-Request-Id`).toMatch(/.+/);
     expect(res.status).toBe(201);
-    const row = await onlyGapFor(rid!, `real POST /api/bookings answered ${res.status}`);
-    expect(row).toMatchObject({ outcome: "succeeded", via: "api" });
-    expect(JSON.parse(row.details_json as string)).toMatchObject({ method: "POST", route: "/api/bookings", status: 201 });
+    expect(await gapRowsFor(rid!), "an exempt route must not write a floor row").toBe(0);
   });
 });

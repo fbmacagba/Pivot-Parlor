@@ -227,6 +227,8 @@ The `apps/workers/` directory contains standalone Cloudflare Workers for:
 
 These are deployed independently and communicate via queues.
 
+`booking` records its own audit entries (route registry and coverage test in `apps/workers/booking/src/audit/`), so the API worker's booking proxies are exempt in its registry.
+
 `research`, `text`, `chatbot` and `booking` are npm workspaces (root `workspaces`). Text-model calls in the API worker's `/api/ai` routes and in the `research`, `text` and `chatbot` workers go through `@repo/llm` (`packages/llm`, `chatComplete`) with route-qualified model ids: `openai-api/<model>` and `anthropic-api/<model>` call the vendors directly, anything else is an OpenRouter slug. Two callers stay on OpenRouter directly and outside `@repo/llm`: the marketing chat widget (`apps/web/app/routes/api.chat.tsx`) and image generation (`apps/workers/images`, plus the API worker's image route), per the spec's non-goals. `/api/ai/models` is ranked live by `apps/worker/src/services/model-registry.ts` and cached in KV (`ai:models:v3`); `packages/utils/src/modelCatalog.ts` is the snapshot fallback and fallback price table (refresh it together with `apps/worker/test/fixtures/model-feeds.ts`). The chatbot's model is platform-wide (`platform:chatbot:model`, set on AI Deploy).
 
 <!-- graphite:managed version=14 -->
