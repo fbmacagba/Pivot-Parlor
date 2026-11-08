@@ -980,21 +980,29 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   // the original, not re-indented. `changes` is set only when a flip happened.
   const priorStatus = String(booking.status);
   let flipped = false;
+  let auditBeforeStatus = priorStatus;
   let auditDeposit: "refunded" | "voided" | "kept" | "none" = "none";
   try {
     return await auditFor(c).run(
       { action: "booking.cancel", shopId, entityType: "booking", entityId: bookingId },
       async (): Promise<Response> => {
   if (priorStatus !== "cancelled") {
-    const claim = await db
-      .prepare(
-        "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('pending', 'confirmed')"
-      )
-      .bind(bookingId, shopId)
-      .run();
-    if ((claim.meta?.changes ?? 0) !== 1) {
+    // The before-status for the audit entry is read in the SAME batch (one D1
+    // transaction) as the flip, so it is the status the UPDATE actually found,
+    // not the earlier pre-read (a settle webhook may have confirmed it since).
+    const [beforeRead, claim] = await db.batch([
+      db.prepare("SELECT status FROM bookings WHERE id = ? AND shop_id = ?").bind(bookingId, shopId),
+      db
+        .prepare(
+          "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('pending', 'confirmed')"
+        )
+        .bind(bookingId, shopId),
+    ]);
+    if ((claim?.meta?.changes ?? 0) !== 1) {
       return c.json({ success: false, error: "Booking was modified by another request" }, 409);
     }
+    const found = (beforeRead?.results?.[0] as { status?: string } | undefined)?.status;
+    if (typeof found === "string") auditBeforeStatus = found;
     flipped = true;
   } else if (!refundExplicit || !(chargedDeposit || holdDeposit)) {
     const reason = alreadyRefunded ? "Deposit already refunded" : "Booking is already cancelled";
@@ -1106,14 +1114,14 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   }
 
   // Every disposition the handler can take, mapped onto the audit enum.
-  auditDeposit =
-    depositAction === "refunded"
-      ? "refunded"
-      : depositAction === "kept"
-        ? "kept"
-        : depositAction === "hold_voided"
-          ? "voided"
-          : "none";
+  // A Record keyed on the disposition type: a new value is a compile error.
+  const DEPOSIT_AUDIT: Record<typeof depositAction, "refunded" | "voided" | "kept" | "none"> = {
+    refunded: "refunded",
+    kept: "kept",
+    hold_voided: "voided",
+    none: "none",
+  };
+  auditDeposit = DEPOSIT_AUDIT[depositAction];
 
   return c.json({
     success: true,
@@ -1128,7 +1136,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
       statusOutcome((res) =>
         res.status < 400
           ? {
-              ...(flipped ? { changes: { status: [priorStatus, "cancelled"] as [unknown, unknown] } } : {}),
+              ...(flipped ? { changes: { status: [auditBeforeStatus, "cancelled"] as [unknown, unknown] } } : {}),
               details: { deposit: auditDeposit },
             }
           : {}

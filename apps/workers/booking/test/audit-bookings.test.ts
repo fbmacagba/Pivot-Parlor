@@ -1,5 +1,6 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import worker from "../src/index";
 import { seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
 import { entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
@@ -8,6 +9,24 @@ const REFUSAL = { success: false, error: "Could not record this action; nothing 
 const FUTURE_DATE = "2099-11-20";
 const SHOP_NAME = "Staff Audit Shop";
 const WHO = { name: "Quincy Quartz", email: "quincy.quartz@test.local", phone: "07700900456" };
+
+/** `dispatch` with a substituted env (e.g. a Proxy over DB). */
+async function dispatchWith(
+  testEnv: typeof env,
+  method: string,
+  path: string,
+  opts: { headers: Record<string, string>; body: unknown }
+): Promise<Response> {
+  const init: RequestInit = {
+    method,
+    headers: { ...opts.headers, "Content-Type": "application/json" },
+    body: JSON.stringify(opts.body),
+  };
+  const ctx = createExecutionContext();
+  const response = await worker.fetch(new Request(`https://booking.test${path}`, init) as never, testEnv as never, ctx as never);
+  await waitOnExecutionContext(ctx);
+  return response as unknown as Response;
+}
 
 const WHSEC = "whsec_test";
 
@@ -133,7 +152,12 @@ describe("staff booking audit", () => {
     await seedSlot(s.shop, s.staff, FUTURE_DATE, "10:00");
     const res = await book(s, "10:00");
     expect(res.status).toBe(200);
-    const { bookingId } = (await res.json()) as { bookingId: string };
+    const { bookingId, clientSecret } = (await res.json()) as { bookingId: string; clientSecret: string };
+    const pi = await env.DB.prepare("SELECT stripe_payment_intent_id AS id FROM bw_booking_state WHERE booking_id = ?")
+      .bind(bookingId)
+      .first<{ id: string }>();
+    expect(clientSecret, "the fake Stripe returned no client secret to look for").toMatch(/.+/);
+    expect(pi?.id, "the booking has no PaymentIntent id to look for").toMatch(/.+/);
     const outcome = await outcomeOf("booking.create", s.shop, bookingId);
     expect(outcome).toMatchObject({
       outcome: "succeeded",
@@ -145,7 +169,7 @@ describe("staff booking audit", () => {
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: [null, "confirmed"] });
     expect(JSON.parse(outcome.details_json as string)).toEqual({ channel: "staff", deposit_required: true });
     for (const row of await entriesFor({ action: "booking.create", shopId: s.shop })) {
-      expectNoPersonalData(row, [WHO.name, WHO.email, WHO.phone, SHOP_NAME]);
+      expectNoPersonalData(row, [WHO.name, WHO.email, WHO.phone, SHOP_NAME, clientSecret, pi!.id]);
     }
     expect(await gapRowsFor(res.headers.get("X-Request-Id")!)).toBe(0);
   });
@@ -374,6 +398,79 @@ describe("staff cancel audit", () => {
     expect(outcome.outcome).toBe("succeeded");
     expect(outcome.changes_json).toBeNull();
     expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "voided" });
+  });
+
+  /** A charged (paid) deposit: PI recorded, deposit_paid_at stamped, tx captured. */
+  async function seedChargedDeposit(s: { shop: string; staff: string; service: string }): Promise<string> {
+    const bookingId = await seedBooking(s, { piId: "pi_charged_1", depositPence: 1250, depositTx: "pending" });
+    await env.DB.prepare("UPDATE bw_booking_state SET deposit_paid_at = datetime('now') WHERE booking_id = ?")
+      .bind(bookingId)
+      .run();
+    await env.DB.prepare("UPDATE bw_transactions SET status = 'captured' WHERE booking_id = ? AND type = 'deposit'")
+      .bind(bookingId)
+      .run();
+    return bookingId;
+  }
+
+  it("maps a refunded charged deposit to details.deposit refunded", async () => {
+    const s = await setup();
+    const bookingId = await seedChargedDeposit(s);
+    const res = await cancel(s.shop, bookingId, { refundDeposit: true });
+    expect(res.status).toBe(200);
+    const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
+    expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "refunded" });
+    expectNoPersonalData(outcome, ["pi_charged_1"]);
+  });
+
+  it("maps a kept charged deposit to details.deposit kept", async () => {
+    const s = await setup();
+    const bookingId = await seedChargedDeposit(s);
+    const res = await cancel(s.shop, bookingId, { refundDeposit: false });
+    expect(res.status).toBe(200);
+    const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "kept" });
+  });
+
+  it("records the status the flip found, not the earlier pre-read", async () => {
+    const s = await setup();
+    const bookingId = await seedBooking(s, { status: "pending" });
+    // A settle webhook confirms the booking after the handler's pre-read but
+    // before its flip batch. The Proxy commits that confirm once, just before
+    // the batch that holds the flip (the one after the SELECT was prepared).
+    let armed = false;
+    let fired = false;
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "prepare") {
+          return (sql: string) => {
+            if (sql.startsWith("SELECT status FROM bookings WHERE id = ? AND shop_id = ?")) armed = true;
+            return target.prepare(sql);
+          };
+        }
+        if (prop === "batch") {
+          return async (stmts: D1PreparedStatement[]) => {
+            if (armed && !fired) {
+              fired = true;
+              await target.prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ?").bind(bookingId).run();
+            }
+            return target.batch(stmts);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    const res = await dispatchWith(
+      { ...env, DB: db },
+      "POST",
+      `/booking/shops/${s.shop}/bookings/${bookingId}/cancel`,
+      { headers: await authed("admin", s.shop), body: {} }
+    );
+    expect(fired, "the flip batch never ran, so the race was never staged").toBe(true);
+    expect(res.status).toBe(200);
+    const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
+    expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
   });
 
   // Pins a dependency (Ruling P9): staff cancel must leave an unpaid Checkout
