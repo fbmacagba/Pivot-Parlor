@@ -654,11 +654,21 @@ export function getShopByCheckoutSessionId(
     .first<DBShop>();
 }
 
-/** Prepared UPDATE marking a shop paid (Stripe checkout) — use in a db.batch(). */
+/** Status a shop moves to once its Stripe checkout is paid: only a shop still
+ *  awaiting payment moves on (to pending). Stripe redelivers events, and a
+ *  redelivery must not send a live or suspended shop back to pending. Keep in
+ *  step with the CASE in updateShopPaymentCompleteStmt. */
+export function statusAfterPayment(status: string): string {
+  return status === "awaiting_payment" ? "pending" : status;
+}
+
+/** Prepared UPDATE marking a shop paid (Stripe checkout) — use in a db.batch().
+ *  The status moves in the same statement (see statusAfterPayment), so a
+ *  redelivered event cannot reset a shop that has gone live since. */
 export function updateShopPaymentCompleteStmt(db: D1Database, shopId: string) {
   return db
     .prepare(
-      "UPDATE shops SET stripe_payment_status = 'paid', status = 'pending' WHERE id = ?",
+      "UPDATE shops SET stripe_payment_status = 'paid', status = CASE WHEN status = 'awaiting_payment' THEN 'pending' ELSE status END WHERE id = ?",
     )
     .bind(shopId);
 }
@@ -2458,6 +2468,46 @@ export async function getPurchaseOrderItems(db: D1Database, poId: string) {
       }
     >();
   return results;
+}
+
+/** Rows a check-then-batch handler guards on their `status` column. */
+export type StatusGuardedTable = "purchase_orders" | "stock_takes";
+
+/**
+ * Batch guard for a handler that checks a row's status and then writes in
+ * one db.batch(): put it FIRST in the batch. While the row's status is still
+ * one of `allowed` it rewrites the status to itself; otherwise it writes NULL,
+ * which fails the column's NOT NULL constraint and rolls the whole batch back,
+ * audit entry included. D1 runs a batch as one transaction, so every write
+ * after the guard sees the status the guard saw: a cancel, order or completion
+ * committed after the pre-check fails the batch instead of being written over.
+ * The caller re-runs its pre-check on fresh reads to answer the failure.
+ */
+export function statusGuardStmt(
+  db: D1Database,
+  table: StatusGuardedTable,
+  id: string,
+  shopId: string,
+  allowed: readonly [string, ...string[]],
+) {
+  const marks = allowed.map(() => "?").join(", ");
+  return db
+    .prepare(
+      `UPDATE ${table} SET status = CASE WHEN status IN (${marks}) THEN status ELSE NULL END WHERE id = ? AND shop_id = ?`,
+    )
+    .bind(...allowed, id, shopId);
+}
+
+/** Prepared UPDATE receiving `quantity` more of a PO line — use in the receipt
+ *  batch. A receipt that would take the line past its ordered quantity writes
+ *  NULL instead, failing NOT NULL and rolling the batch back, so two receipts
+ *  racing for the same outstanding units cannot both land. */
+export function receivePurchaseOrderItemStmt(db: D1Database, itemId: string, quantity: number) {
+  return db
+    .prepare(
+      "UPDATE purchase_order_items SET received_qty = CASE WHEN received_qty + ? <= quantity THEN received_qty + ? ELSE NULL END WHERE id = ?",
+    )
+    .bind(quantity, quantity, itemId);
 }
 
 /** BOM rows for one service, joined with the product facts the UI needs. */

@@ -6,6 +6,8 @@ import {
   getPurchaseOrdersByShop,
   getPurchaseOrderById,
   getPurchaseOrderItems,
+  receivePurchaseOrderItemStmt,
+  statusGuardStmt,
   stockMovementStatements,
 } from "../db/queries.js";
 import { AuditWriteError } from "@repo/audit";
@@ -21,6 +23,10 @@ import { requireShopRole } from "../middleware/rbac.js";
  * level upsert in one batch (stockMovementStatements' invariant), updates the
  * line's received_qty, refreshes the product/variant cost to the latest paid
  * cost, and recomputes the header status inside the same transaction.
+ *
+ * Edit and receive check the PO before they write, so their batches open with
+ * guards (statusGuardStmt, receivePurchaseOrderItemStmt) that roll the batch
+ * back if a concurrent order, cancel or receipt committed in between.
  */
 
 const r = new Hono<{ Bindings: Bindings }>();
@@ -72,6 +78,38 @@ async function resolvePoItems(
     resolved.push({ product_id: product.id, variant_id: variantId, quantity: item.quantity!, unit_cost_pence: cost });
   }
   return { ok: true, items: resolved };
+}
+
+const NOT_EDITABLE = "Only draft purchase orders can be edited";
+const NOT_RECEIVABLE = "Only ordered purchase orders can be received";
+
+type ReceiptLine = { item_id?: string; quantity?: number };
+type PoItemRow = Awaited<ReturnType<typeof getPurchaseOrderItems>>[number];
+
+/**
+ * The receipt pre-check: the PO can still be received, and every line names
+ * one of its items once, for a whole number no greater than is outstanding.
+ * Returns the first problem as the 400 message, or null. The handler runs it
+ * before the batch, and again on fresh reads if the batch's guards roll it
+ * back, so a receipt that lost a race answers the 400 it would have answered
+ * a moment later.
+ */
+function receiptProblem(po: { status: string } | null, items: PoItemRow[], lines: ReceiptLine[]): string | null {
+  if (!po || (po.status !== "ordered" && po.status !== "partial")) return NOT_RECEIVABLE;
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (!line.item_id || !byId.has(line.item_id)) return "Unknown purchase order item";
+    if (seen.has(line.item_id)) return "Duplicate line for the same item";
+    seen.add(line.item_id);
+    if (!Number.isInteger(line.quantity) || (line.quantity ?? 0) < 1) return "quantity must be a positive integer";
+    const item = byId.get(line.item_id)!;
+    const outstanding = item.quantity - item.received_qty;
+    if (line.quantity! > outstanding) {
+      return `Cannot receive ${line.quantity} of "${item.product_name}": only ${outstanding} outstanding`;
+    }
+  }
+  return null;
 }
 
 // ─── GET /api/shops/:shopId/purchase-orders ───────────────────────────────────
@@ -149,7 +187,7 @@ r.put("/:poId", authMiddleware, requireShopRole("admin"), async (c) => {
   const po = await getPurchaseOrderById(c.env.DB, shopId, c.req.param("poId")!);
   if (!po) return c.json({ success: false, error: "Purchase order not found" }, 404);
   if (po.status !== "draft") {
-    return c.json({ success: false, error: "Only draft purchase orders can be edited" }, 400);
+    return c.json({ success: false, error: NOT_EDITABLE }, 400);
   }
 
   const body = await c.req.json<{
@@ -176,32 +214,43 @@ r.put("/:poId", authMiddleware, requireShopRole("admin"), async (c) => {
     { supplier_id: po.supplier_id, notes: po.notes },
     { supplier_id: nextSupplier, notes }
   );
-  // Pre-check-then-batch is unchanged (Plan decision 9); the entry joins the batch.
-  const refused = await batchWithAudit(
-    c,
-    [
-      c.env.DB
-        .prepare("UPDATE purchase_orders SET supplier_id = ?, notes = ? WHERE id = ? AND status = 'draft'")
-        .bind(nextSupplier, notes, po.id),
-      c.env.DB.prepare("DELETE FROM purchase_order_items WHERE po_id = ?").bind(po.id),
-      ...resolved.items.map((i) =>
+  // The guard leads the batch: an order or cancel committed since the
+  // pre-check rolls back the line replacement and the entry with it.
+  let refused: Response | null;
+  try {
+    refused = await batchWithAudit(
+      c,
+      [
+        statusGuardStmt(c.env.DB, "purchase_orders", po.id, shopId, ["draft"]),
         c.env.DB
-          .prepare(
-            "INSERT INTO purchase_order_items (id, po_id, shop_id, product_id, variant_id, quantity, unit_cost_pence) VALUES (?, ?, ?, ?, ?, ?, ?)"
-          )
-          .bind(crypto.randomUUID(), po.id, shopId, i.product_id, i.variant_id, i.quantity, i.unit_cost_pence)
-      ),
-    ],
-    {
-      action: "inventory.po.update",
-      outcome: "succeeded",
-      shopId,
-      entityType: "purchase_order",
-      entityId: po.id,
-      changes,
-      details: { items: resolved.items.length, ...(fields.length > 0 ? { fields } : {}) },
-    },
-  );
+          .prepare("UPDATE purchase_orders SET supplier_id = ?, notes = ? WHERE id = ? AND status = 'draft'")
+          .bind(nextSupplier, notes, po.id),
+        c.env.DB.prepare("DELETE FROM purchase_order_items WHERE po_id = ?").bind(po.id),
+        ...resolved.items.map((i) =>
+          c.env.DB
+            .prepare(
+              "INSERT INTO purchase_order_items (id, po_id, shop_id, product_id, variant_id, quantity, unit_cost_pence) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+            .bind(crypto.randomUUID(), po.id, shopId, i.product_id, i.variant_id, i.quantity, i.unit_cost_pence)
+        ),
+      ],
+      {
+        action: "inventory.po.update",
+        outcome: "succeeded",
+        shopId,
+        entityType: "purchase_order",
+        entityId: po.id,
+        changes,
+        details: { items: resolved.items.length, ...(fields.length > 0 ? { fields } : {}) },
+      },
+    );
+  } catch (e) {
+    // Rolled back whole. If the PO has left draft, answer as the pre-check
+    // now would; any other failure is not a lost race, so it propagates.
+    const fresh = await getPurchaseOrderById(c.env.DB, shopId, po.id);
+    if (fresh?.status !== "draft") return c.json({ success: false, error: NOT_EDITABLE }, 400);
+    throw e;
+  }
   if (refused) return refused;
   return c.json({ success: true });
 });
@@ -280,46 +329,28 @@ r.post("/:poId/receive", authMiddleware, requireShopRole("admin"), async (c) => 
   const po = await getPurchaseOrderById(c.env.DB, shopId, c.req.param("poId")!);
   if (!po) return c.json({ success: false, error: "Purchase order not found" }, 404);
   if (po.status !== "ordered" && po.status !== "partial") {
-    return c.json({ success: false, error: "Only ordered purchase orders can be received" }, 400);
+    return c.json({ success: false, error: NOT_RECEIVABLE }, 400);
   }
 
-  const body = await c.req.json<{ lines?: Array<{ item_id?: string; quantity?: number }> }>();
+  const body = await c.req.json<{ lines?: ReceiptLine[] }>();
   if (!Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ success: false, error: "lines is required" }, 400);
   }
+  const lines = body.lines;
 
   const items = await getPurchaseOrderItems(c.env.DB, po.id);
+  const problem = receiptProblem(po, items, lines);
+  if (problem) return c.json({ success: false, error: problem }, 400);
   const byId = new Map(items.map((i) => [i.id, i]));
 
-  const stmts = [];
-  const seen = new Set<string>();
+  // Guards first: the status guard and each line's received_qty CASE roll the
+  // whole batch back if a cancel or another receipt landed since the checks.
+  const stmts = [statusGuardStmt(c.env.DB, "purchase_orders", po.id, shopId, ["ordered", "partial"])];
   let units = 0;
-  for (const line of body.lines) {
-    if (!line.item_id || !byId.has(line.item_id)) {
-      return c.json({ success: false, error: "Unknown purchase order item" }, 400);
-    }
-    if (seen.has(line.item_id)) {
-      return c.json({ success: false, error: "Duplicate line for the same item" }, 400);
-    }
-    seen.add(line.item_id);
-    const item = byId.get(line.item_id)!;
-    const outstanding = item.quantity - item.received_qty;
-    if (!Number.isInteger(line.quantity) || (line.quantity ?? 0) < 1) {
-      return c.json({ success: false, error: "quantity must be a positive integer" }, 400);
-    }
-    if (line.quantity! > outstanding) {
-      return c.json(
-        { success: false, error: `Cannot receive ${line.quantity} of "${item.product_name}" — only ${outstanding} outstanding` },
-        400
-      );
-    }
-
+  for (const line of lines) {
+    const item = byId.get(line.item_id!)!;
     units += line.quantity!;
-    stmts.push(
-      c.env.DB
-        .prepare("UPDATE purchase_order_items SET received_qty = received_qty + ? WHERE id = ?")
-        .bind(line.quantity, item.id)
-    );
+    stmts.push(receivePurchaseOrderItemStmt(c.env.DB, item.id, line.quantity!));
     stmts.push(
       ...stockMovementStatements(c.env.DB, {
         id: crypto.randomUUID(),
@@ -363,15 +394,25 @@ r.post("/:poId/receive", authMiddleware, requireShopRole("admin"), async (c) => 
       .bind(po.id, po.id, po.id)
   );
 
-  // Pre-check-then-batch is unchanged (Plan decision 9); the entry joins the batch.
-  const refused = await batchWithAudit(c, stmts, {
-    action: "inventory.po.receive",
-    outcome: "succeeded",
-    shopId,
-    entityType: "purchase_order",
-    entityId: po.id,
-    details: { lines: body.lines.length, units },
-  });
+  let refused: Response | null;
+  try {
+    refused = await batchWithAudit(c, stmts, {
+      action: "inventory.po.receive",
+      outcome: "succeeded",
+      shopId,
+      entityType: "purchase_order",
+      entityId: po.id,
+      details: { lines: lines.length, units },
+    });
+  } catch (e) {
+    // Rolled back whole. If the checks now fail on fresh reads (the PO was
+    // cancelled, or another receipt took the units), answer as they would;
+    // any other failure is not a lost race, so it propagates.
+    const fresh = await getPurchaseOrderById(c.env.DB, shopId, po.id);
+    const lost = receiptProblem(fresh, fresh ? await getPurchaseOrderItems(c.env.DB, po.id) : [], lines);
+    if (lost) return c.json({ success: false, error: lost }, 400);
+    throw e;
+  }
   if (refused) return refused;
   const updated = await getPurchaseOrderById(c.env.DB, shopId, po.id);
   return c.json({ success: true, data: { status: updated?.status } });

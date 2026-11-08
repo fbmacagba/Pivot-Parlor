@@ -7,6 +7,7 @@ import {
   getShopByCheckoutSessionId,
   updateShopPaymentCompleteStmt,
   setInviteActiveStmt,
+  statusAfterPayment,
 } from "../db/queries.js";
 import { SYSTEM_ACTOR, auditFor, auditRefused } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
@@ -64,7 +65,7 @@ export async function handleCheckoutSessionCompleted(
       entityType: "shop",
       entityId: shop.id,
       changes: fieldChanges(shop as unknown as Record<string, unknown>, {
-        status: "pending",
+        status: statusAfterPayment(shop.status),
         stripe_payment_status: "paid",
       }).changes,
       details,

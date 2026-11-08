@@ -501,7 +501,7 @@ shops.post(
     if (!text) return c.json({ success: false, error: "Review text is required" }, 400);
     if (text.length > 2000) return c.json({ success: false, error: "Review text is too long (max 2000 characters)" }, 400);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-      return c.json({ success: false, error: "Rating must be 1–5" }, 400);
+      return c.json({ success: false, error: "Rating must be from 1 to 5" }, 400);
     }
     if (!bookingId || bookingId.length > 100) {
       return c.json({ success: false, error: "A booking is required to leave a review" }, 400);

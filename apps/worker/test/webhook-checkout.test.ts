@@ -13,7 +13,7 @@ async function seedAwaitingPaymentShop() {
   const shopId = await seedShop("Webhook Shop");
   const sessionId = `cs_test_${crypto.randomUUID()}`;
   await env.DB.prepare(
-    "UPDATE shops SET stripe_checkout_session_id = ?, stripe_payment_status = 'unpaid' WHERE id = ?"
+    "UPDATE shops SET stripe_checkout_session_id = ?, stripe_payment_status = 'unpaid', status = 'awaiting_payment' WHERE id = ?"
   )
     .bind(sessionId, shopId)
     .run();
@@ -49,6 +49,24 @@ describe("Stripe webhook: checkout.session.completed", () => {
       .bind(inviteId)
       .first<{ active: number }>();
     expect(invite?.active).toBe(1);
+  });
+
+  // Stripe redelivers events. A redelivery after the shop went live must not
+  // send it back to pending (which takes the public site down).
+  it.each(["active", "suspended"])("a redelivered event leaves a %s shop's status alone", async (status) => {
+    const { shopId, sessionId, inviteId } = await seedAwaitingPaymentShop();
+    const session = { id: sessionId, metadata: { shop_id: shopId, invite_id: inviteId } };
+    await handleCheckoutSessionCompleted(env.DB, session);
+    await env.DB.prepare("UPDATE shops SET status = ? WHERE id = ?").bind(status, shopId).run();
+
+    const res = await handleCheckoutSessionCompleted(env.DB, session);
+    expect(res.activated).toBe(true);
+
+    const shop = await env.DB
+      .prepare("SELECT stripe_payment_status, status FROM shops WHERE id = ?")
+      .bind(shopId)
+      .first<{ stripe_payment_status: string; status: string }>();
+    expect(shop).toEqual({ stripe_payment_status: "paid", status });
   });
 
   it("no-ops when metadata is missing", async () => {
