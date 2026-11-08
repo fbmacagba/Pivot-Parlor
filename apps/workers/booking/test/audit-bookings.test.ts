@@ -9,6 +9,21 @@ const FUTURE_DATE = "2099-11-20";
 const SHOP_NAME = "Staff Audit Shop";
 const WHO = { name: "Quincy Quartz", email: "quincy.quartz@test.local", phone: "07700900456" };
 
+const WHSEC = "whsec_test";
+
+async function postSignedEvent(event: Record<string, unknown>): Promise<Response> {
+  const payload = JSON.stringify(event);
+  const enc = new TextEncoder();
+  const t = Math.floor(Date.now() / 1000);
+  const key = await crypto.subtle.importKey("raw", enc.encode(WHSEC), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${t}.${payload}`));
+  const hex = Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0")).join("");
+  return dispatch("POST", "/webhooks/stripe", {
+    headers: { "Stripe-Signature": `t=${t},v1=${hex}`, "Content-Type": "application/json" },
+    body: event,
+  });
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -361,22 +376,35 @@ describe("staff cancel audit", () => {
     expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "voided" });
   });
 
-  it("staff cancel of an unpaid Checkout booking cancels its pending deposit transaction", async () => {
+  // Pins a dependency (Ruling P9): staff cancel must leave an unpaid Checkout
+  // booking's deposit tx 'pending'. payment_intent.succeeded captures the tx
+  // and sets its stripe_id only WHERE status = 'pending', and the recovery
+  // refund needs a 'captured' tx. Cancelling the tx would strand a late payment.
+  it("a deposit that settles after staff cancel of an unpaid booking stays refundable", async () => {
     const s = await setup();
-    // The shape POST /public/bookings leaves for a Checkout deposit: a pending
-    // booking, no PaymentIntent yet, and a pending deposit tx keyed by session id.
     const bookingId = await seedBooking(s, { status: "pending", piId: null, depositPence: 1250, depositTx: "pending" });
     const res = await cancel(s.shop, bookingId);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { deposit_action: string } };
-    expect(body.data.deposit_action).toBe("none");
+    const txOf = () =>
+      env.DB.prepare("SELECT status, stripe_id FROM bw_transactions WHERE booking_id = ? AND type = 'deposit'")
+        .bind(bookingId)
+        .first<{ status: string; stripe_id: string }>();
+    expect((await txOf())?.status).toBe("pending");
+
+    const piId = `pi_late_${bookingId.slice(0, 8)}`;
+    const wh = await postSignedEvent({
+      id: `evt_late_${bookingId.slice(0, 8)}`,
+      type: "payment_intent.succeeded",
+      data: { object: { id: piId, metadata: { bookingId, shopId: s.shop, type: "booking_deposit" } } },
+    });
+    expect(wh.status).toBe(200);
+    expect(await txOf()).toMatchObject({ status: "captured", stripe_id: piId });
     expect(await bookingStatus(bookingId)).toBe("cancelled");
-    const tx = await env.DB.prepare("SELECT status FROM bw_transactions WHERE booking_id = ? AND type = 'deposit'")
-      .bind(bookingId)
-      .first<{ status: string }>();
-    expect(tx?.status).toBe("cancelled");
-    const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit: "none" });
+
+    const refund = await cancel(s.shop, bookingId, { refundDeposit: true });
+    expect(refund.status).toBe(200);
+    const body = (await refund.json()) as { data: { deposit_action: string } };
+    expect(body.data.deposit_action).toBe("refunded");
   });
 
   it("answers 503 and leaves the booking open when the entry cannot be written", async () => {

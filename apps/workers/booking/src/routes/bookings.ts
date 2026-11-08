@@ -1103,17 +1103,6 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
       .bind(bookingId)
       .run();
     depositAction = "hold_voided";
-  } else if (flipped && piId === null && !depositPaid) {
-    // An unpaid Checkout booking has no PaymentIntent, so the hold branch above
-    // never ran. Cancel its pending deposit tx here (no Stripe call) so it is
-    // not left pending forever: the same end state a winning abandon and the
-    // deposit sweep leave. The response and details.deposit stay "none".
-    await db
-      .prepare(
-        "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
-      )
-      .bind(bookingId)
-      .run();
   }
 
   // Every disposition the handler can take, mapped onto the audit enum.
