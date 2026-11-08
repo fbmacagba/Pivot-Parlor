@@ -8,6 +8,9 @@ import {
   getPurchaseOrderItems,
   stockMovementStatements,
 } from "../db/queries.js";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
@@ -111,18 +114,31 @@ r.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
 
   const poId = crypto.randomUUID();
   const notes = typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 1000) : null;
-  await c.env.DB.batch([
-    c.env.DB
-      .prepare("INSERT INTO purchase_orders (id, shop_id, supplier_id, status, notes) VALUES (?, ?, ?, 'draft', ?)")
-      .bind(poId, shopId, body.supplier_id ?? null, notes),
-    ...resolved.items.map((i) =>
+  const refused = await batchWithAudit(
+    c,
+    [
       c.env.DB
-        .prepare(
-          "INSERT INTO purchase_order_items (id, po_id, shop_id, product_id, variant_id, quantity, unit_cost_pence) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(crypto.randomUUID(), poId, shopId, i.product_id, i.variant_id, i.quantity, i.unit_cost_pence)
-    ),
-  ]);
+        .prepare("INSERT INTO purchase_orders (id, shop_id, supplier_id, status, notes) VALUES (?, ?, ?, 'draft', ?)")
+        .bind(poId, shopId, body.supplier_id ?? null, notes),
+      ...resolved.items.map((i) =>
+        c.env.DB
+          .prepare(
+            "INSERT INTO purchase_order_items (id, po_id, shop_id, product_id, variant_id, quantity, unit_cost_pence) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          )
+          .bind(crypto.randomUUID(), poId, shopId, i.product_id, i.variant_id, i.quantity, i.unit_cost_pence)
+      ),
+    ],
+    {
+      action: "inventory.po.create",
+      outcome: "succeeded",
+      shopId,
+      entityType: "purchase_order",
+      entityId: poId,
+      changes: fieldChanges(null, { status: "draft" }).changes,
+      details: { items: resolved.items.length, supplier_id: body.supplier_id ?? null },
+    },
+  );
+  if (refused) return refused;
   return c.json({ success: true, data: { id: poId } }, 201);
 });
 
@@ -154,19 +170,39 @@ r.put("/:poId", authMiddleware, requireShopRole("admin"), async (c) => {
   if (!resolved.ok) return c.json({ success: false, error: resolved.error }, 400);
 
   const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 1000) || null : po.notes;
-  await c.env.DB.batch([
-    c.env.DB
-      .prepare("UPDATE purchase_orders SET supplier_id = ?, notes = ? WHERE id = ? AND status = 'draft'")
-      .bind(body.supplier_id !== undefined ? body.supplier_id : po.supplier_id, notes, po.id),
-    c.env.DB.prepare("DELETE FROM purchase_order_items WHERE po_id = ?").bind(po.id),
-    ...resolved.items.map((i) =>
+  const nextSupplier = body.supplier_id !== undefined ? body.supplier_id : po.supplier_id;
+  // Header fields only; names go in details.fields, never the notes text.
+  const { changes, fields } = fieldChanges(
+    { supplier_id: po.supplier_id, notes: po.notes },
+    { supplier_id: nextSupplier, notes }
+  );
+  // Pre-check-then-batch is unchanged (Plan decision 9); the entry joins the batch.
+  const refused = await batchWithAudit(
+    c,
+    [
       c.env.DB
-        .prepare(
-          "INSERT INTO purchase_order_items (id, po_id, shop_id, product_id, variant_id, quantity, unit_cost_pence) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        )
-        .bind(crypto.randomUUID(), po.id, shopId, i.product_id, i.variant_id, i.quantity, i.unit_cost_pence)
-    ),
-  ]);
+        .prepare("UPDATE purchase_orders SET supplier_id = ?, notes = ? WHERE id = ? AND status = 'draft'")
+        .bind(nextSupplier, notes, po.id),
+      c.env.DB.prepare("DELETE FROM purchase_order_items WHERE po_id = ?").bind(po.id),
+      ...resolved.items.map((i) =>
+        c.env.DB
+          .prepare(
+            "INSERT INTO purchase_order_items (id, po_id, shop_id, product_id, variant_id, quantity, unit_cost_pence) VALUES (?, ?, ?, ?, ?, ?, ?)"
+          )
+          .bind(crypto.randomUUID(), po.id, shopId, i.product_id, i.variant_id, i.quantity, i.unit_cost_pence)
+      ),
+    ],
+    {
+      action: "inventory.po.update",
+      outcome: "succeeded",
+      shopId,
+      entityType: "purchase_order",
+      entityId: po.id,
+      changes,
+      details: { items: resolved.items.length, ...(fields.length > 0 ? { fields } : {}) },
+    },
+  );
+  if (refused) return refused;
   return c.json({ success: true });
 });
 
@@ -174,34 +210,61 @@ r.put("/:poId", authMiddleware, requireShopRole("admin"), async (c) => {
 
 r.post("/:poId/order", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const res = await c.env.DB
-    .prepare(
-      "UPDATE purchase_orders SET status = 'ordered', ordered_at = datetime('now') WHERE id = ? AND shop_id = ? AND status = 'draft'"
-    )
-    .bind(c.req.param("poId")!, shopId)
-    .run();
-  if ((res.meta?.changes ?? 0) !== 1) {
-    return c.json({ success: false, error: "Only draft purchase orders can be marked as ordered" }, 400);
+  const poId = c.req.param("poId")!;
+  try {
+    return await auditFor(c).run(
+      { action: "inventory.po.order", shopId, entityType: "purchase_order", entityId: poId },
+      async (): Promise<Response> => {
+        const res = await c.env.DB
+          .prepare(
+            "UPDATE purchase_orders SET status = 'ordered', ordered_at = datetime('now') WHERE id = ? AND shop_id = ? AND status = 'draft'"
+          )
+          .bind(poId, shopId)
+          .run();
+        if ((res.meta?.changes ?? 0) !== 1) {
+          return c.json({ success: false, error: "Only draft purchase orders can be marked as ordered" }, 400);
+        }
+        return c.json({ success: true });
+      },
+      statusOutcome((res) => (res.status < 400 ? { changes: { status: ["draft", "ordered"] } } : {})),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  return c.json({ success: true });
 });
 
 // ─── POST /api/shops/:shopId/purchase-orders/:poId/cancel ─────────────────────
 
 r.post("/:poId/cancel", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  // Once stock has been received (partial/received) the PO is history, not
-  // cancellable — corrections go through inventory adjustments.
-  const res = await c.env.DB
-    .prepare(
-      "UPDATE purchase_orders SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('draft','ordered')"
-    )
-    .bind(c.req.param("poId")!, shopId)
-    .run();
-  if ((res.meta?.changes ?? 0) !== 1) {
-    return c.json({ success: false, error: "Only draft or ordered purchase orders can be cancelled" }, 400);
+  const poId = c.req.param("poId")!;
+  // For the entry's `changes` only. The conditional UPDATE below stays the
+  // sole gate, so a second cancel reaches it and records `refused`.
+  const prev = await getPurchaseOrderById(c.env.DB, shopId, poId);
+  try {
+    return await auditFor(c).run(
+      { action: "inventory.po.cancel", shopId, entityType: "purchase_order", entityId: poId },
+      async (): Promise<Response> => {
+        // Once stock has been received (partial/received) the PO is history, not
+        // cancellable — corrections go through inventory adjustments.
+        const res = await c.env.DB
+          .prepare(
+            "UPDATE purchase_orders SET status = 'cancelled' WHERE id = ? AND shop_id = ? AND status IN ('draft','ordered')"
+          )
+          .bind(poId, shopId)
+          .run();
+        if ((res.meta?.changes ?? 0) !== 1) {
+          return c.json({ success: false, error: "Only draft or ordered purchase orders can be cancelled" }, 400);
+        }
+        return c.json({ success: true });
+      },
+      statusOutcome((res) => (res.status < 400 ? { changes: { status: [prev?.status ?? null, "cancelled"] } } : {})),
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
   }
-  return c.json({ success: true });
 });
 
 // ─── POST /api/shops/:shopId/purchase-orders/:poId/receive ────────────────────
@@ -224,6 +287,7 @@ r.post("/:poId/receive", authMiddleware, requireShopRole("admin"), async (c) => 
 
   const stmts = [];
   const seen = new Set<string>();
+  let units = 0;
   for (const line of body.lines) {
     if (!line.item_id || !byId.has(line.item_id)) {
       return c.json({ success: false, error: "Unknown purchase order item" }, 400);
@@ -244,6 +308,7 @@ r.post("/:poId/receive", authMiddleware, requireShopRole("admin"), async (c) => 
       );
     }
 
+    units += line.quantity!;
     stmts.push(
       c.env.DB
         .prepare("UPDATE purchase_order_items SET received_qty = received_qty + ? WHERE id = ?")
@@ -292,7 +357,16 @@ r.post("/:poId/receive", authMiddleware, requireShopRole("admin"), async (c) => 
       .bind(po.id, po.id, po.id)
   );
 
-  await c.env.DB.batch(stmts);
+  // Pre-check-then-batch is unchanged (Plan decision 9); the entry joins the batch.
+  const refused = await batchWithAudit(c, stmts, {
+    action: "inventory.po.receive",
+    outcome: "succeeded",
+    shopId,
+    entityType: "purchase_order",
+    entityId: po.id,
+    details: { lines: body.lines.length, units },
+  });
+  if (refused) return refused;
   const updated = await getPurchaseOrderById(c.env.DB, shopId, po.id);
   return c.json({ success: true, data: { status: updated?.status } });
 });

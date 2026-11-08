@@ -3,13 +3,15 @@ import type { Bindings } from "../bindings.js";
 import {
   getProductById,
   getProductVariantById,
-  applyStockMovement,
-  setReorderLevels,
+  stockMovementStatements,
+  setReorderLevelsStmt,
   getLowStockByShop,
   getStockMovementsByShop,
   getInventoryReport,
   type StockMovementType,
 } from "../db/queries.js";
+import { batchWithAudit } from "../audit/context.js";
+import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
@@ -114,16 +116,36 @@ inventoryRouter.post("/movements", authMiddleware, requireShopRole("admin"), asy
   }
 
   const id = crypto.randomUUID();
-  await applyStockMovement(c.env.DB, {
-    id,
-    shop_id: shopId,
-    product_id: product.id,
-    variant_id: body.variant_id ?? null,
-    type: body.type as StockMovementType,
-    quantity_delta: body.quantity_delta,
-    unit_cost_pence: body.unit_cost_pence ?? null,
-    note: typeof body.note === "string" && body.note.trim() ? body.note.trim() : null,
-  });
+  const variantId = body.variant_id ?? null;
+  const unitCost = body.unit_cost_pence ?? null;
+  const refused = await batchWithAudit(
+    c,
+    stockMovementStatements(c.env.DB, {
+      id,
+      shop_id: shopId,
+      product_id: product.id,
+      variant_id: variantId,
+      type: body.type as StockMovementType,
+      quantity_delta: body.quantity_delta,
+      unit_cost_pence: unitCost,
+      note: typeof body.note === "string" && body.note.trim() ? body.note.trim() : null,
+    }),
+    {
+      action: "inventory.movement",
+      outcome: "succeeded",
+      shopId,
+      entityType: "stock_movement",
+      entityId: id,
+      changes: fieldChanges(null, {
+        product_id: product.id,
+        variant_id: variantId,
+        type: body.type,
+        quantity_delta: body.quantity_delta,
+        unit_cost_pence: unitCost,
+      }).changes,
+    },
+  );
+  if (refused) return refused;
   return c.json({ success: true, data: { id } }, 201);
 });
 
@@ -165,13 +187,45 @@ inventoryRouter.put("/reorder", authMiddleware, requireShopRole("admin"), async 
     }
   }
 
-  await setReorderLevels(c.env.DB, {
-    shop_id: shopId,
-    product_id: product.id,
-    variant_id: body.variant_id ?? null,
+  const variantId = body.variant_id ?? null;
+  const current = await (variantId === null
+    ? c.env.DB
+        .prepare(
+          "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1",
+        )
+        .bind(shopId, product.id)
+    : c.env.DB
+        .prepare(
+          "SELECT reorder_point, reorder_qty FROM stock_levels WHERE shop_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
+        )
+        .bind(shopId, product.id, variantId)
+  ).first<{ reorder_point: number; reorder_qty: number }>();
+  const { changes, fields } = fieldChanges(current, {
     reorder_point: body.reorder_point,
     reorder_qty: body.reorder_qty,
   });
+  const refused = await batchWithAudit(
+    c,
+    [
+      setReorderLevelsStmt(c.env.DB, {
+        shop_id: shopId,
+        product_id: product.id,
+        variant_id: variantId,
+        reorder_point: body.reorder_point,
+        reorder_qty: body.reorder_qty,
+      }),
+    ],
+    {
+      action: "inventory.reorder",
+      outcome: "succeeded",
+      shopId,
+      entityType: "stock_level",
+      entityId: variantId ?? product.id,
+      changes,
+      ...(fields.length > 0 ? { details: { fields } } : {}),
+    },
+  );
+  if (refused) return refused;
   return c.json({ success: true });
 });
 

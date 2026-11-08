@@ -2142,8 +2142,10 @@ export async function applyStockMovement(
   await db.batch(stockMovementStatements(db, m));
 }
 
-/** Reorder thresholds are configuration, not stock: set them without a movement row. */
-export function setReorderLevels(
+/** Reorder thresholds are configuration, not stock: set them without a movement row.
+ *  A builder, so the route can batch it with its audit entry (the old executing
+ *  helper had this one caller and is gone). */
+export function setReorderLevelsStmt(
   db: D1Database,
   args: {
     shop_id: string;
@@ -2169,8 +2171,7 @@ export function setReorderLevels(
         args.product_id,
         args.reorder_point,
         args.reorder_qty,
-      )
-      .run();
+      );
   }
   return db
     .prepare(
@@ -2187,8 +2188,7 @@ export function setReorderLevels(
       variantId,
       args.reorder_point,
       args.reorder_qty,
-    )
-    .run();
+    );
 }
 
 export async function getStockLevelsByProduct(
