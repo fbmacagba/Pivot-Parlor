@@ -34,6 +34,8 @@ import {
   type SaleLineInput,
 } from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
+import { AuditWriteError } from "@repo/audit";
+import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -152,6 +154,14 @@ r.post("/:shopId/sales", async (c) => {
   const isRecordOnly = tender !== "stripe";
   const consumption = await resolveConsumption(db, shopId, lines);
 
+  // Audit (Plan 3, pattern T): everything from the stock claim to the response
+  // runs inside `run`, so a lost claim (400) records refused and a Stripe
+  // failure (502) records failed. The body below is the original, not
+  // re-indented. `shopId` is a resolved id: shopExists matched it above.
+  try {
+    return await auditFor(c).run(
+      { action: "pos.sale", shopId, entityType: "sale", entityId: saleId },
+      async (): Promise<Response> => {
   // Oversell floor: atomically claim tracked stock before the sale persists.
   // A losing claim names the short products; the cashier fixes the count (or
   // unticks track_stock on the product) and re-rings.
@@ -254,6 +264,20 @@ r.post("/:shopId/sales", async (c) => {
       payment_url: paymentUrl,
     },
   });
+      },
+      statusOutcome((res) =>
+        res.status < 400
+          ? {
+              changes: { status: [null, isRecordOnly ? "completed" : "pending"] as [unknown, unknown] },
+              details: { tender, lines: lines.length, total_pence: customerTotalPence },
+            }
+          : {}
+      )
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 r.get("/:shopId/sales", async (c) => {
@@ -407,7 +431,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
     const qty = line.quantity ?? 0;
     if (!Number.isInteger(qty) || qty < 1 || qty > item.quantity - item.returned_quantity) {
       return c.json(
-        { success: false, error: `Invalid quantity — ${item.quantity - item.returned_quantity} returnable on that line` },
+        { success: false, error: `Invalid quantity: ${item.quantity - item.returned_quantity} returnable on that line` },
         400
       );
     }
@@ -441,6 +465,14 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
     refundPence + (commissionBearer === "customer" ? commissionReversalPence : 0);
   const fullyRefunded = sale.refunded_pence + refundPence >= sale.subtotal_pence - sale.discount_pence;
 
+  // Audit (Plan 3, pattern T): everything from the return claim to the
+  // response runs inside `run`, so a lost claim (409) records refused and a
+  // Stripe failure (502) records failed. The body below is the original, not
+  // re-indented. `sale.shop_id` is the resolved id from the row read above.
+  try {
+    return await auditFor(c).run(
+      { action: "payment.refund.issue", shopId: sale.shop_id, entityType: "sale", entityId: saleId },
+      async (): Promise<Response> => {
   // Atomic claim on the returnable quantities: a concurrent refund of the
   // same line loses (its guarded UPDATE matches 0 rows) and is compensated.
   const claims = await db.batch(
@@ -454,14 +486,15 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   );
   const lost = claims.some((r) => (r.meta?.changes ?? 0) !== 1);
   if (lost) {
-    await db.batch(
-      priced
-        .filter((_, i) => (claims[i]?.meta?.changes ?? 0) === 1)
-        .map(({ item, qty }) =>
-          db.prepare("UPDATE sale_items SET returned_quantity = returned_quantity - ? WHERE id = ?").bind(qty, item.id)
-        )
-    );
-    return c.json({ success: false, error: "Another refund touched this sale — reload and try again" }, 409);
+    const won = priced
+      .filter((_, i) => (claims[i]?.meta?.changes ?? 0) === 1)
+      .map(({ item, qty }) =>
+        db.prepare("UPDATE sale_items SET returned_quantity = returned_quantity - ? WHERE id = ?").bind(qty, item.id)
+      );
+    // D1 rejects an empty batch ("No SQL statements detected"), which turned a
+    // total loss (no line claimed) into a 500 instead of the 409 below.
+    if (won.length > 0) await db.batch(won);
+    return c.json({ success: false, error: "Another refund touched this sale. Reload and try again." }, 409);
   }
 
   const returnId = crypto.randomUUID();
@@ -592,6 +625,17 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       fully_refunded: fullyRefunded,
     },
   });
+      },
+      statusOutcome((res) =>
+        res.status < 400
+          ? { details: { lines: priced.length, refund_pence: refundPence, via_stripe: sale.tender_type === "stripe" } }
+          : {}
+      )
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 r.post("/:shopId/sales/:saleId/void", async (c) => {
@@ -619,8 +663,25 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
     return c.json({ success: false, error: "Paid Stripe sales must be refunded via Stripe, not voided" }, 400);
   }
 
-  await voidSale(db, shopId, saleId, null);
-  return c.json({ success: true });
+  // Audit (Plan 3, pattern T): from the guarded flip to the response. The
+  // status change is recorded only when this request's flip won the claim.
+  // `sale` was read WHERE shop_id = shopId, so shopId is a resolved id.
+  let claimed = false;
+  try {
+    return await auditFor(c).run(
+      { action: "pos.void", shopId, entityType: "sale", entityId: saleId },
+      async (): Promise<Response> => {
+        claimed = await voidSale(db, shopId, saleId, null);
+        return c.json({ success: true });
+      },
+      statusOutcome((res) =>
+        res.status < 400 && claimed ? { changes: { status: [sale.status, "voided"] as [unknown, unknown] } } : {}
+      )
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
 });
 
 /**
@@ -628,12 +689,12 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
  * rows) voided and put decremented stock back with reversing movements, all
  * in one batch. Guarded by the atomic status flip — only one voider wins.
  */
-async function voidSale(db: Env["DB"], shopId: string, saleId: string, note: string | null) {
+async function voidSale(db: Env["DB"], shopId: string, saleId: string, note: string | null): Promise<boolean> {
   const claim = await db
     .prepare("UPDATE sales SET status = 'voided' WHERE id = ? AND shop_id = ? AND status IN ('pending','completed')")
     .bind(saleId, shopId)
     .run();
-  if ((claim.meta?.changes ?? 0) !== 1) return;
+  if ((claim.meta?.changes ?? 0) !== 1) return false;
 
   const stmts = [
     db.prepare("UPDATE bw_transactions SET status = 'voided' WHERE sale_id = ?").bind(saleId),
@@ -671,6 +732,7 @@ async function voidSale(db: Env["DB"], shopId: string, saleId: string, note: str
   }
 
   await db.batch(stmts);
+  return true;
 }
 
 export default r;
