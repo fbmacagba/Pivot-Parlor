@@ -252,7 +252,6 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   // metadata — payment_intent.succeeded settles the sale by saleId.
   const saleId = crypto.randomUUID();
   auditSaleId = saleId;
-  auditDepositCaptured = captureFromHoldPence > 0;
 
   try {
     if (piId && captureFromHoldPence > 0) {
@@ -262,6 +261,9 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
         ...(captureFromHoldPence < depositPence ? { amountPence: captureFromHoldPence } : {}),
         idempotencyKey: `capture:${bookingId}`,
       });
+      // Set only once Stripe has taken the money: a later failure below
+      // still records the capture (a failed capture never does).
+      auditDepositCaptured = true;
       stripeChargeId = String((cap.latest_charge as string) ?? "");
     }
 
@@ -384,14 +386,19 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     return c.json({ success: false, error: e instanceof Error ? e.message : "Checkout failed" }, 500);
   }
       },
-      statusOutcome((res) =>
-        res.status < 400
-          ? {
-              changes: { status: ["confirmed", "completed"] },
-              details: { sale_id: auditSaleId, deposit_captured: auditDepositCaptured },
-            }
-          : {}
-      )
+      statusOutcome((res) => {
+        if (res.status < 400) {
+          return {
+            changes: { status: ["confirmed", "completed"] },
+            details: { sale_id: auditSaleId, deposit_captured: auditDepositCaptured },
+          };
+        }
+        // Captured, then the balance PI or the persist batch failed: the
+        // deposit is taken in Stripe though the booking reverted. No sale_id,
+        // since the sale never persisted; changes stay null (a failure).
+        if (res.status >= 500 && auditDepositCaptured) return { details: { deposit_captured: true } };
+        return {};
+      })
     );
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);

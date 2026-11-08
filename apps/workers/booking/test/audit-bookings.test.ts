@@ -1,5 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
@@ -322,7 +322,89 @@ describe("checkout audit", () => {
     const outcome = await outcomeOf("booking.checkout", s.shop, bookingId);
     expect(outcome).toMatchObject({ outcome: "failed", reason: "HTTP 500" });
     expect(outcome.changes_json).toBeNull();
+    // The capture itself failed, so no deposit_captured may be claimed.
+    expect(outcome.details_json).toBeNull();
     expectNoPersonalData(outcome, ["pi_fail_cap"]);
+  });
+
+  /** Assert the failed outcome of a checkout that captured the held deposit
+   *  and then failed: changes null, details exactly { deposit_captured: true }
+   *  (no sale_id, since the sale never persisted). */
+  async function expectCapturedThenFailed(shop: string, bookingId: string, piId: string): Promise<void> {
+    const outcome = await outcomeOf("booking.checkout", shop, bookingId);
+    expect(outcome).toMatchObject({ outcome: "failed", reason: "HTTP 500" });
+    expect(outcome.changes_json).toBeNull();
+    const details = JSON.parse(outcome.details_json as string) as Record<string, unknown>;
+    expect(details).toEqual({ deposit_captured: true });
+    expect(details).not.toHaveProperty("sale_id");
+    expectNoPersonalData(outcome, [piId, WHO.name, WHO.email]);
+    expect(await bookingStatus(bookingId)).toBe("confirmed");
+  }
+
+  it("a checkout that captured the deposit and then failed to persist records deposit_captured", async () => {
+    const s = await setup();
+    const piId = "pi_hold_then_persist";
+    const bookingId = await seedBooking(s, { checkedIn: true, piId, depositPence: 1250 });
+    // The persist batch is the first batch after its bookings money UPDATE is
+    // prepared; the capture (and the balance PI) succeeded before it.
+    let armed = false;
+    let fired = false;
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "prepare") {
+          return (sql: string) => {
+            if (sql.startsWith("UPDATE bookings SET amount_pence")) armed = true;
+            return target.prepare(sql);
+          };
+        }
+        if (prop === "batch") {
+          return async (stmts: D1PreparedStatement[]) => {
+            if (armed && !fired) {
+              fired = true;
+              throw new Error("persist failed");
+            }
+            return target.batch(stmts);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    const res = await dispatchWith({ ...env, DB: db }, "POST", `/booking/shops/${s.shop}/bookings/${bookingId}/checkout`, {
+      headers: await authed("staff", s.shop),
+      body: {},
+    });
+    expect(fired, "the persist batch never ran, so the failure was never staged").toBe(true);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "persist failed" });
+    await expectCapturedThenFailed(s.shop, bookingId, piId);
+  });
+
+  it("a checkout that captured the deposit and then failed to create the balance PI records deposit_captured", async () => {
+    const s = await setup();
+    const piId = "pi_hold_then_balance";
+    const bookingId = await seedBooking(s, { checkedIn: true, piId, depositPence: 1250 });
+    const realFetch = globalThis.fetch;
+    let balanceCalls = 0;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+      const idem = new Headers(init?.headers).get("Idempotency-Key") ?? "";
+      if (url.endsWith("/v1/payment_intents") && idem.startsWith("balance:")) {
+        balanceCalls += 1;
+        return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+      }
+      return realFetch(input as never, init as never);
+    });
+    let res: Response;
+    try {
+      res = await checkout(s.shop, bookingId);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(balanceCalls, "the balance PI was never attempted").toBe(1);
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { success: boolean }).success).toBe(false);
+    await expectCapturedThenFailed(s.shop, bookingId, piId);
   });
 
   it("answers 503 and does not complete the booking when the entry cannot be written", async () => {
