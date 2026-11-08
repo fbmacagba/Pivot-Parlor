@@ -9,6 +9,8 @@
  * Exported as a plain function so tests drive it directly with the test DB.
  */
 import type { D1Database } from "@cloudflare/workers-types";
+import { cancelPendingBookingStmts } from "../db/queries.js";
+import { systemAudit } from "../audit/context.js";
 
 export const DEPOSIT_SWEEP_CUTOFF_MIN = 40;
 
@@ -29,27 +31,45 @@ export async function sweepExpiredDepositBookings(
   // settles, so it is a faithful "session created" clock for unpaid rows.
   const stale = await db
     .prepare(
-      `SELECT b.id FROM bookings b
+      `SELECT b.id, b.shop_id FROM bookings b
        JOIN bw_booking_state st ON st.booking_id = b.id
        WHERE b.status = 'pending'
          AND st.stripe_checkout_session_id IS NOT NULL
          AND st.deposit_paid_at IS NULL
          AND st.updated_at < ?
+       ORDER BY st.updated_at, b.id
        LIMIT ?`
     )
     .bind(cutoffIso, maxPerRun)
-    .all<{ id: string }>();
+    .all<{ id: string; shop_id: string }>();
 
-  const ids = (stale.results ?? []).map((r) => r.id);
-  for (const id of ids) {
-    await db.batch([
-      db.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status = 'pending'").bind(id),
-      db
-        .prepare(
-          "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
-        )
-        .bind(id),
-    ]);
+  // One entry per cancelled booking, committed in the SAME batch as the cancel
+  // (the guarded batch: see cancelPendingBookingStmts). The cron has no
+  // request, so one id ties together everything this tick recorded.
+  const audit = systemAudit(db, "cron", crypto.randomUUID());
+  let cancelled = 0;
+  for (const row of stale.results ?? []) {
+    try {
+      await audit.batch(cancelPendingBookingStmts(db, row.id), {
+        action: "booking.cancel",
+        outcome: "succeeded",
+        shopId: row.shop_id,
+        entityType: "booking",
+        entityId: row.id,
+        changes: { status: ["pending", "cancelled"] },
+        details: { reason: "deposit_expired" },
+      });
+      cancelled++;
+    } catch (err) {
+      // The guard rolled the whole batch back because the booking stopped
+      // being pending (paid, confirmed or cancelled since the SELECT): nothing
+      // changed, so skip it and carry on. Any other failure is real.
+      const now = await db
+        .prepare("SELECT status FROM bookings WHERE id = ?")
+        .bind(row.id)
+        .first<{ status: string }>();
+      if (now?.status === "pending") throw err;
+    }
   }
-  return ids.length;
+  return cancelled;
 }

@@ -2,7 +2,7 @@
 // apps/worker/src/db/queries.ts in WS-1 — the booking worker is now the sole
 // writer of public booking creation. Row types carry only the fields this
 // worker reads.
-import type { D1Database } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 
 export interface ShopRow {
   id: string;
@@ -113,4 +113,25 @@ export async function checkSlotConflict(
     .bind(staffId, endTime, startTime)
     .first();
   return !!row;
+}
+
+/** Cancel an unpaid deposit booking, but only while it is still 'pending'.
+ *  The status write is a guard: on any other status it writes NULL into the
+ *  NOT NULL bookings.status, so D1 rolls the WHOLE batch back (the audit
+ *  entry batched with it included). Callers batch these with their entry and,
+ *  on a thrown batch, re-read the status to tell a lost race from a real
+ *  failure. ensure-schema asserts the NOT NULL this relies on. */
+export function cancelPendingBookingStmts(db: D1Database, bookingId: string): D1PreparedStatement[] {
+  return [
+    db
+      .prepare(
+        "UPDATE bookings SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE NULL END WHERE id = ?"
+      )
+      .bind(bookingId),
+    db
+      .prepare(
+        "UPDATE bw_transactions SET status = 'cancelled' WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'"
+      )
+      .bind(bookingId),
+  ];
 }

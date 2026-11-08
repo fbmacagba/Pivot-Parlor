@@ -74,4 +74,26 @@ export async function assertBookingSchema(db: D1Database): Promise<void> {
         `Apply the canonical migrations (node scripts/migrate.mjs) — do not add runtime DDL.`
     );
   }
+  await assertNotNullColumn(db, "bookings", "status");
+}
+
+const IDENTIFIER = /^[a-z_]+$/;
+
+/** Throws unless `table.column` exists and is declared NOT NULL. The deposit
+ *  cancel guard (cancelPendingBookingStmts) writes NULL into bookings.status
+ *  on purpose so D1 rolls a lost-race batch back; that only works while the
+ *  column rejects NULL. If it ever did not, the worker must refuse to start
+ *  rather than write a NULL status. PRAGMA cannot bind a parameter, so the
+ *  names are validated against a strict pattern first. */
+export async function assertNotNullColumn(db: D1Database, table: string, column: string): Promise<void> {
+  if (!IDENTIFIER.test(table) || !IDENTIFIER.test(column)) {
+    throw new Error("[booking] assertNotNullColumn: invalid table or column name");
+  }
+  const info = await db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all<{ name: string; notnull: number }>();
+  const col = (info.results ?? []).find((r) => r.name === column);
+  if (!col || Number(col.notnull) !== 1) {
+    throw new Error(`[booking] ${table}.${column} must be NOT NULL (the deposit cancel guard depends on it)`);
+  }
 }

@@ -13,8 +13,8 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /booking/shops/:shopId/open": "day.open",
   "POST /booking/shops/:shopId/close": "day.close",
   // Task 4
-  "POST /public/bookings": "pending",
-  "POST /public/bookings/:bookingId/abandon": "pending",
+  "POST /public/bookings": "booking.create",
+  "POST /public/bookings/:bookingId/abandon": "booking.cancel",
   // Task 5
   "POST /booking/shops/:shopId/bookings": "pending",
   "POST /booking/shops/:shopId/walk-ins": "pending",
@@ -30,8 +30,8 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 export const CRON_AUDIT: Record<string, AuditDeclaration> = {
-  "*/15 * * * *": "pending",
+  "*/15 * * * *": "booking.cancel",
 };
 
 /** Ratchet: only ever lowered (Plan 3 brings it to 0). */
-export const PENDING_CEILING = 12;
+export const PENDING_CEILING = 9;

@@ -70,10 +70,17 @@ export default defineConfig({
           }
           if (path === "/v1/checkout/sessions" && request.method === "POST") {
             // Same echo trick as payment_intents: the Idempotency-Key lands in
-            // the session id so tests assert it from persisted rows.
-            return Response.json({
-              id: `cs_idem_${idem}`,
-              url: `https://checkout.stripe.com/c/pay/cs_idem_${idem}`,
+            // the session id so tests assert it from persisted rows. A form
+            // body containing "fail" (the product name carries the service
+            // name) simulates Stripe being down, like refunds and capture.
+            return request.text().then((form) => {
+              if (form.includes("fail")) {
+                return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+              }
+              return Response.json({
+                id: `cs_idem_${idem}`,
+                url: `https://checkout.stripe.com/c/pay/cs_idem_${idem}`,
+              });
             });
           }
           return Response.json({ error: { message: `unmocked stripe path ${path}` } }, { status: 500 });
