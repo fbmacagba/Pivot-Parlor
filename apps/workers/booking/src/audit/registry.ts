@@ -6,9 +6,9 @@ export type AuditDeclaration = AuditAction | "pending" | { exempt: string };
 
 export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   // Task 2
-  "POST /booking/shops/:shopId/complete-setup": "pending",
-  "POST /booking/platform/alerts/:alertId/resolve": "pending",
-  "POST /booking/shops/:shopId/connect/onboard": "pending",
+  "POST /booking/shops/:shopId/complete-setup": "shop.setup.complete",
+  "POST /booking/platform/alerts/:alertId/resolve": "platform.alert.resolve",
+  "POST /booking/shops/:shopId/connect/onboard": "payment.connect.onboard",
   // Task 3
   "POST /booking/shops/:shopId/open": "pending",
   "POST /booking/shops/:shopId/close": "pending",
@@ -34,4 +34,4 @@ export const CRON_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plan 3 brings it to 0). */
-export const PENDING_CEILING = 17;
+export const PENDING_CEILING = 14;
