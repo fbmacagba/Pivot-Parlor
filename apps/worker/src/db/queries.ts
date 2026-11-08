@@ -248,10 +248,6 @@ export function createUserStmt(db: D1Database, user: NewUser) {
     );
 }
 
-export function createUser(db: D1Database, user: NewUser) {
-  return createUserStmt(db, user).run();
-}
-
 // ─── Shops ────────────────────────────────────────────────────────────────────
 
 export function getShopById(db: D1Database, id: string) {
@@ -658,20 +654,20 @@ export function getShopByCheckoutSessionId(
     .first<DBShop>();
 }
 
-export function updateShopPaymentComplete(db: D1Database, shopId: string) {
+/** Prepared UPDATE marking a shop paid (Stripe checkout) — use in a db.batch(). */
+export function updateShopPaymentCompleteStmt(db: D1Database, shopId: string) {
   return db
     .prepare(
       "UPDATE shops SET stripe_payment_status = 'paid', status = 'pending' WHERE id = ?",
     )
-    .bind(shopId)
-    .run();
+    .bind(shopId);
 }
 
-export function setInviteActive(db: D1Database, inviteId: string) {
+/** Prepared UPDATE activating an invite once its shop has paid — use in a db.batch(). */
+export function setInviteActiveStmt(db: D1Database, inviteId: string) {
   return db
     .prepare("UPDATE invites SET active = 1 WHERE id = ?")
-    .bind(inviteId)
-    .run();
+    .bind(inviteId);
 }
 
 /** Prepared UPDATE activating a shop — use in a db.batch(). */

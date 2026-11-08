@@ -36,8 +36,8 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   // removed); the declaration only names the guard's 5xx floor row.
   "PATCH /api/shops/:shopId/walkin/:entryId": "walkin.serve",
   "PATCH /api/waitlist/:id/status": "waitlist.update",
-  "POST /api/contact": "pending",
-  "POST /api/invites/:token/accept": "pending",
+  "POST /api/contact": "enquiry.create",
+  "POST /api/invites/:token/accept": "account.invite.accept",
   "POST /api/me/bookings/:bookingId/cancel": "booking.cancel",
   "POST /api/shops": "shop.create",
   "POST /api/shops/:shopId/generate-image": "site.edit",
@@ -65,13 +65,15 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/waitlist": "waitlist.join",
   "POST /api/waitlist/:id/notify": "waitlist.notify",
   "POST /api/walkin/:shopSlug/join": "walkin.join",
-  "POST /api/webhooks/stripe": "pending",
-  "POST /auth/login": "pending",
-  "POST /auth/logout": "pending",
-  "POST /auth/register": "pending",
-  "POST /auth/resend-verification": "pending",
-  "POST /auth/verify-email": "pending",
-  "POST /contact": "pending",
+  "POST /api/webhooks/stripe": "payment.stripe.webhook",
+  "POST /auth/login": "auth.login",
+  "POST /auth/logout": "auth.logout",
+  // One key, two actions (account.create, then account.verification.send for
+  // a public sign-up); the declaration only names the guard's 5xx floor row.
+  "POST /auth/register": "account.create",
+  "POST /auth/resend-verification": "account.verification.send",
+  "POST /auth/verify-email": "account.verify_email",
+  "POST /contact": "enquiry.create",
   // One key, two actions (booking.cancel for both cancel forks, else
   // booking.status); the declaration only names the guard's 5xx floor row.
   "PUT /api/shops/:shopId/bookings/:bookingId/status": "booking.status",
@@ -111,4 +113,4 @@ export const QUEUE_AUDIT: Record<string, AuditDeclaration> = {
 };
 
 /** Ratchet: only ever lowered (Plans 2 and 3 bring it to 0). */
-export const PENDING_CEILING = 21;
+export const PENDING_CEILING = 12;
