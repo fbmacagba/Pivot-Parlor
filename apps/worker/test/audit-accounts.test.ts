@@ -811,6 +811,24 @@ describe("Stripe webhook", () => {
     expectClean(rows, [sessionId, `owner-${inviteId}@webhook.test`, ...(await shopValues(shopId))]);
   });
 
+  it("a redelivered checkout on an active shop records succeeded with no status change", async () => {
+    const { shopId, sessionId, inviteId } = await seedAwaitingPayment();
+    const session = { id: sessionId, metadata: { shop_id: shopId, invite_id: inviteId } };
+    await handleCheckoutSessionCompleted(env.DB, session, systemRecorder(), `evt_${crypto.randomUUID()}`);
+    await env.DB.prepare("UPDATE shops SET status = 'active' WHERE id = ?").bind(shopId).run();
+
+    const eventId = `evt_${crypto.randomUUID()}`;
+    const result = await handleCheckoutSessionCompleted(env.DB, session, systemRecorder(), eventId);
+    expect(result).toEqual({ activated: true });
+    expect(await paymentState(shopId, inviteId)).toEqual({ status: "active", stripe_payment_status: "paid", invite_active: 1 });
+
+    const rows = await rowsForEvent(eventId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.outcome).toBe("succeeded");
+    expect(rows[0]!.shop_id).toBe(shopId);
+    expect(rows[0]!.changes_json).toBeNull();
+  });
+
   it("checkout without metadata records a refused webhook and changes nothing", async () => {
     const eventId = `evt_${crypto.randomUUID()}`;
     const sessionId = `cs_test_${crypto.randomUUID()}`;

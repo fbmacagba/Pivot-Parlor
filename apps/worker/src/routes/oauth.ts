@@ -263,7 +263,7 @@ oauth.get("/facebook/callback", async (c) => {
   const profile = await profileRes.json<{ id?: string; name?: string; email?: string; picture?: { data?: { url?: string } } }>();
 
   if (!profile.id || !profile.email) {
-    return c.json({ success: false, error: "Could not fetch Facebook profile — ensure email permission is granted" }, 400);
+    return c.json({ success: false, error: "Could not fetch Facebook profile. Ensure email permission is granted." }, 400);
   }
 
   const user = await upsertOAuthUser(

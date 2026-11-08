@@ -7,6 +7,7 @@ import {
   getStockTakesByShop,
   getStockTakeItems,
   getCurrentQuantity,
+  statusGuardStmt,
   stockMovementStatements,
 } from "../db/queries.js";
 import { AuditWriteError } from "@repo/audit";
@@ -55,7 +56,7 @@ r.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
     .first<{ id: string }>();
   if (open) {
     return c.json(
-      { success: false, error: "A stock take is already open — complete or cancel it first", open_id: open.id },
+      { success: false, error: "A stock take is already open. Complete or cancel it first.", open_id: open.id },
       409
     );
   }
@@ -94,9 +95,8 @@ r.put("/:stockTakeId/items", authMiddleware, requireShopRole("admin", "staff"), 
   const shopId = c.req.param("shopId")!;
   const st = await getStockTakeById(c.env.DB, shopId, c.req.param("stockTakeId")!);
   if (!st) return c.json({ success: false, error: "Stock take not found" }, 404);
-  if (st.status !== "open") {
-    return c.json({ success: false, error: "This stock take is no longer open" }, 400);
-  }
+  const notOpen = () => c.json({ success: false, error: "This stock take is no longer open" }, 400);
+  if (st.status !== "open") return notOpen();
 
   const body = await c.req.json<{
     items?: Array<{ product_id?: string; variant_id?: string | null; counted_qty?: number }>;
@@ -108,7 +108,9 @@ r.put("/:stockTakeId/items", authMiddleware, requireShopRole("admin", "staff"), 
     return c.json({ success: false, error: "Too many items in one request (max 200)" }, 400);
   }
 
-  const stmts = [];
+  // The guard leads the batch: a completion or cancel committed since the
+  // check above rolls the counts back instead of filing them on a closed take.
+  const stmts = [statusGuardStmt(c.env.DB, "stock_takes", st.id, shopId, ["open"])];
   for (const item of body.items) {
     if (!item.product_id) return c.json({ success: false, error: "product_id is required on every item" }, 400);
     if (!Number.isInteger(item.counted_qty) || (item.counted_qty ?? -1) < 0) {
@@ -149,17 +151,26 @@ r.put("/:stockTakeId/items", authMiddleware, requireShopRole("admin", "staff"), 
     );
   }
 
-  const refused = await batchWithAudit(c, stmts, {
-    action: "inventory.stock_take.count",
-    outcome: "succeeded",
-    shopId,
-    entityType: "stock_take",
-    entityId: st.id,
-    // Count lines in the request (every one passed validation to reach here).
-    // The handler does not dedupe: a product listed twice is two lines, the
-    // later upsert winning, so this is lines submitted, not distinct products.
-    details: { items: body.items.length },
-  });
+  let refused: Response | null;
+  try {
+    refused = await batchWithAudit(c, stmts, {
+      action: "inventory.stock_take.count",
+      outcome: "succeeded",
+      shopId,
+      entityType: "stock_take",
+      entityId: st.id,
+      // Count lines in the request (every one passed validation to reach here).
+      // The handler does not dedupe: a product listed twice is two lines, the
+      // later upsert winning, so this is lines submitted, not distinct products.
+      details: { items: body.items.length },
+    });
+  } catch (e) {
+    // Rolled back whole. If the take has closed, answer as the check above
+    // now would; any other failure is not a lost race, so it propagates.
+    const fresh = await getStockTakeById(c.env.DB, shopId, st.id);
+    if (fresh?.status !== "open") return notOpen();
+    throw e;
+  }
   if (refused) return refused;
   return c.json({ success: true });
 });
