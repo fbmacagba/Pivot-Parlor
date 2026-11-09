@@ -6,7 +6,7 @@ import { getUserByEmail, getUserById, createUserStmt } from "../db/queries.js";
 import { actorForUser, auditFor, auditRefused, batchWithAudit, requestIp, statusOutcome } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, extractSessionJwt, getUser, type JWTUser } from "../middleware/auth.js";
-import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { clientIp, rateLimit, takeWindowSlot } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { hashPassword, verifyPassword, needsRehash } from "../lib/password.js";
 import { sendVerificationEmail } from "../services/email.js";
@@ -52,13 +52,43 @@ async function issueEmailVerification(
   }
 }
 
+/** Refused sign-ins recorded per IP per window. The login brake keys on
+ *  email + IP, so a spray of fresh emails from one address is never braked;
+ *  this bounds the audit rows it can write. */
+export const REFUSED_LOGIN_AUDIT_CAP = 20;
+const REFUSED_LOGIN_AUDIT_WINDOW_S = 900;
+
 /**
  * A refused sign-in, recorded best-effort before today's 401 (Plan decision
  * 4): anonymous + IP, the matched account (or no entity), and never the
  * submitted email or password. Nothing changed, so an entry that cannot be
- * written is logged and the 401 stands.
+ * written is logged and the 401 stands. Past the per-IP cap nothing is
+ * recorded; the last entry recorded before it carries `ip_cap_reached`, so
+ * the trail shows the attempts went on rather than stopped. The cap keys on
+ * the IP the entry's ip_ref is minted from; a request with none skips it, so
+ * callers without an IP are never pooled under one shared cap.
  */
 async function recordLoginRefusal(c: Context<{ Bindings: Bindings }>, userId: string | null): Promise<void> {
+  let lastBeforeCap = false;
+  const ip = requestIp(c);
+  if (ip) {
+    try {
+      const slot = await takeWindowSlot(
+        c.env.KV,
+        `rl:login-refusal-audit:${ip}`,
+        REFUSED_LOGIN_AUDIT_CAP,
+        REFUSED_LOGIN_AUDIT_WINDOW_S,
+      );
+      if (!slot.ok) {
+        console.warn("[audit] login refusal not recorded: per-IP cap reached");
+        return;
+      }
+      lastBeforeCap = slot.remaining === 0;
+    } catch (err) {
+      // A counter that cannot be read never costs the entry.
+      console.error("[audit] login refusal cap unavailable", err instanceof Error ? err.name : "Error");
+    }
+  }
   try {
     await auditFor(c).write({
       action: "auth.login",
@@ -66,6 +96,7 @@ async function recordLoginRefusal(c: Context<{ Bindings: Bindings }>, userId: st
       reason: "invalid_credentials",
       entityType: userId ? "platform_user" : null,
       entityId: userId,
+      ...(lastBeforeCap ? { details: { ip_cap_reached: true } } : {}),
     });
   } catch (err) {
     console.error("[audit] login refusal entry could not be written", err instanceof Error ? err.name : "Error");

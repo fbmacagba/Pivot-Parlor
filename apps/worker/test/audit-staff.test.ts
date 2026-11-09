@@ -250,9 +250,9 @@ describe("staff create / update / delete", () => {
 });
 
 describe("staff avatar", () => {
-  async function upload(shopId: string, staffId: string, token: string): Promise<Response> {
+  async function upload(shopId: string, staffId: string, token: string, tail = [1, 2, 3, 4]): Promise<Response> {
     const form = new FormData();
-    form.append("file", new File([new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4])], "me.webp", { type: "image/webp" }));
+    form.append("file", new File([new Uint8Array([0x52, 0x49, 0x46, 0x46, ...tail])], "me.webp", { type: "image/webp" }));
     const ctx = createExecutionContext();
     const res = (await worker.fetch(
       new Request(`https://worker.test/api/shops/${shopId}/staff/${staffId}/avatar`, {
@@ -284,13 +284,43 @@ describe("staff avatar", () => {
     expect(await gapRowsFor(rid(res))).toBe(0);
   });
 
+  /** The R2 key an avatar URL serves, checked against the per-upload shape. */
+  function keyOf(avatarUrl: string, shopId: string, staffId: string): string {
+    const key = avatarUrl.match(/\/(staff\/[^?#]+)$/)?.[1];
+    expect(key, `no staff key in ${avatarUrl}`).toBeDefined();
+    expect(key).toMatch(new RegExp(`^staff/${shopId}/${staffId}/avatar-[0-9a-f]{8}\\.webp$`));
+    return key!;
+  }
+
+  it("a replacement avatar is a new object, and the earlier photo's bytes are untouched", async () => {
+    const { shopId, token } = await setup();
+    const staffId = await seedStaff(shopId);
+    const first = await upload(shopId, staffId, token, [1, 1, 1, 1]);
+    expect(first.status).toBe(200);
+    const firstUrl = ((await first.json()) as { avatarUrl: string }).avatarUrl;
+    const second = await upload(shopId, staffId, token, [2, 2, 2, 2]);
+    expect(second.status).toBe(200);
+    const secondUrl = ((await second.json()) as { avatarUrl: string }).avatarUrl;
+
+    const firstKey = keyOf(firstUrl, shopId, staffId);
+    const secondKey = keyOf(secondUrl, shopId, staffId);
+    expect(secondKey).not.toBe(firstKey);
+    // The key itself is new per upload, so the URL needs no cache-busting query.
+    expect(secondUrl).not.toContain("?");
+    const bytes = async (key: string) => [...new Uint8Array(await (await env.ASSETS.get(key))!.arrayBuffer())];
+    expect(await bytes(firstKey)).toEqual([0x52, 0x49, 0x46, 0x46, 1, 1, 1, 1]);
+    expect(await bytes(secondKey)).toEqual([0x52, 0x49, 0x46, 0x46, 2, 2, 2, 2]);
+    const row = await env.DB.prepare("SELECT avatar_url FROM staff WHERE id = ?").bind(staffId).first<{ avatar_url: string }>();
+    expect(row!.avatar_url).toBe(secondUrl);
+  });
+
   it("avatar upload refuses before the R2 write when the started entry cannot be written", async () => {
     const { shopId, token } = await setup();
     const staffId = await seedStaff(shopId);
-    const key = `staff/${shopId}/${staffId}/avatar.webp`;
     const res = await withAuditOff(() => upload(shopId, staffId, token));
     expect(res.status).toBe(503);
-    expect(await env.ASSETS.get(key)).toBeNull();
+    // Keys are minted per upload, so check the member's whole prefix.
+    expect((await env.ASSETS.list({ prefix: `staff/${shopId}/${staffId}/` })).objects).toHaveLength(0);
     const row = await env.DB.prepare("SELECT avatar_url FROM staff WHERE id = ?").bind(staffId).first<{ avatar_url: string | null }>();
     expect(row!.avatar_url).toBeNull();
   });

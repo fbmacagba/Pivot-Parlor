@@ -42,6 +42,19 @@ export interface BookingEmailData {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** "HTTP <status>", plus Resend's error code (e.g. invalid_api_key) when the
+ *  body names one. Resend's message can echo the recipient, so only a plain
+ *  identifier code is kept. */
+function resendFailure(status: number, body: string): string {
+  let code: unknown;
+  try {
+    code = (JSON.parse(body) as { name?: unknown }).name;
+  } catch {
+    code = undefined;
+  }
+  return typeof code === "string" && /^[a-z_]{1,64}$/i.test(code) ? `HTTP ${status} (${code})` : `HTTP ${status}`;
+}
+
 async function sendEmail(
   apiKey: string,
   to: string,
@@ -59,6 +72,7 @@ async function sendEmail(
 
   if (!res.ok) {
     const err = await res.text().catch(() => res.statusText);
+    console.error(`[email] Resend refused the send: ${resendFailure(res.status, err)}`);
     throw new Error(`Resend error ${res.status}: ${err}`);
   }
 }

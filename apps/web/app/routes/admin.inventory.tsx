@@ -593,7 +593,7 @@ function ReceiveDialog({
                 {outstanding > 0 ? (
                   <input
                     type="number" min="0" max={outstanding} step="1"
-                    placeholder={`0–${outstanding}`}
+                    placeholder={`Up to ${outstanding}`}
                     value={qtys[item.id] ?? ""}
                     onChange={(e) => setQtys((q) => ({ ...q, [item.id]: e.target.value }))}
                     className="w-24 rounded-lg border border-white/10 bg-dark-100 px-2 py-1.5 text-sm text-white"

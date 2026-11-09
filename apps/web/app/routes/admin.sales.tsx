@@ -294,7 +294,7 @@ function RefundPanel({
                     <>
                       <input
                         type="number" min="0" max={returnable} step="1"
-                        placeholder={`0–${returnable}`}
+                        placeholder={`Up to ${returnable}`}
                         value={qtys[item.id] ?? ""}
                         onChange={(e) => setQtys((q) => ({ ...q, [item.id]: e.target.value }))}
                         className="w-20 rounded-lg border border-white/10 bg-dark-100 px-2 py-1.5 text-sm text-white"
