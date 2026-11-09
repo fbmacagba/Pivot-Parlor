@@ -193,11 +193,36 @@ describe("a payment that lands on a voided till sale", () => {
     );
     expect((await paid(t, saleId, piId, event)).status).toBe(500);
     expect(await refundTxs(saleId)).toEqual([{ amount_pence: 4500, status: "pending", stripe_id: null }]);
+    // The failed entry still names the sale and its shop.
+    const failed = await env.DB.prepare(
+      `SELECT shop_id, entity_id, outcome, details_json FROM audit_log
+        WHERE action = 'payment.stripe.webhook' AND phase = 'outcome' AND outcome = 'failed'
+          AND details_json LIKE '%sale_refund_owed%'`
+    ).all<{ shop_id: string | null; entity_id: string | null; outcome: string; details_json: string }>();
+    expect(failed.results?.length, "no failed webhook entry for the refund outage").toBe(1);
+    expect(failed.results![0]).toMatchObject({ shop_id: t.shop, entity_id: saleId, outcome: "failed" });
+    expect(JSON.parse(failed.results![0]!.details_json)).toMatchObject({ sale_refund_owed: true });
     down = false;
     expect((await paid(t, saleId, piId, event)).status).toBe(200);
     expect(await refundTxs(saleId)).toEqual([
       { amount_pence: 4500, status: "pending", stripe_id: `re_idem_void-refund:${saleId}` },
     ]);
+  });
+
+  it("treats a charge Stripe says is already refunded as done", async () => {
+    const t = await setup();
+    const saleId = await ringStripe(t);
+    await voidSale(t, saleId);
+    spyStripe((url) =>
+      url.endsWith("/v1/refunds")
+        ? Response.json(
+            { error: { code: "charge_already_refunded", message: "Charge ch_1 has already been refunded." } },
+            { status: 400 }
+          )
+        : null
+    );
+    expect((await paid(t, saleId, `pi_vsp_${saleId.slice(0, 8)}`)).status).toBe(200);
+    expect((await refundTxs(saleId)).length).toBe(1);
   });
 
   it("never refunds a sale that was really paid, even when the event is delivered again", async () => {

@@ -390,12 +390,6 @@ r.post("/stripe", async (c) => {
               : null);
           if (saleId) {
             const settled = await settleSale(db, saleId, piId);
-            // Not settled by this delivery: either already completed (a
-            // redelivery) or voided before the customer paid. Only the
-            // voided case is owed back; refundOwedSale checks which.
-            if (!settled.flipped) {
-              await refundOwedSale(c.env.STRIPE_SECRET_KEY, db, saleId, piId, audit.details);
-            }
             // Entity and shop come from the sale row, never from metadata.
             const saleShop = await shopOfSale(db, saleId);
             if (saleShop) {
@@ -406,6 +400,14 @@ r.post("/stripe", async (c) => {
               if (settled.flipped) {
                 audit.changes = { status: ["pending", "completed"] };
               }
+            }
+            // Not settled by this delivery: either already completed (a
+            // redelivery) or voided before the customer paid. Only the
+            // voided case is owed back; refundOwedSale checks which. It runs
+            // after the attribution above, so a failed refund's entry still
+            // names its sale.
+            if (!settled.flipped) {
+              await refundOwedSale(c.env.STRIPE_SECRET_KEY, db, saleId, piId, audit.details);
             }
           }
           const bookingId =
