@@ -12,7 +12,7 @@ export {
   readModelList,
   recordAiUsage,
 } from "./usage";
-export type { CostBasis, UsageCost, UsageKv, UsageDb, AiUsageRecord } from "./usage";
+export type { CostBasis, UsageCost, UsageKv, UsageDb, AiUsageRecord, UsagePricing } from "./usage";
 export type {
   Effort,
   ProviderKeys,

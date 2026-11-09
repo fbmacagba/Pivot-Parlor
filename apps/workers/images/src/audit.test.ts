@@ -24,14 +24,24 @@ const research = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
-const imageResponse = () =>
-  new Response(
+/** What OpenRouter billed for one image (`usage.cost`, USD). */
+const BILLED = 0.0672;
+
+const imageResponse = (opts: { cost?: number | null; withImage?: boolean } = {}) => {
+  const cost = opts.cost === undefined ? BILLED : opts.cost;
+  const images = opts.withImage === false ? [] : [{ image_url: { url: `data:image/png;base64,${PNG_B64}` } }];
+  return new Response(
     JSON.stringify({
-      choices: [{ message: { content: null, images: [{ image_url: { url: `data:image/png;base64,${PNG_B64}` } }] } }],
-      usage: { prompt_tokens: 11, completion_tokens: 22 },
+      choices: [{ message: { content: null, images } }],
+      usage: { prompt_tokens: 11, completion_tokens: 22, ...(cost === null ? {} : { cost }) },
     }),
     { status: 200, headers: { "content-type": "application/json" } }
   );
+};
+
+/** The cost-log inserts, as [shop_id, worker, model, usage_type, in, out, total, cost, basis, job_id]. */
+const usageRows = (h: { fake: { statements: { sql: string; args: unknown[] }[] } }) =>
+  h.fake.statements.filter((s) => s.sql.includes("INSERT INTO ai_usage_log")).map((s) => s.args.slice(1));
 
 const message = (extra: Record<string, unknown> = {}) => ({
   jobId: "job-1",
@@ -95,7 +105,8 @@ describe("images audit", () => {
     const out = JSON.parse(calls.filter((r) => r.phase === "outcome")[0]!.details_json as string);
     expect(out.input_tokens).toBe(11);
     expect(out.output_tokens).toBe(22);
-    expect(out.estimated_cost_usd ?? null).toBeNull();
+    expect(out.estimated_cost_usd).toBe(BILLED);
+    expect(out.cost_basis).toBe("reported");
     expect(h.puts).toHaveLength(3);
     // The assembler finishes the job, not images.
     expect(h.fake.rows.some((r) => r.action === "site.regenerate.complete")).toBe(false);
@@ -103,6 +114,49 @@ describe("images audit", () => {
     for (const secret of [HERO_PROMPT, LOGO_PROMPT, CATALOG_PROMPT, PNG_B64]) {
       expect(dump).not.toContain(secret);
     }
+  });
+
+  it("each answered image writes one cost-log row with the billed cost, correlated to its ai.call", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => imageResponse());
+    const h = harness();
+    await h.run(message());
+    // worker + job id are what the historical import's live-twin exclusion
+    // matches on, so these rows are never imported a second time.
+    expect(usageRows(h)).toEqual(
+      ["site_image_hero", "site_image_logo", "site_image_catalog_0"].map((purpose) => [
+        "shop-1", "pivot-parlor-images", MODEL, purpose, 11, 22, 33, BILLED, "reported", "job-1",
+      ])
+    );
+  });
+
+  it("an image with no billed cost stays unpriced, even when the model list prices the model", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => imageResponse({ cost: null }));
+    const h = harness();
+    // A list price would use the text completion rate, far below image output.
+    h.kv.set("ai:models:v3", JSON.stringify([{ id: MODEL, costPer1MInput: 0.5, costPer1MOutput: 3, livePricing: true }]));
+    await h.run(message());
+    for (const r of aiCalls(h).filter((c) => c.phase === "outcome")) {
+      const d = JSON.parse(r.details_json as string);
+      expect(d.estimated_cost_usd).toBeNull();
+      expect(d.cost_basis).toBeNull();
+    }
+    const rows = usageRows(h);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) expect(row.slice(7, 9)).toEqual([0, null]);
+  });
+
+  it("an answered call that returns no image still records what it cost", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => imageResponse({ withImage: false }));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const h = harness();
+    await h.run(message());
+    for (const r of aiCalls(h).filter((c) => c.phase === "outcome")) expect(r.outcome).toBe("failed");
+    expect(usageRows(h).map((row) => [row[3], row[7], row[8]])).toEqual([
+      ["site_image_hero", BILLED, "reported"],
+      ["site_image_logo", BILLED, "reported"],
+      ["site_image_catalog_0", BILLED, "reported"],
+    ]);
+    expect(h.assemble).toHaveLength(1);
   });
 
   it("every assemble send carries origin_actor_ref", async () => {
@@ -139,6 +193,7 @@ describe("images audit", () => {
     const h = harness({ failAuditWrites: "started" });
     await h.run(message());
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(usageRows(h)).toEqual([]);
     expect(h.puts).toHaveLength(0);
     expect(h.assemble).toHaveLength(0);
     expect(h.kv.has("gen:job-1:images")).toBe(false);
@@ -168,6 +223,8 @@ describe("images audit", () => {
       expect(r.outcome).toBe("failed");
       expect(r.reason).toBe("ImageGenerationError (HTTP 500)");
     }
+    // An error response is not billed: nothing goes to the cost log.
+    expect(usageRows(h)).toEqual([]);
     expect(h.assemble).toHaveLength(1);
     const payload = JSON.parse(h.kv.get("gen:job-1:images")!);
     expect(payload.errors.map((e: { step: string }) => e.step)).toEqual([

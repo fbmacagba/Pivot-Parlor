@@ -16,6 +16,7 @@
     "wrangler": "^4.74.0"
   },
   "dependencies": {
-    "@repo/audit": "*"
+    "@repo/audit": "*",
+    "@repo/llm": "*"
   }
 }

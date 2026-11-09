@@ -142,6 +142,46 @@ describe("recordAiUsage", () => {
     expect(result).toBeNull();
   });
 
+  // Reported pricing exists for image calls: OpenRouter bills image output at
+  // its own rate (image_output), which the model list does not carry, so a list
+  // price would under-state the call. The provider's billed figure is the only
+  // basis, and its absence means unknown, never a list guess.
+  it("records a provider-reported cost as basis reported and never reads the model list", async () => {
+    const { db, calls } = fakeDb();
+    const kv = kvWith({ [MODELS_KV_KEY]: JSON.stringify(LIST) });
+    const result = await recordAiUsage(
+      { DB: db, KV: kv },
+      { ...base, usage: { inputTokens: 10_000, outputTokens: 2_000 }, pricing: { from: "reported", usd: 0.0672001 } }
+    );
+    expect(result).toEqual({ costUsd: 0.0672, basis: "reported" });
+    expect(calls[0]!.values.slice(5, 10)).toEqual([10_000, 2_000, 12_000, 0.0672, "reported"]);
+    expect(kv.get).not.toHaveBeenCalled();
+  });
+
+  it("leaves a reported-pricing call unpriced when the provider gave no usable figure, even when the list prices the model", async () => {
+    for (const usd of [null, Number.NaN, Number.POSITIVE_INFINITY, -0.01]) {
+      const { db, calls } = fakeDb();
+      const kv = kvWith({ [MODELS_KV_KEY]: JSON.stringify(LIST) });
+      const result = await recordAiUsage(
+        { DB: db, KV: kv },
+        { ...base, usage: { inputTokens: 10_000, outputTokens: 2_000 }, pricing: { from: "reported", usd } }
+      );
+      expect(result).toBeNull();
+      expect(calls[0]!.values.slice(5, 10)).toEqual([10_000, 2_000, 12_000, 0, null]);
+      expect(kv.get).not.toHaveBeenCalled();
+    }
+  });
+
+  it("records a reported zero as a real zero, not as unknown", async () => {
+    const { db, calls } = fakeDb();
+    const result = await recordAiUsage(
+      { DB: db, KV: kvWith({}) },
+      { ...base, usage: { inputTokens: 1, outputTokens: 1 }, pricing: { from: "reported", usd: 0 } }
+    );
+    expect(result).toEqual({ costUsd: 0, basis: "reported" });
+    expect(calls[0]!.values.slice(8, 10)).toEqual([0, "reported"]);
+  });
+
   it("never throws when the insert fails, and says so", async () => {
     const { db } = fakeDb(async () => { throw new Error("no such column: cost_basis"); });
     const log = vi.fn();
