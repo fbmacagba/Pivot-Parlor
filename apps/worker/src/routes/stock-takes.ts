@@ -50,39 +50,59 @@ r.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const user = getUser(c);
   const body = await c.req.json<{ notes?: string }>().catch((): { notes?: string } => ({}));
 
-  const open = await c.env.DB
-    .prepare("SELECT id FROM stock_takes WHERE shop_id = ? AND status = 'open' LIMIT 1")
-    .bind(shopId)
-    .first<{ id: string }>();
-  if (open) {
-    return c.json(
-      { success: false, error: "A stock take is already open. Complete or cancel it first.", open_id: open.id },
+  const openTake = () =>
+    c.env.DB
+      .prepare("SELECT id FROM stock_takes WHERE shop_id = ? AND status = 'open' LIMIT 1")
+      .bind(shopId)
+      .first<{ id: string }>();
+  const alreadyOpen = (openId: string) =>
+    c.json(
+      { success: false, error: "A stock take is already open. Complete or cancel it first.", open_id: openId },
       409
     );
-  }
+  const open = await openTake();
+  if (open) return alreadyOpen(open.id);
 
   const id = crypto.randomUUID();
   const notes = typeof body.notes === "string" && body.notes.trim() ? body.notes.trim().slice(0, 1000) : null;
   // Developers pass requireShopRole without a shop check: the entry records
   // the shop only once it resolves (never the raw param).
   const auditShop = await auditShopId(c, shopId);
-  const refused = await batchWithAudit(
-    c,
-    [
-      c.env.DB
-        .prepare("INSERT INTO stock_takes (id, shop_id, status, notes, created_by) VALUES (?, ?, 'open', ?, ?)")
-        .bind(id, shopId, notes, user.sub),
-    ],
-    {
-      action: "inventory.stock_take.open",
-      outcome: "succeeded",
-      shopId: auditShop,
-      entityType: "stock_take",
-      entityId: id,
-      changes: fieldChanges(null, { status: "open" }).changes,
-      ...(auditShop ? {} : { details: UNRESOLVED_SHOP }),
-    },
-  );
+  let refused: Response | null;
+  try {
+    refused = await batchWithAudit(
+      c,
+      [
+        // The insert is its own guard: an open committed since the check above
+        // makes status NULL, which the NOT NULL column refuses, so the batch
+        // (and its audit entry) rolls back instead of opening a second take.
+        c.env.DB
+          .prepare(
+            `INSERT INTO stock_takes (id, shop_id, status, notes, created_by)
+             VALUES (?1, ?2,
+                     CASE WHEN EXISTS (SELECT 1 FROM stock_takes WHERE shop_id = ?2 AND status = 'open')
+                          THEN NULL ELSE 'open' END,
+                     ?3, ?4)`
+          )
+          .bind(id, shopId, notes, user.sub),
+      ],
+      {
+        action: "inventory.stock_take.open",
+        outcome: "succeeded",
+        shopId: auditShop,
+        entityType: "stock_take",
+        entityId: id,
+        changes: fieldChanges(null, { status: "open" }).changes,
+        ...(auditShop ? {} : { details: UNRESOLVED_SHOP }),
+      },
+    );
+  } catch (e) {
+    // Rolled back whole. If another take is now open, answer as the check
+    // above now would; any other failure is not a lost race, so it propagates.
+    const fresh = await openTake();
+    if (fresh) return alreadyOpen(fresh.id);
+    throw e;
+  }
   if (refused) return refused;
   return c.json({ success: true, data: { id } }, 201);
 });

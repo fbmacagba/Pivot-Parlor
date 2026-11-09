@@ -223,3 +223,50 @@ describe("stock-take count race", () => {
     expect(await entriesFor({ action: "inventory.stock_take.count", entityId: stId })).toHaveLength(0);
   });
 });
+
+describe("stock-take open race", () => {
+  it("an open racing another open is refused, leaving exactly one open take", async () => {
+    const shop = await seedShop("Race Open Twice");
+    const headers = await adminFor(shop);
+    // The other open committed after this one's "already open?" check.
+    const otherId = crypto.randomUUID();
+
+    const res = await withConcurrentWrite(
+      [env.DB.prepare("INSERT INTO stock_takes (id, shop_id, status) VALUES (?, ?, 'open')").bind(otherId, shop)],
+      "POST",
+      `/api/shops/${shop}/stock-takes`,
+      headers,
+      {},
+    );
+
+    expect(res.status, await res.clone().text()).toBe(409);
+    const body = (await res.json()) as Body<null> & { open_id?: string };
+    expect(body.error).toBe("A stock take is already open. Complete or cancel it first.");
+    expect(body.open_id).toBe(otherId);
+    const open = await env.DB.prepare("SELECT id FROM stock_takes WHERE shop_id = ? AND status = 'open'")
+      .bind(shop)
+      .all<{ id: string }>();
+    expect(open.results?.map((r) => r.id)).toEqual([otherId]);
+    expect(await entriesFor({ action: "inventory.stock_take.open", shopId: shop })).toHaveLength(0);
+  });
+
+  it("an open in another shop does not block this shop's open", async () => {
+    const shop = await seedShop("Race Open Elsewhere");
+    const elsewhere = await seedShop("Race Open Other Shop");
+    const headers = await adminFor(shop);
+
+    const res = await withConcurrentWrite(
+      [env.DB.prepare("INSERT INTO stock_takes (id, shop_id, status) VALUES (?, ?, 'open')").bind(crypto.randomUUID(), elsewhere)],
+      "POST",
+      `/api/shops/${shop}/stock-takes`,
+      headers,
+      {},
+    );
+
+    expect(res.status, await res.clone().text()).toBe(201);
+    const id = ((await res.json()) as Body<{ id: string }>).data.id;
+    const st = await env.DB.prepare("SELECT status FROM stock_takes WHERE id = ?").bind(id).first<{ status: string }>();
+    expect(st?.status).toBe("open");
+    expect(await entriesFor({ action: "inventory.stock_take.open", shopId: shop, entityId: id })).toHaveLength(1);
+  });
+});
