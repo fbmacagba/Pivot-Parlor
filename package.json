@@ -32,7 +32,9 @@
   "workspaces": [
     "apps/*",
     "apps/workers/booking",
+    "apps/workers/builder",
     "apps/workers/chatbot",
+    "apps/workers/images",
     "apps/workers/research",
     "apps/workers/text",
     "packages/*"
