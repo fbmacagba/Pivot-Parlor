@@ -132,6 +132,16 @@ describe("recordAiUsage", () => {
     expect(calls[0]!.values.slice(8, 10)).toEqual([0, null]);
   });
 
+  it("returns null when a priced call's insert fails", async () => {
+    const { db } = fakeDb(async () => { throw new Error("D1 unavailable"); });
+    const result = await recordAiUsage(
+      { DB: db, KV: kvWith({ [MODELS_KV_KEY]: JSON.stringify(LIST) }) },
+      { ...base, usage: { inputTokens: 10_000, outputTokens: 2_000 } },
+      vi.fn()
+    );
+    expect(result).toBeNull();
+  });
+
   it("never throws when the insert fails, and says so", async () => {
     const { db } = fakeDb(async () => { throw new Error("no such column: cost_basis"); });
     const log = vi.fn();
