@@ -6,7 +6,7 @@
  */
 import { env } from "cloudflare:test";
 import type { D1Database, D1PreparedStatement, KVNamespace, MessageBatch } from "@cloudflare/workers-types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { completionEntryId } from "@repo/audit";
 import worker, { type Env } from "../src/index";
 
@@ -95,6 +95,19 @@ async function putPayloads(jobId: string, p: { text: Payload; images: Payload; r
   }
 }
 
+/** Another running job for an existing shop, with its gen:* payloads. */
+async function addJob(shopId: string, p: { text: Payload; images: Payload; research: Payload }): Promise<string> {
+  const jobId = `job-${crypto.randomUUID()}`;
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO generation_jobs (id, shop_id, status, stage, created_at, updated_at) VALUES (?, ?, 'running', 'assemble', ?, ?)"
+  )
+    .bind(jobId, shopId, now, now)
+    .run();
+  await putPayloads(jobId, p);
+  return jobId;
+}
+
 /** A live (or any other website_status) published row, as the API worker leaves it. */
 async function seedSite(shopId: string, websiteStatus: string, headline: string): Promise<{ generated_at: string }> {
   const generated_at = "2026-01-01T00:00:00.000Z";
@@ -181,6 +194,14 @@ function hookedDb(hooks: { failBatchWhen?: (sql: string) => boolean; firstJobSta
   }) as D1Database;
   return { db, prepared, batches };
 }
+
+/** Which terminal batch this was, by the statements it held. */
+const kind = (b: { sqls: string[] }): "publish" | "review" | "finish" =>
+  b.sqls.some((q) => q.startsWith("INSERT INTO shop_sites"))
+    ? "publish"
+    : b.sqls.some((q) => q.startsWith("INSERT INTO shop_site_candidates"))
+      ? "review"
+      : "finish";
 
 interface EntryRow {
   id: string;
@@ -298,8 +319,10 @@ describe("publish: one audited batch", () => {
     // Together: ONE batch, in the decided order.
     const committed = h.batches.filter((b) => b.settled === "committed");
     expect(committed).toHaveLength(1);
+    // The palette comes after BOTH site statements, or a first publish would lose it.
     expect(committed[0]!.sqls.map((q) => q.replace(/\s+/g, " ").trim())).toEqual([
-      expect.stringMatching(/^INSERT INTO shop_sites /),
+      expect.stringMatching(/^UPDATE shop_sites SET headline = \?/),
+      expect.stringMatching(/^INSERT INTO shop_sites \(.+ WHERE NOT EXISTS \(SELECT 1 FROM shop_sites WHERE shop_id = \?\)$/),
       expect.stringMatching(/^UPDATE shop_sites SET owner_color_primary/),
       expect.stringMatching(/^UPDATE shops SET status = 'active'/),
       expect.stringMatching(/^UPDATE generation_jobs SET status = \?/),
@@ -326,19 +349,12 @@ describe("publish: one audited batch", () => {
     const first = await setup({ research: researchPayload({ template: "bold", owner_color_primary: "#123456", owner_color_accent: "#abcdef" }) });
     await deliver(first.message);
     const [before] = await sites(first.shopId);
-    // Columns no publish writes must survive the upsert.
+    // Columns no publish writes must survive the site write.
     await env.DB.prepare("UPDATE shop_sites SET design_notes = 'keep me', locked_images_json = '{\"logo\":true}' WHERE shop_id = ?")
       .bind(first.shopId)
       .run();
 
-    const secondJob = `job-${crypto.randomUUID()}`;
-    const now = new Date().toISOString();
-    await env.DB.prepare(
-      "INSERT INTO generation_jobs (id, shop_id, status, stage, created_at, updated_at) VALUES (?, ?, 'running', 'assemble', ?, ?)"
-    )
-      .bind(secondJob, first.shopId, now, now)
-      .run();
-    await putPayloads(secondJob, {
+    const secondJob = await addJob(first.shopId, {
       text: textPayload({ headline: "Fresh fades on Example Row", color_primary: "#222222" }),
       images: imagesPayload(),
       research: researchPayload({ template: "classic" }),
@@ -397,7 +413,7 @@ describe("publish: one audited batch", () => {
     await deliver(s.message, { db: h.db });
 
     // The duplicate really did send its publish batch, and D1 refused it whole.
-    const publish = h.batches.filter((b) => b.sqls[0]!.startsWith("INSERT INTO shop_sites"));
+    const publish = h.batches.filter((b) => kind(b) === "publish");
     expect(publish).toHaveLength(1);
     expect(publish[0]!.settled).toBe("rolled_back");
     // finishJob read the job back as complete: no crash path, nothing else sent.
@@ -415,16 +431,20 @@ describe("publish: one audited batch", () => {
   it("a failing entry leaves the live site and the job untouched", async () => {
     const s = await setup();
     const live = await seedSite(s.shopId, "draft", "The published headline");
+    await env.KV.put(`site:${s.shopSlug}`, "cached");
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const h = hookedDb({ failBatchWhen: (q) => q.startsWith("INSERT INTO audit_log") });
 
     await deliver(s.message, { db: h.db });
 
     // The publish batch and the crash path's failed completion were both refused.
-    expect(h.batches.map((b) => [b.sqls[0]!.slice(0, 22), b.settled])).toEqual([
-      ["INSERT INTO shop_sites", "rolled_back"],
-      ["UPDATE generation_jobs", "rolled_back"],
+    expect(h.batches.map((b) => [kind(b), b.settled])).toEqual([
+      ["publish", "rolled_back"],
+      ["finish", "rolled_back"],
     ]);
+    // The clean-up runs only AFTER a batch commits: the cache and the working keys survive.
+    expect(await env.KV.get(`site:${s.shopSlug}`)).toBe("cached");
+    expect(await kvLeft(genKeys(s.jobId))).toEqual([`gen:${s.jobId}:research`, `gen:${s.jobId}:images`, `gen:${s.jobId}:text`]);
     const [row] = await sites(s.shopId);
     expect(row).toMatchObject({ headline: "The published headline", generated_at: live.generated_at, template: "classic" });
     expect(await shop(s.shopId)).toEqual({ status: "pending", is_active: 0 });
@@ -491,6 +511,11 @@ describe("review: one audited batch", () => {
 });
 
 describe("failure exits: one failed completion entry each", () => {
+  // Every exit logs its failure; keep those stack traces out of the run.
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
   async function expectFailed(s: Setup, reason: string, error: string | RegExp) {
     const j = await job(s.jobId);
     expect(j?.status).toBe("failed");
@@ -536,7 +561,6 @@ describe("failure exits: one failed completion entry each", () => {
   it("a candidate-store failure", async () => {
     const s = await setup({ shopStatus: "active", isActive: 1 });
     const live = await seedSite(s.shopId, "live", "The live headline");
-    vi.spyOn(console, "error").mockImplementation(() => {});
     const h = hookedDb({ failBatchWhen: (q) => q.startsWith("INSERT INTO shop_site_candidates") });
 
     await deliver(s.message, { db: h.db });
@@ -550,7 +574,6 @@ describe("failure exits: one failed completion entry each", () => {
 
   it("a crash", async () => {
     const s = await setup();
-    vi.spyOn(console, "error").mockImplementation(() => {});
     const kv = new Proxy(env.KV, {
       get(target, prop) {
         if (prop === "get") {
@@ -588,9 +611,9 @@ describe("waiting for the upstream stages", () => {
   });
 });
 
-describe("the shop_sites upsert", () => {
+describe("the shop_sites write (P14: no reliance on a unique index)", () => {
   // The pre-change statements (676b34e:apps/workers/builder/src/index.ts),
-  // copied by hand: the upsert must write exactly what they wrote.
+  // copied by hand: the site write must cover exactly what they wrote.
   const OLD_UPDATE_SET = [
     "headline", "tagline", "about", "services_json", "hero_image_url", "logo_url", "catalog_images_json",
     "color_primary", "color_accent", "font_heading", "font_body", "seo_title", "seo_description",
@@ -607,41 +630,91 @@ describe("the shop_sites upsert", () => {
     "design_spec", "design_version", "gallery_images_json",
   ];
   const sorted = (xs: string[]) => [...xs].sort();
+  const flat = (q: string) => q.replace(/\s+/g, " ").trim();
 
-  it("the upsert writes the same columns the old INSERT and UPDATE wrote", async () => {
+  it("the site UPDATE and INSERT write the same columns the old ones wrote", async () => {
     const s = await setup();
     const h = hookedDb();
     await deliver(s.message, { db: h.db });
 
-    // The statement the worker actually sent, not a constant it might not use.
-    const sent = h.prepared.filter((q) => q.trimStart().startsWith("INSERT INTO shop_sites"));
-    expect(sent).toHaveLength(1);
-    const flat = sent[0]!.replace(/\s+/g, " ").trim();
-    const m = flat.match(/^INSERT INTO shop_sites \(([^)]*)\) VALUES \(([^)]*)\) ON CONFLICT ?\((\w+)\) DO UPDATE SET (.+)$/);
-    expect(m, flat).not.toBeNull();
-    const insert = m![1]!.split(",").map((c) => c.trim());
-    const values = m![2]!.split(",").map((v) => v.trim());
-    const assignments = m![4]!.split(",").map((a) => a.trim().match(/^(\w+) = (.+)$/));
-    expect(assignments.every(Boolean), flat).toBe(true);
-    const updated = assignments.map((a) => a![1]!);
+    // The statements the worker actually sent, not constants it might not use.
+    // This job has no owner palette, so the only shop_sites UPDATE is the site write.
+    const updates = h.prepared.map(flat).filter((q) => q.startsWith("UPDATE shop_sites SET"));
+    const inserts = h.prepared.map(flat).filter((q) => q.startsWith("INSERT INTO shop_sites"));
+    expect(updates).toHaveLength(1);
+    expect(inserts).toHaveLength(1);
 
-    expect(m![3]).toBe("shop_id");
-    expect(values).toHaveLength(insert.length);
-    expect(new Set(insert).size).toBe(insert.length);
+    const u = updates[0]!.match(/^UPDATE shop_sites SET (.+) WHERE shop_id = \?$/);
+    expect(u, updates[0]).not.toBeNull();
+    const assignments = u![1]!.split(",").map((a) => a.trim().match(/^(\w+) = (.+)$/));
+    expect(assignments.every(Boolean), updates[0]).toBe(true);
+    const updated = assignments.map((a) => a![1]!);
     expect(new Set(updated).size).toBe(updated.length);
-    expect(sorted(insert)).toEqual(sorted(OLD_INSERT));
     expect(sorted(updated)).toEqual(sorted(OLD_UPDATE_SET));
-    // id and template are insert-only; every update takes this publish's value.
+    // id and template are insert-only; every column takes this publish's bound value.
     expect(updated).not.toContain("id");
     expect(updated).not.toContain("template");
-    expect(assignments.map((a) => a![2])).toEqual(updated.map((c) => `excluded.${c}`));
+    expect(updated).not.toContain("shop_id");
+    expect(assignments.map((a) => a![2])).toEqual(updated.map(() => "?"));
+
+    // Keyed on shop_id ALONE (no status filter), so it never adds a second row.
+    const i = inserts[0]!.match(
+      /^INSERT INTO shop_sites \(([^)]*)\) SELECT (.+) WHERE NOT EXISTS \(SELECT 1 FROM shop_sites WHERE shop_id = \?\)$/
+    );
+    expect(i, inserts[0]).not.toBeNull();
+    const inserted = i![1]!.split(",").map((c) => c.trim());
+    expect(new Set(inserted).size).toBe(inserted.length);
+    expect(sorted(inserted)).toEqual(sorted(OLD_INSERT));
+    expect(i![2]!.split(",").map((v) => v.trim())).toEqual(inserted.map(() => "?"));
   });
 
-  it("migration 003's unique index on shop_id is in the replayed chain", async () => {
-    const list = await env.DB.prepare("PRAGMA index_list(shop_sites)").all<{ name: string; unique: number }>();
-    const index = (list.results ?? []).find((i) => i.name === "idx_shop_sites_shop_id");
-    expect(index?.unique).toBe(1);
-    const cols = await env.DB.prepare("PRAGMA index_info(idx_shop_sites_shop_id)").all<{ name: string }>();
-    expect((cols.results ?? []).map((c) => c.name)).toEqual(["shop_id"]);
+  // Replaces the earlier "migration 003's unique index is in the replayed
+  // chain" test: publish no longer depends on that index.
+  it("publishes without migration 003's unique index on shop_id", async () => {
+    // Production may list 003 as applied by --baseline without its index
+    // having run; the old UPDATE-then-INSERT never needed it, nor may this.
+    await env.DB.prepare("DROP INDEX idx_shop_sites_shop_id").run();
+    try {
+      const indexes = await env.DB.prepare("PRAGMA index_list(shop_sites)").all<{ name: string; unique: number }>();
+      for (const ix of (indexes.results ?? []).filter((x) => x.unique === 1)) {
+        const cols = await env.DB.prepare(`PRAGMA index_info(${ix.name})`).all<{ name: string }>();
+        expect((cols.results ?? []).map((c) => c.name), ix.name).not.toEqual(["shop_id"]);
+      }
+
+      const first = await setup({
+        research: researchPayload({ template: "bold", owner_color_primary: "#123456", owner_color_accent: "#abcdef" }),
+      });
+      await deliver(first.message);
+      const inserted = await sites(first.shopId);
+      expect(inserted).toHaveLength(1);
+      // The owner palette lands on the row the INSERT just created.
+      expect(inserted[0]).toMatchObject({
+        status: "active",
+        template: "bold",
+        headline: "Sharp cuts on Example Row",
+        owner_color_primary: "#123456",
+        owner_color_accent: "#abcdef",
+      });
+      expect(await job(first.jobId)).toEqual({ status: "complete", stage: "complete", error: null });
+
+      const secondJob = await addJob(first.shopId, {
+        text: textPayload({ headline: "Fresh fades on Example Row" }),
+        images: imagesPayload(),
+        research: researchPayload({ template: "classic" }),
+      });
+      await deliver({ ...first.message, jobId: secondJob });
+
+      const rows = await sites(first.shopId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.id).toBe(inserted[0]!.id);
+      expect(rows[0]!.template).toBe("bold");
+      expect(rows[0]!.headline).toBe("Fresh fades on Example Row");
+      expect(rows[0]!.generated_at).not.toBe(inserted[0]!.generated_at);
+      expect(await job(secondJob)).toEqual({ status: "complete", stage: "complete", error: null });
+      expect(await completions(first.shopId)).toHaveLength(2);
+    } finally {
+      // Storage persists across tests in this file: put the chain's index back.
+      await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_shop_sites_shop_id ON shop_sites(shop_id)").run();
+    }
   });
 });

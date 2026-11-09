@@ -243,29 +243,39 @@ function parseStageMessage(body: unknown): StageMessage | null {
   return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, origin_actor_ref: originActorRef(o.origin_actor_ref) };
 }
 
-// ── The published row: ONE upsert ───────────────────────────────────────────
-// Migration 003's unique index on shop_id is the conflict target. It writes
-// exactly what the old UPDATE-then-INSERT pair wrote: every regenerated column
-// plus status on both paths; id and template only when the row is created.
+// ── The published row: UPDATE, then INSERT where none exists ─────────────────
+// Keyed on shop_id alone and never on a unique index (P14): production may
+// list migration 003 as applied by --baseline without its index having run,
+// and the old UPDATE-then-INSERT never needed one. In one batch, the UPDATE
+// rewrites an existing row and the guarded INSERT creates one only when none
+// exists, so exactly one of them writes. Together they write what the old
+// pair wrote: every regenerated column plus status on both paths; id and
+// template only when the row is created.
 const SITE_INSERT_ONLY_COLUMNS = ["id", "shop_id", "template"] as const;
 const SITE_PUBLISH_COLUMNS = [...CANDIDATE_COLUMNS, "status"] as const;
-const SITE_UPSERT_COLUMNS = [...SITE_INSERT_ONLY_COLUMNS, ...SITE_PUBLISH_COLUMNS] as const;
-type SiteUpsertColumn = (typeof SITE_UPSERT_COLUMNS)[number];
+const SITE_INSERT_COLUMNS = [...SITE_INSERT_ONLY_COLUMNS, ...SITE_PUBLISH_COLUMNS] as const;
+type SiteColumn = (typeof SITE_INSERT_COLUMNS)[number];
 
-const SITE_UPSERT_SQL =
-  `INSERT INTO shop_sites (${SITE_UPSERT_COLUMNS.join(", ")})\n` +
-  `VALUES (${SITE_UPSERT_COLUMNS.map(() => "?").join(", ")})\n` +
-  `ON CONFLICT(shop_id) DO UPDATE SET ${SITE_PUBLISH_COLUMNS.map((c) => `${c} = excluded.${c}`).join(", ")}`;
+const SITE_UPDATE_SQL = `UPDATE shop_sites SET\n  ${SITE_PUBLISH_COLUMNS.map((c) => `${c} = ?`).join(", ")}\nWHERE shop_id = ?`;
+const SITE_INSERT_SQL =
+  `INSERT INTO shop_sites (${SITE_INSERT_COLUMNS.join(", ")})\n` +
+  `SELECT ${SITE_INSERT_COLUMNS.map(() => "?").join(", ")}\n` +
+  `WHERE NOT EXISTS (SELECT 1 FROM shop_sites WHERE shop_id = ?)`;
 
-function siteUpsert(db: D1Database, shopId: string, template: string, columns: CandidateColumnValues): D1PreparedStatement {
-  const values: Record<SiteUpsertColumn, string | number | null> = {
+/** The site's two statements, in order: the UPDATE, then the guarded INSERT. */
+function siteWrites(db: D1Database, shopId: string, template: string, columns: CandidateColumnValues): D1PreparedStatement[] {
+  // One record, bound by column name, so the two column lists cannot drift.
+  const values: Record<SiteColumn, string | number | null> = {
     ...columns,
     id: crypto.randomUUID(),
     shop_id: shopId,
     template,
     status: "active",
   };
-  return db.prepare(SITE_UPSERT_SQL).bind(...SITE_UPSERT_COLUMNS.map((c) => values[c]));
+  return [
+    db.prepare(SITE_UPDATE_SQL).bind(...SITE_PUBLISH_COLUMNS.map((c) => values[c]), shopId),
+    db.prepare(SITE_INSERT_SQL).bind(...SITE_INSERT_COLUMNS.map((c) => values[c]), shopId),
+  ];
 }
 
 /** What the activation changes on the shop, read just before the batch; null when nothing. */
@@ -653,12 +663,17 @@ async function processOne(body: unknown, env: Env): Promise<void> {
          ON CONFLICT(shop_id) DO UPDATE SET job_id = excluded.job_id, payload_json = excluded.payload_json, created_at = excluded.created_at`
     ).bind(shopId, jobId, payload, now);
     // ONE batch: the candidate, the guarded job completion and its entry.
+    let reviewed: "finished" | "already_finished";
     try {
-      await finishJob(env.DB, rec, { ...job, status: "complete", stage: "review", error: null, reason: null }, [storeCandidate]);
+      reviewed = await finishJob(env.DB, rec, { ...job, status: "complete", stage: "review", error: null, reason: null }, [
+        storeCandidate,
+      ]);
     } catch (e) {
       // The batch rolled back whole, so the deterministic entry id is free again.
+      // The error can come from any statement in it, so only a missing
+      // candidate table is blamed on migration 049.
       const detail = e instanceof Error ? e.message : String(e);
-      const err = /no such table/i.test(detail)
+      const err = /no such table:?\s*shop_site_candidates/i.test(detail)
         ? "assemble: shop_site_candidates is missing (migration 049 has not run); the live site was left unchanged"
         : `assemble: could not store the new version for review; the live site was left unchanged: ${detail}`.slice(0, 500);
       console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
@@ -667,6 +682,10 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       return;
     }
     await deleteJobKeys(env, jobId);
+    if (reviewed === "already_finished") {
+      console.log(`[${jobId}] [pivot-parlor-assembler] another delivery already finished this job; nothing written`);
+      return;
+    }
     // No site: cache bust and no shop activation: nothing public changed.
     console.log(
       `[${jobId}] [pivot-parlor-assembler] DONE (waiting for review) shopSlug=${shopSlug} status=${existingRow?.website_status ?? "?"} services=${text.services.length}`
@@ -675,12 +694,14 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   }
 
   // ── Publish: ONE batch ─────────────────────────────────────────────────────
-  // The site upsert, the owner palette (when chosen), the shop activation, the
-  // guarded job completion and its entry commit together or not at all.
-  const publish: D1PreparedStatement[] = [siteUpsert(env.DB, shopId, template, columns)];
+  // The site UPDATE and guarded INSERT, the owner palette (when chosen), the
+  // shop activation, the guarded job completion and its entry commit together
+  // or not at all.
+  const publish: D1PreparedStatement[] = siteWrites(env.DB, shopId, template, columns);
   // Persist an owner-chosen palette to the winning slot. Done as an isolated,
   // override-only write so a normal regeneration never clears an existing
-  // owner override (the upsert leaves owner_color_* untouched).
+  // owner override (the site write leaves owner_color_* untouched). It must
+  // follow BOTH site statements, or a first publish would lose it.
   if (ownerColorPrimary && ownerColorAccent) {
     publish.push(
       env.DB.prepare("UPDATE shop_sites SET owner_color_primary = ?, owner_color_accent = ? WHERE shop_id = ?").bind(
@@ -703,13 +724,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     { ...job, status: "complete", stage: "complete", error: null, reason: null, changes: activationChanges(shopBefore) },
     publish
   );
-  console.log(
-    finished === "finished"
-      ? `[${jobId}] [pivot-parlor-assembler] published shop_sites shopId=${shopId}${ownerColorPrimary ? " (owner palette)" : ""}`
-      : `[${jobId}] [pivot-parlor-assembler] another delivery already finished this job; nothing written`
-  );
 
-  // Both harmless if another delivery finished first.
+  // Only after the batch, and harmless if another delivery finished first.
   await deleteJobKeys(env, jobId);
 
   try {
@@ -718,6 +734,14 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     /* best-effort bust public site cache */
   }
 
+  if (finished === "already_finished") {
+    console.log(`[${jobId}] [pivot-parlor-assembler] another delivery already finished this job; nothing written`);
+    return;
+  }
+
+  console.log(
+    `[${jobId}] [pivot-parlor-assembler] published shop_sites shopId=${shopId}${ownerColorPrimary ? " (owner palette)" : ""}`
+  );
   if (hadImagesKv) {
     console.log(
       `[${jobId}] [pivot-parlor-assembler] stored heroUrl=${hero_image_url ?? "(null)"} logoUrl=${logo_url ?? "(null)"}`

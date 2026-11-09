@@ -2,9 +2,9 @@
  * Test setup: replay the MAIN worker's full migration chain (schema.sql +
  * migrations/) against the per-file simulated D1 database. The main worker's
  * chain is the canonical schema owner (CLAUDE.md), including shop_sites
- * (migration-only, with migration 003's unique index on shop_id) and
- * shop_site_candidates (migration 049), so the assembler's upserts run here
- * against exactly what production replays. Same pattern as the booking worker.
+ * (migration-only) and shop_site_candidates (migration 049), so the
+ * assembler's writes run here against exactly what production replays.
+ * Same pattern as the booking worker.
  */
 import { env } from "cloudflare:test";
 import { beforeAll } from "vitest";

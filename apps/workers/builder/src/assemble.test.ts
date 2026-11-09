@@ -8,7 +8,7 @@
  *    the live site alone;
  *  - a crash records the job as failed instead of leaving it "running".
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageBatch } from "@cloudflare/workers-types";
 import worker, { type Env } from "./index";
 
@@ -19,7 +19,7 @@ const JOB = "job-0001";
 const SHOP = "shop-0001";
 const SLUG = "test-barber";
 
-function fakeEnv(opts: { site: SiteState; candidateTableMissing?: boolean; kvThrows?: boolean }) {
+function fakeEnv(opts: { site: SiteState; candidateTableMissing?: boolean; auditTableMissing?: boolean; kvThrows?: boolean }) {
   const calls: Call[] = [];
   const kv = new Map<string, string>();
   const kvDeleted: string[] = [];
@@ -31,8 +31,8 @@ function fakeEnv(opts: { site: SiteState; candidateTableMissing?: boolean; kvThr
       if (opts.candidateTableMissing && sql.includes("shop_site_candidates")) {
         throw new Error("D1_ERROR: no such table: shop_site_candidates: SQLITE_ERROR");
       }
-      if (sql.includes("UPDATE shop_sites SET\n")) {
-        return { meta: { changes: opts.site === "none" ? 0 : 1 } };
+      if (opts.auditTableMissing && sql.startsWith("INSERT INTO audit_log")) {
+        throw new Error("D1_ERROR: no such table: audit_log: SQLITE_ERROR");
       }
       return { meta: { changes: 1 } };
     },
@@ -137,6 +137,14 @@ const writes = (calls: Call[], prefix: string) => calls.filter((c) => c.sql.trim
 const jobUpdates = (calls: Call[]) => writes(calls, "UPDATE generation_jobs");
 
 describe("assembler write target", () => {
+  // The failure paths log (with stack traces); keep them out of the run.
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it.each(["live", "paused"] as const)("stores a %s site's regeneration for review and leaves the site alone", async (site) => {
     const { env, calls, kvDeleted } = fakeEnv({ site });
     const { acked } = await runOnce(env);
@@ -168,6 +176,8 @@ describe("assembler write target", () => {
     const { env, calls, kvDeleted } = fakeEnv({ site });
     await runOnce(env);
     expect(writes(calls, "INSERT INTO shop_site_candidates")).toHaveLength(0);
+    // UPDATE by shop_id, then INSERT only where no row exists (P14).
+    expect(writes(calls, "UPDATE shop_sites SET\n")).toHaveLength(1);
     expect(writes(calls, "INSERT INTO shop_sites")).toHaveLength(1);
     expect(writes(calls, "UPDATE shops")).toHaveLength(1);
     expect(kvDeleted).toContain(`site:${SLUG}`);
@@ -183,6 +193,16 @@ describe("assembler write target", () => {
     const failed = jobUpdates(calls).at(-1)!;
     expect(failed.args).toContain("failed");
     expect(failed.args.some((a) => typeof a === "string" && a.includes("migration 049"))).toBe(true);
+  });
+
+  it("does not blame migration 049 when a different table is missing", async () => {
+    const { env, calls } = fakeEnv({ site: "live", auditTableMissing: true });
+    await runOnce(env);
+    expect(writes(calls, "INSERT INTO shop_site_candidates")).toHaveLength(0);
+    const failed = jobUpdates(calls).at(-1)!;
+    const error = failed.args.find((a): a is string => typeof a === "string" && a.startsWith("assemble:"));
+    expect(error).toMatch(/^assemble: could not store the new version for review; the live site was left unchanged: .*no such table: audit_log/);
+    expect(error).not.toMatch(/migration 049/);
   });
 
   it("records a crash as a failed job instead of leaving it running", async () => {
