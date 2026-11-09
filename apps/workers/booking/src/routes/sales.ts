@@ -20,6 +20,7 @@ import { shopExists } from "../middleware/shop-access.js";
 import { todayUtcYmd } from "../lib/time.js";
 import { d1Rows } from "../lib/d1-helpers.js";
 import { createCheckoutSession, createRefund } from "../lib/stripe.js";
+import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import { calculateCommissionPence } from "@repo/utils";
 import {
   SaleInputError,
@@ -715,9 +716,11 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
   }
 
   const sale = await db
-    .prepare("SELECT id, status, tender_type, refunded_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+    .prepare(
+      "SELECT id, status, tender_type, refunded_pence, stripe_checkout_session_id FROM sales WHERE id = ? AND shop_id = ? LIMIT 1"
+    )
     .bind(saleId, shopId)
-    .first<VoidableSale & { id: string }>();
+    .first<VoidableSale & { id: string; stripe_checkout_session_id: string | null }>();
   if (!sale) {
     return c.json({ success: false, error: "Sale not found" }, 404);
   }
@@ -738,7 +741,15 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
       { action: "pos.void", shopId, entityType: "sale", entityId: saleId },
       async (): Promise<Response> => {
         flip = await voidSale(db, shopId, saleId, null);
-        if (flip.claimed) return c.json({ success: true });
+        if (flip.claimed) {
+          // A pending Stripe sale's QR Checkout stays payable for Stripe's
+          // default 24 hours: close it, best effort, so nobody pays for a sale
+          // that no longer exists.
+          if (flip.before === "pending" && sale.tender_type === "stripe") {
+            await expireSessionBestEffort(c.env.STRIPE_SECRET_KEY, sale.stripe_checkout_session_id, { saleId });
+          }
+          return c.json({ success: true });
+        }
         const now = await db
           .prepare("SELECT status, tender_type, refunded_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
           .bind(saleId, shopId)

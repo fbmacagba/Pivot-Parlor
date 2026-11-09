@@ -551,7 +551,7 @@ publicRoutes.post(
     if (won) {
       // This request cancelled the booking, so close its session: it would
       // otherwise stay payable for the rest of its 31 minutes.
-      await expireSessionBestEffort(c.env.STRIPE_SECRET_KEY, st.stripe_checkout_session_id, bookingId);
+      await expireSessionBestEffort(c.env.STRIPE_SECRET_KEY, st.stripe_checkout_session_id, { bookingId });
     }
     return c.json({ success: true });
   },

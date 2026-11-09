@@ -1129,7 +1129,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
     await expireSessionBestEffort(
       c.env.STRIPE_SECRET_KEY,
       typeof st?.stripe_checkout_session_id === "string" ? st.stripe_checkout_session_id : null,
-      bookingId
+      { bookingId }
     );
   }
 

@@ -1,5 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { seedProduct, seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
@@ -375,6 +375,61 @@ describe("void audit", () => {
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("pos.void", t.shop, saleId);
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["pending", "voided"] });
+  });
+
+  /** Records the Stripe calls the worker makes while `fn` runs. */
+  async function stripeCallsDuring(fn: () => Promise<unknown>, expire500 = false): Promise<string[]> {
+    const calls: string[] = [];
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.startsWith("https://api.stripe.com/")) {
+        calls.push(new URL(url).pathname);
+        if (expire500 && url.endsWith("/expire")) {
+          return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+        }
+      }
+      return real(input, init);
+    });
+    try {
+      await fn();
+    } finally {
+      vi.restoreAllMocks();
+    }
+    return calls;
+  }
+
+  it("voiding a pending Stripe sale closes its Checkout session", async () => {
+    const t = await setup();
+    const saleId = await ringOk(t, "stripe", STRIPE_URLS);
+    const session = await env.DB.prepare("SELECT stripe_checkout_session_id AS s FROM sales WHERE id = ?")
+      .bind(saleId)
+      .first<{ s: string }>();
+    expect(session?.s, "the sale has no Checkout Session to close").toMatch(/.+/);
+    let status = 0;
+    const calls = await stripeCallsDuring(async () => {
+      status = (await voidIt(t, saleId)).status;
+    });
+    expect(status).toBe(200);
+    expect(calls).toEqual([`/v1/checkout/sessions/${encodeURIComponent(session!.s)}/expire`]);
+  });
+
+  it("a failed session close never changes the void's answer, and a cash void calls Stripe never", async () => {
+    const t = await setup();
+    const stripeSale = await ringOk(t, "stripe", STRIPE_URLS);
+    let status = 0;
+    await stripeCallsDuring(async () => {
+      status = (await voidIt(t, stripeSale)).status;
+    }, true);
+    expect(status).toBe(200);
+    expect(await saleStatus(stripeSale)).toBe("voided");
+
+    const cashSale = await ringOk(t);
+    const calls = await stripeCallsDuring(async () => {
+      status = (await voidIt(t, cashSale)).status;
+    });
+    expect(status).toBe(200);
+    expect(calls).toEqual([]);
   });
 
   it("voiding an already-voided sale answers 400 and records nothing", async () => {
