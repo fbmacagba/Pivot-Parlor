@@ -3,6 +3,7 @@ import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { addMinutesToHm, todayUtcYmd } from "../lib/time.js";
 import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent, createRefund } from "../lib/stripe.js";
+import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import {
   SaleInputError,
   resolveSaleLines,
@@ -1118,6 +1119,18 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
       .bind(bookingId)
       .run();
     depositAction = "hold_voided";
+  }
+
+  // An unpaid Checkout deposit (no PaymentIntent yet, deposit tx still
+  // pending) that this request cancelled: close the session so it can no
+  // longer be paid. Best effort; a deposit that still lands is refunded by
+  // the payment_intent.succeeded webhook.
+  if (flipped && piId === null && depositTx?.status === "pending") {
+    await expireSessionBestEffort(
+      c.env.STRIPE_SECRET_KEY,
+      typeof st?.stripe_checkout_session_id === "string" ? st.stripe_checkout_session_id : null,
+      bookingId
+    );
   }
 
   // Every disposition the handler can take, mapped onto the audit enum.

@@ -24,6 +24,7 @@ import { runBookingSideEffects } from "../services/booking-side-effects.js";
 import { reportError } from "../services/report-error.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { createCheckoutSession } from "../lib/stripe.js";
+import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 import { addMinutes, calculateCommissionPence, isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
@@ -513,11 +514,11 @@ publicRoutes.post(
   async (c) => {
     const bookingId = c.req.param("bookingId");
     const st = await c.env.DB.prepare(
-      `SELECT booking_id, shop_id FROM bw_booking_state
+      `SELECT booking_id, shop_id, stripe_checkout_session_id FROM bw_booking_state
          WHERE booking_id = ? AND stripe_checkout_session_id IS NOT NULL AND deposit_paid_at IS NULL LIMIT 1`,
     )
       .bind(bookingId)
-      .first<{ booking_id: string; shop_id: string }>();
+      .first<{ booking_id: string; shop_id: string; stripe_checkout_session_id: string }>();
     if (!st) return c.json({ success: false, error: "Booking not found" }, 404);
 
     // Guarded batch: the cancel and its entry commit together, and only while
@@ -525,6 +526,7 @@ publicRoutes.post(
     // race the guard rolls the batch back, the answer stays what it always
     // was, and the trail records the refused attempt.
     const entity = { shopId: st.shop_id, entityType: "booking", entityId: bookingId };
+    let won = false;
     try {
       await auditFor(c).batch(cancelPendingBookingStmts(c.env.DB, bookingId), {
         action: "booking.cancel",
@@ -533,6 +535,7 @@ publicRoutes.post(
         changes: { status: ["pending", "cancelled"] },
         details: { reason: "abandoned" },
       });
+      won = true;
     } catch (e) {
       if (e instanceof AuditWriteError) return auditRefused(c);
       const now = await c.env.DB.prepare("SELECT status FROM bookings WHERE id = ?")
@@ -544,6 +547,11 @@ publicRoutes.post(
       } catch {
         // Best effort: a failure to record the refusal never changes the answer.
       }
+    }
+    if (won) {
+      // This request cancelled the booking, so close its session: it would
+      // otherwise stay payable for the rest of its 31 minutes.
+      await expireSessionBestEffort(c.env.STRIPE_SECRET_KEY, st.stripe_checkout_session_id, bookingId);
     }
     return c.json({ success: true });
   },

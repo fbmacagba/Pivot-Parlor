@@ -68,6 +68,10 @@ export default defineConfig({
               return Response.json({ id: `re_idem_${idem}`, status: "pending" });
             });
           }
+          const expire = path.match(/^\/v1\/checkout\/sessions\/([^/]+)\/expire$/);
+          if (expire && request.method === "POST") {
+            return Response.json({ id: decodeURIComponent(expire[1]!), status: "expired" });
+          }
           if (path === "/v1/checkout/sessions" && request.method === "POST") {
             // Same echo trick as payment_intents: the Idempotency-Key lands in
             // the session id so tests assert it from persisted rows. A form
