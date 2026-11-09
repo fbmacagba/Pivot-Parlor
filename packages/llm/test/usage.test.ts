@@ -182,6 +182,22 @@ describe("recordAiUsage", () => {
     expect(calls[0]!.values.slice(8, 10)).toEqual([0, "reported"]);
   });
 
+  // Production's D1 errors log a stack with no message line, so a failed insert
+  // was invisible except as "could not record usage". The line itself must
+  // carry the database's own words.
+  it("puts the database's error text and its cause in the failure line", async () => {
+    const d1 = new Error("D1_ERROR: table ai_usage_log has no column named cost_basis: SQLITE_ERROR", {
+      cause: new Error("table ai_usage_log has no column named cost_basis: SQLITE_ERROR"),
+    });
+    const { db } = fakeDb(async () => { throw d1; });
+    const log = vi.fn();
+    await recordAiUsage({ DB: db, KV: kvWith({}) }, { ...base, usage: { inputTokens: 1, outputTokens: 1 } }, log);
+    const line = String(log.mock.calls[0]![0]);
+    expect(line).toContain("could not record usage for pivot-parlor-text job=job-1");
+    expect(line).toContain("D1_ERROR: table ai_usage_log has no column named cost_basis: SQLITE_ERROR");
+    expect(line).toContain("cause: table ai_usage_log has no column named cost_basis");
+  });
+
   it("never throws when the insert fails, and says so", async () => {
     const { db } = fakeDb(async () => { throw new Error("no such column: cost_basis"); });
     const log = vi.fn();
