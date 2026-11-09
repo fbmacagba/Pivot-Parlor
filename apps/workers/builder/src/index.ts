@@ -1,10 +1,15 @@
 /**
  * pivot-parlor-assembler — Consumes site-assemble-queue: merge KV images+text → shop_sites, complete job, cleanup KV.
+ *
+ * Every job ends with exactly one `site.regenerate.complete` audit entry, in
+ * the SAME D1 batch as the writes it records (publish, review or failure).
  */
-import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
+import { finishJob, originActorRef, queueAudit, type AuditRecorder } from "@repo/audit";
 import { parseLockedImages } from "./lockedImages";
 import {
   buildCandidatePayload,
+  CANDIDATE_COLUMNS,
   chooseImage,
   gateCopy,
   mergeCatalog,
@@ -26,6 +31,26 @@ export interface StageMessage {
   jobId: string;
   shopId: string;
   shopSlug: string;
+  /** Who clicked Regenerate (`subj_user_<id>`). Absent on messages from before the audit trail. */
+  origin_actor_ref?: string | null;
+}
+
+const WORKER_NAME = "pivot-parlor-assembler";
+
+/** The fixed reason codes a failed completion entry carries (never the error text). */
+type FailReason =
+  | "missing_text"
+  | "invalid_images_kv"
+  | "invalid_text_kv"
+  | "text_failed_validation"
+  | "candidate_store_failed"
+  | "crash";
+
+/** What every completion entry of one job shares. */
+interface JobRef {
+  jobId: string;
+  shopId: string;
+  origin: string | null;
 }
 
 interface ImagesKvPayload {
@@ -214,30 +239,44 @@ function parseStageMessage(body: unknown): StageMessage | null {
   if (!body || typeof body !== "object") return null;
   const o = body as Record<string, unknown>;
   if (typeof o.jobId !== "string" || typeof o.shopId !== "string" || typeof o.shopSlug !== "string") return null;
-  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug };
+  // Kept on the parsed message so both wait-path re-sends carry it onward.
+  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, origin_actor_ref: originActorRef(o.origin_actor_ref) };
 }
 
-async function updateGenerationJob(
-  db: D1Database,
-  id: string,
-  patch: { status?: string; stage?: string; error?: string | null }
-): Promise<void> {
-  const sets: string[] = ["updated_at = ?"];
-  const vals: unknown[] = [new Date().toISOString()];
-  if (patch.status !== undefined) {
-    sets.push("status = ?");
-    vals.push(patch.status);
-  }
-  if (patch.stage !== undefined) {
-    sets.push("stage = ?");
-    vals.push(patch.stage);
-  }
-  if (patch.error !== undefined) {
-    sets.push("error = ?");
-    vals.push(patch.error);
-  }
-  vals.push(id);
-  await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+// ── The published row: ONE upsert ───────────────────────────────────────────
+// Migration 003's unique index on shop_id is the conflict target. It writes
+// exactly what the old UPDATE-then-INSERT pair wrote: every regenerated column
+// plus status on both paths; id and template only when the row is created.
+const SITE_INSERT_ONLY_COLUMNS = ["id", "shop_id", "template"] as const;
+const SITE_PUBLISH_COLUMNS = [...CANDIDATE_COLUMNS, "status"] as const;
+const SITE_UPSERT_COLUMNS = [...SITE_INSERT_ONLY_COLUMNS, ...SITE_PUBLISH_COLUMNS] as const;
+type SiteUpsertColumn = (typeof SITE_UPSERT_COLUMNS)[number];
+
+const SITE_UPSERT_SQL =
+  `INSERT INTO shop_sites (${SITE_UPSERT_COLUMNS.join(", ")})\n` +
+  `VALUES (${SITE_UPSERT_COLUMNS.map(() => "?").join(", ")})\n` +
+  `ON CONFLICT(shop_id) DO UPDATE SET ${SITE_PUBLISH_COLUMNS.map((c) => `${c} = excluded.${c}`).join(", ")}`;
+
+function siteUpsert(db: D1Database, shopId: string, template: string, columns: CandidateColumnValues): D1PreparedStatement {
+  const values: Record<SiteUpsertColumn, string | number | null> = {
+    ...columns,
+    id: crypto.randomUUID(),
+    shop_id: shopId,
+    template,
+    status: "active",
+  };
+  return db.prepare(SITE_UPSERT_SQL).bind(...SITE_UPSERT_COLUMNS.map((c) => values[c]));
+}
+
+/** What the activation changes on the shop, read just before the batch; null when nothing. */
+function activationChanges(
+  before: { status: string | null; is_active: number | null } | null
+): Record<string, [unknown, unknown]> | null {
+  if (!before) return null;
+  const changes: Record<string, [unknown, unknown]> = {};
+  if (before.status !== "active") changes.status = [before.status, "active"];
+  if (before.is_active !== 1) changes.is_active = [before.is_active, 1];
+  return Object.keys(changes).length > 0 ? changes : null;
 }
 
 /** Drop the job's working keys once it has finished (complete or failed). */
@@ -250,25 +289,55 @@ async function deleteJobKeys(env: Env, jobId: string): Promise<void> {
 }
 
 /** A crash in processOne used to be logged and acked, leaving the job
- *  "running" until the browser poller gave up. Record it as failed instead;
- *  a job that already finished is left as it is. */
+ *  "running" until the browser poller gave up. Record it as failed, with its
+ *  completion entry; a job that already finished is left as it is. Never throws. */
 export async function failJobAfterCrash(env: Pick<Env, "DB">, body: unknown, e: unknown): Promise<void> {
-  const jobId = (body as { jobId?: unknown } | null)?.jobId;
+  const raw = (body ?? {}) as { jobId?: unknown; shopId?: unknown; origin_actor_ref?: unknown };
+  const jobId = raw.jobId;
   if (typeof jobId !== "string" || !jobId) return;
-  const err = `assemble: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  const error = `assemble: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  const shopId = raw.shopId;
+  if (typeof shopId !== "string" || !shopId) {
+    // No shop to attach an entry to: the job must still end.
+    console.error("[audit] job failed without its completion entry", jobId);
+    await fallbackFailedWrite(env.DB, jobId, error);
+    return;
+  }
+  await failJob(
+    env.DB,
+    queueAudit(env.DB, WORKER_NAME, jobId),
+    { jobId, shopId, origin: originActorRef(raw.origin_actor_ref) },
+    error,
+    "crash"
+  );
+}
+
+/**
+ * End a job as failed with exactly one completion entry. `error` goes to
+ * generation_jobs only; the entry carries the fixed `reason`. Never throws:
+ * if the terminal batch cannot be written, fall back to the plain guarded
+ * failed write (the job must still end) and say so in the log (Ruling 5).
+ */
+async function failJob(db: D1Database, rec: AuditRecorder, job: JobRef, error: string, reason: FailReason): Promise<void> {
   try {
-    await env.DB.prepare(
-      "UPDATE generation_jobs SET status = 'failed', stage = 'assemble', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
-    )
-      .bind(err, new Date().toISOString(), jobId)
+    await finishJob(db, rec, { ...job, status: "failed", stage: "assemble", error, reason });
+  } catch (auditErr) {
+    console.error("[audit] job failed without its completion entry", job.jobId, auditErr);
+    await fallbackFailedWrite(db, job.jobId, error);
+  }
+}
+
+async function fallbackFailedWrite(db: D1Database, jobId: string, error: string): Promise<void> {
+  try {
+    await db
+      .prepare(
+        "UPDATE generation_jobs SET status = 'failed', stage = 'assemble', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
+      )
+      .bind(error, new Date().toISOString(), jobId)
       .run();
   } catch (persistErr) {
     console.error(`[${jobId}] [pivot-parlor-assembler] could not record the failure`, persistErr);
   }
-}
-
-async function setShopActive(db: D1Database, shopId: string): Promise<void> {
-  await db.prepare("UPDATE shops SET status = ?, is_active = 1 WHERE id = ?").bind("active", shopId).run();
 }
 
 function servicesForJson(services: TextServiceOut[]): string {
@@ -317,6 +386,8 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   }
 
   const { jobId, shopId, shopSlug } = msg;
+  const job: JobRef = { jobId, shopId, origin: msg.origin_actor_ref ?? null };
+  const rec = queueAudit(env.DB, WORKER_NAME, jobId);
 
   const jobRow = await env.DB.prepare("SELECT status FROM generation_jobs WHERE id = ?").bind(jobId).first<{ status: string }>();
   if (jobRow?.status === "complete" || jobRow?.status === "failed") {
@@ -336,7 +407,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     if (textRetries >= ASSEMBLE_MAX_RETRIES) {
       const err = `assemble: missing text after ${textRetries} retries`;
       console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
-      await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: err });
+      await failJob(env.DB, rec, job, err, "missing_text");
       await env.KV.delete(genResearchKey(jobId));
       await env.KV.delete(genImagesKey(jobId));
       await env.KV.delete(genTextKey(jobId));
@@ -371,7 +442,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       images = JSON.parse(imagesRaw) as ImagesKvPayload;
     } catch (e) {
       console.error(`[${jobId}] [pivot-parlor-assembler] parse images KV failed`, e);
-      await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: "invalid images KV JSON" });
+      await failJob(env.DB, rec, job, "invalid images KV JSON", "invalid_images_kv");
       return;
     }
   }
@@ -381,7 +452,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     text = JSON.parse(textRaw) as TextKvPayload;
   } catch (e) {
     console.error(`[${jobId}] [pivot-parlor-assembler] parse KV failed`, e);
-    await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: "invalid KV JSON" });
+    await failJob(env.DB, rec, job, "invalid KV JSON", "invalid_text_kv");
     return;
   }
 
@@ -390,7 +461,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   if (!text.headline?.trim() || !Array.isArray(text.services)) {
     const err = "assemble: text failed validation";
     console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
-    await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: err });
+    await failJob(env.DB, rec, job, err, "text_failed_validation");
     return;
   }
 
@@ -536,62 +607,65 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const font_heading = coerceCuratedFont(text.font_heading, "heading", intent.heading_style ?? "");
   const font_body = coerceCuratedFont(text.font_body, "body", "");
 
+  // The regenerated shop_sites values: the review path stores them as the
+  // candidate, the publish path writes them to the live row.
+  const columns: CandidateColumnValues = {
+    headline: text.headline,
+    tagline: text.tagline,
+    about: text.about,
+    services_json,
+    hero_image_url,
+    logo_url,
+    catalog_images_json,
+    color_primary: text.color_primary,
+    color_accent: text.color_accent,
+    font_heading,
+    font_body,
+    seo_title: text.seo_title,
+    seo_description: text.seo_description,
+    trust_signals_json: intent.trust_signals_json,
+    usps_json: intent.usps_json,
+    layout_mood: intent.layout_mood,
+    brand_voice: intent.brand_voice,
+    hero_cta: intent.hero_cta,
+    about_title: intent.about_title,
+    palette_json: intent.palette_json,
+    heading_weight: intent.heading_weight,
+    heading_style: intent.heading_style,
+    design_spec: design_spec_json,
+    design_version,
+    gallery_images_json,
+    generated_at: now,
+  };
+
   // ── Owner review (migration 049) ───────────────────────────────────────────
   // A site the public can already reach is never replaced unapproved: the
   // result is stored as the shop's one pending version (a newer regeneration
   // replaces an older pending one) and the live row is left untouched.
   if (siteWriteTarget(existingRow) === "candidate") {
-    const columns: CandidateColumnValues = {
-      headline: text.headline,
-      tagline: text.tagline,
-      about: text.about,
-      services_json,
-      hero_image_url,
-      logo_url,
-      catalog_images_json,
-      color_primary: text.color_primary,
-      color_accent: text.color_accent,
-      font_heading,
-      font_body,
-      seo_title: text.seo_title,
-      seo_description: text.seo_description,
-      trust_signals_json: intent.trust_signals_json,
-      usps_json: intent.usps_json,
-      layout_mood: intent.layout_mood,
-      brand_voice: intent.brand_voice,
-      hero_cta: intent.hero_cta,
-      about_title: intent.about_title,
-      palette_json: intent.palette_json,
-      heading_weight: intent.heading_weight,
-      heading_style: intent.heading_style,
-      design_spec: design_spec_json,
-      design_version,
-      gallery_images_json,
-      generated_at: now,
-    };
     const payload = buildCandidatePayload({
       columns,
       ownerPalette: ownerColorPrimary && ownerColorAccent ? { primary: ownerColorPrimary, accent: ownerColorAccent } : null,
       serviceNames: text.services.map((s) => s.name),
     });
-    try {
-      await env.DB.prepare(
-        `INSERT INTO shop_site_candidates (shop_id, job_id, payload_json, created_at) VALUES (?, ?, ?, ?)
+    const storeCandidate = env.DB.prepare(
+      `INSERT INTO shop_site_candidates (shop_id, job_id, payload_json, created_at) VALUES (?, ?, ?, ?)
          ON CONFLICT(shop_id) DO UPDATE SET job_id = excluded.job_id, payload_json = excluded.payload_json, created_at = excluded.created_at`
-      )
-        .bind(shopId, jobId, payload, now)
-        .run();
+    ).bind(shopId, jobId, payload, now);
+    // ONE batch: the candidate, the guarded job completion and its entry.
+    try {
+      await finishJob(env.DB, rec, { ...job, status: "complete", stage: "review", error: null, reason: null }, [storeCandidate]);
     } catch (e) {
+      // The batch rolled back whole, so the deterministic entry id is free again.
       const detail = e instanceof Error ? e.message : String(e);
       const err = /no such table/i.test(detail)
         ? "assemble: shop_site_candidates is missing (migration 049 has not run); the live site was left unchanged"
         : `assemble: could not store the new version for review; the live site was left unchanged: ${detail}`.slice(0, 500);
       console.error(`[${jobId}] [pivot-parlor-assembler] ${err}`);
-      await updateGenerationJob(env.DB, jobId, { status: "failed", stage: "assemble", error: err });
+      await failJob(env.DB, rec, job, err, "candidate_store_failed");
       await deleteJobKeys(env, jobId);
       return;
     }
-    await updateGenerationJob(env.DB, jobId, { status: "complete", stage: "review", error: null });
     await deleteJobKeys(env, jobId);
     // No site: cache bust and no shop activation: nothing public changed.
     console.log(
@@ -600,122 +674,42 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
 
-  const upd = await env.DB.prepare(
-    `UPDATE shop_sites SET
-      headline = ?, tagline = ?, about = ?,
-      services_json = ?,
-      hero_image_url = ?, logo_url = ?, catalog_images_json = ?,
-      color_primary = ?, color_accent = ?, font_heading = ?, font_body = ?,
-      seo_title = ?, seo_description = ?,
-      trust_signals_json = ?, usps_json = ?, layout_mood = ?, brand_voice = ?,
-      hero_cta = ?, about_title = ?, palette_json = ?,
-      heading_weight = ?, heading_style = ?,
-      design_spec = ?, design_version = ?,
-      gallery_images_json = ?,
-      status = 'active', generated_at = ?
-    WHERE shop_id = ?`
-  )
-    .bind(
-      text.headline,
-      text.tagline,
-      text.about,
-      services_json,
-      hero_image_url,
-      logo_url,
-      catalog_images_json,
-      text.color_primary,
-      text.color_accent,
-      font_heading,
-      font_body,
-      text.seo_title,
-      text.seo_description,
-      intent.trust_signals_json,
-      intent.usps_json,
-      intent.layout_mood,
-      intent.brand_voice,
-      intent.hero_cta,
-      intent.about_title,
-      intent.palette_json,
-      intent.heading_weight,
-      intent.heading_style,
-      design_spec_json,
-      design_version,
-      gallery_images_json,
-      now,
-      shopId
-    )
-    .run();
-
-  const changed = (upd.meta?.changes ?? 0) as number;
-  if (changed === 0) {
-    const siteId = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO shop_sites (
-        id, shop_id, template, headline, tagline, about, services_json,
-        color_primary, color_accent, font_heading, font_body,
-        hero_image_url, logo_url, catalog_images_json, generated_at, status,
-        seo_title, seo_description,
-        trust_signals_json, usps_json, layout_mood, brand_voice,
-        hero_cta, about_title, palette_json, heading_weight, heading_style,
-        design_spec, design_version, gallery_images_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-      .bind(
-        siteId,
-        shopId,
-        template,
-        text.headline,
-        text.tagline,
-        text.about,
-        services_json,
-        text.color_primary,
-        text.color_accent,
-        font_heading,
-        font_body,
-        hero_image_url,
-        logo_url,
-        catalog_images_json,
-        now,
-        text.seo_title,
-        text.seo_description,
-        intent.trust_signals_json,
-        intent.usps_json,
-        intent.layout_mood,
-        intent.brand_voice,
-        intent.hero_cta,
-        intent.about_title,
-        intent.palette_json,
-        intent.heading_weight,
-        intent.heading_style,
-        design_spec_json,
-        design_version,
-        gallery_images_json
-      )
-      .run();
-    console.log(`[${jobId}] [pivot-parlor-assembler] INSERT shop_sites id=${siteId} shopId=${shopId}`);
-  } else {
-    console.log(`[${jobId}] [pivot-parlor-assembler] UPDATE shop_sites rows=${changed} shopId=${shopId}`);
-  }
-
+  // ── Publish: ONE batch ─────────────────────────────────────────────────────
+  // The site upsert, the owner palette (when chosen), the shop activation, the
+  // guarded job completion and its entry commit together or not at all.
+  const publish: D1PreparedStatement[] = [siteUpsert(env.DB, shopId, template, columns)];
   // Persist an owner-chosen palette to the winning slot. Done as an isolated,
   // override-only write so a normal regeneration never clears an existing
-  // owner override (the main write above leaves owner_color_* untouched).
+  // owner override (the upsert leaves owner_color_* untouched).
   if (ownerColorPrimary && ownerColorAccent) {
-    await env.DB.prepare(
-      "UPDATE shop_sites SET owner_color_primary = ?, owner_color_accent = ? WHERE shop_id = ?"
-    )
-      .bind(ownerColorPrimary, ownerColorAccent, shopId)
-      .run();
-    console.log(`[${jobId}] [pivot-parlor-assembler] set owner palette override shopId=${shopId}`);
+    publish.push(
+      env.DB.prepare("UPDATE shop_sites SET owner_color_primary = ?, owner_color_accent = ? WHERE shop_id = ?").bind(
+        ownerColorPrimary,
+        ownerColorAccent,
+        shopId
+      )
+    );
   }
+  publish.push(env.DB.prepare("UPDATE shops SET status = 'active', is_active = 1 WHERE id = ?").bind(shopId));
 
-  await updateGenerationJob(env.DB, jobId, {
-    status: "complete",
-    stage: "complete",
-    error: null,
-  });
-  await setShopActive(env.DB, shopId);
+  // Read just before the batch: only the pipeline writes these two fields.
+  const shopBefore = await env.DB.prepare("SELECT status, is_active FROM shops WHERE id = ?")
+    .bind(shopId)
+    .first<{ status: string | null; is_active: number | null }>();
+  // A throw here reaches the queue handler, which fails the job via failJobAfterCrash.
+  const finished = await finishJob(
+    env.DB,
+    rec,
+    { ...job, status: "complete", stage: "complete", error: null, reason: null, changes: activationChanges(shopBefore) },
+    publish
+  );
+  console.log(
+    finished === "finished"
+      ? `[${jobId}] [pivot-parlor-assembler] published shop_sites shopId=${shopId}${ownerColorPrimary ? " (owner palette)" : ""}`
+      : `[${jobId}] [pivot-parlor-assembler] another delivery already finished this job; nothing written`
+  );
 
+  // Both harmless if another delivery finished first.
   await deleteJobKeys(env, jobId);
 
   try {

@@ -59,6 +59,18 @@ function fakeEnv(opts: { site: SiteState; candidateTableMissing?: boolean; kvThr
     prepare(sql: string) {
       return { ...statement(sql, []), bind: (...args: unknown[]) => statement(sql, args) };
     },
+    // All or nothing, as D1's is: a failing statement leaves no call recorded.
+    async batch(stmts: Array<{ run(): Promise<unknown> }>) {
+      const mark = calls.length;
+      try {
+        const out: unknown[] = [];
+        for (const s of stmts) out.push(await s.run());
+        return out;
+      } catch (e) {
+        calls.length = mark;
+        throw e;
+      }
+    },
   };
   const KV = {
     async get(key: string) {
@@ -156,7 +168,7 @@ describe("assembler write target", () => {
     const { env, calls, kvDeleted } = fakeEnv({ site });
     await runOnce(env);
     expect(writes(calls, "INSERT INTO shop_site_candidates")).toHaveLength(0);
-    expect(writes(calls, "UPDATE shop_sites SET\n")).toHaveLength(1);
+    expect(writes(calls, "INSERT INTO shop_sites")).toHaveLength(1);
     expect(writes(calls, "UPDATE shops")).toHaveLength(1);
     expect(kvDeleted).toContain(`site:${SLUG}`);
     const done = jobUpdates(calls).at(-1)!;
@@ -179,8 +191,9 @@ describe("assembler write target", () => {
     expect(acked).toBe(1);
     const failed = jobUpdates(calls);
     expect(failed).toHaveLength(1);
-    expect(failed[0]!.sql).toMatch(/status NOT IN \('complete', 'failed'\)/);
-    expect(failed[0]!.args[0]).toBe("assemble: KV unavailable");
+    expect(failed[0]!.sql).toMatch(/NOT IN \('complete', 'failed'\)/);
+    expect(failed[0]!.args[0]).toBe("failed");
+    expect(failed[0]!.args[2]).toBe("assemble: KV unavailable");
     expect(failed[0]!.args.at(-1)).toBe(JOB);
   });
 });
