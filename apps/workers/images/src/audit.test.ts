@@ -145,6 +145,25 @@ describe("images audit", () => {
     for (const row of rows) expect(row.slice(7, 9)).toEqual([0, null]);
   });
 
+  it("a BYOK call stays unpriced: its usage.cost is only OpenRouter's fee, not the image", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: null, images: [{ image_url: { url: `data:image/png;base64,${PNG_B64}` } }] } }],
+            usage: { prompt_tokens: 11, completion_tokens: 22, cost: 0.0034, is_byok: true },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
+    const h = harness();
+    await h.run(message());
+    for (const r of aiCalls(h).filter((c) => c.phase === "outcome")) {
+      expect(JSON.parse(r.details_json as string).estimated_cost_usd).toBeNull();
+    }
+    for (const row of usageRows(h)) expect(row.slice(7, 9)).toEqual([0, null]);
+  });
+
   it("an answered call that returns no image still records what it cost", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => imageResponse({ withImage: false }));
     vi.spyOn(console, "error").mockImplementation(() => {});

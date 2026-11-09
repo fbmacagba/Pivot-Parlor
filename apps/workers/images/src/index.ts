@@ -184,8 +184,9 @@ interface ImageResult {
   buffer: ArrayBuffer | null;
   httpStatus: number;
   rawBody: string;
-  /** Present on an answered (billed) call. `cost` is what OpenRouter charged, in USD. */
-  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: unknown };
+  /** Present on an answered (billed) call. `cost` is what OpenRouter charged, in USD;
+   *  on a BYOK key (`is_byok`) it is only OpenRouter's fee, not the image. */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: unknown; is_byok?: unknown };
   /** What the cost log recorded for this call (null when unpriced). */
   billed?: UsageCost | null;
 }
@@ -265,6 +266,14 @@ async function openRouterGenerateImage(
   return { buffer: buf, httpStatus: res.status, rawBody: text, usage };
 }
 
+/** What the image cost, or null when the response does not say. A BYOK call's
+ *  `cost` is only OpenRouter's fee (the provider bills the key's owner), so it
+ *  is left unpriced rather than recorded many times too low. */
+function billedUsd(usage: NonNullable<ImageResult["usage"]>): number | null {
+  if (usage.is_byok === true) return null;
+  return typeof usage.cost === "number" ? usage.cost : null;
+}
+
 /** One audited model call. Throws ImageGenerationError when no image came back
  *  (recorded as a failed outcome) and AuditWriteError when the trail refuses
  *  the started write (the model is then never called). The R2 upload is the
@@ -294,7 +303,7 @@ async function auditedImage(
           usageType: purpose,
           usage: { inputTokens: r.usage.prompt_tokens ?? 0, outputTokens: r.usage.completion_tokens ?? 0 },
           jobId: costLog.jobId,
-          pricing: { from: "reported", usd: typeof r.usage.cost === "number" ? r.usage.cost : null },
+          pricing: { from: "reported", usd: billedUsd(r.usage) },
         });
       }
       if (!r.buffer) throw new ImageGenerationError(r);

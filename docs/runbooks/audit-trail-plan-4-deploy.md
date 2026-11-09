@@ -56,6 +56,15 @@ Each step runs only on the owner's go-ahead.
    - one `site.regenerate.complete` (succeeded) from the assembler;
    - "System, started by <owner name>" in `/dev/activity`.
 2. Optionally, regenerate once WITH images, to see the `site_image_*` `ai.call` rows. It costs more, and it is the only live check of the images worker.
+   - With image cost recorded (fix/image-cost-assembler-ddl), each `site_image_*` outcome should carry `cost_basis` `reported`.
+   - On gemini-3.1-flash-image (about 1,120 output tokens at $60/1M `image_output`), a correct `estimated_cost_usd` is about 0.067.
+   - How to read anything else:
+
+     | Reading | Meaning |
+     |---|---|
+     | `null` | the responses carry no `usage.cost`, or the key is BYOK (deliberately unpriced) |
+     | about 0.003 | a partial figure |
+     | about 67 or another magnitude | a units mismatch |
 3. Send one message to a NON-demo live shop's chatbot. Expect one anonymous `ai.call` with purpose `chatbot` and a `subj_ip_` subject, and an `ai_usage_log` row whose cost is now priced from the model list (Plan 4 Ruling 9: the chatbot's cost basis changes at the deploy date).
    - A demo shop's chat is scripted in the browser ("Sample assistant · Scripted replies") and never reaches the chatbot worker, so it cannot verify it. The worker also requires a Turnstile token.
    - As of 2026-11-09 every production shop is a demo, so this step waits for the first real shop to go live.
