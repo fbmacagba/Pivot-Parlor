@@ -243,6 +243,29 @@ describe("research audit", () => {
     expect(h.acked).toEqual([true]);
   });
 
+  it("a status read that throws ends the job as a crash, with one entry and nothing sent", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => completion(JSON.stringify(spec())));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const h = harness({
+      answer: (sql) => {
+        if (sql.startsWith("SELECT status FROM generation_jobs")) throw new Error("D1 blip");
+        return null;
+      },
+    });
+    await h.run(message());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(h.sends).toEqual({ images: [], text: [], assemble: [] });
+    const done = h.fake.rows.filter((r) => r.action === "site.regenerate.complete");
+    expect(done).toHaveLength(1);
+    expect(done[0]!.outcome).toBe("failed");
+    expect(done[0]!.reason).toBe("crash");
+    expect(h.fake.rows.filter((r) => r.action === "ai.call")).toEqual([]);
+    const update = h.fake.statements.find((s) => s.sql.startsWith("UPDATE generation_jobs SET status = ?"));
+    expect(update!.args.slice(0, 3)).toEqual(["failed", "research", "D1 blip"]);
+    expect(JSON.parse(h.kv.get("job:job-1")!).status).toBe("failed");
+    expect(h.acked).toEqual([true]);
+  });
+
   it("a finished job is skipped before the API key check, so no fresh completion entry is written", async () => {
     const h = harness(
       { answer: (sql) => (sql.startsWith("SELECT status FROM generation_jobs") ? { status: "failed" } : null) },

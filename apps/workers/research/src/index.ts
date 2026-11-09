@@ -599,7 +599,7 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * End a job as failed with exactly one completion entry. Never throws: if the
+ * End a job as failed with at most one completion entry. Never throws: if the
  * entry cannot be written, fall back to the plain failed write (the job must
  * still end) and say so in the log. The KV mirror follows the terminal write,
  * and is skipped when another path had already finished the job.
@@ -643,20 +643,29 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
   }
 
   const { jobId, shopId } = input;
+  const origin = input.origin_actor_ref ?? null;
+  const rec = queueAudit(env.DB, WORKER_NAME, jobId);
 
   // A redelivered message for a finished job does nothing: no model call, no
   // send, no write (as the assembler does). Read before the API key check, so
   // a finished job never gets a fresh completion entry from that path either.
-  const jobRow = await env.DB.prepare("SELECT status FROM generation_jobs WHERE id = ?")
-    .bind(jobId)
-    .first<{ status: string | null }>();
+  // A failed read takes the crash path, so a D1 blip still ends the job
+  // (failJob's terminal write is guarded, so it is safe on an unknown status).
+  let jobRow: { status: string | null } | null;
+  try {
+    jobRow = await env.DB.prepare("SELECT status FROM generation_jobs WHERE id = ?")
+      .bind(jobId)
+      .first<{ status: string | null }>();
+  } catch (err) {
+    console.error(`[${jobId}] [pivot-parlor-research] Job failed`, err);
+    await failJob(env, rec, input, errorMessage(err), "crash");
+    return;
+  }
   if (jobRow?.status === "complete" || jobRow?.status === "failed") {
     console.log(`[${jobId}] [pivot-parlor-research] skip (job already ${jobRow.status})`);
     return;
   }
 
-  const origin = input.origin_actor_ref ?? null;
-  const rec = queueAudit(env.DB, WORKER_NAME, jobId);
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) {
     await failJob(env, rec, input, "OPENROUTER_API_KEY is not configured", "not_configured");
