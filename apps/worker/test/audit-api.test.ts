@@ -463,3 +463,71 @@ describe("/api/audit", () => {
     expect(hist).toBeNull();
   });
 });
+
+describe("/api/audit origin_name (Plan 4 Task 9)", () => {
+  async function seedOriginSubject(id: string, name: string, redactedAt: string | null) {
+    await E.DB.prepare(
+      "INSERT INTO audit_subjects (id, kind, user_id, display_name, created_at, redacted_at) VALUES (?, 'user', ?, ?, ?, ?)"
+    ).bind(id, id, name, new Date().toISOString(), redactedAt).run();
+  }
+  async function pipelineRow(requestId: string, detailsJson: string | null) {
+    await E.DB.prepare(
+      `INSERT INTO audit_log (id, occurred_at, entry_hash, actor_type, via, action, phase, outcome, worker, historical, request_id, details_json)
+       VALUES (?, ?, 'x', 'system', 'queue', 'site.regenerate.complete', 'done', 'succeeded', 'test', 0, ?, ?)`
+    ).bind(crypto.randomUUID(), new Date().toISOString(), requestId, detailsJson).run();
+  }
+  async function listByRequest(token: string, requestId: string) {
+    const res = await dispatch("GET", `/api/audit?request_id=${requestId}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const body = JSON.parse(text) as { data: { entries: { origin_name: string | null; origin_redacted: boolean }[] } };
+    return { text, entries: body.data.entries };
+  }
+
+  it("a pipeline entry names who clicked", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedOriginSubject(ref, "Sam Example", null);
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ origin_name: "Sam Example", origin_redacted: false });
+  });
+
+  it("a redacted origin is never named", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedOriginSubject(ref, "Hidden Person", new Date().toISOString());
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { text, entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: true });
+    expect(text).not.toContain("Hidden Person");
+  });
+
+  it("an entry with no origin has origin_name null", async () => {
+    const { token } = await dev();
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ other: 1 }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
+  });
+
+  it("an unknown origin ref is neither named nor redacted", async () => {
+    const { token } = await dev();
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: "subj_user_missing" }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
+  });
+
+  it("malformed details_json does not fail the page", async () => {
+    const { token } = await dev();
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, "{not json");
+    const { entries } = await listByRequest(token, rid);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
+  });
+});

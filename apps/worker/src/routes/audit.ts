@@ -95,10 +95,12 @@ function filters(c: Ctx): Filters {
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", binds, echo };
 }
 
-const SELECT = `SELECT l.*, a.display_name AS actor_name, a.email AS actor_email, a.redacted_at AS actor_redacted_at, ip.ip AS ip
+const SELECT = `SELECT l.*, a.display_name AS actor_name, a.email AS actor_email, a.redacted_at AS actor_redacted_at, ip.ip AS ip,
+  CASE WHEN o.redacted_at IS NULL THEN o.display_name END AS origin_name, o.redacted_at AS origin_redacted_at
   FROM audit_log l
   LEFT JOIN audit_subjects a ON a.id = l.actor_ref
-  LEFT JOIN audit_subjects ip ON ip.id = l.ip_ref`;
+  LEFT JOIN audit_subjects ip ON ip.id = l.ip_ref
+  LEFT JOIN audit_subjects o ON o.id = CASE WHEN json_valid(l.details_json) THEN json_extract(l.details_json, '$.origin_actor_ref') END`;
 
 async function guarded<T>(c: Ctx, fn: () => Promise<T>): Promise<T | Response> {
   try {
@@ -134,9 +136,13 @@ audit.get("/", async (c) => {
     .bind(...binds, PAGE + 1)
     .all<Record<string, unknown>>();
   const list = rows.results ?? [];
-  const page: (Record<string, unknown> & { redacted: boolean })[] = list
+  const page: (Record<string, unknown> & { redacted: boolean; origin_redacted: boolean })[] = list
     .slice(0, PAGE)
-    .map((r) => ({ ...r, redacted: r.actor_redacted_at !== null && r.actor_redacted_at !== undefined }));
+    .map((r) => ({
+      ...r,
+      redacted: r.actor_redacted_at !== null && r.actor_redacted_at !== undefined,
+      origin_redacted: r.origin_redacted_at !== null && r.origin_redacted_at !== undefined,
+    }));
   const last = page[page.length - 1];
   return c.json({
     success: true,
