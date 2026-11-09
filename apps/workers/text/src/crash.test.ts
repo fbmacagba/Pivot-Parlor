@@ -2,23 +2,13 @@
  *  nothing writes the text KV and the assembler polls for it 20 times,
  *  60 s apart, before failing. */
 import { describe, it, expect } from "vitest";
+import { fakeAuditDb } from "@repo/audit/testing";
 import worker, { failJobAfterCrash } from "./index";
 
+/** A D1 stand-in that commits batches; `calls` is every non-audit statement. */
 function recordingDb() {
-  const calls: Array<{ sql: string; args: unknown[] }> = [];
-  return {
-    calls,
-    prepare(sql: string) {
-      return {
-        bind: (...args: unknown[]) => ({
-          run: async () => {
-            calls.push({ sql, args });
-            return { success: true, meta: {} };
-          },
-        }),
-      };
-    },
-  };
+  const fake = fakeAuditDb();
+  return Object.assign(fake.db, { calls: fake.statements });
 }
 
 const message = { jobId: "job-crash-1", shopId: "shop-1", shopSlug: "shop-one" };
@@ -40,11 +30,13 @@ describe("text worker crash handling", () => {
       env as never
     );
     expect(acked).toBe(1);
-    const failed = db.calls.find((c) => /SET status = 'failed', stage = 'text'/.test(c.sql));
+    const failed = db.calls.find((c) => c.sql.startsWith("UPDATE generation_jobs SET status = ?"));
     expect(failed).toBeDefined();
-    expect(failed!.sql).toMatch(/status NOT IN \('complete', 'failed'\)/);
-    expect(String(failed!.args[0])).toContain("KV unavailable");
-    expect(failed!.args[2]).toBe("job-crash-1");
+    expect(failed!.sql).toMatch(/NOT IN \('complete', 'failed'\)/);
+    expect(failed!.args[0]).toBe("failed");
+    expect(failed!.args[1]).toBe("text");
+    expect(String(failed!.args[2])).toContain("KV unavailable");
+    expect(failed!.args[4]).toBe("job-crash-1");
   });
 
   it("does nothing for a message with no job id", async () => {
