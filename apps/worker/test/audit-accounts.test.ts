@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuditRecorder } from "@repo/audit";
 import { AUDIT_REFUSED_MESSAGE } from "../src/audit/context";
 import { hashPassword } from "../src/lib/password";
+import { REFUSED_LOGIN_AUDIT_CAP } from "../src/routes/auth";
 import { handleCheckoutSessionCompleted } from "../src/routes/webhooks";
 import { dispatch } from "./request";
 import { authHeaders, seedShop, seedUser, tokenFor } from "./helpers";
@@ -211,6 +212,48 @@ describe("login", () => {
     const subj = await env.DB.prepare("SELECT COUNT(*) AS n FROM audit_subjects WHERE email = ?").bind(email).first<{ n: number }>();
     expect(subj!.n).toBe(0);
     expect(await gapRowsFor(rid(res))).toBe(0);
+  });
+
+  /** A refused sign-in for an address nobody holds: a fresh email each time,
+   *  so the email+IP brake never trips (the shape of a password spray). */
+  function sprayAttempt(ip: string): Promise<Response> {
+    return dispatch("POST", "/auth/login", {
+      headers: { "CF-Connecting-IP": ip },
+      body: { email: `spray-${crypto.randomUUID()}@sign-in.test`, password: secret("pw") },
+    });
+  }
+
+  it("refused sign-ins from one IP are recorded up to the per-IP cap, the last one marked", async () => {
+    const ip = nextIp();
+    const responses: Response[] = [];
+    for (let i = 0; i < REFUSED_LOGIN_AUDIT_CAP + 2; i++) {
+      const res = await sprayAttempt(ip);
+      expect(res.status).toBe(401);
+      expect(await res.clone().json()).toEqual({ success: false, error: "Invalid credentials" });
+      responses.push(res);
+    }
+
+    const counts = await Promise.all(responses.map(async (r) => (await rowsForRequest(rid(r))).length));
+    expect(counts).toEqual([...Array<number>(REFUSED_LOGIN_AUDIT_CAP).fill(1), 0, 0]);
+    const first = (await rowsForRequest(rid(responses[0]!)))[0]!;
+    expect(first.details_json).toBeNull();
+    const last = (await rowsForRequest(rid(responses[REFUSED_LOGIN_AUDIT_CAP - 1]!)))[0]!;
+    expect(last.outcome).toBe("refused");
+    expect(JSON.parse(String(last.details_json))).toEqual({ ip_cap_reached: true });
+    for (const r of responses) expect(await gapRowsFor(rid(r))).toBe(0);
+  });
+
+  it("one IP reaching the cap does not stop another IP's refusals being recorded", async () => {
+    const capped = nextIp();
+    for (let i = 0; i < REFUSED_LOGIN_AUDIT_CAP; i++) expect((await sprayAttempt(capped)).status).toBe(401);
+    expect(await rowsForRequest(rid(await sprayAttempt(capped)))).toHaveLength(0);
+
+    const res = await sprayAttempt(nextIp());
+    expect(res.status).toBe(401);
+    const rows = await rowsForRequest(rid(res));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.reason).toBe("invalid_credentials");
+    expect(rows[0]!.details_json).toBeNull();
   });
 
   it("a login refusal that cannot be recorded still answers 401", async () => {
