@@ -156,7 +156,15 @@ export async function recordAiUsage(
       .run();
     return cost;
   } catch (err) {
-    log(`[ai-usage] could not record usage for ${record.workerName} job=${record.jobId ?? "-"}`, err);
+    log(`[ai-usage] could not record usage for ${record.workerName} job=${record.jobId ?? "-"}: ${errorText(err)}`, err);
     return null;
   }
+}
+
+/** The error's own words and its cause's, for the log line itself: a D1
+ *  error logged as an object prints a stack with no message line. */
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause instanceof Error ? ` (cause: ${err.cause.message})` : "";
+  return `${err.message}${cause}`;
 }
