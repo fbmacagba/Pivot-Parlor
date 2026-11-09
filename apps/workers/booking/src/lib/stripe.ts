@@ -9,6 +9,24 @@ function formEncode(data: Record<string, string | number | undefined | null>): s
   return parts.join("&");
 }
 
+/** A Stripe API error. The message is unchanged from the plain Error this
+ *  used to be; `code` is Stripe's machine-readable error code, when it sent one. */
+export class StripeApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null
+  ) {
+    super(message);
+    this.name = "StripeApiError";
+  }
+}
+
+/** True when `err` is a Stripe API error carrying this error code. */
+export function isStripeErrorCode(err: unknown, code: string): boolean {
+  return err instanceof StripeApiError && err.code === code;
+}
+
 async function parseStripeResponse(res: Response, context: string): Promise<Record<string, unknown>> {
   const text = await res.text();
   let json: unknown;
@@ -18,8 +36,13 @@ async function parseStripeResponse(res: Response, context: string): Promise<Reco
     json = { raw: text };
   }
   if (!res.ok) {
-    const err = (json as { error?: { message?: string } })?.error?.message ?? text.slice(0, 500);
-    throw new Error(`Stripe ${context} ${res.status}: ${err}`);
+    const error = (json as { error?: { message?: string; code?: string } })?.error;
+    const err = error?.message ?? text.slice(0, 500);
+    throw new StripeApiError(
+      `Stripe ${context} ${res.status}: ${err}`,
+      res.status,
+      typeof error?.code === "string" ? error.code : null
+    );
   }
   return json as Record<string, unknown>;
 }
@@ -177,6 +200,16 @@ export async function createRefund(params: {
   }
   const data = await stripePost(params.secret, "/refunds", body, params.idempotencyKey);
   return { id: String(data.id), status: String(data.status ?? "") };
+}
+
+/**
+ * Close an open Checkout Session so it can no longer be paid. Used when an
+ * unpaid deposit booking is cancelled: the session would otherwise stay
+ * payable until it lapses. Stripe refuses a session that is already complete
+ * or expired, so callers treat this as best effort.
+ */
+export async function expireCheckoutSession(secret: string, sessionId: string): Promise<void> {
+  await stripePost(secret, `/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {});
 }
 
 export async function capturePaymentIntent(

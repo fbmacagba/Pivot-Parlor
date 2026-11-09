@@ -557,11 +557,12 @@ describe("staff cancel audit", () => {
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
   });
 
-  // Pins a dependency (Ruling P9): staff cancel must leave an unpaid Checkout
-  // booking's deposit tx 'pending'. payment_intent.succeeded captures the tx
-  // and sets its stripe_id only WHERE status = 'pending', and the recovery
-  // refund needs a 'captured' tx. Cancelling the tx would strand a late payment.
-  it("a deposit that settles after staff cancel of an unpaid booking stays refundable", async () => {
+  // Ruling P9 pinned that a deposit settling after staff cancel of an unpaid
+  // booking stays refundable by hand. The webhook now refunds it itself (it
+  // captures a 'pending' or 'cancelled' deposit tx and records the refund it
+  // owes), so the staff recovery path finds it already refunded and cannot
+  // send a second one.
+  it("a deposit that settles after staff cancel of an unpaid booking is refunded once, by the webhook", async () => {
     const s = await setup();
     const bookingId = await seedBooking(s, { status: "pending", piId: null, depositPence: 1250, depositTx: "pending" });
     const res = await cancel(s.shop, bookingId);
@@ -581,11 +582,18 @@ describe("staff cancel audit", () => {
     expect(wh.status).toBe(200);
     expect(await txOf()).toMatchObject({ status: "captured", stripe_id: piId });
     expect(await bookingStatus(bookingId)).toBe("cancelled");
+    const refunds = await env.DB.prepare(
+      "SELECT amount_pence, status, stripe_id FROM bw_transactions WHERE booking_id = ? AND type = 'refund'"
+    )
+      .bind(bookingId)
+      .all();
+    expect(refunds.results).toEqual([
+      { amount_pence: 1250, status: "pending", stripe_id: `re_idem_deposit-refund:${bookingId}` },
+    ]);
 
     const refund = await cancel(s.shop, bookingId, { refundDeposit: true });
-    expect(refund.status).toBe(200);
-    const body = (await refund.json()) as { data: { deposit_action: string } };
-    expect(body.data.deposit_action).toBe("refunded");
+    expect(refund.status).toBe(400);
+    expect(await refund.json()).toEqual({ success: false, error: "Deposit already refunded" });
   });
 
   it("answers 503 and leaves the booking open when the entry cannot be written", async () => {

@@ -11,7 +11,8 @@
  *   account.updated              → flip shops.stripe_connect_onboarded
  *   payment_intent.succeeded     → tx captured; ledger pending → transferred;
  *                                  stamp bw_booking_state.completed_at for the
- *                                  balance PI
+ *                                  balance PI; a deposit that lands on a
+ *                                  cancelled booking is refunded
  *   charge.refunded              → tx + ledger → refunded
  *   charge.dispute.created       → tx + ledger → disputed
  *
@@ -23,7 +24,7 @@ import { calculateCommissionPence } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import type { Env } from "../types.js";
 import { auditFor, auditRefused, statusOutcome, SYSTEM_ACTOR } from "../audit/context.js";
-import { verifyStripeSignature } from "../lib/stripe.js";
+import { createRefund, isStripeErrorCode, verifyStripeSignature } from "../lib/stripe.js";
 import { runBookingSideEffects } from "../services/booking-side-effects.js";
 import { reportError } from "../services/report-error.js";
 
@@ -76,6 +77,56 @@ async function markTransactionsByStripeId(
     .bind(status, stripeId)
     .run();
   return { bookingId: tx?.booking_id ?? null, saleId: tx?.sale_id ?? null };
+}
+
+/**
+ * Refund a deposit that settled on an already-cancelled booking. The debt was
+ * recorded first, as a pending refund tx with no Stripe id, in the same batch
+ * as the capture; this sends that refund and stamps its id on the record.
+ * Every step is safe to repeat: on a Stripe failure it throws, the handler
+ * answers 500, and Stripe's retry finds the same record and sends the same
+ * refund under the same Idempotency-Key. Key and parameters match the staff
+ * cancel's deposit refund, so the two paths can only ever produce one refund.
+ * A charge Stripe says is already refunded counts as done: charge.refunded
+ * reconciles it.
+ */
+async function refundOwedDeposit(
+  secret: string,
+  db: Env["DB"],
+  bookingId: string,
+  piId: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  const owed = await db
+    .prepare(
+      `SELECT id, shop_id, amount_pence FROM bw_transactions
+       WHERE booking_id = ? AND type = 'refund' AND sale_id IS NULL AND stripe_id IS NULL AND status = 'pending'
+       LIMIT 1`,
+    )
+    .bind(bookingId)
+    .first<{ id: string; shop_id: string; amount_pence: number }>();
+  if (!owed) return;
+  details.deposit_refund_owed = true;
+  let refundId: string | null = null;
+  try {
+    const refund = await createRefund({
+      secret,
+      paymentIntentId: piId,
+      amountPence: Number(owed.amount_pence),
+      metadata: { shopId: owed.shop_id, bookingId, type: "deposit_refund" },
+      idempotencyKey: `deposit-refund:${bookingId}`,
+    });
+    refundId = refund.id;
+  } catch (err) {
+    if (!isStripeErrorCode(err, "charge_already_refunded")) throw err;
+  }
+  if (refundId) {
+    await db
+      .prepare("UPDATE bw_transactions SET stripe_id = ? WHERE id = ? AND stripe_id IS NULL")
+      .bind(refundId, owed.id)
+      .run();
+  }
+  details.deposit_refunded = true;
 }
 
 /** Settle a sale (WS-3): status, PI id, ledger, and completion stamp. */
@@ -298,10 +349,46 @@ r.post("/stripe", async (c) => {
           // paid credit, never a capturable hold), and only now send the
           // confirmation email + enqueue the reminder.
           if (bookingId && metadata.type === "booking_deposit") {
-            await db.batch([
+            // One batch (one D1 transaction), so every statement sees the same
+            // booking status. A Checkout Session stays payable for 31 minutes,
+            // so the deposit can land on a booking that was cancelled meanwhile
+            // (abandon, staff cancel, expiry). That money is owed back: the
+            // first statement records the debt as a pending refund tx with no
+            // Stripe id yet. It runs BEFORE the capture so it reads the deposit
+            // tx as it stood: a 'captured' tx means this PI already settled
+            // the booking (confirmed, or later cancelled with the deposit
+            // kept), and that is never refunded here.
+            const [, , , , flip] = await db.batch([
               db
                 .prepare(
-                  "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE booking_id = ? AND type = 'deposit' AND status = 'pending'",
+                  `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
+                   SELECT ?, b.id, b.shop_id, 'refund', t.amount_pence, 'pending', NULL
+                     FROM bookings b
+                     JOIN bw_transactions t ON t.booking_id = b.id AND t.type = 'deposit'
+                    WHERE b.id = ? AND b.status = 'cancelled' AND t.status IN ('pending', 'cancelled')
+                      AND t.amount_pence > 0
+                      AND NOT EXISTS (SELECT 1 FROM bw_transactions r WHERE r.booking_id = b.id AND r.type = 'refund')
+                    LIMIT 1`,
+                )
+                .bind(crypto.randomUUID(), bookingId),
+              // While a refund is owed, kill the checkout deposit credit, as
+              // the staff cancel refund does, so a reinstated booking can never
+              // be credited money that went back. The refund amount comes from
+              // the record above, not from these columns.
+              db
+                .prepare(
+                  `UPDATE bw_booking_state SET deposit_amount_pence = 0, deposit_application_fee_pence = 0,
+                     updated_at = datetime('now')
+                   WHERE booking_id = ? AND EXISTS (
+                     SELECT 1 FROM bw_transactions r
+                      WHERE r.booking_id = ? AND r.type = 'refund' AND r.sale_id IS NULL
+                        AND r.stripe_id IS NULL AND r.status = 'pending')`,
+                )
+                .bind(bookingId, bookingId),
+              // 'cancelled' too: the refund paths look the deposit up by the PI id.
+              db
+                .prepare(
+                  "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE booking_id = ? AND type = 'deposit' AND status IN ('pending', 'cancelled')",
                 )
                 .bind(piId, bookingId),
               db
@@ -311,14 +398,14 @@ r.post("/stripe", async (c) => {
                    WHERE booking_id = ? AND deposit_paid_at IS NULL`,
                 )
                 .bind(piId, bookingId),
+              db
+                .prepare(
+                  "UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'pending'",
+                )
+                .bind(bookingId),
             ]);
-            const flip = await db
-              .prepare(
-                "UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'pending'",
-              )
-              .bind(bookingId)
-              .run();
-            const flipped = (flip.meta?.changes ?? 0) === 1;
+            const flipped = (flip?.meta?.changes ?? 0) === 1;
+            await refundOwedDeposit(c.env.STRIPE_SECRET_KEY, db, bookingId, piId, audit.details);
             if (audit.entityType === "booking") {
               // A late payment on a booking that is no longer pending still
               // stamps deposit_paid_at above, but the flip changes no row.

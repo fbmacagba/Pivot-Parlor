@@ -1,5 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { seedProduct, seedService, seedShop, seedStaff, tokenFor } from "./helpers";
 import { dispatch } from "./request";
@@ -377,6 +377,61 @@ describe("void audit", () => {
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["pending", "voided"] });
   });
 
+  /** Records the Stripe calls the worker makes while `fn` runs. */
+  async function stripeCallsDuring(fn: () => Promise<unknown>, expire500 = false): Promise<string[]> {
+    const calls: string[] = [];
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.startsWith("https://api.stripe.com/")) {
+        calls.push(new URL(url).pathname);
+        if (expire500 && url.endsWith("/expire")) {
+          return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+        }
+      }
+      return real(input, init);
+    });
+    try {
+      await fn();
+    } finally {
+      vi.restoreAllMocks();
+    }
+    return calls;
+  }
+
+  it("voiding a pending Stripe sale closes its Checkout session", async () => {
+    const t = await setup();
+    const saleId = await ringOk(t, "stripe", STRIPE_URLS);
+    const session = await env.DB.prepare("SELECT stripe_checkout_session_id AS s FROM sales WHERE id = ?")
+      .bind(saleId)
+      .first<{ s: string }>();
+    expect(session?.s, "the sale has no Checkout Session to close").toMatch(/.+/);
+    let status = 0;
+    const calls = await stripeCallsDuring(async () => {
+      status = (await voidIt(t, saleId)).status;
+    });
+    expect(status).toBe(200);
+    expect(calls).toEqual([`/v1/checkout/sessions/${encodeURIComponent(session!.s)}/expire`]);
+  });
+
+  it("a failed session close never changes the void's answer, and a cash void calls Stripe never", async () => {
+    const t = await setup();
+    const stripeSale = await ringOk(t, "stripe", STRIPE_URLS);
+    let status = 0;
+    await stripeCallsDuring(async () => {
+      status = (await voidIt(t, stripeSale)).status;
+    }, true);
+    expect(status).toBe(200);
+    expect(await saleStatus(stripeSale)).toBe("voided");
+
+    const cashSale = await ringOk(t);
+    const calls = await stripeCallsDuring(async () => {
+      status = (await voidIt(t, cashSale)).status;
+    });
+    expect(status).toBe(200);
+    expect(calls).toEqual([]);
+  });
+
   it("voiding an already-voided sale answers 400 and records nothing", async () => {
     const t = await setup();
     const saleId = await ringOk(t);
@@ -416,27 +471,100 @@ describe("void audit", () => {
 
   it("records the status the flip found, not the earlier pre-read", async () => {
     const t = await setup();
-    // A pending Stripe sale passes the route's pre-checks. Before the flip the
-    // sale becomes completed (a settle), so the entry must say completed.
-    const saleId = await ringOk(t, "stripe", STRIPE_URLS);
-    const res = await voidWithRaceBeforeFlip(t, saleId, "UPDATE sales SET status = 'completed' WHERE id = ?");
+    // The pre-read sees completed; before the flip the cash sale reads
+    // pending, so the entry must say pending.
+    const saleId = await ringOk(t);
+    const res = await voidWithRaceBeforeFlip(t, saleId, "UPDATE sales SET status = 'pending' WHERE id = ?");
     expect(res.status).toBe(200);
     expect(await saleStatus(saleId)).toBe("voided");
     const outcome = await outcomeOf("pos.void", t.shop, saleId);
     expect(outcome.outcome).toBe("succeeded");
-    expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["completed", "voided"] });
+    expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["pending", "voided"] });
   });
 
-  it("a void whose flip loses records refused not_voidable, with the response unchanged", async () => {
+  it("a pending Stripe sale that is paid before the flip is not voided", async () => {
     const t = await setup();
-    const saleId = await ringOk(t);
-    const res = await voidWithRaceBeforeFlip(t, saleId, "UPDATE sales SET status = 'refunded' WHERE id = ?");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true });
-    expect(await saleStatus(saleId)).toBe("refunded");
+    const saleId = await ringOk(t, "stripe", STRIPE_URLS);
+    expect(await stockQty(t)).toBe(3);
+    const res = await voidWithRaceBeforeFlip(
+      t,
+      saleId,
+      "UPDATE sales SET status = 'completed', stripe_payment_intent_id = 'pi_paid_race' WHERE id = ?"
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: "Paid Stripe sales must be refunded via Stripe, not voided",
+    });
+    expect(await saleStatus(saleId)).toBe("completed");
+    expect(await stockQty(t)).toBe(3);
+    const tx = await env.DB.prepare("SELECT status FROM bw_transactions WHERE sale_id = ?")
+      .bind(saleId)
+      .first<{ status: string }>();
+    expect(tx?.status).not.toBe("voided");
     const outcome = await outcomeOf("pos.void", t.shop, saleId);
     expect(outcome).toMatchObject({ outcome: "refused", reason: "not_voidable" });
     expect(outcome.changes_json).toBeNull();
+  });
+
+  it("a void whose flip loses answers what it found and records refused not_voidable", async () => {
+    const t = await setup();
+    const saleId = await ringOk(t);
+    const res = await voidWithRaceBeforeFlip(t, saleId, "UPDATE sales SET status = 'refunded' WHERE id = ?");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: "Refunded sales cannot be voided" });
+    expect(await saleStatus(saleId)).toBe("refunded");
+    expect(await stockQty(t)).toBe(3);
+    const outcome = await outcomeOf("pos.void", t.shop, saleId);
+    expect(outcome).toMatchObject({ outcome: "refused", reason: "not_voidable" });
+    expect(outcome.changes_json).toBeNull();
+  });
+
+  it("a partly refunded cash sale cannot be voided", async () => {
+    const t = await setup();
+    const saleId = await ringOk(t);
+    const item = await productItem(saleId);
+    expect((await refund(t, saleId, item, 1)).status).toBe(200);
+    const stockAfterRefund = await stockQty(t);
+    const res = await voidIt(t, saleId);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ success: false, error: "Refunded sales cannot be voided" });
+    expect(await saleStatus(saleId)).toBe("completed");
+    expect(await stockQty(t)).toBe(stockAfterRefund);
+    expect((await entriesFor({ action: "pos.void", shopId: t.shop })).length).toBe(0);
+  });
+
+  it("a void whose reversal cannot be written leaves the sale, its money and its stock as they were", async () => {
+    const t = await setup();
+    const saleId = await ringOk(t);
+    expect(await stockQty(t)).toBe(3);
+    // Every stock movement this request writes fails, so the reversal batch
+    // cannot commit. The flip must roll back with it.
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "prepare") {
+          return (sql: string) =>
+            sql.includes("INSERT INTO stock_movements")
+              ? { bind: () => target.prepare("INSERT INTO no_such_table_void_test (x) VALUES (1)") }
+              : target.prepare(sql);
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    const res = await dispatchWith({ ...env, DB: db }, "POST", `/booking/shops/${t.shop}/sales/${saleId}/void`, {
+      headers: await authed("admin", t.shop),
+      body: {},
+    });
+    expect(res.status).toBe(500);
+    expect(await saleStatus(saleId)).toBe("completed");
+    expect(await stockQty(t)).toBe(3);
+    const rows = await env.DB.prepare(
+      "SELECT (SELECT status FROM bw_transactions WHERE sale_id = ?1) AS tx, (SELECT status FROM bw_commission_ledger WHERE sale_id = ?1) AS ledger"
+    )
+      .bind(saleId)
+      .first<{ tx: string; ledger: string }>();
+    expect(rows).toEqual({ tx: "captured", ledger: "pending" });
   });
 
   it("answers 503 and leaves the sale completed when the entry cannot be written", async () => {
