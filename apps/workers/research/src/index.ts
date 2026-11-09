@@ -15,6 +15,7 @@ import { chatComplete, recordAiUsage, type ProviderKeys, type UsageCost } from "
 import {
   AuditWriteError,
   auditAiCall,
+  FAILED_JOB_FALLBACK_SQL,
   finishJob,
   originActorRef,
   queueAudit,
@@ -619,7 +620,7 @@ async function failJob(
       });
     } catch (auditErr) {
       console.error("[audit] job failed without its completion entry", jobId, auditErr);
-      await updateGenerationJob(env.DB, jobId, { status: "failed", error });
+      await env.DB.prepare(FAILED_JOB_FALLBACK_SQL).bind("research", error, new Date().toISOString(), jobId).run();
     }
     if (result === "already_finished") return;
     await putJobKv(env.KV, jobId, { status: "failed", error, shopSlug: input.shopSlug });

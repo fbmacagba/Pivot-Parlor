@@ -6,6 +6,7 @@ import { chatComplete, recordAiUsage, type ProviderKeys, type UsageCost } from "
 import {
   AuditWriteError,
   auditAiCall,
+  FAILED_JOB_FALLBACK_SQL,
   finishJob,
   originActorRef,
   queueAudit,
@@ -431,11 +432,7 @@ async function failJob(
 
 async function legacyFailedWrite(env: Pick<Env, "DB">, jobId: string, error: string): Promise<void> {
   try {
-    await env.DB.prepare(
-      "UPDATE generation_jobs SET status = 'failed', stage = 'text', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
-    )
-      .bind(error, new Date().toISOString(), jobId)
-      .run();
+    await env.DB.prepare(FAILED_JOB_FALLBACK_SQL).bind("text", error, new Date().toISOString(), jobId).run();
   } catch (persistErr) {
     console.error(`[${jobId}] [pivot-parlor-text] could not record the failure`, persistErr);
   }

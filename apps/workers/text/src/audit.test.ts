@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { completionEntryId } from "@repo/audit";
+import { completionEntryId, FAILED_JOB_FALLBACK_SQL } from "@repo/audit";
 import { fakeAuditDb, type FakeAuditDbOptions } from "@repo/audit/testing";
 import worker, { failJobAfterCrash } from "./index";
 
@@ -172,10 +172,13 @@ describe("text audit", () => {
     const h = harness({ failOnSql: /^UPDATE generation_jobs SET status = \?, stage = \?, error = \?, updated_at = \?/ });
     await expect(failJobAfterCrash(h.env as never, message(), new Error("boom"))).resolves.toBeUndefined();
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes("[audit] job failed without its completion entry"))).toBe(true);
-    const fallback = h.fake.statements.find((s) => s.sql.startsWith("UPDATE generation_jobs SET status = 'failed', stage = 'text'"));
+    // The shared guarded fallback: status 'failed' is in the SQL; binds are stage, error, updated_at, id.
+    const fallback = h.fake.statements.find((s) => s.sql === FAILED_JOB_FALLBACK_SQL);
     expect(fallback).toBeDefined();
-    expect(fallback!.sql).toMatch(/status NOT IN \('complete', 'failed'\)/);
-    expect(fallback!.args[0]).toBe("text: boom");
-    expect(fallback!.args[2]).toBe("job-1");
+    expect(fallback!.sql).toContain("status = 'failed'");
+    expect(fallback!.sql).toContain("COALESCE(status, 'queued') NOT IN ('complete', 'failed')");
+    expect(fallback!.args[0]).toBe("text");
+    expect(fallback!.args[1]).toBe("text: boom");
+    expect(fallback!.args[3]).toBe("job-1");
   });
 });

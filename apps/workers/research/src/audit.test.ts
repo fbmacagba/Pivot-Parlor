@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { completionEntryId } from "@repo/audit";
+import { completionEntryId, FAILED_JOB_FALLBACK_SQL } from "@repo/audit";
 import { fakeAuditDb, type FakeAuditDbOptions } from "@repo/audit/testing";
 import worker from "./index";
 
@@ -205,7 +205,14 @@ describe("research audit", () => {
     const h = harness({ failOnSql: /^UPDATE generation_jobs SET status = \?, stage = \?, error = \?, updated_at = \?/ });
     await h.run(message());
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes("[audit] job failed without its completion entry"))).toBe(true);
-    expect(h.fake.statements.some((s) => s.sql.startsWith("UPDATE generation_jobs SET updated_at") && s.args.includes("failed"))).toBe(true);
+    // The shared guarded fallback: status 'failed' is in the SQL; binds are stage, error, updated_at, id.
+    const fallback = h.fake.statements.find((s) => s.sql === FAILED_JOB_FALLBACK_SQL);
+    expect(fallback).toBeDefined();
+    expect(fallback!.sql).toContain("status = 'failed'");
+    expect(fallback!.sql).toContain("COALESCE(status, 'queued') NOT IN ('complete', 'failed')");
+    expect(fallback!.args[0]).toBe("research");
+    expect(String(fallback!.args[1])).toContain("could not produce a valid spec after 2 attempts");
+    expect(fallback!.args[3]).toBe("job-1");
     expect(JSON.parse(h.kv.get("job:job-1")!).status).toBe("failed");
   });
 

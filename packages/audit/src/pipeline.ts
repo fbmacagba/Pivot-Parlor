@@ -94,6 +94,14 @@ export interface FinishJob {
 const TERMINAL_JOB_SQL =
   "UPDATE generation_jobs SET status = ?, stage = ?, error = ?, updated_at = ? WHERE id = ? AND COALESCE(status, 'queued') NOT IN ('complete', 'failed')";
 
+/**
+ * The Ruling 5 fallback every queue worker runs when `finishJob` cannot write
+ * the completion entry: the job must still end. Same guard as the terminal
+ * write, so it never overwrites a finished job. Binds: stage, error, updated_at, id.
+ */
+export const FAILED_JOB_FALLBACK_SQL =
+  "UPDATE generation_jobs SET status = 'failed', stage = ?, error = ?, updated_at = ? WHERE id = ? AND COALESCE(status, 'queued') NOT IN ('complete', 'failed')";
+
 export async function finishJobStatements(
   db: D1Database,
   rec: AuditRecorder,

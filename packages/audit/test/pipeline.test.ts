@@ -3,6 +3,7 @@ import { AuditWriteError, createAuditRecorder } from "../src";
 import {
   auditAiCall,
   completionEntryId,
+  FAILED_JOB_FALLBACK_SQL,
   finishJob,
   finishJobStatements,
   originActorRef,
@@ -236,5 +237,13 @@ describe("finishJob", () => {
     await expect(finishJob(failing.db, recorderOver(failing), JOB, extra2)).rejects.toThrow();
     expect(failing.statements).toEqual([]);
     expect(failing.rows).toEqual([]);
+  });
+});
+
+describe("FAILED_JOB_FALLBACK_SQL", () => {
+  it("marks a job failed with the same terminal guard as finishJob", () => {
+    expect(FAILED_JOB_FALLBACK_SQL).toBe(
+      `UPDATE generation_jobs SET status = 'failed', stage = ?, error = ?, updated_at = ? WHERE id = ? AND ${GUARD}`
+    );
   });
 });

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FAILED_JOB_FALLBACK_SQL } from "@repo/audit";
 import { fakeAuditDb, type FakeAuditDbOptions } from "@repo/audit/testing";
 import worker, { handOffAfterCrash } from "./index";
 
@@ -197,11 +198,14 @@ describe("images audit", () => {
     });
     await h.run(message());
     expect(errSpy.mock.calls.some((c) => String(c[0]).includes("[audit] job failed without its completion entry"))).toBe(true);
-    const fallback = h.fake.statements.find((s) => s.sql.startsWith("UPDATE generation_jobs SET status = 'failed', stage = 'images'"));
+    // The shared guarded fallback: status 'failed' is in the SQL; binds are stage, error, updated_at, id.
+    const fallback = h.fake.statements.find((s) => s.sql === FAILED_JOB_FALLBACK_SQL);
     expect(fallback).toBeDefined();
-    expect(fallback!.sql).toMatch(/status NOT IN \('complete', 'failed'\)/);
-    expect(fallback!.args[0]).toBe("Could not record this action; nothing was changed.");
-    expect(fallback!.args[2]).toBe("job-1");
+    expect(fallback!.sql).toContain("status = 'failed'");
+    expect(fallback!.sql).toContain("COALESCE(status, 'queued') NOT IN ('complete', 'failed')");
+    expect(fallback!.args[0]).toBe("images");
+    expect(fallback!.args[1]).toBe("Could not record this action; nothing was changed.");
+    expect(fallback!.args[3]).toBe("job-1");
     expect(h.assemble).toHaveLength(0);
   });
 });

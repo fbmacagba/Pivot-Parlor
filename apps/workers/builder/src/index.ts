@@ -5,7 +5,7 @@
  * the SAME D1 batch as the writes it records (publish, review or failure).
  */
 import type { D1Database, D1PreparedStatement, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
-import { finishJob, originActorRef, queueAudit, type AuditRecorder } from "@repo/audit";
+import { FAILED_JOB_FALLBACK_SQL, finishJob, originActorRef, queueAudit, type AuditRecorder } from "@repo/audit";
 import { parseLockedImages } from "./lockedImages";
 import {
   buildCandidatePayload,
@@ -339,12 +339,7 @@ async function failJob(db: D1Database, rec: AuditRecorder, job: JobRef, error: s
 
 async function fallbackFailedWrite(db: D1Database, jobId: string, error: string): Promise<void> {
   try {
-    await db
-      .prepare(
-        "UPDATE generation_jobs SET status = 'failed', stage = 'assemble', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
-      )
-      .bind(error, new Date().toISOString(), jobId)
-      .run();
+    await db.prepare(FAILED_JOB_FALLBACK_SQL).bind("assemble", error, new Date().toISOString(), jobId).run();
   } catch (persistErr) {
     console.error(`[${jobId}] [pivot-parlor-assembler] could not record the failure`, persistErr);
   }

@@ -2,7 +2,15 @@
  * pivot-parlor-images — Consumes site-images-queue: OpenRouter images → R2 → KV gen:{jobId}:images → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue, R2Bucket } from "@cloudflare/workers-types";
-import { AuditWriteError, auditAiCall, finishJob, originActorRef, queueAudit, type AuditRecorder } from "@repo/audit";
+import {
+  AuditWriteError,
+  auditAiCall,
+  FAILED_JOB_FALLBACK_SQL,
+  finishJob,
+  originActorRef,
+  queueAudit,
+  type AuditRecorder,
+} from "@repo/audit";
 
 export interface Env {
   ASSETS: R2Bucket;
@@ -642,10 +650,8 @@ async function failJob(
     console.error("[audit] job failed without its completion entry", job.jobId, auditErr);
     try {
       await db
-        .prepare(
-          "UPDATE generation_jobs SET status = 'failed', stage = 'images', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
-        )
-        .bind(AUDIT_REFUSED_ERROR, new Date().toISOString(), job.jobId)
+        .prepare(FAILED_JOB_FALLBACK_SQL)
+        .bind("images", AUDIT_REFUSED_ERROR, new Date().toISOString(), job.jobId)
         .run();
     } catch (persistErr) {
       console.error(`[${job.jobId}] [pivot-parlor-images] could not record the failure`, persistErr);
