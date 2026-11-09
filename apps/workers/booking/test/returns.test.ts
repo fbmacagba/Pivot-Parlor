@@ -5,11 +5,33 @@
  * Stripe refunds are faked by the outboundService (/v1/refunds echoes the
  * Idempotency-Key into re_idem_<key>).
  */
-import { env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { describe, expect, it, vi } from "vitest";
 import { calculateCommissionPence } from "@repo/utils";
+import worker from "../src/index";
 import { dispatch } from "./request";
 import { seedShop, seedStaff, seedService, seedProduct, tokenFor } from "./helpers";
+
+/** `dispatch` with a substituted env (e.g. a Proxy over DB). */
+async function dispatchWith(
+  testEnv: typeof env,
+  method: string,
+  path: string,
+  opts: { headers: Record<string, string>; body: unknown }
+): Promise<Response> {
+  const ctx = createExecutionContext();
+  const response = await worker.fetch(
+    new Request(`https://booking.test${path}`, {
+      method,
+      headers: { ...opts.headers, "Content-Type": "application/json" },
+      body: JSON.stringify(opts.body),
+    }) as never,
+    testEnv as never,
+    ctx as never
+  );
+  await waitOnExecutionContext(ctx);
+  return response as unknown as Response;
+}
 
 const SECRET = "whsec_test";
 const encoder = new TextEncoder();
@@ -469,6 +491,196 @@ describe("Stripe refunds", () => {
       body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
     });
     expect(retry.status).toBe(200);
+  });
+
+  async function refundRows(saleId: string) {
+    return env.DB.prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM sale_returns WHERE sale_id = ?1) AS returns,
+         (SELECT COUNT(*) FROM sale_return_items ri JOIN sale_returns r ON r.id = ri.return_id WHERE r.sale_id = ?1) AS items,
+         (SELECT COUNT(*) FROM bw_transactions WHERE sale_id = ?1 AND type = 'refund') AS refund_txs,
+         (SELECT COALESCE(SUM(amount_pence), 0) FROM bw_transactions WHERE sale_id = ?1 AND type = 'refund') AS refund_tx_pence,
+         (SELECT COUNT(*) FROM bw_commission_ledger WHERE sale_id = ?1 AND commission_amount_pence < 0) AS reversals,
+         (SELECT refunded_pence FROM sales WHERE id = ?1) AS refunded_pence,
+         (SELECT status FROM sales WHERE id = ?1) AS sale_status`
+    )
+      .bind(saleId)
+      .first<Record<string, number | string>>();
+  }
+
+  const refundOne = (shop: string, saleId: string, item: string, token: string, db?: typeof env.DB) =>
+    dispatchWith(db ? { ...env, DB: db } : env, "POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
+      headers: { Authorization: `Bearer ${token}` },
+      body: { lines: [{ sale_item_id: item, quantity: 1 }] },
+    });
+
+  /** A DB whose `n`th batch call first runs `before` (or fails, when `fail`). */
+  function dbWithBatch(n: number, opts: { before?: string; saleId?: string; fail?: boolean }) {
+    let calls = 0;
+    const seen = { fired: false };
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        if (prop === "batch") {
+          return async (stmts: D1PreparedStatement[]) => {
+            calls += 1;
+            if (calls === n && !seen.fired) {
+              seen.fired = true;
+              if (opts.fail) throw new Error("D1 unavailable (test)");
+              if (opts.before) await target.prepare(opts.before).bind(opts.saleId).run();
+            }
+            return target.batch(stmts);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof env.DB;
+    return { db, seen };
+  }
+
+  it("records the return before calling Stripe, so an early charge.refunded completes it instead of booking it twice", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, piId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+
+    // Stripe's charge.refunded arrives while the refund route is still running,
+    // right after Stripe accepted the refund.
+    const real = globalThis.fetch;
+    let delivered = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const res = await real(input, init);
+      if (url.endsWith("/v1/refunds") && !delivered) {
+        delivered = true;
+        const wh = await postWebhook({
+          id: `evt_${crypto.randomUUID()}`,
+          type: "charge.refunded",
+          data: { object: { id: "ch_early", payment_intent: piId, amount: 4500, amount_refunded: 1000 } },
+        });
+        expect(wh.status).toBe(200);
+      }
+      return res;
+    });
+    try {
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(res.status).toBe(200);
+      expect(delivered, "charge.refunded was never delivered mid-refund").toBe(true);
+      const body = (await res.json()) as { data: { id: string } };
+      expect(await refundRows(saleId)).toEqual({
+        returns: 1,
+        items: 1,
+        refund_txs: 1,
+        refund_tx_pence: 1000,
+        reversals: 1,
+        refunded_pence: 1000,
+        sale_status: "completed",
+      });
+      const ret = await env.DB.prepare("SELECT status, stripe_refund_id FROM sale_returns WHERE id = ?")
+        .bind(body.data.id)
+        .first();
+      expect(ret).toEqual({ status: "completed", stripe_refund_id: `re_idem_refund:${body.data.id}` });
+      expect(await stockQty(shop, product)).toBe(4);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a Stripe failure removes the whole record and releases the claim", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    await env.DB.prepare("UPDATE sales SET stripe_payment_intent_id = 'pi_fail_refund' WHERE id = ?").bind(saleId).run();
+    const stock = await stockQty(shop, product);
+
+    const res = await refundOne(shop, saleId, productItem, token);
+    expect(res.status).toBe(502);
+    expect(await refundRows(saleId)).toEqual({
+      returns: 0,
+      items: 0,
+      refund_txs: 0,
+      refund_tx_pence: 0,
+      reversals: 0,
+      refunded_pence: 0,
+      sale_status: "completed",
+    });
+    const item = await env.DB.prepare("SELECT returned_quantity AS q FROM sale_items WHERE id = ?")
+      .bind(productItem)
+      .first<{ q: number }>();
+    expect(item?.q).toBe(0);
+    expect(await stockQty(shop, product)).toBe(stock);
+  });
+
+  it("when the save after Stripe fails, the refund still stands on record and charge.refunded completes it", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, piId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    // Batches under run(): #1 started entry, #2 claim, #3 record, #4 finalize.
+    const { db, seen } = dbWithBatch(4, { fail: true });
+    const res = await refundOne(shop, saleId, productItem, token, db);
+    expect(seen.fired, "the finalize batch never ran").toBe(true);
+    expect(res.status).toBe(200);
+    expect(await refundRows(saleId)).toMatchObject({ returns: 1, refund_txs: 1, reversals: 1, refunded_pence: 1000 });
+    // The claim stays held, so a retry cannot refund the same unit twice.
+    const claim = await env.DB.prepare("SELECT returned_quantity AS q FROM sale_items WHERE id = ?")
+      .bind(productItem)
+      .first<{ q: number }>();
+    expect(claim?.q).toBe(1);
+    // Stripe refunded, the restock could not be saved: reported in the entry.
+    const outcome = (
+      await env.DB.prepare(
+        "SELECT details_json FROM audit_log WHERE action = 'payment.refund.issue' AND entity_id = ? AND phase = 'outcome'"
+      )
+        .bind(saleId)
+        .first<{ details_json: string }>()
+    )?.details_json;
+    expect(JSON.parse(String(outcome))).toMatchObject({ via_stripe: true, finalized: false });
+
+    const wh = await postWebhook({
+      id: `evt_${crypto.randomUUID()}`,
+      type: "charge.refunded",
+      data: { object: { id: "ch_late", payment_intent: piId, amount: 4500, amount_refunded: 1000 } },
+    });
+    expect(wh.status).toBe(200);
+    expect(await refundRows(saleId)).toMatchObject({ returns: 1, refund_txs: 1, refund_tx_pence: 1000, refunded_pence: 1000 });
+    const ret = await env.DB.prepare("SELECT status FROM sale_returns WHERE sale_id = ?").bind(saleId).first();
+    expect(ret).toEqual({ status: "completed" });
+  });
+
+  it("a sale disputed between the refund's checks and its record is not refunded", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    const stripeCalls: string[] = [];
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.startsWith("https://api.stripe.com/")) stripeCalls.push(url);
+      return real(input, init);
+    });
+    try {
+      const { db, seen } = dbWithBatch(3, { before: "UPDATE sales SET status = 'disputed' WHERE id = ?", saleId });
+      const res = await refundOne(shop, saleId, productItem, token, db);
+      expect(seen.fired, "the record batch never ran").toBe(true);
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        success: false,
+        error: "This sale changed while refunding. Reload and try again.",
+      });
+      expect(stripeCalls).toEqual([]);
+      expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, reversals: 0, refunded_pence: 0 });
+      const item = await env.DB.prepare("SELECT returned_quantity AS q FROM sale_items WHERE id = ?")
+        .bind(productItem)
+        .first<{ q: number }>();
+      expect(item?.q).toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a cash sale voided between the refund's checks and its record is not refunded", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const { db, seen } = dbWithBatch(3, { before: "UPDATE sales SET status = 'voided' WHERE id = ?", saleId });
+    const res = await refundOne(shop, saleId, productItem, token, db);
+    expect(seen.fired, "the record batch never ran").toBe(true);
+    expect(res.status).toBe(409);
+    expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, reversals: 0, refunded_pence: 0 });
   });
 
   it("cannot over-refund across sequential returns", async () => {

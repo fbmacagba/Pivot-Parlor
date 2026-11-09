@@ -469,6 +469,9 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   // response runs inside `run`, so a lost claim (409) records refused and a
   // Stripe failure (502) records failed. The body below is the original, not
   // re-indented. `sale.shop_id` is the resolved id from the row read above.
+  // `finalizeFailed`: Stripe refunded and the return is on record, but its
+  // refund id and restock could not be saved (details only).
+  let finalizeFailed = false;
   try {
     return await auditFor(c).run(
       { action: "payment.refund.issue", shopId: sale.shop_id, entityType: "sale", entityId: saleId },
@@ -499,9 +502,125 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
 
   const returnId = crypto.randomUUID();
   const isStripe = sale.tender_type === "stripe";
-  let stripeRefundId: string | null = null;
+  const refundTxId = crypto.randomUUID();
+  const ledgerRowId = crypto.randomUUID();
+  const lines = priced.map((p) => ({ ...p, rowId: crypto.randomUUID() }));
+  const releaseClaims = (): D1PreparedStatement[] =>
+    priced.map(({ item, qty }) =>
+      db.prepare("UPDATE sale_items SET returned_quantity = returned_quantity - ? WHERE id = ?").bind(qty, item.id)
+    );
+  const restockStatements = (line: (typeof lines)[number]): D1PreparedStatement[] =>
+    line.restock && line.item.product_id
+      ? stockMovementStatements(db, {
+          shopId,
+          productId: line.item.product_id,
+          variantId: line.item.variant_id,
+          type: "return",
+          quantityDelta: line.qty,
+          unitCostPence: null,
+          referenceType: "sale_return",
+          referenceId: returnId,
+          staffId: line.item.staff_id,
+          note: "Customer return",
+        })
+      : [];
+
+  // Record the return BEFORE any money moves, for every tender. The first
+  // statement is the guard: it writes NULL into the NOT NULL sales.status
+  // (migration 035) unless the sale is still 'completed', so a void, dispute
+  // or full refund that landed after the checks above rolls the whole record
+  // back. A Stripe return starts 'pending' with no refund id yet. If
+  // charge.refunded arrives before this request finishes, it finds this
+  // return and completes it, rather than booking the same money a second time
+  // as a dashboard refund. Record-only tenders settle here (the shop hands the
+  // cash back), restock included; a Stripe return restocks once Stripe has
+  // accepted the refund.
+  const record: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `UPDATE sales SET status = CASE WHEN status = 'completed' THEN ? ELSE NULL END,
+           refunded_pence = refunded_pence + ?
+         WHERE id = ? AND shop_id = ?`
+      )
+      .bind(!isStripe && fullyRefunded ? "refunded" : "completed", refundPence, saleId, shopId),
+    db
+      .prepare(
+        `INSERT INTO sale_returns (id, shop_id, sale_id, refund_pence, commission_reversal_pence,
+           tender_type, status, stripe_refund_id, reason, created_by, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+      )
+      .bind(
+        returnId,
+        shopId,
+        saleId,
+        refundPence,
+        commissionReversalPence,
+        sale.tender_type,
+        isStripe ? "pending" : "completed",
+        typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 500) : null,
+        user.sub,
+        isStripe ? null : new Date().toISOString()
+      ),
+  ];
+  for (const line of lines) {
+    const restockNow = !isStripe && line.restock;
+    record.push(
+      db
+        .prepare(
+          `INSERT INTO sale_return_items (id, return_id, shop_id, sale_item_id, quantity, refund_pence, restocked)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(line.rowId, returnId, shopId, line.item.id, line.qty, line.refundPence, restockNow ? 1 : 0)
+    );
+    if (restockNow) record.push(...restockStatements(line));
+  }
+  // Compensating ledger row: negative amounts at the sale's snapshot rates.
+  // 'pending' matches the sale flow — record-only commission is owed (netted
+  // off), Stripe flips to 'transferred' when charge.refunded confirms the fee
+  // actually came back.
+  record.push(
+    db
+      .prepare(
+        `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, sale_id,
+           services_amount_pence, retail_amount_pence, commission_rate, retail_commission_rate,
+           commission_amount_pence, commission_bearer, status)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+      )
+      .bind(
+        ledgerRowId,
+        shopId,
+        sale.business_day_id,
+        saleId,
+        -refundServicesPence,
+        -refundRetailPence,
+        commissionRate,
+        retailCommissionRate,
+        -commissionReversalPence,
+        commissionBearer
+      ),
+    db
+      .prepare(
+        `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
+         VALUES (?, NULL, ?, ?, 'refund', ?, ?, NULL)`
+      )
+      .bind(refundTxId, saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed")
+  );
+  try {
+    await db.batch(record);
+  } catch (e) {
+    const now = await db
+      .prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+      .bind(saleId, shopId)
+      .first<{ status: string }>();
+    await db.batch(releaseClaims());
+    if (now && now.status !== "completed") {
+      return c.json({ success: false, error: "This sale changed while refunding. Reload and try again." }, 409);
+    }
+    throw e;
+  }
 
   if (isStripe) {
+    let stripeRefundId: string;
     try {
       const refund = await createRefund({
         secret: c.env.STRIPE_SECRET_KEY,
@@ -512,107 +631,48 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       });
       stripeRefundId = refund.id;
     } catch (e) {
-      // Give the claimed quantities back — nothing was refunded.
+      // Nothing was refunded: remove the record and give the claimed
+      // quantities back. If an unrelated charge.refunded counted this return
+      // towards a full refund meanwhile, the sale goes back to completed.
       reportError("sale.refund_stripe", e, { shopId, saleId, returnId });
-      await db.batch(
-        priced.map(({ item, qty }) =>
-          db.prepare("UPDATE sale_items SET returned_quantity = returned_quantity - ? WHERE id = ?").bind(qty, item.id)
-        )
-      );
+      await db.batch([
+        db.prepare("DELETE FROM sale_return_items WHERE return_id = ?").bind(returnId),
+        db.prepare("DELETE FROM sale_returns WHERE id = ?").bind(returnId),
+        db.prepare("DELETE FROM bw_commission_ledger WHERE id = ?").bind(ledgerRowId),
+        db.prepare("DELETE FROM bw_transactions WHERE id = ?").bind(refundTxId),
+        db.prepare("UPDATE sales SET refunded_pence = refunded_pence - ? WHERE id = ?").bind(refundPence, saleId),
+        db
+          .prepare(
+            "UPDATE sales SET status = 'completed' WHERE id = ? AND status = 'refunded' AND refunded_pence < subtotal_pence - discount_pence"
+          )
+          .bind(saleId),
+        ...releaseClaims(),
+      ]);
       return c.json({ success: false, error: e instanceof Error ? e.message : "Stripe refund failed" }, 502);
     }
-  }
 
-  // Persist the return. Record-only tenders settle immediately (the shop
-  // hands the cash back); Stripe stays 'pending' until charge.refunded.
-  const stmts = [
-    db
-      .prepare(
-        `INSERT INTO sale_returns (id, shop_id, sale_id, refund_pence, commission_reversal_pence,
-           tender_type, status, stripe_refund_id, reason, created_by, completed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        returnId,
-        shopId,
-        saleId,
-        refundPence,
-        commissionReversalPence,
-        sale.tender_type,
-        isStripe ? "pending" : "completed",
-        stripeRefundId,
-        typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 500) : null,
-        user.sub,
-        isStripe ? null : new Date().toISOString()
-      ),
-  ];
-  for (const { item, qty, restock, refundPence: linePence } of priced) {
-    stmts.push(
-      db
-        .prepare(
-          `INSERT INTO sale_return_items (id, return_id, shop_id, sale_item_id, quantity, refund_pence, restocked)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        )
-        .bind(crypto.randomUUID(), returnId, shopId, item.id, qty, linePence, restock ? 1 : 0)
-    );
-    if (restock && item.product_id) {
-      stmts.push(
-        ...stockMovementStatements(db, {
-          shopId,
-          productId: item.product_id,
-          variantId: item.variant_id,
-          type: "return",
-          quantityDelta: qty,
-          unitCostPence: null,
-          referenceType: "sale_return",
-          referenceId: returnId,
-          staffId: item.staff_id,
-          note: "Customer return",
-        })
+    // Stripe accepted the refund: stamp its id and restock. The money and its
+    // record already stand, so a failure here is reported, not answered: the
+    // return stays on record (charge.refunded completes it) and the claim
+    // stays held, so a retry cannot refund the same units again.
+    const finalize: D1PreparedStatement[] = [
+      db.prepare("UPDATE sale_returns SET stripe_refund_id = ? WHERE id = ?").bind(stripeRefundId, returnId),
+      db.prepare("UPDATE bw_transactions SET stripe_id = ? WHERE id = ?").bind(stripeRefundId, refundTxId),
+    ];
+    for (const line of lines) {
+      if (!line.restock) continue;
+      finalize.push(
+        ...restockStatements(line),
+        db.prepare("UPDATE sale_return_items SET restocked = 1 WHERE id = ?").bind(line.rowId)
       );
     }
+    try {
+      await db.batch(finalize);
+    } catch (e) {
+      finalizeFailed = true;
+      reportError("sale.refund_finalize", e, { shopId, saleId, returnId });
+    }
   }
-  // Compensating ledger row: negative amounts at the sale's snapshot rates.
-  // 'pending' matches the sale flow — record-only commission is owed (netted
-  // off), Stripe flips to 'transferred' when charge.refunded confirms the fee
-  // actually came back.
-  stmts.push(
-    db
-      .prepare(
-        `INSERT INTO bw_commission_ledger (id, shop_id, business_day_id, booking_id, sale_id,
-           services_amount_pence, retail_amount_pence, commission_rate, retail_commission_rate,
-           commission_amount_pence, commission_bearer, status)
-         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending')`
-      )
-      .bind(
-        crypto.randomUUID(),
-        shopId,
-        sale.business_day_id,
-        saleId,
-        -refundServicesPence,
-        -refundRetailPence,
-        commissionRate,
-        retailCommissionRate,
-        -commissionReversalPence,
-        commissionBearer
-      )
-  );
-  stmts.push(
-    db
-      .prepare(
-        `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
-         VALUES (?, NULL, ?, ?, 'refund', ?, ?, ?)`
-      )
-      .bind(crypto.randomUUID(), saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed", stripeRefundId)
-  );
-  stmts.push(
-    db
-      .prepare(
-        `UPDATE sales SET refunded_pence = refunded_pence + ?${!isStripe && fullyRefunded ? ", status = 'refunded'" : ""} WHERE id = ?`
-      )
-      .bind(refundPence, saleId)
-  );
-  await db.batch(stmts);
 
   return c.json({
     success: true,
@@ -628,7 +688,14 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       },
       statusOutcome((res) =>
         res.status < 400
-          ? { details: { lines: priced.length, refund_pence: refundPence, via_stripe: sale.tender_type === "stripe" } }
+          ? {
+              details: {
+                lines: priced.length,
+                refund_pence: refundPence,
+                via_stripe: sale.tender_type === "stripe",
+                ...(finalizeFailed ? { finalized: false } : {}),
+              },
+            }
           : {}
       )
     );
