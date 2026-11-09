@@ -6,6 +6,7 @@
  */
 import type { D1Database, D1PreparedStatement, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
 import { FAILED_JOB_FALLBACK_SQL, finishJob, originActorRef, queueAudit, type AuditRecorder } from "@repo/audit";
+import { SchemaOutOfDateError, assertAssemblerSchema } from "./ensure-schema";
 import { parseLockedImages } from "./lockedImages";
 import {
   buildCandidatePayload,
@@ -44,6 +45,7 @@ type FailReason =
   | "invalid_text_kv"
   | "text_failed_validation"
   | "candidate_store_failed"
+  | "schema_out_of_date"
   | "crash";
 
 /** What every completion entry of one job shares. */
@@ -357,32 +359,6 @@ function servicesForJson(services: TextServiceOut[]): string {
   );
 }
 
-async function ensureShopSitesSeoColumns(db: D1Database): Promise<void> {
-  const tryAdd = async (name: string, ddl: string) => {
-    try {
-      await db.prepare(`ALTER TABLE shop_sites ADD COLUMN ${name} ${ddl}`).run();
-    } catch {
-      /* column exists */
-    }
-  };
-  await tryAdd("seo_title", "TEXT");
-  await tryAdd("seo_description", "TEXT");
-  // Design-intent columns (WS-6). Canonical DDL: migrations 021 + 023 in the
-  // main worker; these defensive adds only bridge a builder deploy that lands
-  // before the migration has run.
-  await tryAdd("trust_signals_json", "TEXT");
-  await tryAdd("usps_json", "TEXT");
-  await tryAdd("layout_mood", "TEXT");
-  await tryAdd("brand_voice", "TEXT");
-  await tryAdd("hero_cta", "TEXT");
-  await tryAdd("about_title", "TEXT");
-  await tryAdd("palette_json", "TEXT");
-  await tryAdd("design_version", "INTEGER NOT NULL DEFAULT 1");
-  // Curated typography (WS-6 item 5). Canonical DDL: migration 042.
-  await tryAdd("heading_weight", "TEXT");
-  await tryAdd("heading_style", "TEXT");
-}
-
 async function processOne(body: unknown, env: Env): Promise<void> {
   const msg = parseStageMessage(body);
   if (!msg) {
@@ -470,7 +446,16 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
 
-  await ensureShopSitesSeoColumns(env.DB);
+  // WS-8: the migrations own the schema. A database that missed one fails the
+  // job, named; a read that fails propagates to the crash path instead.
+  try {
+    await assertAssemblerSchema(env.DB);
+  } catch (err) {
+    if (!(err instanceof SchemaOutOfDateError)) throw err;
+    console.error(`[${jobId}] [pivot-parlor-assembler] ${err.message}`);
+    await failJob(env.DB, rec, job, err.message, "schema_out_of_date");
+    return;
+  }
 
   let template = "minimal";
   // An owner-chosen palette is a deliberate override, so it must land in the
