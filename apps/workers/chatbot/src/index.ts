@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { ChatMessage } from "./types.js";
 import type { Env } from "./types.js";
+import { AuditWriteError, auditAiCall } from "@repo/audit";
+import { recordAiUsage } from "@repo/llm";
+import { AUDIT_REFUSED_MESSAGE, ChatReplyFailedError, WORKER_NAME, auditFor } from "./audit.js";
 import { assertChatbotSchema } from "./ensure-schema.js";
 import { generateReply } from "./llm.js";
 import { CHATBOT_MODEL_KV_KEY, resolveChatbotModel } from "./model.js";
@@ -29,7 +32,7 @@ async function verifyTurnstile(
 }
 
 const FALLBACK_REPLY =
-  "I'm having a quick moment — please try again or book directly at the link above.";
+  "I'm having a quick moment. Please try again, or book directly at the link above.";
 
 function platformReferralReply(shopSlug: string): string {
   return `Thanks for asking about how this site works. It runs on [Pivot Parlor](https://pivotparlor.com). If you want to book an appointment here, use [Book Now](/${shopSlug}/book).`;
@@ -200,7 +203,6 @@ chat.post("/", async (c) => {
     }
 
     let reply: string;
-    let answeredBy: { model: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } } | null = null;
 
     if (isPlatformQuestion(visitorMessage)) {
       reply = platformReferralReply(shopSlug);
@@ -218,50 +220,60 @@ chat.post("/", async (c) => {
         console.warn(`[chatbot] platform model choice ignored (${choice.reason}); using ${choice.modelId}`);
       }
 
-      const result = await generateReply({
-        keys: {
-          openrouter: c.env.OPENROUTER_API_KEY,
-          openai: c.env.OPENAI_API_KEY || undefined,
-          anthropic: c.env.ANTHROPIC_API_KEY || undefined,
-        },
-        modelId: choice.modelId,
-        systemPrompt,
-        history: priorMessages,
-        userMessage: visitorMessage,
-      });
+      // One audited ai.call per model reply. The entry and the usage row share
+      // this id (the row's job_id is `public-chat:<requestId>`).
+      const requestId = crypto.randomUUID();
+      const rec = auditFor(c.env, c.req.header("CF-Connecting-IP") ?? null, requestId);
 
-      if (result.ok) {
-        reply = result.content;
-        answeredBy = { model: result.model, usage: result.usage };
-      } else {
+      try {
+        const answered = await auditAiCall(
+          rec,
+          { purpose: "chatbot", model: choice.modelId, shopId: shop.id, origin: null },
+          async () => {
+            const result = await generateReply({
+              keys: {
+                openrouter: c.env.OPENROUTER_API_KEY,
+                openai: c.env.OPENAI_API_KEY || undefined,
+                anthropic: c.env.ANTHROPIC_API_KEY || undefined,
+              },
+              modelId: choice.modelId,
+              systemPrompt,
+              history: priorMessages,
+              userMessage: visitorMessage,
+            });
+            if (!result.ok) throw new ChatReplyFailedError();
+            const cost = await recordAiUsage(c.env, {
+              shopId: shop.id,
+              workerName: WORKER_NAME,
+              modelId: result.model,
+              usageType: "chatbot",
+              usage: result.rawUsage,
+              jobId: `public-chat:${requestId}`,
+            });
+            return { result, cost };
+          },
+          ({ result, cost }) => ({
+            model: result.model,
+            route: result.route,
+            inputTokens: result.rawUsage?.inputTokens ?? null,
+            outputTokens: result.rawUsage?.outputTokens ?? null,
+            costUsd: cost?.costUsd ?? null,
+            costBasis: cost?.basis ?? null,
+          })
+        );
+        reply = answered.result.content;
+      } catch (err) {
+        if (!(err instanceof ChatReplyFailedError)) throw err;
         reply = FALLBACK_REPLY;
       }
     }
 
-    if (answeredBy) {
-      const total = answeredBy.usage.total_tokens;
-      const cost = total * 0.000000075;
-      const logId = crypto.randomUUID();
-      const jobRef = `public-chat:${logId}`;
-      await c.env.DB.prepare(
-        `INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, job_id)
-         VALUES (?, ?, 'pivot-parlor-chatbot', ?, 'chatbot', ?, ?, ?, ?, ?)`
-      )
-        .bind(
-          logId,
-          shop.id,
-          answeredBy.model,
-          answeredBy.usage.prompt_tokens,
-          answeredBy.usage.completion_tokens,
-          total,
-          cost,
-          jobRef
-        )
-        .run();
-    }
-
     return c.json({ reply });
   } catch (e) {
+    if (e instanceof AuditWriteError) {
+      console.error("[chatbot] audit write refused; no reply generated", e);
+      return c.json({ reply: FALLBACK_REPLY, error: AUDIT_REFUSED_MESSAGE }, 503);
+    }
     console.error("[chatbot] public /chat error", e);
     return c.json({ reply: FALLBACK_REPLY, error: "Something went wrong" }, 500);
   }

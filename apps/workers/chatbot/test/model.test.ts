@@ -59,6 +59,8 @@ describe("generateReply", () => {
       content: "From £12.",
       model: "anthropic-api/claude-haiku-4.5",
       usage: { prompt_tokens: 40, completion_tokens: 5, total_tokens: 45 },
+      route: "anthropic",
+      rawUsage: { inputTokens: 40, outputTokens: 5 },
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://api.anthropic.com/v1/messages");
