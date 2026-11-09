@@ -24,16 +24,18 @@ function memoryKv(seed: Record<string, string> = {}) {
 /** fakeAuditDb plus the `.all()` the shop-context reader uses (no rows). */
 function chatDb(fake: FakeAuditDb): FakeAuditDb {
   const realPrepare = fake.db.prepare.bind(fake.db);
-  const withAll = (stmt: any): any => ({
+  type Stmt = { bind(...a: unknown[]): Stmt };
+  const withAll = (stmt: Stmt): Stmt & { all(): Promise<{ results: unknown[] }> } => ({
     ...stmt,
     bind: (...a: unknown[]) => withAll(stmt.bind(...a)),
     all: async () => ({ results: [] }),
   });
-  (fake.db as any).prepare = (sql: string) => withAll(realPrepare(sql));
+  (fake.db as unknown as { prepare: (sql: string) => Stmt }).prepare = (sql: string) =>
+    withAll(realPrepare(sql) as unknown as Stmt);
   return fake;
 }
 
-function setup(opts: { auditFail?: "all"; models?: unknown[] } = {}) {
+function setup(opts: { auditFail?: "all" | "outcome"; models?: unknown[] } = {}) {
   const fake = chatDb(
     fakeAuditDb({
       failAuditWrites: opts.auditFail,
@@ -123,6 +125,21 @@ describe("chatbot audit", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(fake.rows).toEqual([]);
     expect(fake.statements.filter((s) => s.sql.includes("ai_usage_log"))).toEqual([]);
+  });
+
+  it("a refused outcome write is logged and swallowed: the visitor still gets the reply, started row and usage row remain", async () => {
+    const { fake, env } = setup({ auditFail: "outcome" });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const res = await chat(env, VISITOR_MESSAGE, { "CF-Connecting-IP": "203.0.113.9" });
+    // The recorder never fails a call that already ran and was paid for: only a refused STARTED write is a 503.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ reply: MODEL_REPLY });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fake.rows.map((r) => r.phase)).toEqual(["started"]);
+    expect(fake.statements.filter((s) => s.sql.includes("INSERT INTO ai_usage_log"))).toHaveLength(1);
+    const everything = JSON.stringify(fake.rows);
+    expect(everything).not.toContain(VISITOR_MESSAGE);
+    expect(everything).not.toContain(MODEL_REPLY);
   });
 
   it("the platform referral reply calls no model and writes nothing", async () => {

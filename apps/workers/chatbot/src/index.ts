@@ -271,7 +271,7 @@ chat.post("/", async (c) => {
     return c.json({ reply });
   } catch (e) {
     if (e instanceof AuditWriteError) {
-      console.error("[chatbot] audit write refused; no reply generated", e);
+      console.error("[chatbot] audit write refused; answered 503", e);
       return c.json({ reply: FALLBACK_REPLY, error: AUDIT_REFUSED_MESSAGE }, 503);
     }
     console.error("[chatbot] public /chat error", e);
