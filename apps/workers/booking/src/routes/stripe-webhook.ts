@@ -358,7 +358,7 @@ r.post("/stripe", async (c) => {
             // tx as it stood: a 'captured' tx means this PI already settled
             // the booking (confirmed, or later cancelled with the deposit
             // kept), and that is never refunded here.
-            const [, , , flip] = await db.batch([
+            const [, , , , flip] = await db.batch([
               db
                 .prepare(
                   `INSERT INTO bw_transactions (id, booking_id, shop_id, type, amount_pence, status, stripe_id)
@@ -371,6 +371,20 @@ r.post("/stripe", async (c) => {
                     LIMIT 1`,
                 )
                 .bind(crypto.randomUUID(), bookingId),
+              // While a refund is owed, kill the checkout deposit credit, as
+              // the staff cancel refund does, so a reinstated booking can never
+              // be credited money that went back. The refund amount comes from
+              // the record above, not from these columns.
+              db
+                .prepare(
+                  `UPDATE bw_booking_state SET deposit_amount_pence = 0, deposit_application_fee_pence = 0,
+                     updated_at = datetime('now')
+                   WHERE booking_id = ? AND EXISTS (
+                     SELECT 1 FROM bw_transactions r
+                      WHERE r.booking_id = ? AND r.type = 'refund' AND r.sale_id IS NULL
+                        AND r.stripe_id IS NULL AND r.status = 'pending')`,
+                )
+                .bind(bookingId, bookingId),
               // 'cancelled' too: the refund paths look the deposit up by the PI id.
               db
                 .prepare(

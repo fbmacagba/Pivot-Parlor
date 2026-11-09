@@ -109,6 +109,14 @@ async function refundTxs(id: string) {
   return rows.results ?? [];
 }
 
+async function creditOf(id: string) {
+  return env.DB.prepare(
+    "SELECT deposit_amount_pence, deposit_application_fee_pence FROM bw_booking_state WHERE booking_id = ?"
+  )
+    .bind(id)
+    .first<{ deposit_amount_pence: number; deposit_application_fee_pence: number }>();
+}
+
 async function sessionOf(id: string): Promise<string> {
   const row = await env.DB.prepare("SELECT stripe_checkout_session_id AS s FROM bw_booking_state WHERE booking_id = ?")
     .bind(id)
@@ -155,6 +163,9 @@ describe("a deposit that settles after the booking was cancelled", () => {
     expect(await refundTxs(id)).toEqual([
       { amount_pence: 1250, status: "pending", stripe_id: `re_idem_deposit-refund:${id}`, sale_id: null },
     ]);
+    // The checkout deposit credit dies with the refund, as on staff cancel,
+    // so a reinstated booking can never be credited money that went back.
+    expect(await creditOf(id)).toEqual({ deposit_amount_pence: 0, deposit_application_fee_pence: 0 });
 
     // The staff recovery path sees it as already refunded, so no second refund.
     const again = await staffCancel(s.shop, id, { refundDeposit: true });
@@ -212,9 +223,11 @@ describe("a deposit that settles after the booking was cancelled", () => {
     let down = true;
     spyStripe((url) => (down && url.endsWith("/v1/refunds") ? STRIPE_DOWN() : null));
     expect((await piSucceeded(id, s.shop, piId, event)).status).toBe(500);
-    // The debt is on record before Stripe was called, with no refund id yet.
+    // The debt is on record before Stripe was called, with no refund id yet,
+    // and the deposit credit is already dead.
     expect(await refundTxs(id)).toEqual([{ amount_pence: 1250, status: "pending", stripe_id: null, sale_id: null }]);
     expect((await depositTx(id))?.status).toBe("captured");
+    expect(await creditOf(id)).toEqual({ deposit_amount_pence: 0, deposit_application_fee_pence: 0 });
 
     down = false;
     expect((await piSucceeded(id, s.shop, piId, event)).status).toBe(200);
@@ -248,6 +261,7 @@ describe("a deposit that settles after the booking was cancelled", () => {
     expect((await piSucceeded(id, s.shop, piId)).status).toBe(200);
     expect(await bookingStatus(id)).toBe("confirmed");
     expect(await refundTxs(id)).toEqual([]);
+    expect(await creditOf(id)).toEqual({ deposit_amount_pence: 1250, deposit_application_fee_pence: 125 });
   });
 
   it("never refunds a deposit staff chose to keep, even when the event is delivered again", async () => {
