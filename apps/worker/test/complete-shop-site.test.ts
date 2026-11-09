@@ -157,15 +157,25 @@ describe("public profile and copy joins", () => {
     expect(upload.status).toBe(200);
     const { avatarUrl } = (await upload.json()) as { avatarUrl: string };
     const url = new URL(avatarUrl);
-    expect(url.pathname).toBe(`/staff/${shopId}/${staffId}/avatar.webp`);
-    expect(url.searchParams.get("v")).toBeTruthy();
+    // A new object per upload, so the URL carries no version query.
+    expect(url.pathname).toMatch(new RegExp(`^/staff/${shopId}/${staffId}/avatar-[0-9a-f]{8}\\.webp$`));
+    expect(url.search).toBe("");
 
-    const res = await dispatch("GET", url.pathname + url.search);
+    const res = await dispatch("GET", url.pathname);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("image/webp");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
 
+    // Portraits uploaded before per-upload keys keep serving at their URL.
+    const legacy = new Uint8Array([0x52, 0x49, 0x46, 0x46, 9, 9, 9, 9]);
+    await env.ASSETS.put(`staff/${shopId}/${staffId}/avatar.webp`, legacy.buffer, { httpMetadata: { contentType: "image/webp" } });
+    const old = await dispatch("GET", `/staff/${shopId}/${staffId}/avatar.webp?v=legacy`);
+    expect(old.status).toBe(200);
+    expect(new Uint8Array(await old.arrayBuffer())).toEqual(legacy);
+
     expect((await dispatch("GET", `/staff/${shopId}/${staffId}/other.webp`)).status).toBe(404);
+    expect((await dispatch("GET", `/staff/${shopId}/${staffId}/avatar-notahex1.webp`)).status).toBe(404);
+    expect((await dispatch("GET", `/staff/${shopId}/${staffId}/avatar-0123abcd.gif`)).status).toBe(404);
     expect((await dispatch("GET", `/staff/${shopId}/nobody/avatar.webp`)).status).toBe(404);
   });
 

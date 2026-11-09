@@ -238,7 +238,10 @@ staff.post("/:staffId/avatar", requireShopRole("admin"), async (c) => {
     file.type ||
     (ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg");
 
-  const key = `staff/${shopId}/${staffId}/avatar.${ext}`;
+  // A new object per upload (the #106 rule for custom visuals): a replacement
+  // never rewrites the bytes behind an earlier URL, so no cache, page or
+  // failed save can serve the wrong photo, and the URL needs no version query.
+  const key = `staff/${shopId}/${staffId}/avatar-${crypto.randomUUID().slice(0, 8)}.${ext}`;
 
   // Pattern T: the started entry commits before the R2 write, so an upload
   // that cannot be recorded never happens (503, nothing written).
@@ -257,9 +260,7 @@ staff.post("/:staffId/avatar", requireShopRole("admin"), async (c) => {
 
         let base = (c.env.ASSET_BASE_URL ?? "").trim().replace(/\/$/, "");
         if (!base) base = `https://assets.pivot-parlor.com`;
-        // The key is fixed per member, so a replacement photo would sit behind the
-        // old one's day-long cache; the version makes each upload a new URL.
-        const avatarUrl = `${base}/${key}?v=${Date.now().toString(36)}`;
+        const avatarUrl = `${base}/${key}`;
 
         await updateStaffMemberStmt(c.env.DB, staffId, { avatar_url: avatarUrl })!.run();
 
