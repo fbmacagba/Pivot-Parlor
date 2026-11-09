@@ -217,12 +217,53 @@ describe("research audit", () => {
   });
 
   it("an already finished job skips the mirror write", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => completion("nope"));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => completion("nope"));
+    // The job is open when the message starts (the first status read), and
+    // another path has finished it by the time finishJob re-reads it.
+    let statusReads = 0;
     const h = harness({
       failOnSql: /^UPDATE generation_jobs SET status = \?, stage = \?, error = \?, updated_at = \? WHERE id = \? AND/,
-      answer: (sql) => (sql.startsWith("SELECT status FROM generation_jobs") ? { status: "failed" } : null),
+      answer: (sql) => (sql.startsWith("SELECT status FROM generation_jobs") && statusReads++ > 0 ? { status: "failed" } : null),
     });
     await h.run(message());
+    expect(fetchSpy).toHaveBeenCalled();
     expect(h.kv.get("job:job-1")).not.toContain('"failed"');
+  });
+
+  it.each(["complete", "failed"])("a redelivered message for a %s job does nothing", async (status) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => completion(JSON.stringify(spec())));
+    const h = harness({ answer: (sql) => (sql.startsWith("SELECT status FROM generation_jobs") ? { status } : null) });
+    await h.run(message());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(h.sends).toEqual({ images: [], text: [], assemble: [] });
+    expect(h.kv.size).toBe(0);
+    expect(h.fake.rows).toEqual([]);
+    // No write of any kind, so the job's status is untouched.
+    expect(h.fake.statements).toEqual([]);
+    expect(h.acked).toEqual([true]);
+  });
+
+  it("a finished job is skipped before the API key check, so no fresh completion entry is written", async () => {
+    const h = harness(
+      { answer: (sql) => (sql.startsWith("SELECT status FROM generation_jobs") ? { status: "failed" } : null) },
+      { OPENROUTER_API_KEY: "" }
+    );
+    await h.run(message());
+    expect(h.fake.rows).toEqual([]);
+    expect(h.fake.statements).toEqual([]);
+    expect(h.kv.size).toBe(0);
+  });
+
+  it("every research write to generation_jobs carries the terminal guard", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => completion(JSON.stringify(spec())));
+    const h = harness();
+    await h.run(message());
+    const writes = h.fake.statements.filter((s) => s.sql.startsWith("UPDATE generation_jobs"));
+    // The running write at the start, then the one that stores the spec.
+    expect(writes).toHaveLength(2);
+    for (const w of writes) {
+      expect(w.sql).toContain("WHERE id = ? AND COALESCE(status, 'queued') NOT IN ('complete', 'failed')");
+    }
+    expect(writes[1]!.args).toContain("parallel");
   });
 });

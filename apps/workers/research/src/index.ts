@@ -253,7 +253,13 @@ async function updateGenerationJob(
     vals.push(patch.error);
   }
   vals.push(id);
-  await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  // Never reopen a finished job: a redelivered message must not reset it to running.
+  await db
+    .prepare(
+      `UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ? AND COALESCE(status, 'queued') NOT IN ('complete', 'failed')`
+    )
+    .bind(...vals)
+    .run();
 }
 
 function buildUserPrompt(msg: ResearchQueueMessage): string {
@@ -637,6 +643,18 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
   }
 
   const { jobId, shopId } = input;
+
+  // A redelivered message for a finished job does nothing: no model call, no
+  // send, no write (as the assembler does). Read before the API key check, so
+  // a finished job never gets a fresh completion entry from that path either.
+  const jobRow = await env.DB.prepare("SELECT status FROM generation_jobs WHERE id = ?")
+    .bind(jobId)
+    .first<{ status: string | null }>();
+  if (jobRow?.status === "complete" || jobRow?.status === "failed") {
+    console.log(`[${jobId}] [pivot-parlor-research] skip (job already ${jobRow.status})`);
+    return;
+  }
+
   const origin = input.origin_actor_ref ?? null;
   const rec = queueAudit(env.DB, WORKER_NAME, jobId);
   const apiKey = env.OPENROUTER_API_KEY;
