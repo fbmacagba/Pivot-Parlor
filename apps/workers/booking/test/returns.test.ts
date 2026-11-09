@@ -683,6 +683,140 @@ describe("Stripe refunds", () => {
     expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, reversals: 0, refunded_pence: 0 });
   });
 
+  it("a refund that completes a sale another refund already part-refunded flips it, even from a stale read", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, serviceItem } = await ringCashSale(shop, staff, service, product, token);
+    // A concurrent refund of both product units (2000) lands after this
+    // request's checks read refunded_pence 0, before its record.
+    const { db, seen } = dbWithBatch(3, { before: "UPDATE sales SET refunded_pence = 2000 WHERE id = ?", saleId });
+    const res = await refundOne(shop, saleId, serviceItem, token, db);
+    expect(seen.fired, "the record batch never ran").toBe(true);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: { fully_refunded: boolean } }).data.fully_refunded).toBe(true);
+    expect(await refundRows(saleId)).toMatchObject({ refunded_pence: 4500, sale_status: "refunded" });
+  });
+
+  it("a refund that would take a sale past its total is refused, from a stale read", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, serviceItem } = await ringCashSale(shop, staff, service, product, token);
+    const { db, seen } = dbWithBatch(3, { before: "UPDATE sales SET refunded_pence = 4000 WHERE id = ?", saleId });
+    const res = await refundOne(shop, saleId, serviceItem, token, db);
+    expect(seen.fired, "the record batch never ran").toBe(true);
+    expect(res.status).toBe(409);
+    expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, refunded_pence: 4000, sale_status: "completed" });
+    const item = await env.DB.prepare("SELECT returned_quantity AS q FROM sale_items WHERE id = ?")
+      .bind(serviceItem)
+      .first<{ q: number }>();
+    expect(item?.q).toBe(0);
+  });
+
+  /** Stripe answers the refund create with `createStatus`; the refund list
+   *  (GET /v1/refunds) holds the refund the create carried when `madeIt`. */
+  function stripeAnswers(createStatus: number | "network", madeIt: boolean | "down") {
+    const calls: string[] = [];
+    let createdReturnId = "";
+    const real = globalThis.fetch;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (!url.startsWith("https://api.stripe.com/v1/refunds")) return real(input, init);
+      const method = init?.method ?? "GET";
+      calls.push(`${method} ${new URL(url).pathname}`);
+      if (method === "POST") {
+        createdReturnId = new URLSearchParams(String(init?.body ?? "")).get("metadata[returnId]") ?? "";
+        if (createStatus === "network") throw new TypeError("Network connection lost.");
+        return Response.json({ error: { message: "stripe trouble" } }, { status: createStatus });
+      }
+      if (madeIt === "down") return Response.json({ error: { message: "stripe down" } }, { status: 503 });
+      return Response.json({
+        data: madeIt ? [{ id: "re_made_it", status: "succeeded", metadata: { returnId: createdReturnId } }] : [],
+      });
+    });
+    return calls;
+  }
+
+  it("a Stripe 5xx whose refund went through anyway keeps the refund, so a retry cannot pay twice", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    try {
+      const calls = stripeAnswers(500, true);
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(calls).toEqual(["POST /v1/refunds", "GET /v1/refunds"]);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: { id: string } };
+      const ret = await env.DB.prepare("SELECT status, stripe_refund_id FROM sale_returns WHERE id = ?")
+        .bind(body.data.id)
+        .first();
+      expect(ret).toEqual({ status: "pending", stripe_refund_id: "re_made_it" });
+      expect(await refundRows(saleId)).toMatchObject({ returns: 1, refund_txs: 1, refunded_pence: 1000 });
+      expect(await stockQty(shop, product)).toBe(4);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a network failure whose refund went through anyway keeps the refund and the claim", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    try {
+      const calls = stripeAnswers("network", true);
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(calls).toEqual(["POST /v1/refunds", "GET /v1/refunds"]);
+      expect(res.status).toBe(200);
+      const ret = await env.DB.prepare("SELECT stripe_refund_id FROM sale_returns WHERE sale_id = ?")
+        .bind(saleId)
+        .first();
+      expect(ret).toEqual({ stripe_refund_id: "re_made_it" });
+      const item = await env.DB.prepare("SELECT returned_quantity AS q FROM sale_items WHERE id = ?")
+        .bind(productItem)
+        .first<{ q: number }>();
+      expect(item?.q).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a Stripe 5xx with no refund at Stripe undoes the record", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    try {
+      const calls = stripeAnswers(502, false);
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(calls).toEqual(["POST /v1/refunds", "GET /v1/refunds"]);
+      expect(res.status).toBe(502);
+      expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, reversals: 0, refunded_pence: 0 });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a refund Stripe rejected outright is undone without asking Stripe again", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    try {
+      const calls = stripeAnswers(400, true);
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(calls).toEqual(["POST /v1/refunds"]);
+      expect(res.status).toBe(502);
+      expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, refunded_pence: 0 });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("when Stripe cannot be asked either, the record is undone, as before", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    try {
+      const calls = stripeAnswers(500, "down");
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(calls).toEqual(["POST /v1/refunds", "GET /v1/refunds"]);
+      expect(res.status).toBe(502);
+      expect(await refundRows(saleId)).toMatchObject({ returns: 0, refund_txs: 0, refunded_pence: 0 });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("cannot over-refund across sequential returns", async () => {
     const { shop, staff, service, product, token } = await seedRefundShop();
     const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);

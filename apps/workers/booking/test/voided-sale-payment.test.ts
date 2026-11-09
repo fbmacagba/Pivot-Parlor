@@ -257,6 +257,59 @@ describe("a payment that lands on a voided till sale", () => {
   });
 });
 
+describe("a till QR page that expires unpaid", () => {
+  async function sessionOf(saleId: string): Promise<string> {
+    const row = await env.DB.prepare("SELECT stripe_checkout_session_id AS s FROM sales WHERE id = ?")
+      .bind(saleId)
+      .first<{ s: string }>();
+    expect(row?.s, "the sale has no Checkout Session").toMatch(/.+/);
+    return row!.s;
+  }
+
+  const expired = (t: Till, saleId: string, sessionId: string, id = evtId()) =>
+    postEvent({
+      id,
+      type: "checkout.session.expired",
+      data: { object: { id: sessionId, metadata: { saleId, shopId: t.shop, type: "sale" } } },
+    });
+
+  it("voids its pending sale and releases the stock", async () => {
+    const t = await setup();
+    const saleId = await ringStripe(t);
+    expect(await stockQty(t)).toBe(3);
+    const res = await expired(t, saleId, await sessionOf(saleId));
+    expect(res.status).toBe(200);
+    expect((await saleRow(saleId))?.status).toBe("voided");
+    expect(await stockQty(t)).toBe(5);
+    const outcome = await env.DB.prepare(
+      `SELECT shop_id, entity_id, changes_json FROM audit_log
+        WHERE action = 'payment.stripe.webhook' AND phase = 'outcome' AND entity_id = ?`
+    )
+      .bind(saleId)
+      .first<{ shop_id: string; entity_id: string; changes_json: string }>();
+    expect(outcome).toMatchObject({ shop_id: t.shop, entity_id: saleId });
+    expect(JSON.parse(outcome!.changes_json)).toEqual({ status: ["pending", "voided"] });
+  });
+
+  it("leaves a paid sale alone, and a redelivery or a stranger's session changes nothing", async () => {
+    const t = await setup();
+    const paidSale = await ringStripe(t);
+    const session = await sessionOf(paidSale);
+    expect((await paid(t, paidSale, `pi_ok_${paidSale.slice(0, 8)}`)).status).toBe(200);
+    expect((await expired(t, paidSale, session)).status).toBe(200);
+    expect((await saleRow(paidSale))?.status).toBe("completed");
+
+    const other = await ringStripe(t);
+    expect((await expired(t, other, "cs_not_this_sale")).status).toBe(200);
+    expect((await saleRow(other))?.status).toBe("pending");
+
+    expect((await expired(t, other, await sessionOf(other))).status).toBe(200);
+    expect((await expired(t, other, await sessionOf(other))).status).toBe(200);
+    expect((await saleRow(other))?.status).toBe("voided");
+    expect(await stockQty(t)).toBe(3); // paidSale's two units stay sold
+  });
+});
+
 describe("till Checkout pages", () => {
   it("lapse after 31 minutes instead of Stripe's 24-hour default", async () => {
     const t = await setup();

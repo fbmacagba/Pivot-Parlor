@@ -19,8 +19,14 @@ import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { todayUtcYmd } from "../lib/time.js";
 import { d1Rows } from "../lib/d1-helpers.js";
-import { createCheckoutSession, createRefund } from "../lib/stripe.js";
+import {
+  createCheckoutSession,
+  createRefund,
+  isDefiniteStripeRefusal,
+  listRefundsForPaymentIntent,
+} from "../lib/stripe.js";
 import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
+import { voidRefusal, voidSale, type VoidableSale } from "../lib/sale-void.js";
 import { calculateCommissionPence } from "@repo/utils";
 import {
   SaleInputError,
@@ -468,7 +474,6 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   // give their share back too.
   const customerRefundPence =
     refundPence + (commissionBearer === "customer" ? commissionReversalPence : 0);
-  const fullyRefunded = sale.refunded_pence + refundPence >= sale.subtotal_pence - sale.discount_pence;
 
   // Audit (Plan 3, pattern T): everything from the return claim to the
   // response runs inside `run`, so a lost claim (409) records refused and a
@@ -540,14 +545,23 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   // as a dashboard refund. Record-only tenders settle here (the shop hands the
   // cash back), restock included; a Stripe return restocks once Stripe has
   // accepted the refund.
+  //
+  // The guard also reads refunded_pence as it stands, not as the checks above
+  // read it, so a concurrent refund of other lines can neither push the sale
+  // past its total (rolled back, 409) nor leave a record-only sale that this
+  // refund completes still 'completed' (it flips to 'refunded' here). Stripe
+  // sales flip on charge.refunded, as before.
   const record: D1PreparedStatement[] = [
     db
       .prepare(
-        `UPDATE sales SET status = CASE WHEN status = 'completed' THEN ? ELSE NULL END,
-           refunded_pence = refunded_pence + ?
-         WHERE id = ? AND shop_id = ?`
+        `UPDATE sales SET status = CASE
+           WHEN status = 'completed' AND refunded_pence + ?1 <= subtotal_pence - discount_pence
+           THEN CASE WHEN ?2 = 1 AND refunded_pence + ?1 >= subtotal_pence - discount_pence THEN 'refunded' ELSE 'completed' END
+           ELSE NULL END,
+           refunded_pence = refunded_pence + ?1
+         WHERE id = ?3 AND shop_id = ?4`
       )
-      .bind(!isStripe && fullyRefunded ? "refunded" : "completed", refundPence, saleId, shopId),
+      .bind(refundPence, isStripe ? 0 : 1, saleId, shopId),
     db
       .prepare(
         `INSERT INTO sale_returns (id, shop_id, sale_id, refund_pence, commission_reversal_pence,
@@ -608,24 +622,39 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
         `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
          VALUES (?, NULL, ?, ?, 'refund', ?, ?, NULL)`
       )
-      .bind(refundTxId, saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed")
+      .bind(refundTxId, saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed"),
+    // Read back in the same transaction: the answer's fully_refunded is the
+    // sale as this refund left it, not as the checks above read it.
+    db.prepare("SELECT refunded_pence, subtotal_pence, discount_pence FROM sales WHERE id = ?").bind(saleId)
   );
+  let fullyRefunded: boolean;
   try {
-    await db.batch(record);
+    const results = await db.batch(record);
+    const after = results[results.length - 1]?.results?.[0] as
+      | { refunded_pence: number; subtotal_pence: number; discount_pence: number }
+      | undefined;
+    fullyRefunded = after
+      ? Number(after.refunded_pence) >= Number(after.subtotal_pence) - Number(after.discount_pence)
+      : false;
   } catch (e) {
     const now = await db
-      .prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+      .prepare("SELECT status, refunded_pence, subtotal_pence, discount_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
       .bind(saleId, shopId)
-      .first<{ status: string }>();
+      .first<{ status: string; refunded_pence: number; subtotal_pence: number; discount_pence: number }>();
     await db.batch(releaseClaims());
-    if (now && now.status !== "completed") {
+    if (
+      now &&
+      (now.status !== "completed" ||
+        Number(now.refunded_pence) + refundPence > Number(now.subtotal_pence) - Number(now.discount_pence))
+    ) {
       return c.json({ success: false, error: "This sale changed while refunding. Reload and try again." }, 409);
     }
     throw e;
   }
 
   if (isStripe) {
-    let stripeRefundId: string;
+    let stripeRefundId: string | null = null;
+    let stripeError: unknown = null;
     try {
       const refund = await createRefund({
         secret: c.env.STRIPE_SECRET_KEY,
@@ -636,10 +665,25 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       });
       stripeRefundId = refund.id;
     } catch (e) {
-      // Nothing was refunded: remove the record and give the claimed
+      stripeError = e;
+      reportError("sale.refund_stripe", e, { shopId, saleId, returnId });
+      // A 5xx or a network failure is ambiguous: the refund may have gone
+      // through. Ask Stripe before undoing anything, so a cashier's retry can
+      // never refund the same units twice. A refusal (4xx) certainly did nothing.
+      if (!isDefiniteStripeRefusal(e)) {
+        try {
+          const refunds = await listRefundsForPaymentIntent(c.env.STRIPE_SECRET_KEY, sale.stripe_payment_intent_id!);
+          stripeRefundId = refunds.find((r) => r.metadata.returnId === returnId)?.id || null;
+        } catch (lookupErr) {
+          reportError("sale.refund_lookup", lookupErr, { shopId, saleId, returnId });
+        }
+      }
+    }
+    if (!stripeRefundId) {
+      // Nothing was refunded (or Stripe could not say, which is treated as
+      // nothing, as before): remove the record and give the claimed
       // quantities back. If an unrelated charge.refunded counted this return
       // towards a full refund meanwhile, the sale goes back to completed.
-      reportError("sale.refund_stripe", e, { shopId, saleId, returnId });
       await db.batch([
         db.prepare("DELETE FROM sale_return_items WHERE return_id = ?").bind(returnId),
         db.prepare("DELETE FROM sale_returns WHERE id = ?").bind(returnId),
@@ -653,7 +697,10 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
           .bind(saleId),
         ...releaseClaims(),
       ]);
-      return c.json({ success: false, error: e instanceof Error ? e.message : "Stripe refund failed" }, 502);
+      return c.json(
+        { success: false, error: stripeError instanceof Error ? stripeError.message : "Stripe refund failed" },
+        502
+      );
     }
 
     // Stripe accepted the refund: stamp its id and restock. The money and its
@@ -773,117 +820,5 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
     throw e;
   }
 });
-
-/** The sale fields that decide whether it can still be voided. */
-interface VoidableSale {
-  status: string;
-  tender_type: string;
-  refunded_pence: number;
-}
-
-/**
- * Why this sale can no longer be voided, or null when it can. A void reverses
- * the whole sale (stock, tender, ledger), so it is only for a sale whose money
- * never moved: a pending one, or a completed record-only one with nothing
- * refunded. A paid Stripe sale is refunded, never voided. The same rule is
- * the guard in voidSale's flip, so the pre-check and the write agree.
- */
-function voidRefusal(sale: VoidableSale): string | null {
-  if (sale.status === "voided") return "Sale already voided";
-  if (sale.status === "refunded" || Number(sale.refunded_pence) > 0) return "Refunded sales cannot be voided";
-  if (sale.status === "completed" && sale.tender_type === "stripe") {
-    // Money already moved: that is a refund (Stripe dashboard → the
-    // charge.refunded webhook flips the sale), not a void.
-    return "Paid Stripe sales must be refunded via Stripe, not voided";
-  }
-  if (sale.status === "pending" || sale.status === "completed") return null;
-  return "This sale cannot be voided";
-}
-
-/**
- * Void = the sale never effectively happened: mark it (and its tender/ledger
- * rows) voided and put decremented stock back with reversing movements, all
- * in ONE batch, so the flip and the reversal commit together or not at all.
- *
- * The flip is the guard. It writes NULL into the NOT NULL sales.status
- * (migration 035) unless the sale is still voidable (the voidRefusal rule),
- * which makes D1 roll the whole batch back. That makes it card-aware: a
- * pending Stripe sale that settled meanwhile is no longer voidable. On a
- * thrown batch a fresh read tells a lost race (claimed false) from a real
- * failure (rethrown).
- */
-async function voidSale(
-  db: Env["DB"],
-  shopId: string,
-  saleId: string,
-  note: string | null
-): Promise<{ claimed: boolean; before: string | null }> {
-  // Movements are written when the sale is rung, never later, so reading them
-  // before the batch is safe. Every statement is shop-scoped.
-  const movements = await db
-    .prepare(
-      `SELECT product_id, variant_id, quantity_delta, unit_cost_pence, staff_id
-       FROM stock_movements WHERE shop_id = ? AND reference_type = 'sale' AND reference_id = ?`
-    )
-    .bind(shopId, saleId)
-    .all();
-
-  // The status read precedes the flip in the same batch, so `before` is the
-  // status the flip actually found, not an earlier pre-read.
-  const stmts = [
-    db.prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ?").bind(saleId, shopId),
-    db
-      .prepare(
-        `UPDATE sales SET status = CASE
-           WHEN (status = 'pending' OR (status = 'completed' AND tender_type != 'stripe')) AND refunded_pence = 0
-           THEN 'voided' ELSE NULL END
-         WHERE id = ? AND shop_id = ?`
-      )
-      .bind(saleId, shopId),
-    db.prepare("UPDATE bw_transactions SET status = 'voided' WHERE sale_id = ? AND shop_id = ?").bind(saleId, shopId),
-    db
-      .prepare("UPDATE bw_commission_ledger SET status = 'voided' WHERE sale_id = ? AND shop_id = ?")
-      .bind(saleId, shopId),
-  ];
-  for (const m of d1Rows<{
-    product_id: string;
-    variant_id: string | null;
-    quantity_delta: number;
-    unit_cost_pence: number | null;
-    staff_id: string | null;
-  }>(movements)) {
-    stmts.push(
-      ...stockMovementStatements(db, {
-        shopId,
-        productId: m.product_id,
-        variantId: m.variant_id,
-        type: "adjustment",
-        quantityDelta: -m.quantity_delta,
-        unitCostPence: m.unit_cost_pence,
-        referenceType: "void",
-        referenceId: saleId,
-        staffId: m.staff_id,
-        note: note ?? "Sale voided",
-      })
-    );
-  }
-
-  let read: D1Result | undefined;
-  try {
-    [read] = await db.batch(stmts);
-  } catch (err) {
-    const now = await db
-      .prepare("SELECT status, tender_type, refunded_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
-      .bind(saleId, shopId)
-      .first<VoidableSale>();
-    if (now && voidRefusal(now) !== null) return { claimed: false, before: now.status };
-    throw err;
-  }
-  const before = ((read?.results?.[0] as { status?: string } | undefined)?.status ?? null) as string | null;
-  // No row in this shop: the flip matched nothing and every other statement
-  // is scoped to the same sale and shop, so nothing changed.
-  if (before === null) return { claimed: false, before: null };
-  return { claimed: true, before };
-}
 
 export default r;

@@ -25,6 +25,7 @@ import { AuditWriteError } from "@repo/audit";
 import type { Env } from "../types.js";
 import { auditFor, auditRefused, statusOutcome, SYSTEM_ACTOR } from "../audit/context.js";
 import { createRefund, isStripeErrorCode, verifyStripeSignature } from "../lib/stripe.js";
+import { voidSale } from "../lib/sale-void.js";
 import { runBookingSideEffects } from "../services/booking-side-effects.js";
 import { reportError } from "../services/report-error.js";
 
@@ -840,6 +841,31 @@ r.post("/stripe", async (c) => {
           // event can never cancel a booking whose money actually arrived.
           const sessionId = String(obj.id ?? "");
           const metadata = (obj.metadata ?? {}) as Record<string, unknown>;
+
+          // A till sale's QR page lapsed unpaid: it can never be paid now, so
+          // its pending sale is voided and the claimed stock goes back. The
+          // sale must still be pending on THIS session; voidSale's guarded
+          // batch makes a sale paid or voided meanwhile a no-op.
+          if (sessionId && metadata.type === "sale" && typeof metadata.saleId === "string") {
+            const sale = await db
+              .prepare(
+                "SELECT id, shop_id FROM sales WHERE id = ? AND stripe_checkout_session_id = ? AND status = 'pending' LIMIT 1",
+              )
+              .bind(metadata.saleId, sessionId)
+              .first<{ id: string; shop_id: string }>();
+            if (sale) {
+              audit.shopId = sale.shop_id;
+              audit.entityType = "sale";
+              audit.entityId = sale.id;
+              audit.details.resolved = true;
+              const voided = await voidSale(db, sale.shop_id, sale.id, "Checkout expired unpaid");
+              if (voided.claimed) {
+                audit.changes = { status: [voided.before, "voided"] };
+              }
+            }
+            break;
+          }
+
           const bookingId =
             typeof metadata.bookingId === "string" ? metadata.bookingId : null;
           if (!sessionId || !bookingId || metadata.type !== "booking_deposit")
