@@ -612,6 +612,33 @@ describe("/api/audit origin_name (Plan 4 Task 9)", () => {
     expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
   });
 
+  async function seedNamelessSubject(id: string, email: string, redactedAt: string | null) {
+    await E.DB.prepare(
+      "INSERT INTO audit_subjects (id, kind, user_id, display_name, email, created_at, redacted_at) VALUES (?, 'user', ?, NULL, ?, ?, ?)"
+    ).bind(id, id, email, new Date().toISOString(), redactedAt).run();
+  }
+
+  it("an origin with no display name is labelled by its email, like the actor", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedNamelessSubject(ref, "nameless.owner@example.test", null);
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: "nameless.owner@example.test", origin_redacted: false });
+  });
+
+  it("a redacted origin with no display name never shows its email", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedNamelessSubject(ref, "gone.owner@example.test", new Date().toISOString());
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { text, entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: true });
+    expect(text).not.toContain("gone.owner@example.test");
+  });
+
   it("malformed details_json does not fail the page", async () => {
     const { token } = await dev();
     const rid = `origin-${crypto.randomUUID()}`;

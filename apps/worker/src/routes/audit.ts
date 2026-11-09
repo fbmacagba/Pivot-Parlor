@@ -96,7 +96,7 @@ function filters(c: Ctx): Filters {
 }
 
 const SELECT = `SELECT l.*, a.display_name AS actor_name, a.email AS actor_email, a.redacted_at AS actor_redacted_at, ip.ip AS ip,
-  CASE WHEN o.redacted_at IS NULL THEN o.display_name END AS origin_name, o.redacted_at AS origin_redacted_at
+  CASE WHEN o.redacted_at IS NULL THEN COALESCE(o.display_name, o.email) END AS origin_name, o.redacted_at AS origin_redacted_at
   FROM audit_log l
   LEFT JOIN audit_subjects a ON a.id = l.actor_ref
   LEFT JOIN audit_subjects ip ON ip.id = l.ip_ref
