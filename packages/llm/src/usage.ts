@@ -87,14 +87,15 @@ export interface AiUsageRecord {
 }
 
 /**
- * Writes one cost-log row. Never throws: a cost-log failure is logged and must
- * not fail the site generation that made the call.
+ * Writes one cost-log row and returns the cost it wrote (null when unpriced,
+ * when there is no usage, or when the insert failed). Never throws: a cost-log
+ * failure is logged and must not fail the site generation that made the call.
  */
 export async function recordAiUsage(
   env: { DB: UsageDb; KV: UsageKv },
   record: AiUsageRecord,
   log: (message: string, err?: unknown) => void = (message, err) => console.error(message, err ?? "")
-): Promise<void> {
+): Promise<UsageCost | null> {
   try {
     const input = record.usage?.inputTokens ?? 0;
     const output = record.usage?.outputTokens ?? 0;
@@ -124,7 +125,9 @@ export async function recordAiUsage(
         record.jobId
       )
       .run();
+    return cost;
   } catch (err) {
     log(`[ai-usage] could not record usage for ${record.workerName} job=${record.jobId ?? "-"}`, err);
+    return null;
   }
 }
