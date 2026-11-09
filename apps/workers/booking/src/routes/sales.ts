@@ -232,6 +232,10 @@ r.post("/:shopId/sales", async (c) => {
         successUrl: body.success_url!,
         cancelUrl: body.cancel_url!,
         idempotencyKey: `sale:${saleId}`,
+        // The customer pays at the counter, so the QR page need not outlive
+        // the visit: Stripe's default is 24 hours. Stripe's minimum is 30
+        // minutes from creation; 31 keeps clock skew safe.
+        expiresAtEpochS: Math.floor(Date.now() / 1000) + 31 * 60,
       });
       paymentUrl = session.url;
       await db.batch([

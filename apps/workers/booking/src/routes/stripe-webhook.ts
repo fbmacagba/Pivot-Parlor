@@ -145,19 +145,94 @@ async function settleSale(
     )
     .bind(piId, saleId)
     .run();
+  // The sale's own money only: a pending refund tx and its negative ledger
+  // reversal belong to a till refund awaiting charge.refunded, and a
+  // redelivered payment_intent.succeeded must never mark them settled.
   await db
     .prepare(
-      "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE sale_id = ? AND status = 'pending'",
+      "UPDATE bw_transactions SET status = 'captured', stripe_id = ? WHERE sale_id = ? AND status = 'pending' AND type != 'refund'",
     )
     .bind(piId, saleId)
     .run();
   await db
     .prepare(
-      "UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending'",
+      "UPDATE bw_commission_ledger SET status = 'transferred' WHERE sale_id = ? AND status = 'pending' AND commission_amount_pence >= 0",
     )
     .bind(saleId)
     .run();
   return { flipped: (flip.meta?.changes ?? 0) === 1 };
+}
+
+/**
+ * Refund a payment that landed on a voided till sale. Void means the sale
+ * never happened (a void is refused once the money moved), so the payment is
+ * owed back in full. Same shape as refundOwedDeposit: the debt is recorded
+ * first, as a pending refund tx with no Stripe id, together with the PI that
+ * paid (so charge.refunded can find the sale); then the refund is sent and
+ * its id stamped. Every step is safe to repeat, and a charge Stripe says is
+ * already refunded counts as done.
+ *
+ * Both the record and the lookup require the sale to be voided: a completed
+ * sale's pending refund tx with no Stripe id is a till refund in flight, and
+ * is never touched here.
+ */
+async function refundOwedSale(
+  secret: string,
+  db: Env["DB"],
+  saleId: string,
+  piId: string,
+  details: Record<string, unknown>,
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
+         SELECT ?, NULL, s.id, s.shop_id, 'refund', t.amount_pence, 'pending', NULL
+           FROM sales s
+           JOIN bw_transactions t ON t.sale_id = s.id AND t.type = 'sale'
+          WHERE s.id = ? AND s.status = 'voided' AND s.tender_type = 'stripe' AND t.amount_pence > 0
+            AND (s.stripe_payment_intent_id IS NULL OR s.stripe_payment_intent_id = ?)
+            AND NOT EXISTS (SELECT 1 FROM bw_transactions r WHERE r.sale_id = s.id AND r.type = 'refund')
+          LIMIT 1`,
+      )
+      .bind(crypto.randomUUID(), saleId, piId),
+    db
+      .prepare(
+        "UPDATE sales SET stripe_payment_intent_id = ? WHERE id = ? AND status = 'voided' AND stripe_payment_intent_id IS NULL",
+      )
+      .bind(piId, saleId),
+  ]);
+  const owed = await db
+    .prepare(
+      `SELECT r.id, r.shop_id, r.amount_pence FROM bw_transactions r
+         JOIN sales s ON s.id = r.sale_id AND s.status = 'voided'
+        WHERE r.sale_id = ? AND r.type = 'refund' AND r.stripe_id IS NULL AND r.status = 'pending'
+        LIMIT 1`,
+    )
+    .bind(saleId)
+    .first<{ id: string; shop_id: string; amount_pence: number }>();
+  if (!owed) return;
+  details.sale_refund_owed = true;
+  let refundId: string | null = null;
+  try {
+    const refund = await createRefund({
+      secret,
+      paymentIntentId: piId,
+      amountPence: Number(owed.amount_pence),
+      metadata: { shopId: owed.shop_id, saleId, type: "void_refund" },
+      idempotencyKey: `void-refund:${saleId}`,
+    });
+    refundId = refund.id;
+  } catch (err) {
+    if (!isStripeErrorCode(err, "charge_already_refunded")) throw err;
+  }
+  if (refundId) {
+    await db
+      .prepare("UPDATE bw_transactions SET stripe_id = ? WHERE id = ? AND stripe_id IS NULL")
+      .bind(refundId, owed.id)
+      .run();
+  }
+  details.sale_refunded = true;
 }
 
 async function setSaleStatus(db: Env["DB"], saleId: string, status: string) {
@@ -326,6 +401,14 @@ r.post("/stripe", async (c) => {
                 audit.changes = { status: ["pending", "completed"] };
               }
             }
+            // Not settled by this delivery: either already completed (a
+            // redelivery) or voided before the customer paid. Only the
+            // voided case is owed back; refundOwedSale checks which. It runs
+            // after the attribution above, so a failed refund's entry still
+            // names its sale.
+            if (!settled.flipped) {
+              await refundOwedSale(c.env.STRIPE_SECRET_KEY, db, saleId, piId, audit.details);
+            }
           }
           const bookingId =
             marked.bookingId ??
@@ -489,6 +572,39 @@ r.post("/stripe", async (c) => {
             )
             .bind(piId)
             .first<{ booking_id: string | null; sale_id: string | null }>();
+
+          // A voided sale is out of the books. The refund of a payment that
+          // landed on it (refundOwedSale) books nothing: no return, no
+          // refunded_pence, no status change; it only completes that refund's
+          // record. The sale is found by its tx, or, when no money tx carries
+          // this PI (a voided sale's tx keeps its session id), by the PI that
+          // paid it. A booking's money tx skips the lookup.
+          const voidedSale = origin?.sale_id
+            ? await db
+                .prepare("SELECT id, shop_id FROM sales WHERE id = ? AND status = 'voided' LIMIT 1")
+                .bind(origin.sale_id)
+                .first<{ id: string; shop_id: string }>()
+            : !origin
+              ? await db
+                  .prepare(
+                    "SELECT id, shop_id FROM sales WHERE stripe_payment_intent_id = ? AND status = 'voided' LIMIT 1",
+                  )
+                  .bind(piId)
+                  .first<{ id: string; shop_id: string }>()
+              : null;
+          if (voidedSale) {
+            audit.shopId = voidedSale.shop_id;
+            audit.entityType = "sale";
+            audit.entityId = voidedSale.id;
+            audit.details.resolved = true;
+            await db
+              .prepare(
+                "UPDATE bw_transactions SET status = 'completed' WHERE sale_id = ? AND type = 'refund' AND status = 'pending'",
+              )
+              .bind(voidedSale.id)
+              .run();
+            break;
+          }
 
           if (origin?.sale_id) {
             const saleId = origin.sale_id;
