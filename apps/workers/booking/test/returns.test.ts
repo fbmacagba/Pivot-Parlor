@@ -712,7 +712,7 @@ describe("Stripe refunds", () => {
 
   /** Stripe answers the refund create with `createStatus`; the refund list
    *  (GET /v1/refunds) holds the refund the create carried when `madeIt`. */
-  function stripeAnswers(createStatus: number, madeIt: boolean | "down") {
+  function stripeAnswers(createStatus: number | "network", madeIt: boolean | "down") {
     const calls: string[] = [];
     let createdReturnId = "";
     const real = globalThis.fetch;
@@ -723,6 +723,7 @@ describe("Stripe refunds", () => {
       calls.push(`${method} ${new URL(url).pathname}`);
       if (method === "POST") {
         createdReturnId = new URLSearchParams(String(init?.body ?? "")).get("metadata[returnId]") ?? "";
+        if (createStatus === "network") throw new TypeError("Network connection lost.");
         return Response.json({ error: { message: "stripe trouble" } }, { status: createStatus });
       }
       if (madeIt === "down") return Response.json({ error: { message: "stripe down" } }, { status: 503 });
@@ -748,6 +749,27 @@ describe("Stripe refunds", () => {
       expect(ret).toEqual({ status: "pending", stripe_refund_id: "re_made_it" });
       expect(await refundRows(saleId)).toMatchObject({ returns: 1, refund_txs: 1, refunded_pence: 1000 });
       expect(await stockQty(shop, product)).toBe(4);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("a network failure whose refund went through anyway keeps the refund and the claim", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await settledStripeSale(shop, staff, service, product, token);
+    try {
+      const calls = stripeAnswers("network", true);
+      const res = await refundOne(shop, saleId, productItem, token);
+      expect(calls).toEqual(["POST /v1/refunds", "GET /v1/refunds"]);
+      expect(res.status).toBe(200);
+      const ret = await env.DB.prepare("SELECT stripe_refund_id FROM sale_returns WHERE sale_id = ?")
+        .bind(saleId)
+        .first();
+      expect(ret).toEqual({ stripe_refund_id: "re_made_it" });
+      const item = await env.DB.prepare("SELECT returned_quantity AS q FROM sale_items WHERE id = ?")
+        .bind(productItem)
+        .first<{ q: number }>();
+      expect(item?.q).toBe(1);
     } finally {
       vi.restoreAllMocks();
     }
