@@ -46,7 +46,13 @@ export function auditAiCall<T>(
     },
     fn,
     (r) => {
-      const m = measure(r);
+      let m: AiCallMeasure;
+      try {
+        m = measure(r);
+      } catch {
+        // The call already ran and was paid for: record that, never the thrown message.
+        return { details: { purpose: meta.purpose, model: meta.model, origin_actor_ref, measure_failed: true } };
+      }
       return {
         details: {
           purpose: meta.purpose,
@@ -103,12 +109,13 @@ export async function finishJobStatements(
     entityType: "shop",
     entityId: job.shopId,
     changes: job.changes ?? null,
+    // Caller details first: the authoritative keys always win.
     details: {
+      ...job.details,
       job_id: job.jobId,
       stage: job.stage,
       result: job.status,
       origin_actor_ref: originActorRef(job.origin),
-      ...job.details,
     },
   });
   return [update, ...entry];

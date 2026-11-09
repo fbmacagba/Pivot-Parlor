@@ -96,6 +96,23 @@ describe("auditAiCall", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
+  it("a measure that throws still records a succeeded outcome and returns the result", async () => {
+    const fake = fakeAuditDb();
+    const out = await auditAiCall(recorderOver(fake), META, async () => "paid", () => {
+      throw new Error("no usage: secret provider body");
+    });
+    expect(out).toBe("paid");
+    expect(fake.rows).toHaveLength(2);
+    expect(fake.rows[1]).toMatchObject({ phase: "outcome", outcome: "succeeded" });
+    expect(details(fake.rows[1]!)).toEqual({
+      purpose: "research",
+      model: "openai-api/gpt-x",
+      origin_actor_ref: "subj_user_abc-1",
+      measure_failed: true,
+    });
+    expect(JSON.stringify(fake.rows)).not.toContain("secret provider body");
+  });
+
   it("records a failed outcome and rethrows when the call throws", async () => {
     const fake = fakeAuditDb();
     const boom = Object.assign(new Error("secret provider body"), { name: "LlmError", status: 502 });
@@ -159,6 +176,24 @@ describe("finishJobStatements", () => {
     expect(JSON.stringify(fake.rows)).not.toContain("secret provider body");
     const update = (stmts[0] as unknown as { args: unknown[] }).args;
     expect(update).toContain("model call failed: secret provider body");
+  });
+
+  it("caller details cannot override the completion's authoritative keys", async () => {
+    const fake = fakeAuditDb();
+    const stmts = await finishJobStatements(fake.db, recorderOver(fake), {
+      ...JOB,
+      status: "failed",
+      reason: "crash",
+      details: { origin_actor_ref: "forged", job_id: "other", stage: "x", result: "complete", note: "kept" },
+    });
+    await fake.db.batch(stmts);
+    expect(details(fake.rows[0]!)).toEqual({
+      job_id: "job-1",
+      stage: "assemble",
+      result: "failed",
+      origin_actor_ref: "subj_user_abc-1",
+      note: "kept",
+    });
   });
 
   it("merges extra details into the entry", async () => {
