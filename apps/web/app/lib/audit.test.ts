@@ -9,6 +9,7 @@ import {
   escapeHtml,
   formatAuditDate,
   formatAuditDateTime,
+  pipelineActorLabel,
 } from "./audit";
 
 describe("audit page helpers", () => {
@@ -74,5 +75,21 @@ describe("audit page helpers", () => {
     const html = auditExportErrorHtml("<script>alert(1)</script>");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+});
+
+describe("pipelineActorLabel", () => {
+  it("names who started a system entry", () => {
+    expect(pipelineActorLabel({ actor_type: "system", origin_name: "Sam Example", origin_redacted: false })).toBe("System, started by Sam Example");
+  });
+  it("never names a redacted origin", () => {
+    expect(pipelineActorLabel({ actor_type: "system", origin_name: null, origin_redacted: true })).toBe("System, started by Redacted");
+  });
+  it("labels a system entry with no origin plainly", () => {
+    expect(pipelineActorLabel({ actor_type: "system" })).toBe("System");
+    expect(pipelineActorLabel({ actor_type: "system", origin_name: null, origin_redacted: false })).toBe("System");
+  });
+  it("leaves non-system rows to the page's own label", () => {
+    expect(pipelineActorLabel({ actor_type: "user", origin_name: "Sam Example" })).toBeNull();
   });
 });

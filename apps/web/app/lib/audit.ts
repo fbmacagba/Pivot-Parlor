@@ -130,6 +130,21 @@ const LABELS: Record<string, string> = {
   "platform.alert.resolve": "Platform alert resolved",
 };
 
+/** Who a pipeline (system) entry is attributed to. The research, text, images
+ *  and assembler workers write as the system, carrying the person who started
+ *  the action as `origin_name`; a redacted origin is never named. Null for a
+ *  non-system row, so the page keeps its own label for those. */
+export function pipelineActorLabel(entry: {
+  actor_type: string;
+  origin_name?: string | null;
+  origin_redacted?: boolean;
+}): string | null {
+  if (entry.actor_type !== "system") return null;
+  if (entry.origin_name) return `System, started by ${entry.origin_name}`;
+  if (entry.origin_redacted) return "System, started by Redacted";
+  return "System";
+}
+
 export function actionLabel(action: string): string {
   return LABELS[action] ?? action;
 }

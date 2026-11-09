@@ -2,6 +2,15 @@
  * pivot-parlor-images — Consumes site-images-queue: OpenRouter images → R2 → KV gen:{jobId}:images → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue, R2Bucket } from "@cloudflare/workers-types";
+import {
+  AuditWriteError,
+  auditAiCall,
+  FAILED_JOB_FALLBACK_SQL,
+  finishJob,
+  originActorRef,
+  queueAudit,
+  type AuditRecorder,
+} from "@repo/audit";
 
 export interface Env {
   ASSETS: R2Bucket;
@@ -19,6 +28,8 @@ export interface StageMessage {
   shopSlug: string;
   image_model?: string;
   skip_images?: boolean;
+  /** Who clicked Regenerate (`subj_user_<id>`). Absent on messages from before the audit trail. */
+  origin_actor_ref?: string | null;
 }
 
 interface ResearchSpecShape {
@@ -37,6 +48,8 @@ interface GenResearchKvPayload {
   template: string;
   text_model?: string;
   image_model?: string;
+  /** Who clicked Regenerate; research writes it, absent on older payloads. */
+  origin_actor_ref?: string | null;
 }
 
 interface ImagesKvPayload {
@@ -61,6 +74,23 @@ export function jobAssetName(jobId: string, slot: string): string {
 }
 
 const GALLERY_MAX = 3;
+
+const WORKER_NAME = "pivot-parlor-images";
+const AUDIT_REFUSED_ERROR = "Could not record this action; nothing was changed.";
+
+/** A model call that produced no image. Carries the HTTP status (when there was
+ *  one) so the audit reason reads "ImageGenerationError (HTTP 500)"; the provider
+ *  body stays on `result` and never enters the message. */
+export class ImageGenerationError extends Error {
+  readonly status?: number;
+  readonly result: ImageResult;
+  constructor(result: ImageResult) {
+    super("image generation failed");
+    this.name = "ImageGenerationError";
+    if (result.httpStatus > 0) this.status = result.httpStatus;
+    this.result = result;
+  }
+}
 
 const DEFAULT_IMAGE_MODEL = "google/gemini-3.1-flash-image";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -149,6 +179,13 @@ function extractDataImageUrlFromMessage(message: unknown): string | null {
   return null;
 }
 
+interface ImageResult {
+  buffer: ArrayBuffer | null;
+  httpStatus: number;
+  rawBody: string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
 async function openRouterGenerateImage(
   apiKey: string,
   model: string,
@@ -156,7 +193,7 @@ async function openRouterGenerateImage(
   aspectRatio: string,
   label: string,
   jobId: string
-): Promise<{ buffer: ArrayBuffer | null; httpStatus: number; rawBody: string }> {
+): Promise<ImageResult> {
   const promptPreview = prompt.slice(0, 100);
   console.log(
     `[${jobId}] [pivot-parlor-images] OpenRouter request ${label} model=${model} prompt[0:100]=${JSON.stringify(promptPreview)}`
@@ -209,18 +246,48 @@ async function openRouterGenerateImage(
     return { buffer: null, httpStatus: res.status, rawBody: text };
   }
 
+  const usage = (data as { usage?: ImageResult["usage"] } | null)?.usage;
   const message = (data as { choices?: Array<{ message?: unknown }> })?.choices?.[0]?.message;
   const dataUrl = extractDataImageUrlFromMessage(message);
   if (!dataUrl) {
     console.error(`[${jobId}] [pivot-parlor-images] ${label} no image in response`, text.slice(0, 4000));
-    return { buffer: null, httpStatus: res.status, rawBody: text };
+    return { buffer: null, httpStatus: res.status, rawBody: text, usage };
   }
 
   const buf = dataImageUrlToArrayBuffer(dataUrl);
   if (!buf || buf.byteLength === 0) {
-    return { buffer: null, httpStatus: res.status, rawBody: text };
+    return { buffer: null, httpStatus: res.status, rawBody: text, usage };
   }
-  return { buffer: buf, httpStatus: res.status, rawBody: text };
+  return { buffer: buf, httpStatus: res.status, rawBody: text, usage };
+}
+
+/** One audited model call. Throws ImageGenerationError when no image came back
+ *  (recorded as a failed outcome) and AuditWriteError when the trail refuses
+ *  the started write (the model is then never called). The R2 upload is the
+ *  caller's, outside this call. */
+async function auditedImage(
+  rec: AuditRecorder,
+  audit: { model: string; shopId: string; origin: string | null },
+  purpose: string,
+  call: () => Promise<ImageResult>
+): Promise<ImageResult> {
+  return auditAiCall(
+    rec,
+    { purpose, model: audit.model, shopId: audit.shopId, origin: audit.origin },
+    async () => {
+      const r = await call();
+      if (!r.buffer) throw new ImageGenerationError(r);
+      return r;
+    },
+    (r) => ({
+      model: audit.model,
+      route: "openrouter",
+      inputTokens: r.usage?.prompt_tokens ?? null,
+      outputTokens: r.usage?.completion_tokens ?? null,
+      costUsd: null,
+      costBasis: null,
+    })
+  );
 }
 
 async function uploadPng(bucket: R2Bucket, key: string, buf: ArrayBuffer): Promise<void> {
@@ -234,7 +301,14 @@ function parseStageMessage(body: unknown): StageMessage | null {
   const image_model =
     typeof o.image_model === "string" && o.image_model.trim() ? o.image_model.trim() : undefined;
   const skip_images = o.skip_images === true;
-  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, image_model, skip_images };
+  return {
+    jobId: o.jobId,
+    shopId: o.shopId,
+    shopSlug: o.shopSlug,
+    image_model,
+    skip_images,
+    origin_actor_ref: originActorRef(o.origin_actor_ref),
+  };
 }
 
 async function processOne(body: unknown, env: Env): Promise<void> {
@@ -245,6 +319,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   }
 
   const { jobId, shopSlug, shopId } = msg;
+  const rec = queueAudit(env.DB, WORKER_NAME, jobId);
+  // The message's origin wins; the research payload's fills in for older messages.
+  let origin: string | null = msg.origin_actor_ref ?? null;
   console.log(
     `[${jobId}] [pivot-parlor-images] message received jobId=${jobId} shopId=${shopId} shopSlug=${shopSlug} image_model=${msg.image_model ?? "(unset, will use KV or default)"} skip_images=${Boolean(msg.skip_images)}`
   );
@@ -278,7 +355,12 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       errors: [],
     };
     await env.KV.put(genImagesKey(jobId), JSON.stringify(imagesPayload), { expirationTtl: KV_TTL_SEC });
-    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+    await env.SITE_ASSEMBLE_QUEUE.send({
+      jobId: msg.jobId,
+      shopId: msg.shopId,
+      shopSlug: msg.shopSlug,
+      origin_actor_ref: origin,
+    });
     console.log(`[${jobId}] [pivot-parlor-images] skip_images: KV + site-assemble-queue`);
     return;
   }
@@ -297,7 +379,12 @@ async function processOne(body: unknown, env: Env): Promise<void> {
       errors: [{ step, detail }],
     };
     await env.KV.put(genImagesKey(jobId), JSON.stringify(empty), { expirationTtl: KV_TTL_SEC });
-    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+    await env.SITE_ASSEMBLE_QUEUE.send({
+      jobId: msg.jobId,
+      shopId: msg.shopId,
+      shopSlug: msg.shopSlug,
+      origin_actor_ref: origin,
+    });
   };
 
   const apiKey = env.OPENROUTER_API_KEY;
@@ -320,6 +407,9 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     await handOffWithoutImages("research_kv", "invalid research JSON");
     return;
   }
+
+  origin = origin ?? originActorRef(research.origin_actor_ref);
+  const audit = (model: string) => ({ model, shopId, origin });
 
   const resolvedImageModel =
     msg.image_model?.trim() || research.image_model?.trim() || DEFAULT_IMAGE_MODEL;
@@ -349,9 +439,23 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const prefix = `shops/${shopSlug}`;
   const errors: ImagesKvPayload["errors"] = [];
 
+  // One audited model call per image. A missing image is not a failed job: the
+  // ImageGenerationError is turned back into today's result so the caller records
+  // its `errors` entry. Anything else (AuditWriteError included) propagates.
+  const generate = async (purpose: string, prompt: string, aspect: string, label: string): Promise<ImageResult> => {
+    try {
+      return await auditedImage(rec, audit(resolvedImageModel), purpose, () =>
+        openRouterGenerateImage(apiKey, resolvedImageModel, prompt, aspect, label, jobId)
+      );
+    } catch (e) {
+      if (e instanceof ImageGenerationError) return e.result;
+      throw e;
+    }
+  };
+
   let heroUrl = "";
   if (heroPrompt.trim()) {
-    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, heroPrompt, "16:9", "hero", jobId);
+    const r = await generate("site_image_hero", heroPrompt, "16:9", "hero");
     if (r.buffer) {
       try {
         const name = jobAssetName(jobId, "hero");
@@ -391,7 +495,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   }
 
   if (!logoUrl && logoPrompt.trim()) {
-    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, logoPrompt, "1:1", "logo", jobId);
+    const r = await generate("site_image_logo", logoPrompt, "1:1", "logo");
     if (r.buffer) {
       try {
         const name = jobAssetName(jobId, "logo");
@@ -410,7 +514,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   const catalogUrls: string[] = [];
   for (let i = 0; i < catalogPrompts.length; i++) {
     const p = catalogPrompts[i]!;
-    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, p, "1:1", `catalog-${i}`, jobId);
+    const r = await generate(`site_image_catalog_${i}`, p, "1:1", `catalog-${i}`);
     const filename = jobAssetName(jobId, `catalog-${i}`);
     if (r.buffer) {
       try {
@@ -436,7 +540,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     .slice(0, GALLERY_MAX);
   const galleryUrls: string[] = [];
   for (let i = 0; i < galleryPrompts.length; i++) {
-    const r = await openRouterGenerateImage(apiKey, resolvedImageModel, galleryPrompts[i]!, "4:3", `gallery-${i}`, jobId);
+    const r = await generate(`site_image_gallery_${i}`, galleryPrompts[i]!, "4:3", `gallery-${i}`);
     const filename = jobAssetName(jobId, `gallery-${i}`);
     if (r.buffer) {
       try {
@@ -470,7 +574,12 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     console.log(
       `[${jobId}] [pivot-parlor-images] KV write gen:${jobId}:images success heroUrl=${heroUrl || "(empty)"} logoUrl=${logoUrl || "(empty)"} catalogUrls=${JSON.stringify(catalogUrls)}`
     );
-    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+    await env.SITE_ASSEMBLE_QUEUE.send({
+      jobId: msg.jobId,
+      shopId: msg.shopId,
+      shopSlug: msg.shopSlug,
+      origin_actor_ref: origin,
+    });
     console.log(`[${jobId}] [pivot-parlor-images] enqueued site-assemble-queue (immediately after KV)`);
   } catch (e) {
     console.error(`[${jobId}] [pivot-parlor-images] KV write gen:${jobId}:images FAILED`, e);
@@ -482,15 +591,23 @@ async function processOne(body: unknown, env: Env): Promise<void> {
  * An unexpected error still hands the assembler an explicit "no new images"
  * payload, the same degrade path as a missing key: the job finishes now and
  * keeps every published image, instead of the assembler polling 20 times,
- * 60 s apart, for a KV entry that will never appear. Images never fail a job.
+ * 60 s apart, for a KV entry that will never appear. Images never fail a job
+ * over a model or storage problem. The one exception is a refused audit write:
+ * publishing a site with no photos because the trail was down is wrong, so that
+ * ends the job as failed and assembles nothing.
  */
 export async function handOffAfterCrash(
-  env: Pick<Env, "KV" | "SITE_ASSEMBLE_QUEUE">,
+  env: Pick<Env, "KV" | "SITE_ASSEMBLE_QUEUE" | "DB">,
   body: unknown,
   e: unknown
 ): Promise<void> {
-  const b = (body ?? {}) as { jobId?: unknown; shopId?: unknown; shopSlug?: unknown };
+  const b = (body ?? {}) as { jobId?: unknown; shopId?: unknown; shopSlug?: unknown; origin_actor_ref?: unknown };
   if (typeof b.jobId !== "string" || typeof b.shopId !== "string" || typeof b.shopSlug !== "string") return;
+  const origin = originActorRef(b.origin_actor_ref);
+  if (e instanceof AuditWriteError) {
+    await failJob(env.DB, { jobId: b.jobId, shopId: b.shopId, origin });
+    return;
+  }
   const empty: ImagesKvPayload = {
     heroUrl: "",
     logoUrl: "",
@@ -501,9 +618,44 @@ export async function handOffAfterCrash(
   };
   try {
     await env.KV.put(genImagesKey(b.jobId), JSON.stringify(empty), { expirationTtl: KV_TTL_SEC });
-    await env.SITE_ASSEMBLE_QUEUE.send({ jobId: b.jobId, shopId: b.shopId, shopSlug: b.shopSlug });
+    await env.SITE_ASSEMBLE_QUEUE.send({
+      jobId: b.jobId,
+      shopId: b.shopId,
+      shopSlug: b.shopSlug,
+      origin_actor_ref: origin,
+    });
   } catch (handOffErr) {
     console.error(`[${b.jobId}] [pivot-parlor-images] could not hand off after a crash`, handOffErr);
+  }
+}
+
+/**
+ * End a job as failed with at most one completion entry. Never throws: if the
+ * entry cannot be written, fall back to the plain guarded failed write (the job
+ * must still end) and say so in the log.
+ */
+async function failJob(
+  db: D1Database,
+  job: { jobId: string; shopId: string; origin: string | null }
+): Promise<void> {
+  try {
+    await finishJob(db, queueAudit(db, WORKER_NAME, job.jobId), {
+      ...job,
+      status: "failed",
+      stage: "images",
+      error: AUDIT_REFUSED_ERROR,
+      reason: "audit_refused",
+    });
+  } catch (auditErr) {
+    console.error("[audit] job failed without its completion entry", job.jobId, auditErr);
+    try {
+      await db
+        .prepare(FAILED_JOB_FALLBACK_SQL)
+        .bind("images", AUDIT_REFUSED_ERROR, new Date().toISOString(), job.jobId)
+        .run();
+    } catch (persistErr) {
+      console.error(`[${job.jobId}] [pivot-parlor-images] could not record the failure`, persistErr);
+    }
   }
 }
 

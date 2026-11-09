@@ -10,6 +10,10 @@ export type ChatCallResult =
       /** Route-qualified id that actually answered (chosen model or the default rescue). */
       model: string;
       usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+      /** The route that was called, for the audit entry. */
+      route: string;
+      /** The provider's own counts, null when it sent none (usage above then reads 0). */
+      rawUsage: { inputTokens: number; outputTokens: number } | null;
     }
   | { ok: false };
 
@@ -59,6 +63,8 @@ export async function generateReply(
         content: r.text,
         model: modelId,
         usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens },
+        route: r.route,
+        rawUsage: r.usage ? { inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens } : null,
       };
     } catch (err) {
       console.warn(`[chatbot] ${modelId} failed: ${err instanceof Error ? err.message : String(err)}`);

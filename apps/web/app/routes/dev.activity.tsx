@@ -16,6 +16,7 @@ import {
   entryStatus,
   formatAuditDate,
   formatAuditDateTime,
+  pipelineActorLabel,
 } from "~/lib/audit";
 
 interface Entry {
@@ -33,6 +34,8 @@ interface Entry {
   actor_name: string | null;
   actor_email: string | null;
   redacted: boolean;
+  origin_name?: string | null;
+  origin_redacted?: boolean;
   ip: string | null;
   ip_ref: string | null;
   shop_id: string | null;
@@ -258,7 +261,7 @@ export default function DevActivity() {
         {entries.length === 0 && !error && <li className="text-white/60">No activity matches these filters.</li>}
         {entries.map((e) => {
           const status = entryStatus(e);
-          const who = e.redacted ? "Redacted" : e.actor_name ?? e.actor_email ?? (e.actor_type === "system" ? "System" : e.actor_type === "anonymous" ? "Visitor" : e.actor_type);
+          const who = e.redacted ? "Redacted" : pipelineActorLabel(e) ?? e.actor_name ?? e.actor_email ?? (e.actor_type === "system" ? "System" : e.actor_type === "anonymous" ? "Visitor" : e.actor_type);
           return (
             <li key={e.id} className="rounded-lg border border-white/10 bg-white/[0.02]">
               <details>

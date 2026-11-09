@@ -5,11 +5,17 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
     "typescript": "^5.9.2",
+    "vitest": "^4.1.8",
     "wrangler": "^4.74.0"
+  },
+  "dependencies": {
+    "@repo/audit": "*"
   }
 }

@@ -95,10 +95,12 @@ function filters(c: Ctx): Filters {
   return { where: where.length ? `WHERE ${where.join(" AND ")}` : "", binds, echo };
 }
 
-const SELECT = `SELECT l.*, a.display_name AS actor_name, a.email AS actor_email, a.redacted_at AS actor_redacted_at, ip.ip AS ip
+const SELECT = `SELECT l.*, a.display_name AS actor_name, a.email AS actor_email, a.redacted_at AS actor_redacted_at, ip.ip AS ip,
+  CASE WHEN o.redacted_at IS NULL THEN COALESCE(o.display_name, o.email) END AS origin_name, o.redacted_at AS origin_redacted_at
   FROM audit_log l
   LEFT JOIN audit_subjects a ON a.id = l.actor_ref
-  LEFT JOIN audit_subjects ip ON ip.id = l.ip_ref`;
+  LEFT JOIN audit_subjects ip ON ip.id = l.ip_ref
+  LEFT JOIN audit_subjects o ON o.id = CASE WHEN json_valid(l.details_json) THEN json_extract(l.details_json, '$.origin_actor_ref') END`;
 
 async function guarded<T>(c: Ctx, fn: () => Promise<T>): Promise<T | Response> {
   try {
@@ -134,9 +136,13 @@ audit.get("/", async (c) => {
     .bind(...binds, PAGE + 1)
     .all<Record<string, unknown>>();
   const list = rows.results ?? [];
-  const page: (Record<string, unknown> & { redacted: boolean })[] = list
+  const page: (Record<string, unknown> & { redacted: boolean; origin_redacted: boolean })[] = list
     .slice(0, PAGE)
-    .map((r) => ({ ...r, redacted: r.actor_redacted_at !== null && r.actor_redacted_at !== undefined }));
+    .map((r) => ({
+      ...r,
+      redacted: r.actor_redacted_at !== null && r.actor_redacted_at !== undefined,
+      origin_redacted: r.origin_redacted_at !== null && r.origin_redacted_at !== undefined,
+    }));
   const last = page[page.length - 1];
   return c.json({
     success: true,
@@ -369,12 +375,30 @@ function historicalIso(createdAt: unknown): string | null {
 // predates the audit trail, so this backfills each row once as a historical
 // ai.call entry attributed to the system (not the developer who happens to
 // trigger the backfill), keyed 'hist_<id>' so a re-run never re-imports.
+//
+// A usage row that already has a LIVE twin is never a candidate (Plan 4 final
+// review I1): since Plan 4, research, text and chatbot record each call as a
+// live ai.call AND an ai_usage_log row, and importing the row would add a
+// false, permanent "historical" duplicate. The twin is a live ai.call (any
+// phase: a started-only row still counts) from the SAME worker, so a row from
+// a worker that never recorded live (a partial deploy) still imports. Its
+// request id is the job id for the queue workers (queueAudit), and the
+// <uuid> of the chatbot's 'public-chat:<uuid>' job id (Ruling P13). l.request_id
+// is compared bare, so idx_audit_log_request serves the lookup. The exclusion
+// is in SQL, not a filter after the LIMIT, so `more` stays truthful.
+const IMPORT_CANDIDATES_SQL = `SELECT u.* FROM ai_usage_log u
+  WHERE NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.id = 'hist_' || u.id)
+    AND NOT EXISTS (
+      SELECT 1 FROM audit_log l
+      WHERE l.request_id = CASE WHEN u.job_id LIKE 'public-chat:%' THEN substr(u.job_id, 13) ELSE u.job_id END
+        AND l.worker = u.worker_name
+        AND l.action = 'ai.call'
+        AND l.historical = 0
+    )
+  ORDER BY u.created_at LIMIT 500`;
+
 audit.post("/import-historical", async (c) => {
-  const rows = (
-    await c.env.DB.prepare(
-      `SELECT u.* FROM ai_usage_log u WHERE NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.id = 'hist_' || u.id) ORDER BY u.created_at LIMIT 500`
-    ).all<Record<string, unknown>>()
-  ).results ?? [];
+  const rows = (await c.env.DB.prepare(IMPORT_CANDIDATES_SQL).all<Record<string, unknown>>()).results ?? [];
   const candidates: { row: Record<string, unknown>; iso: string }[] = [];
   let skipped = 0;
   for (const r of rows) {

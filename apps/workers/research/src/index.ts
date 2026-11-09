@@ -11,7 +11,16 @@ import {
   type DesignSpec,
   type ComposerId,
 } from "./design-spec";
-import { chatComplete, recordAiUsage, type ProviderKeys } from "@repo/llm";
+import { chatComplete, recordAiUsage, type ProviderKeys, type UsageCost } from "@repo/llm";
+import {
+  AuditWriteError,
+  auditAiCall,
+  FAILED_JOB_FALLBACK_SQL,
+  finishJob,
+  originActorRef,
+  queueAudit,
+  type AuditRecorder,
+} from "@repo/audit";
 import {
   alignServiceCopy,
   factSignals,
@@ -59,6 +68,8 @@ export interface ResearchQueueMessage {
   template?: string;
   /** Design Director (v3) composer selection — "seed" skips the AI design_spec prompt. */
   composer?: ComposerId;
+  /** Who clicked Regenerate (`subj_user_<id>`). Absent on messages from before the audit trail. */
+  origin_actor_ref?: string | null;
 }
 
 export interface ResearchSpec {
@@ -137,8 +148,11 @@ export interface GenResearchKvPayload {
   service_copy: Record<string, string>;
   /** The owner's own notes: a claim they wrote here may be published. */
   style_notes: string;
+  /** Who clicked Regenerate, carried to the later stages for their audit entries. */
+  origin_actor_ref: string | null;
 }
 
+const WORKER_NAME = "pivot-parlor-research";
 const KV_TTL_SEC = 3600;
 const genResearchKey = (jobId: string) => `gen:${jobId}:research`;
 const genImagesKey = (jobId: string) => `gen:${jobId}:images`;
@@ -239,7 +253,13 @@ async function updateGenerationJob(
     vals.push(patch.error);
   }
   vals.push(id);
-  await db.prepare(`UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  // Never reopen a finished job: a redelivered message must not reset it to running.
+  await db
+    .prepare(
+      `UPDATE generation_jobs SET ${sets.join(", ")} WHERE id = ? AND COALESCE(status, 'queued') NOT IN ('complete', 'failed')`
+    )
+    .bind(...vals)
+    .run();
 }
 
 function buildUserPrompt(msg: ResearchQueueMessage): string {
@@ -352,31 +372,50 @@ async function researchJson(
   system: string,
   user: string,
   effort: TextEffort | undefined,
-  costLog: { env: Pick<Env, "DB" | "KV">; shopId: string }
+  costLog: { env: Pick<Env, "DB" | "KV">; shopId: string },
+  audit: { rec: AuditRecorder; origin: string | null }
 ): Promise<string> {
-  const result = await chatComplete(
-    {
-      modelId: model,
-      system,
-      messages: [{ role: "user", content: user }],
-      effort,
-      maxTokens: 8000,
-      jsonOnly: true,
-      appTitle: "Pivot Parlor Research",
+  // The call and its cost-log write are one ai.call entry, so the outcome row
+  // reuses the cost that was just recorded. A refused started write throws
+  // AuditWriteError before the model is called.
+  const { result } = await auditAiCall(
+    audit.rec,
+    { purpose: "site_research", model, shopId: costLog.shopId, origin: audit.origin },
+    async () => {
+      const result = await chatComplete(
+        {
+          modelId: model,
+          system,
+          messages: [{ role: "user", content: user }],
+          effort,
+          maxTokens: 8000,
+          jsonOnly: true,
+          appTitle: "Pivot Parlor Research",
+        },
+        keys
+      );
+      console.log(
+        `[${jobId}] [pivot-parlor-research] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
+      );
+      const cost: UsageCost | null = await recordAiUsage(costLog.env, {
+        shopId: costLog.shopId,
+        workerName: WORKER_NAME,
+        modelId: model,
+        usageType: "site_research",
+        usage: result.usage,
+        jobId,
+      });
+      return { result, cost };
     },
-    keys
+    ({ result, cost }) => ({
+      model: result.model,
+      route: result.route,
+      inputTokens: result.usage?.inputTokens ?? null,
+      outputTokens: result.usage?.outputTokens ?? null,
+      costUsd: cost?.costUsd ?? null,
+      costBasis: cost?.basis ?? null,
+    })
   );
-  console.log(
-    `[${jobId}] [pivot-parlor-research] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
-  );
-  await recordAiUsage(costLog.env, {
-    shopId: costLog.shopId,
-    workerName: "pivot-parlor-research",
-    modelId: model,
-    usageType: "site_research",
-    usage: result.usage,
-    jobId,
-  });
   return result.text;
 }
 
@@ -535,6 +574,7 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
   const template =
     typeof o.template === "string" && o.template.trim() ? o.template.trim() : undefined;
   return {
+    origin_actor_ref: originActorRef(o.origin_actor_ref),
     jobId: o.jobId,
     shopId: o.shopId,
     shopName: o.shopName,
@@ -558,6 +598,43 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * End a job as failed with at most one completion entry. Never throws: if the
+ * entry cannot be written, fall back to the plain failed write (the job must
+ * still end) and say so in the log. The KV mirror follows the terminal write,
+ * and is skipped when another path had already finished the job.
+ */
+async function failJob(
+  env: Env,
+  rec: AuditRecorder,
+  input: ResearchQueueMessage,
+  error: string,
+  reason: string
+): Promise<void> {
+  const { jobId, shopId } = input;
+  try {
+    let result: "finished" | "already_finished" = "finished";
+    try {
+      result = await finishJob(env.DB, rec, {
+        jobId,
+        shopId,
+        status: "failed",
+        stage: "research",
+        error,
+        reason,
+        origin: input.origin_actor_ref ?? null,
+      });
+    } catch (auditErr) {
+      console.error("[audit] job failed without its completion entry", jobId, auditErr);
+      await env.DB.prepare(FAILED_JOB_FALLBACK_SQL).bind("research", error, new Date().toISOString(), jobId).run();
+    }
+    if (result === "already_finished") return;
+    await putJobKv(env.KV, jobId, { status: "failed", error, shopSlug: input.shopSlug });
+  } catch (persistErr) {
+    console.error("[pivot-parlor-research] Failed to persist job failure", persistErr);
+  }
+}
+
 async function processOneMessage(body: unknown, env: Env): Promise<void> {
   const input = parseInput(body);
   if (!input) {
@@ -566,15 +643,32 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
   }
 
   const { jobId, shopId } = input;
+  const origin = input.origin_actor_ref ?? null;
+  const rec = queueAudit(env.DB, WORKER_NAME, jobId);
+
+  // A redelivered message for a finished job does nothing: no model call, no
+  // send, no write (as the assembler does). Read before the API key check, so
+  // a finished job never gets a fresh completion entry from that path either.
+  // A failed read takes the crash path, so a D1 blip still ends the job
+  // (failJob's terminal write is guarded, so it is safe on an unknown status).
+  let jobRow: { status: string | null } | null;
+  try {
+    jobRow = await env.DB.prepare("SELECT status FROM generation_jobs WHERE id = ?")
+      .bind(jobId)
+      .first<{ status: string | null }>();
+  } catch (err) {
+    console.error(`[${jobId}] [pivot-parlor-research] Job failed`, err);
+    await failJob(env, rec, input, errorMessage(err), "crash");
+    return;
+  }
+  if (jobRow?.status === "complete" || jobRow?.status === "failed") {
+    console.log(`[${jobId}] [pivot-parlor-research] skip (job already ${jobRow.status})`);
+    return;
+  }
+
   const apiKey = env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    const msg = "OPENROUTER_API_KEY is not configured";
-    try {
-      await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
-      await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug: input.shopSlug });
-    } catch (e) {
-      console.error("[pivot-parlor-research] Failed to persist config error", e);
-    }
+    await failJob(env, rec, input, "OPENROUTER_API_KEY is not configured", "not_configured");
     return;
   }
 
@@ -614,8 +708,10 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       }
       let rawText: string;
       try {
-        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort, { env, shopId });
+        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort, { env, shopId }, { rec, origin });
       } catch (e) {
+        // A refused audit write ends the job; any other failure tries the next attempt.
+        if (e instanceof AuditWriteError) throw e;
         lastError = `model call failed: ${errorMessage(e)}`;
         console.warn(`[${jobId}] [pivot-parlor-research] attempt ${attempt}/${attempts.length} ${lastError}`);
         continue;
@@ -645,8 +741,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     if (!spec) {
       const err = `Research worker could not produce a valid spec after ${attempts.length} attempts (${lastError})`;
       console.error(`[${jobId}] [pivot-parlor-research] ${err}`);
-      await updateGenerationJob(env.DB, jobId, { status: "failed", error: err });
-      await putJobKv(env.KV, jobId, { status: "failed", error: err, shopSlug: input.shopSlug });
+      await failJob(env, rec, input, err, "no_valid_spec");
       return;
     }
 
@@ -696,6 +791,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       fact_signals: factSignals(input.business, input.services.length, input.shopType),
       service_copy: serviceCopy,
       style_notes: input.styleNotes.slice(0, 4000),
+      origin_actor_ref: origin,
       services: input.services.map((s) => ({
         name: s.name,
         price_gbp: s.price_gbp,
@@ -761,6 +857,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
         jobId,
         shopId,
         shopSlug: input.shopSlug,
+        origin_actor_ref: origin,
       });
       console.log(`[${jobId}] [pivot-parlor-research] skip_images: wrote ${genImagesKey(jobId)} + site-assemble-queue`);
     } else {
@@ -769,6 +866,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
         shopId,
         shopSlug: input.shopSlug,
         image_model: input.image_model,
+        origin_actor_ref: origin,
       });
       console.log(`[${jobId}] [pivot-parlor-research] enqueued site-images-queue`);
     }
@@ -779,16 +877,15 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       shopSlug: input.shopSlug,
       text_model: input.text_model,
       ...(input.text_effort ? { text_effort: input.text_effort } : {}),
+      origin_actor_ref: origin,
     });
     console.log(`[${jobId}] [pivot-parlor-research] enqueued site-text-queue`);
   } catch (err) {
-    const msg = errorMessage(err);
     console.error(`[${jobId}] [pivot-parlor-research] Job failed`, err);
-    try {
-      await updateGenerationJob(env.DB, jobId, { status: "failed", error: msg });
-      await putJobKv(env.KV, jobId, { status: "failed", error: msg, shopSlug: input.shopSlug });
-    } catch (persistErr) {
-      console.error("[pivot-parlor-research] Failed to persist job failure", persistErr);
+    if (err instanceof AuditWriteError) {
+      await failJob(env, rec, input, "Could not record this action; nothing was changed.", "audit_refused");
+    } else {
+      await failJob(env, rec, input, errorMessage(err), "crash");
     }
   }
 }

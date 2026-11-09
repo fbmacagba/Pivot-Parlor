@@ -10,6 +10,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@repo/audit": "*",
     "@repo/llm": "*",
     "hono": "^4.6.12"
   },

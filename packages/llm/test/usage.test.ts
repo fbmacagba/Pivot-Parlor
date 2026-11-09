@@ -114,12 +114,40 @@ describe("recordAiUsage", () => {
     expect(calls[0]!.values.slice(5, 10)).toEqual([3, 4, 7, 0, null]);
   });
 
+  it("returns the cost it wrote", async () => {
+    const { db, calls } = fakeDb();
+    const result = await recordAiUsage(
+      { DB: db, KV: kvWith({ [MODELS_KV_KEY]: JSON.stringify(LIST) }) },
+      { ...base, usage: { inputTokens: 10_000, outputTokens: 2_000 } }
+    );
+    expect(result).toEqual({ costUsd: 0.0018, basis: "live" });
+    expect(result?.costUsd).toBe(calls[0]!.values[8]);
+    expect(result?.basis).toBe(calls[0]!.values[9]);
+  });
+
+  it("returns null for an unpriced call", async () => {
+    const { db, calls } = fakeDb();
+    const result = await recordAiUsage({ DB: db, KV: kvWith({}) }, { ...base, usage: { inputTokens: 5, outputTokens: 5 } });
+    expect(result).toBeNull();
+    expect(calls[0]!.values.slice(8, 10)).toEqual([0, null]);
+  });
+
+  it("returns null when a priced call's insert fails", async () => {
+    const { db } = fakeDb(async () => { throw new Error("D1 unavailable"); });
+    const result = await recordAiUsage(
+      { DB: db, KV: kvWith({ [MODELS_KV_KEY]: JSON.stringify(LIST) }) },
+      { ...base, usage: { inputTokens: 10_000, outputTokens: 2_000 } },
+      vi.fn()
+    );
+    expect(result).toBeNull();
+  });
+
   it("never throws when the insert fails, and says so", async () => {
     const { db } = fakeDb(async () => { throw new Error("no such column: cost_basis"); });
     const log = vi.fn();
     await expect(
       recordAiUsage({ DB: db, KV: kvWith({}) }, { ...base, usage: { inputTokens: 1, outputTokens: 1 } }, log)
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
     expect(log).toHaveBeenCalledOnce();
     expect(log.mock.calls[0]![0]).toContain("could not record usage");
   });

@@ -2,7 +2,16 @@
  * pivot-parlor-text — Consumes site-text-queue: OpenRouter copy → KV gen:{jobId}:text → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
-import { chatComplete, recordAiUsage, type ProviderKeys } from "@repo/llm";
+import { chatComplete, recordAiUsage, type ProviderKeys, type UsageCost } from "@repo/llm";
+import {
+  AuditWriteError,
+  auditAiCall,
+  FAILED_JOB_FALLBACK_SQL,
+  finishJob,
+  originActorRef,
+  queueAudit,
+  type AuditRecorder,
+} from "@repo/audit";
 
 export interface Env {
   DB: D1Database;
@@ -24,6 +33,8 @@ export interface StageMessage {
   shopSlug: string;
   text_model?: string;
   text_effort?: TextEffort;
+  /** Who clicked Regenerate (`subj_user_<id>`). Absent on messages from before the audit trail. */
+  origin_actor_ref?: string | null;
 }
 
 interface GenResearchKvPayload {
@@ -46,6 +57,8 @@ interface GenResearchKvPayload {
   service_copy?: Record<string, string>;
   /** Owner-entered facts block (team, hours, area); absent on older payloads. */
   business?: unknown;
+  /** Who clicked Regenerate; research writes it, absent on older payloads. */
+  origin_actor_ref?: string | null;
 }
 
 export interface TextServiceOut {
@@ -70,6 +83,8 @@ export interface TextKvPayload {
   completedAt: string;
 }
 
+const WORKER_NAME = "pivot-parlor-text";
+const AUDIT_REFUSED_ERROR = "Could not record this action; nothing was changed.";
 const DEFAULT_TEXT_MODEL = "google/gemini-3.1-flash-lite-preview";
 const KV_TTL_SEC = 3600;
 
@@ -88,7 +103,14 @@ function parseStageMessage(body: unknown): StageMessage | null {
     o.text_effort === "low" || o.text_effort === "medium" || o.text_effort === "high"
       ? o.text_effort
       : undefined;
-  return { jobId: o.jobId, shopId: o.shopId, shopSlug: o.shopSlug, text_model, text_effort };
+  return {
+    jobId: o.jobId,
+    shopId: o.shopId,
+    shopSlug: o.shopSlug,
+    text_model,
+    text_effort,
+    origin_actor_ref: originActorRef(o.origin_actor_ref),
+  };
 }
 
 /** One JSON-only completion through the shared client (HTTP retries and the
@@ -101,31 +123,50 @@ async function textJson(
   system: string,
   user: string,
   effort: TextEffort | undefined,
-  costLog: { env: Pick<Env, "DB" | "KV">; shopId: string }
+  costLog: { env: Pick<Env, "DB" | "KV">; shopId: string },
+  audit: { rec: AuditRecorder; origin: string | null }
 ): Promise<string> {
-  const result = await chatComplete(
-    {
-      modelId: model,
-      system,
-      messages: [{ role: "user", content: user }],
-      effort,
-      maxTokens: 8000,
-      jsonOnly: true,
-      appTitle: "Pivot Parlor Text",
+  // The call and its cost-log write are one ai.call entry, so the outcome row
+  // reuses the cost just recorded. A refused started write throws
+  // AuditWriteError before the model is called.
+  const { result } = await auditAiCall(
+    audit.rec,
+    { purpose: "site_text", model, shopId: costLog.shopId, origin: audit.origin },
+    async () => {
+      const result = await chatComplete(
+        {
+          modelId: model,
+          system,
+          messages: [{ role: "user", content: user }],
+          effort,
+          maxTokens: 8000,
+          jsonOnly: true,
+          appTitle: "Pivot Parlor Text",
+        },
+        keys
+      );
+      console.log(
+        `[${jobId}] [pivot-parlor-text] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
+      );
+      const cost: UsageCost | null = await recordAiUsage(costLog.env, {
+        shopId: costLog.shopId,
+        workerName: WORKER_NAME,
+        modelId: model,
+        usageType: "site_text",
+        usage: result.usage,
+        jobId,
+      });
+      return { result, cost };
     },
-    keys
+    ({ result, cost }) => ({
+      model: result.model,
+      route: result.route,
+      inputTokens: result.usage?.inputTokens ?? null,
+      outputTokens: result.usage?.outputTokens ?? null,
+      costUsd: cost?.costUsd ?? null,
+      costBasis: cost?.basis ?? null,
+    })
   );
-  console.log(
-    `[${jobId}] [pivot-parlor-text] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
-  );
-  await recordAiUsage(costLog.env, {
-    shopId: costLog.shopId,
-    workerName: "pivot-parlor-text",
-    modelId: model,
-    usageType: "site_text",
-    usage: result.usage,
-    jobId,
-  });
   return result.text;
 }
 
@@ -224,6 +265,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     return;
   }
   const { jobId } = msg;
+  const rec = queueAudit(env.DB, WORKER_NAME, jobId);
 
   const researchRaw = await env.KV.get(genResearchKey(jobId));
   let research: GenResearchKvPayload | null = null;
@@ -237,11 +279,11 @@ async function processOne(body: unknown, env: Env): Promise<void> {
     // assembler to poll for text for 20 minutes. The published site is untouched.
     const err = `text: research output ${researchRaw ? "unreadable" : "missing"} (gen:${jobId}:research)`;
     console.error(`[${jobId}] [pivot-parlor-text] ${err}`);
-    await env.DB.prepare("UPDATE generation_jobs SET status = 'failed', stage = 'text', error = ?, updated_at = ? WHERE id = ?")
-      .bind(err, new Date().toISOString(), jobId)
-      .run();
+    await failJob(env, rec, { jobId, shopId: msg.shopId, origin: msg.origin_actor_ref ?? null }, err, "missing_research");
     return;
   }
+  // Who clicked Regenerate: the message first, then the copy research kept.
+  const origin = msg.origin_actor_ref ?? originActorRef(research.origin_actor_ref);
 
   const apiKey = env.OPENROUTER_API_KEY;
   const keys: ProviderKeys = {
@@ -303,7 +345,7 @@ Return JSON:
       console.warn(`[${jobId}] [pivot-parlor-text] ${textModel} failed, falling back to default model ${model}`);
     }
     try {
-      const raw = await textJson(jobId, keys, model, system, user, effort, { env, shopId: msg.shopId });
+      const raw = await textJson(jobId, keys, model, system, user, effort, { env, shopId: msg.shopId }, { rec, origin });
       const parsed: unknown = JSON.parse(raw);
       if (validateTextOut(parsed)) {
         parsed.services = servicesFromSource(research, parsed.services);
@@ -314,6 +356,8 @@ Return JSON:
       }
       break; // a reply came back; an invalid one is not retried on another model
     } catch (e) {
+      // A refused audit write ends the job; any other failure tries the next model.
+      if (e instanceof AuditWriteError) throw e;
       console.error(`[${jobId}] [pivot-parlor-text] model call failed (model=${model})`, e);
     }
   }
@@ -335,7 +379,7 @@ Return JSON:
     `[${jobId}] [pivot-parlor-text] wrote KV ${genTextKey(jobId)} services=${payload.services.length} headline="${payload.headline.slice(0, 40)}..."`
   );
 
-  await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug });
+  await env.SITE_ASSEMBLE_QUEUE.send({ jobId: msg.jobId, shopId: msg.shopId, shopSlug: msg.shopSlug, origin_actor_ref: origin });
   console.log(`[${jobId}] [pivot-parlor-text] enqueued site-assemble-queue`);
 }
 
@@ -346,15 +390,49 @@ Return JSON:
  * exits on its next attempt and the published site is untouched.
  */
 export async function failJobAfterCrash(env: Pick<Env, "DB">, body: unknown, e: unknown): Promise<void> {
-  const jobId = (body as { jobId?: unknown } | null)?.jobId;
+  const raw = (body ?? {}) as { jobId?: unknown; shopId?: unknown; origin_actor_ref?: unknown };
+  const jobId = raw.jobId;
   if (typeof jobId !== "string" || !jobId) return;
-  const err = `text: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  const refused = e instanceof AuditWriteError;
+  const error = refused ? AUDIT_REFUSED_ERROR : `text: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500);
+  const shopId = raw.shopId;
+  if (typeof shopId !== "string" || !shopId) {
+    console.error("[audit] job failed without its completion entry", jobId);
+    await legacyFailedWrite(env, jobId, error);
+    return;
+  }
+  await failJob(
+    env,
+    queueAudit(env.DB, WORKER_NAME, jobId),
+    { jobId, shopId, origin: originActorRef(raw.origin_actor_ref) },
+    error,
+    refused ? "audit_refused" : "crash"
+  );
+}
+
+/**
+ * End a job as failed with at most one completion entry. Never throws: if the
+ * entry cannot be written, fall back to the plain guarded failed write (the job
+ * must still end) and say so in the log.
+ */
+async function failJob(
+  env: Pick<Env, "DB">,
+  rec: AuditRecorder,
+  job: { jobId: string; shopId: string; origin: string | null },
+  error: string,
+  reason: string
+): Promise<void> {
   try {
-    await env.DB.prepare(
-      "UPDATE generation_jobs SET status = 'failed', stage = 'text', error = ?, updated_at = ? WHERE id = ? AND status NOT IN ('complete', 'failed')"
-    )
-      .bind(err, new Date().toISOString(), jobId)
-      .run();
+    await finishJob(env.DB, rec, { ...job, status: "failed", stage: "text", error, reason });
+  } catch (auditErr) {
+    console.error("[audit] job failed without its completion entry", job.jobId, auditErr);
+    await legacyFailedWrite(env, job.jobId, error);
+  }
+}
+
+async function legacyFailedWrite(env: Pick<Env, "DB">, jobId: string, error: string): Promise<void> {
+  try {
+    await env.DB.prepare(FAILED_JOB_FALLBACK_SQL).bind("text", error, new Date().toISOString(), jobId).run();
   } catch (persistErr) {
     console.error(`[${jobId}] [pivot-parlor-text] could not record the failure`, persistErr);
   }

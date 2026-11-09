@@ -43,6 +43,48 @@ async function rawAuditRow(action: string): Promise<void> {
     .run();
 }
 
+const RESEARCH = "pivot-parlor-research";
+const TEXT = "pivot-parlor-text";
+const CHATBOT = "pivot-parlor-chatbot";
+
+/** A raw audit_log row as a worker's own recorder leaves it: live (historical
+ *  0) by default, with the given worker and request id. */
+async function workerEntry(
+  worker: string,
+  requestId: string,
+  opts: { phase?: "started" | "outcome"; action?: string; historical?: 0 | 1 } = {}
+): Promise<void> {
+  const phase = opts.phase ?? "started";
+  await E.DB.prepare(
+    `INSERT INTO audit_log (id, occurred_at, entry_hash, actor_type, via, action, phase, outcome, worker, historical, request_id)
+     VALUES (?, ?, 'x', 'system', 'queue', ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(), new Date().toISOString(), opts.action ?? "ai.call", phase,
+      phase === "outcome" ? "succeeded" : null, worker, opts.historical ?? 0, requestId
+    )
+    .run();
+}
+
+/** One ai_usage_log row, as @repo/llm's recordAiUsage writes it. */
+async function usageRow(worker: string, jobId: string | null): Promise<string> {
+  const id = `u-${crypto.randomUUID()}`;
+  await E.DB.prepare(
+    "INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, job_id, created_at) VALUES (?, NULL, ?, 'm', 'site_research', 1, 1, 2, 0.001, ?, '2026-06-01 00:00:00')"
+  ).bind(id, worker, jobId).run();
+  return id;
+}
+
+async function wasImported(usageId: string): Promise<boolean> {
+  return (await E.DB.prepare("SELECT id FROM audit_log WHERE id = ?").bind(`hist_${usageId}`).first()) !== null;
+}
+
+async function importHistorical(): Promise<void> {
+  const { token } = await dev();
+  const res = await dispatch("POST", "/api/audit/import-historical", { headers: authHeaders(token) });
+  expect(res.status).toBe(200);
+}
+
 describe("/api/audit", () => {
   it("lists entries with actor details and logs the view", async () => {
     const { id, token } = await dev();
@@ -461,5 +503,148 @@ describe("/api/audit", () => {
     }
     const hist = await E.DB.prepare("SELECT id FROM audit_log WHERE id = 'hist_u-refuse'").first();
     expect(hist).toBeNull();
+  });
+
+  // Plan 4 final review I1: after Plan 4, research, text and chatbot write BOTH
+  // a live ai.call and an ai_usage_log row per call. The import must never
+  // turn the second into a false, permanent "historical" duplicate.
+  it("does not import a research usage row whose job has a live research ai.call (started only)", async () => {
+    const job = `job-${crypto.randomUUID()}`;
+    const twin = await usageRow(RESEARCH, job);
+    await workerEntry(RESEARCH, job, { phase: "started" });
+    const control = await usageRow(RESEARCH, `job-${crypto.randomUUID()}`);
+    await importHistorical();
+    expect(await wasImported(twin)).toBe(false);
+    expect(await wasImported(control)).toBe(true);
+  });
+
+  it("does not import a chatbot usage row whose public-chat id has a live chatbot ai.call", async () => {
+    const reply = crypto.randomUUID();
+    const twin = await usageRow(CHATBOT, `public-chat:${reply}`);
+    await workerEntry(CHATBOT, reply, { phase: "outcome" });
+    const control = await usageRow(CHATBOT, `public-chat:${crypto.randomUUID()}`);
+    await importHistorical();
+    expect(await wasImported(twin)).toBe(false);
+    expect(await wasImported(control)).toBe(true);
+  });
+
+  it("still imports a usage row with no live twin, as before", async () => {
+    const job = `job-${crypto.randomUUID()}`;
+    const row = await usageRow(RESEARCH, job);
+    const noJob = await usageRow(RESEARCH, null);
+    // None of these is a live ai.call for this job from this worker.
+    await workerEntry(RESEARCH, `job-${crypto.randomUUID()}`);
+    await workerEntry(RESEARCH, job, { historical: 1 });
+    await workerEntry(RESEARCH, job, { action: "site.regenerate.complete", phase: "outcome" });
+    await importHistorical();
+    expect(await wasImported(row)).toBe(true);
+    expect(await wasImported(noJob)).toBe(true);
+  });
+
+  it("partial deploy: a research usage row still imports when only text recorded that job live", async () => {
+    // Old research (usage row only), new text (usage row and a live ai.call).
+    const job = `job-${crypto.randomUUID()}`;
+    const research = await usageRow(RESEARCH, job);
+    const text = await usageRow(TEXT, job);
+    await workerEntry(TEXT, job, { phase: "started" });
+    await workerEntry(TEXT, job, { phase: "outcome" });
+    await importHistorical();
+    expect(await wasImported(research)).toBe(true);
+    expect(await wasImported(text)).toBe(false);
+  });
+});
+
+describe("/api/audit origin_name (Plan 4 Task 9)", () => {
+  async function seedOriginSubject(id: string, name: string, redactedAt: string | null) {
+    await E.DB.prepare(
+      "INSERT INTO audit_subjects (id, kind, user_id, display_name, created_at, redacted_at) VALUES (?, 'user', ?, ?, ?, ?)"
+    ).bind(id, id, name, new Date().toISOString(), redactedAt).run();
+  }
+  async function pipelineRow(requestId: string, detailsJson: string | null) {
+    await E.DB.prepare(
+      `INSERT INTO audit_log (id, occurred_at, entry_hash, actor_type, via, action, phase, outcome, worker, historical, request_id, details_json)
+       VALUES (?, ?, 'x', 'system', 'queue', 'site.regenerate.complete', 'done', 'succeeded', 'test', 0, ?, ?)`
+    ).bind(crypto.randomUUID(), new Date().toISOString(), requestId, detailsJson).run();
+  }
+  async function listByRequest(token: string, requestId: string) {
+    const res = await dispatch("GET", `/api/audit?request_id=${requestId}`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const body = JSON.parse(text) as { data: { entries: { origin_name: string | null; origin_redacted: boolean }[] } };
+    return { text, entries: body.data.entries };
+  }
+
+  it("a pipeline entry names who clicked", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedOriginSubject(ref, "Sam Example", null);
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ origin_name: "Sam Example", origin_redacted: false });
+  });
+
+  it("a redacted origin is never named", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedOriginSubject(ref, "Hidden Person", new Date().toISOString());
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { text, entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: true });
+    expect(text).not.toContain("Hidden Person");
+  });
+
+  it("an entry with no origin has origin_name null", async () => {
+    const { token } = await dev();
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ other: 1 }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
+  });
+
+  it("an unknown origin ref is neither named nor redacted", async () => {
+    const { token } = await dev();
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: "subj_user_missing" }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
+  });
+
+  async function seedNamelessSubject(id: string, email: string, redactedAt: string | null) {
+    await E.DB.prepare(
+      "INSERT INTO audit_subjects (id, kind, user_id, display_name, email, created_at, redacted_at) VALUES (?, 'user', ?, NULL, ?, ?, ?)"
+    ).bind(id, id, email, new Date().toISOString(), redactedAt).run();
+  }
+
+  it("an origin with no display name is labelled by its email, like the actor", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedNamelessSubject(ref, "nameless.owner@example.test", null);
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: "nameless.owner@example.test", origin_redacted: false });
+  });
+
+  it("a redacted origin with no display name never shows its email", async () => {
+    const { token } = await dev();
+    const ref = `subj_user_${crypto.randomUUID()}`;
+    await seedNamelessSubject(ref, "gone.owner@example.test", new Date().toISOString());
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, JSON.stringify({ origin_actor_ref: ref }));
+    const { text, entries } = await listByRequest(token, rid);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: true });
+    expect(text).not.toContain("gone.owner@example.test");
+  });
+
+  it("malformed details_json does not fail the page", async () => {
+    const { token } = await dev();
+    const rid = `origin-${crypto.randomUUID()}`;
+    await pipelineRow(rid, "{not json");
+    const { entries } = await listByRequest(token, rid);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ origin_name: null, origin_redacted: false });
   });
 });
