@@ -648,38 +648,42 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
   }
 
   const sale = await db
-    .prepare("SELECT id, status, tender_type FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+    .prepare("SELECT id, status, tender_type, refunded_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
     .bind(saleId, shopId)
-    .first<{ id: string; status: string; tender_type: string }>();
+    .first<VoidableSale & { id: string }>();
   if (!sale) {
     return c.json({ success: false, error: "Sale not found" }, 404);
   }
-  if (sale.status === "voided") {
-    return c.json({ success: false, error: "Sale already voided" }, 400);
-  }
-  if (sale.tender_type === "stripe" && sale.status === "completed") {
-    // Money already moved: that is a refund (Stripe dashboard → the
-    // charge.refunded webhook flips the sale), not a void.
-    return c.json({ success: false, error: "Paid Stripe sales must be refunded via Stripe, not voided" }, 400);
+  const refusal = voidRefusal(sale);
+  if (refusal) {
+    return c.json({ success: false, error: refusal }, 400);
   }
 
   // Audit (Plan 3, pattern T): from the guarded flip to the response. The
   // status change is recorded only when this request's flip won the claim.
   // `sale` was read WHERE shop_id = shopId, so shopId is a resolved id.
-  // A lost flip (a concurrent void, or a refund that already moved the sale)
-  // keeps the route's 200 but is recorded refused, never succeeded.
+  // A lost flip (a concurrent void, a settle that made a Stripe sale paid, or
+  // a refund) never answers success: it answers what a fresh read finds and
+  // is recorded refused, not_voidable.
   let flip: { claimed: boolean; before: string | null } = { claimed: false, before: null };
   try {
     return await auditFor(c).run(
       { action: "pos.void", shopId, entityType: "sale", entityId: saleId },
       async (): Promise<Response> => {
         flip = await voidSale(db, shopId, saleId, null);
-        return c.json({ success: true });
+        if (flip.claimed) return c.json({ success: true });
+        const now = await db
+          .prepare("SELECT status, tender_type, refunded_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+          .bind(saleId, shopId)
+          .first<VoidableSale>();
+        const found = now ? voidRefusal(now) : null;
+        return found
+          ? c.json({ success: false, error: found }, 400)
+          : c.json({ success: false, error: "This sale changed while voiding. Reload and try again." }, 409);
       },
       statusOutcome((res) => {
-        if (res.status >= 400) return {};
-        if (!flip.claimed) return { outcome: "refused", reason: "not_voidable" };
-        return { changes: { status: [flip.before, "voided"] as [unknown, unknown] } };
+        if (!flip.claimed) return { reason: "not_voidable" };
+        return res.status < 400 ? { changes: { status: [flip.before, "voided"] as [unknown, unknown] } } : {};
       })
     );
   } catch (e) {
@@ -688,10 +692,43 @@ r.post("/:shopId/sales/:saleId/void", async (c) => {
   }
 });
 
+/** The sale fields that decide whether it can still be voided. */
+interface VoidableSale {
+  status: string;
+  tender_type: string;
+  refunded_pence: number;
+}
+
+/**
+ * Why this sale can no longer be voided, or null when it can. A void reverses
+ * the whole sale (stock, tender, ledger), so it is only for a sale whose money
+ * never moved: a pending one, or a completed record-only one with nothing
+ * refunded. A paid Stripe sale is refunded, never voided. The same rule is
+ * the guard in voidSale's flip, so the pre-check and the write agree.
+ */
+function voidRefusal(sale: VoidableSale): string | null {
+  if (sale.status === "voided") return "Sale already voided";
+  if (sale.status === "refunded" || Number(sale.refunded_pence) > 0) return "Refunded sales cannot be voided";
+  if (sale.status === "completed" && sale.tender_type === "stripe") {
+    // Money already moved: that is a refund (Stripe dashboard → the
+    // charge.refunded webhook flips the sale), not a void.
+    return "Paid Stripe sales must be refunded via Stripe, not voided";
+  }
+  if (sale.status === "pending" || sale.status === "completed") return null;
+  return "This sale cannot be voided";
+}
+
 /**
  * Void = the sale never effectively happened: mark it (and its tender/ledger
  * rows) voided and put decremented stock back with reversing movements, all
- * in one batch. Guarded by the atomic status flip — only one voider wins.
+ * in ONE batch, so the flip and the reversal commit together or not at all.
+ *
+ * The flip is the guard. It writes NULL into the NOT NULL sales.status
+ * (migration 035) unless the sale is still voidable (the voidRefusal rule),
+ * which makes D1 roll the whole batch back. That makes it card-aware: a
+ * pending Stripe sale that settled meanwhile is no longer voidable. On a
+ * thrown batch a fresh read tells a lost race (claimed false) from a real
+ * failure (rethrown).
  */
 async function voidSale(
   db: Env["DB"],
@@ -699,22 +736,8 @@ async function voidSale(
   saleId: string,
   note: string | null
 ): Promise<{ claimed: boolean; before: string | null }> {
-  // The status read and the guarded flip share one batch, so `before` is the
-  // status the flip actually found, not an earlier pre-read.
-  const [read, claim] = await db.batch([
-    db.prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ?").bind(saleId, shopId),
-    db
-      .prepare("UPDATE sales SET status = 'voided' WHERE id = ? AND shop_id = ? AND status IN ('pending','completed')")
-      .bind(saleId, shopId),
-  ]);
-  const before = ((read?.results?.[0] as { status?: string } | undefined)?.status ?? null) as string | null;
-  if ((claim?.meta?.changes ?? 0) !== 1) return { claimed: false, before };
-
-  const stmts = [
-    db.prepare("UPDATE bw_transactions SET status = 'voided' WHERE sale_id = ?").bind(saleId),
-    db.prepare("UPDATE bw_commission_ledger SET status = 'voided' WHERE sale_id = ?").bind(saleId),
-  ];
-
+  // Movements are written when the sale is rung, never later, so reading them
+  // before the batch is safe. Every statement is shop-scoped.
   const movements = await db
     .prepare(
       `SELECT product_id, variant_id, quantity_delta, unit_cost_pence, staff_id
@@ -722,6 +745,24 @@ async function voidSale(
     )
     .bind(shopId, saleId)
     .all();
+
+  // The status read precedes the flip in the same batch, so `before` is the
+  // status the flip actually found, not an earlier pre-read.
+  const stmts = [
+    db.prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ?").bind(saleId, shopId),
+    db
+      .prepare(
+        `UPDATE sales SET status = CASE
+           WHEN (status = 'pending' OR (status = 'completed' AND tender_type != 'stripe')) AND refunded_pence = 0
+           THEN 'voided' ELSE NULL END
+         WHERE id = ? AND shop_id = ?`
+      )
+      .bind(saleId, shopId),
+    db.prepare("UPDATE bw_transactions SET status = 'voided' WHERE sale_id = ? AND shop_id = ?").bind(saleId, shopId),
+    db
+      .prepare("UPDATE bw_commission_ledger SET status = 'voided' WHERE sale_id = ? AND shop_id = ?")
+      .bind(saleId, shopId),
+  ];
   for (const m of d1Rows<{
     product_id: string;
     variant_id: string | null;
@@ -745,7 +786,21 @@ async function voidSale(
     );
   }
 
-  await db.batch(stmts);
+  let read: D1Result | undefined;
+  try {
+    [read] = await db.batch(stmts);
+  } catch (err) {
+    const now = await db
+      .prepare("SELECT status, tender_type, refunded_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+      .bind(saleId, shopId)
+      .first<VoidableSale>();
+    if (now && voidRefusal(now) !== null) return { claimed: false, before: now.status };
+    throw err;
+  }
+  const before = ((read?.results?.[0] as { status?: string } | undefined)?.status ?? null) as string | null;
+  // No row in this shop: the flip matched nothing and every other statement
+  // is scoped to the same sale and shop, so nothing changed.
+  if (before === null) return { claimed: false, before: null };
   return { claimed: true, before };
 }
 
