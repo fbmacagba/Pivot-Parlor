@@ -62,7 +62,9 @@ Each step runs only on the owner's go-ahead.
 
      | Reading | Meaning |
      |---|---|
-     | `null` | the responses carry no `usage.cost`, or the key is BYOK (deliberately unpriced) |
+     | `null` | either the `ai_usage_log` insert failed (`recordAiUsage` returns null then; look for `[ai-usage] could not record usage`, which now carries the database's error text), or the responses carry no `usage.cost`, or the key is BYOK (deliberately unpriced) |
+
+     On 2026-11-09 every cost read `null`, research and text included, because production's `ai_usage_log` still had a CHECK on `usage_type` that predates migration 019 (baselined there). Migration 051 rebuilds the table to the chain's shape.
      | about 0.003 | a partial figure |
      | about 67 or another magnitude | a units mismatch |
 3. Send one message to a NON-demo live shop's chatbot. Expect one anonymous `ai.call` with purpose `chatbot` and a `subj_ip_` subject, and an `ai_usage_log` row whose cost is now priced from the model list (Plan 4 Ruling 9: the chatbot's cost basis changes at the deploy date).
