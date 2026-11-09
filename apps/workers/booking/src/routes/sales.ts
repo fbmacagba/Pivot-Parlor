@@ -19,7 +19,12 @@ import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
 import { todayUtcYmd } from "../lib/time.js";
 import { d1Rows } from "../lib/d1-helpers.js";
-import { createCheckoutSession, createRefund } from "../lib/stripe.js";
+import {
+  createCheckoutSession,
+  createRefund,
+  isDefiniteStripeRefusal,
+  listRefundsForPaymentIntent,
+} from "../lib/stripe.js";
 import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import { calculateCommissionPence } from "@repo/utils";
 import {
@@ -647,7 +652,8 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   }
 
   if (isStripe) {
-    let stripeRefundId: string;
+    let stripeRefundId: string | null = null;
+    let stripeError: unknown = null;
     try {
       const refund = await createRefund({
         secret: c.env.STRIPE_SECRET_KEY,
@@ -658,10 +664,25 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       });
       stripeRefundId = refund.id;
     } catch (e) {
-      // Nothing was refunded: remove the record and give the claimed
+      stripeError = e;
+      reportError("sale.refund_stripe", e, { shopId, saleId, returnId });
+      // A 5xx or a network failure is ambiguous: the refund may have gone
+      // through. Ask Stripe before undoing anything, so a cashier's retry can
+      // never refund the same units twice. A refusal (4xx) certainly did nothing.
+      if (!isDefiniteStripeRefusal(e)) {
+        try {
+          const refunds = await listRefundsForPaymentIntent(c.env.STRIPE_SECRET_KEY, sale.stripe_payment_intent_id!);
+          stripeRefundId = refunds.find((r) => r.metadata.returnId === returnId)?.id || null;
+        } catch (lookupErr) {
+          reportError("sale.refund_lookup", lookupErr, { shopId, saleId, returnId });
+        }
+      }
+    }
+    if (!stripeRefundId) {
+      // Nothing was refunded (or Stripe could not say, which is treated as
+      // nothing, as before): remove the record and give the claimed
       // quantities back. If an unrelated charge.refunded counted this return
       // towards a full refund meanwhile, the sale goes back to completed.
-      reportError("sale.refund_stripe", e, { shopId, saleId, returnId });
       await db.batch([
         db.prepare("DELETE FROM sale_return_items WHERE return_id = ?").bind(returnId),
         db.prepare("DELETE FROM sale_returns WHERE id = ?").bind(returnId),
@@ -675,7 +696,10 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
           .bind(saleId),
         ...releaseClaims(),
       ]);
-      return c.json({ success: false, error: e instanceof Error ? e.message : "Stripe refund failed" }, 502);
+      return c.json(
+        { success: false, error: stripeError instanceof Error ? stripeError.message : "Stripe refund failed" },
+        502
+      );
     }
 
     // Stripe accepted the refund: stamp its id and restock. The money and its

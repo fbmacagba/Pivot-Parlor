@@ -27,6 +27,15 @@ export function isStripeErrorCode(err: unknown, code: string): boolean {
   return err instanceof StripeApiError && err.code === code;
 }
 
+/**
+ * True when Stripe answered and refused the request, so it certainly did
+ * nothing: a 4xx other than 409 (an idempotent request still in flight).
+ * A 5xx or a network failure is ambiguous: the request may have gone through.
+ */
+export function isDefiniteStripeRefusal(err: unknown): boolean {
+  return err instanceof StripeApiError && err.status >= 400 && err.status < 500 && err.status !== 409;
+}
+
 async function parseStripeResponse(res: Response, context: string): Promise<Record<string, unknown>> {
   const text = await res.text();
   let json: unknown;
@@ -200,6 +209,20 @@ export async function createRefund(params: {
   }
   const data = await stripePost(params.secret, "/refunds", body, params.idempotencyKey);
   return { id: String(data.id), status: String(data.status ?? "") };
+}
+
+/** The refunds Stripe holds for a PaymentIntent (most recent 100). Used to
+ *  find out whether a refund request that failed ambiguously went through. */
+export async function listRefundsForPaymentIntent(
+  secret: string,
+  paymentIntentId: string
+): Promise<Array<{ id: string; metadata: Record<string, string> }>> {
+  const data = await stripeGet(secret, `/refunds?payment_intent=${encodeURIComponent(paymentIntentId)}&limit=100`);
+  const list = Array.isArray(data.data) ? (data.data as Array<Record<string, unknown>>) : [];
+  return list.map((r) => ({
+    id: String(r.id ?? ""),
+    metadata: (r.metadata ?? {}) as Record<string, string>,
+  }));
 }
 
 /**
