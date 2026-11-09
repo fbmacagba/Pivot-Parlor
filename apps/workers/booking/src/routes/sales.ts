@@ -468,7 +468,6 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   // give their share back too.
   const customerRefundPence =
     refundPence + (commissionBearer === "customer" ? commissionReversalPence : 0);
-  const fullyRefunded = sale.refunded_pence + refundPence >= sale.subtotal_pence - sale.discount_pence;
 
   // Audit (Plan 3, pattern T): everything from the return claim to the
   // response runs inside `run`, so a lost claim (409) records refused and a
@@ -540,14 +539,23 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   // as a dashboard refund. Record-only tenders settle here (the shop hands the
   // cash back), restock included; a Stripe return restocks once Stripe has
   // accepted the refund.
+  //
+  // The guard also reads refunded_pence as it stands, not as the checks above
+  // read it, so a concurrent refund of other lines can neither push the sale
+  // past its total (rolled back, 409) nor leave a record-only sale that this
+  // refund completes still 'completed' (it flips to 'refunded' here). Stripe
+  // sales flip on charge.refunded, as before.
   const record: D1PreparedStatement[] = [
     db
       .prepare(
-        `UPDATE sales SET status = CASE WHEN status = 'completed' THEN ? ELSE NULL END,
-           refunded_pence = refunded_pence + ?
-         WHERE id = ? AND shop_id = ?`
+        `UPDATE sales SET status = CASE
+           WHEN status = 'completed' AND refunded_pence + ?1 <= subtotal_pence - discount_pence
+           THEN CASE WHEN ?2 = 1 AND refunded_pence + ?1 >= subtotal_pence - discount_pence THEN 'refunded' ELSE 'completed' END
+           ELSE NULL END,
+           refunded_pence = refunded_pence + ?1
+         WHERE id = ?3 AND shop_id = ?4`
       )
-      .bind(!isStripe && fullyRefunded ? "refunded" : "completed", refundPence, saleId, shopId),
+      .bind(refundPence, isStripe ? 0 : 1, saleId, shopId),
     db
       .prepare(
         `INSERT INTO sale_returns (id, shop_id, sale_id, refund_pence, commission_reversal_pence,
@@ -608,17 +616,31 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
         `INSERT INTO bw_transactions (id, booking_id, sale_id, shop_id, type, amount_pence, status, stripe_id)
          VALUES (?, NULL, ?, ?, 'refund', ?, ?, NULL)`
       )
-      .bind(refundTxId, saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed")
+      .bind(refundTxId, saleId, shopId, customerRefundPence, isStripe ? "pending" : "completed"),
+    // Read back in the same transaction: the answer's fully_refunded is the
+    // sale as this refund left it, not as the checks above read it.
+    db.prepare("SELECT refunded_pence, subtotal_pence, discount_pence FROM sales WHERE id = ?").bind(saleId)
   );
+  let fullyRefunded: boolean;
   try {
-    await db.batch(record);
+    const results = await db.batch(record);
+    const after = results[results.length - 1]?.results?.[0] as
+      | { refunded_pence: number; subtotal_pence: number; discount_pence: number }
+      | undefined;
+    fullyRefunded = after
+      ? Number(after.refunded_pence) >= Number(after.subtotal_pence) - Number(after.discount_pence)
+      : false;
   } catch (e) {
     const now = await db
-      .prepare("SELECT status FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
+      .prepare("SELECT status, refunded_pence, subtotal_pence, discount_pence FROM sales WHERE id = ? AND shop_id = ? LIMIT 1")
       .bind(saleId, shopId)
-      .first<{ status: string }>();
+      .first<{ status: string; refunded_pence: number; subtotal_pence: number; discount_pence: number }>();
     await db.batch(releaseClaims());
-    if (now && now.status !== "completed") {
+    if (
+      now &&
+      (now.status !== "completed" ||
+        Number(now.refunded_pence) + refundPence > Number(now.subtotal_pence) - Number(now.discount_pence))
+    ) {
       return c.json({ success: false, error: "This sale changed while refunding. Reload and try again." }, 409);
     }
     throw e;
