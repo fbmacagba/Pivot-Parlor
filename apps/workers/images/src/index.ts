@@ -630,7 +630,7 @@ export async function handOffAfterCrash(
 }
 
 /**
- * End a job as failed with exactly one completion entry. Never throws: if the
+ * End a job as failed with at most one completion entry. Never throws: if the
  * entry cannot be written, fall back to the plain guarded failed write (the job
  * must still end) and say so in the log.
  */

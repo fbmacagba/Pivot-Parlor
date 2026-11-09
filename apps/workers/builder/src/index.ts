@@ -1,7 +1,7 @@
 /**
  * pivot-parlor-assembler — Consumes site-assemble-queue: merge KV images+text → shop_sites, complete job, cleanup KV.
  *
- * Every job ends with exactly one `site.regenerate.complete` audit entry, in
+ * Every job ends with at most one `site.regenerate.complete` audit entry, in
  * the SAME D1 batch as the writes it records (publish, review or failure).
  */
 import type { D1Database, D1PreparedStatement, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
@@ -323,7 +323,7 @@ export async function failJobAfterCrash(env: Pick<Env, "DB">, body: unknown, e: 
 }
 
 /**
- * End a job as failed with exactly one completion entry. `error` goes to
+ * End a job as failed with at most one completion entry. `error` goes to
  * generation_jobs only; the entry carries the fixed `reason`. Never throws:
  * if the terminal batch cannot be written, fall back to the plain guarded
  * failed write (the job must still end) and say so in the log (Ruling 5).

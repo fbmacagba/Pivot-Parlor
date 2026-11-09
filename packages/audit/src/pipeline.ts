@@ -130,7 +130,7 @@ export async function finishJobStatements(
 }
 
 /**
- * End a job with exactly one completion entry, in the same batch as the job's
+ * End a job with at most one completion entry, in the same batch as the job's
  * terminal write. If the batch fails because an earlier delivery already
  * finished the job, that is success; any other failure rethrows.
  */
