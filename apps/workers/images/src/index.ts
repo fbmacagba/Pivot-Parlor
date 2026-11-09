@@ -589,14 +589,14 @@ async function processOne(body: unknown, env: Env): Promise<void> {
  * ends the job as failed and assembles nothing.
  */
 export async function handOffAfterCrash(
-  env: Pick<Env, "KV" | "SITE_ASSEMBLE_QUEUE"> & Partial<Pick<Env, "DB">>,
+  env: Pick<Env, "KV" | "SITE_ASSEMBLE_QUEUE" | "DB">,
   body: unknown,
   e: unknown
 ): Promise<void> {
   const b = (body ?? {}) as { jobId?: unknown; shopId?: unknown; shopSlug?: unknown; origin_actor_ref?: unknown };
   if (typeof b.jobId !== "string" || typeof b.shopId !== "string" || typeof b.shopSlug !== "string") return;
   const origin = originActorRef(b.origin_actor_ref);
-  if (e instanceof AuditWriteError && env.DB) {
+  if (e instanceof AuditWriteError) {
     await failJob(env.DB, { jobId: b.jobId, shopId: b.shopId, origin });
     return;
   }
