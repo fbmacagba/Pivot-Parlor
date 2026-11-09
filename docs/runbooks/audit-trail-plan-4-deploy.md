@@ -56,7 +56,18 @@ Each step runs only on the owner's go-ahead.
    - one `site.regenerate.complete` (succeeded) from the assembler;
    - "System, started by <owner name>" in `/dev/activity`.
 2. Optionally, regenerate once WITH images, to see the `site_image_*` `ai.call` rows. It costs more, and it is the only live check of the images worker.
-3. Send one message to a demo shop's chatbot. Expect one anonymous `ai.call` with purpose `chatbot` and a `subj_ip_` subject, and an `ai_usage_log` row whose cost is now priced from the model list (Plan 4 Ruling 9: the chatbot's cost basis changes at the deploy date).
+   - With image cost recorded (fix/image-cost-assembler-ddl), each `site_image_*` outcome should carry `cost_basis` `reported`.
+   - On gemini-3.1-flash-image (about 1,120 output tokens at $60/1M `image_output`), a correct `estimated_cost_usd` is about 0.067.
+   - How to read anything else:
+
+     | Reading | Meaning |
+     |---|---|
+     | `null` | the responses carry no `usage.cost`, or the key is BYOK (deliberately unpriced) |
+     | about 0.003 | a partial figure |
+     | about 67 or another magnitude | a units mismatch |
+3. Send one message to a NON-demo live shop's chatbot. Expect one anonymous `ai.call` with purpose `chatbot` and a `subj_ip_` subject, and an `ai_usage_log` row whose cost is now priced from the model list (Plan 4 Ruling 9: the chatbot's cost basis changes at the deploy date).
+   - A demo shop's chat is scripted in the browser ("Sample assistant · Scripted replies") and never reaches the chatbot worker, so it cannot verify it. The worker also requires a Turnstile token.
+   - As of 2026-11-09 every production shop is a demo, so this step waits for the first real shop to go live.
 
 ## Rollback
 
@@ -65,8 +76,8 @@ Run `npx wrangler rollback` per worker, in reverse deploy order (research, then 
 ## Follow-ups for the owner
 
 - Retire `pivot-parlor-audit` and `site-audit-queue`: no producer since at least 2026-07-06. Also remove the orphaned `site-build-queue` consumer on images. This is destructive, so the owner decides.
-- The builder's runtime `ALTER TABLE` (`ensureShopSitesSeoColumns`): move it to assert-only, as WS-8 did for the other workers.
-- Image generation cost: images writes no `ai_usage_log` rows, so `ai.call` entries for images carry tokens but no cost.
+- DONE (fix/image-cost-assembler-ddl): the builder's runtime `ALTER TABLE` is replaced by an assert-only check (`apps/workers/builder/src/ensure-schema.ts`). A database missing one of the 12 columns fails the job with reason `schema_out_of_date`, and a static test bans DDL in the assembler's source. No migration was needed: 021, 023, 040 and 042 already own the columns. Production was checked first through the public site API, where all 12 carry real values.
+- DONE (same branch): image generation cost. Each answered image call writes an `ai_usage_log` row and carries the cost on its `ai.call`, with `cost_basis` `reported`. The figure is OpenRouter's billed `usage.cost`, never a model-list price: image output is billed at `image_output` ($60/1M for gemini-3.1-flash-image), far above the completion rate the list stores. A response without `usage.cost` stays unpriced.
 - (M3) A D1 blip across more than one statement during an images refusal can still let the assembler time out into "assemble without images".
 - (M4) The chatbot's chosen-model-then-default fallback is recorded as one `ai.call`, not one per attempt.
 - (Final review item 5) Move the four queue workers' duplicated `failJob` into `@repo/audit`.

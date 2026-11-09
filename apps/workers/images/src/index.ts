@@ -11,6 +11,7 @@ import {
   queueAudit,
   type AuditRecorder,
 } from "@repo/audit";
+import { recordAiUsage, type UsageCost } from "@repo/llm";
 
 export interface Env {
   ASSETS: R2Bucket;
@@ -183,7 +184,11 @@ interface ImageResult {
   buffer: ArrayBuffer | null;
   httpStatus: number;
   rawBody: string;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  /** Present on an answered (billed) call. `cost` is what OpenRouter charged, in USD;
+   *  on a BYOK key (`is_byok`) it is only OpenRouter's fee, not the image. */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: unknown; is_byok?: unknown };
+  /** What the cost log recorded for this call (null when unpriced). */
+  billed?: UsageCost | null;
 }
 
 async function openRouterGenerateImage(
@@ -261,14 +266,28 @@ async function openRouterGenerateImage(
   return { buffer: buf, httpStatus: res.status, rawBody: text, usage };
 }
 
+/** What the image cost, or null when the response does not say. A BYOK call's
+ *  `cost` is only OpenRouter's fee (the provider bills the key's owner), so it
+ *  is left unpriced rather than recorded many times too low. */
+function billedUsd(usage: NonNullable<ImageResult["usage"]>): number | null {
+  if (usage.is_byok === true) return null;
+  return typeof usage.cost === "number" ? usage.cost : null;
+}
+
 /** One audited model call. Throws ImageGenerationError when no image came back
  *  (recorded as a failed outcome) and AuditWriteError when the trail refuses
  *  the started write (the model is then never called). The R2 upload is the
- *  caller's, outside this call. */
+ *  caller's, outside this call.
+ *
+ *  Every answered call is billed, image or not, so it is written to the cost
+ *  log first, priced only from what OpenRouter reported it charged: image
+ *  output has its own rate the model list does not carry, so a missing figure
+ *  stays unpriced rather than being guessed from the list. */
 async function auditedImage(
   rec: AuditRecorder,
   audit: { model: string; shopId: string; origin: string | null },
   purpose: string,
+  costLog: { env: Pick<Env, "DB" | "KV">; jobId: string },
   call: () => Promise<ImageResult>
 ): Promise<ImageResult> {
   return auditAiCall(
@@ -276,6 +295,17 @@ async function auditedImage(
     { purpose, model: audit.model, shopId: audit.shopId, origin: audit.origin },
     async () => {
       const r = await call();
+      if (r.usage) {
+        r.billed = await recordAiUsage(costLog.env, {
+          shopId: audit.shopId,
+          workerName: WORKER_NAME,
+          modelId: audit.model,
+          usageType: purpose,
+          usage: { inputTokens: r.usage.prompt_tokens ?? 0, outputTokens: r.usage.completion_tokens ?? 0 },
+          jobId: costLog.jobId,
+          pricing: { from: "reported", usd: billedUsd(r.usage) },
+        });
+      }
       if (!r.buffer) throw new ImageGenerationError(r);
       return r;
     },
@@ -284,8 +314,8 @@ async function auditedImage(
       route: "openrouter",
       inputTokens: r.usage?.prompt_tokens ?? null,
       outputTokens: r.usage?.completion_tokens ?? null,
-      costUsd: null,
-      costBasis: null,
+      costUsd: r.billed?.costUsd ?? null,
+      costBasis: r.billed?.basis ?? null,
     })
   );
 }
@@ -444,7 +474,7 @@ async function processOne(body: unknown, env: Env): Promise<void> {
   // its `errors` entry. Anything else (AuditWriteError included) propagates.
   const generate = async (purpose: string, prompt: string, aspect: string, label: string): Promise<ImageResult> => {
     try {
-      return await auditedImage(rec, audit(resolvedImageModel), purpose, () =>
+      return await auditedImage(rec, audit(resolvedImageModel), purpose, { env, jobId }, () =>
         openRouterGenerateImage(apiKey, resolvedImageModel, prompt, aspect, label, jobId)
       );
     } catch (e) {

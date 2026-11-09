@@ -10,6 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageBatch } from "@cloudflare/workers-types";
+import { SHOP_SITES_REQUIRED_COLUMNS } from "./ensure-schema";
 import worker, { type Env } from "./index";
 
 type Call = { sql: string; args: unknown[] };
@@ -52,6 +53,14 @@ function fakeEnv(opts: { site: SiteState; candidateTableMissing?: boolean; audit
         };
       }
       return null;
+    },
+    // The assembler's schema check: a migrated shop_sites.
+    async all() {
+      calls.push({ sql, args });
+      if (sql === "PRAGMA table_info(shop_sites)") {
+        return { results: SHOP_SITES_REQUIRED_COLUMNS.map((name) => ({ name })) };
+      }
+      return { results: [] };
     },
   });
 

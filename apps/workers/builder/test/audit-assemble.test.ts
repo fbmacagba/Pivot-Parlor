@@ -572,6 +572,47 @@ describe("failure exits: one failed completion entry each", () => {
     expect(await kvLeft(genKeys(s.jobId))).toEqual([]);
   });
 
+  // WS-8: the assembler used to ALTER missing shop_sites columns in at runtime.
+  // A database that missed a migration now fails the job, named, and the
+  // assembler never touches the schema.
+  it("a database that missed a migration, without changing the schema", async () => {
+    const s = await setup();
+    await env.DB.prepare("ALTER TABLE shop_sites DROP COLUMN heading_style").run();
+    try {
+      const h = hookedDb();
+      await deliver(s.message, { db: h.db });
+      await expectFailed(s, "schema_out_of_date", /shop_sites\.heading_style/);
+      expect(h.prepared.filter((q) => /\b(ALTER|CREATE|DROP)\s+(TABLE|INDEX)\b/i.test(q))).toEqual([]);
+      const cols = await env.DB.prepare("PRAGMA table_info(shop_sites)").all<{ name: string }>();
+      expect((cols.results ?? []).map((c) => c.name)).not.toContain("heading_style");
+    } finally {
+      // Storage persists across tests in this file: put the chain's column back.
+      await env.DB.prepare("ALTER TABLE shop_sites ADD COLUMN heading_style TEXT").run();
+    }
+  });
+
+  it("a schema read that fails is a crash, not a missing migration", async () => {
+    const s = await setup();
+    const db = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop === "prepare") {
+          return (sql: string) =>
+            sql.startsWith("PRAGMA table_info")
+              ? {
+                  all: async () => {
+                    throw new Error("D1_ERROR: network connection lost");
+                  },
+                }
+              : target.prepare(sql);
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as D1Database;
+    await deliver(s.message, { db });
+    await expectFailed(s, "crash", "assemble: D1_ERROR: network connection lost");
+  });
+
   it("a crash", async () => {
     const s = await setup();
     const kv = new Proxy(env.KV, {

@@ -12,14 +12,32 @@ import type { ChatUsage } from "./types";
  * when the model isn't listed, or the list can't be read, the row keeps its
  * tokens, the cost stays 0 and `cost_basis` stays NULL, so it reads as
  * "unknown", never as "free".
+ *
+ * Image calls are the exception (`pricing: { from: "reported" }`): OpenRouter
+ * bills image output at its own `image_output` rate, which the list does not
+ * carry, so a list price would under-state them many times over. They record
+ * the provider's billed figure (`usage.cost`) instead, and never fall back to
+ * the list when it is missing.
  */
 
 /** The API worker's served model list (KV). Fresh copy first, then the no-expiry last good one. */
 export const MODELS_KV_KEY = "ai:models:v3";
 export const MODELS_LAST_GOOD_KV_KEY = "ai:models:v3:last";
 
-/** `live`: priced from the OpenRouter feed. `catalog`: the list's snapshot fallback price. */
-export type CostBasis = "live" | "catalog";
+/**
+ * `live`: priced from the OpenRouter feed. `catalog`: the list's snapshot
+ * fallback price. `reported`: the provider's own billed figure for the call
+ * (OpenRouter `usage.cost`, in USD credits). Written to `ai_usage_log.cost_basis`;
+ * migration 050's comment predates `reported`.
+ */
+export type CostBasis = "live" | "catalog" | "reported";
+
+/**
+ * How a call is priced. `model_list` (the default) prices tokens from the
+ * API's model list. `reported` uses only the provider's billed figure: a
+ * missing or unusable one leaves the call unpriced and the list is never read.
+ */
+export type UsagePricing = { from: "model_list" } | { from: "reported"; usd: number | null };
 
 export interface UsageCost {
   costUsd: number;
@@ -84,6 +102,14 @@ export interface AiUsageRecord {
   /** Null when the provider returned no token counts. */
   usage: ChatUsage | null;
   jobId: string | null;
+  /** Defaults to `{ from: "model_list" }`. */
+  pricing?: UsagePricing;
+}
+
+/** A billed figure the provider reported, or null when there is none to trust. */
+function reportedCost(usd: number | null): UsageCost | null {
+  if (typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) return null;
+  return { costUsd: round6(usd), basis: "reported" };
 }
 
 /**
@@ -100,7 +126,10 @@ export async function recordAiUsage(
     const input = record.usage?.inputTokens ?? 0;
     const output = record.usage?.outputTokens ?? 0;
     let cost: UsageCost | null = null;
-    if (record.usage) {
+    const pricing = record.pricing ?? { from: "model_list" };
+    if (pricing.from === "reported") {
+      cost = reportedCost(pricing.usd);
+    } else if (record.usage) {
       try {
         cost = costFromModelList(await readModelList(env.KV), record.modelId, record.usage);
       } catch (err) {
