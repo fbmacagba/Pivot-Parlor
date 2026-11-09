@@ -64,25 +64,30 @@ const REFUSED_LOGIN_AUDIT_WINDOW_S = 900;
  * submitted email or password. Nothing changed, so an entry that cannot be
  * written is logged and the 401 stands. Past the per-IP cap nothing is
  * recorded; the last entry recorded before it carries `ip_cap_reached`, so
- * the trail shows the attempts went on rather than stopped.
+ * the trail shows the attempts went on rather than stopped. The cap keys on
+ * the IP the entry's ip_ref is minted from; a request with none skips it, so
+ * callers without an IP are never pooled under one shared cap.
  */
 async function recordLoginRefusal(c: Context<{ Bindings: Bindings }>, userId: string | null): Promise<void> {
   let lastBeforeCap = false;
-  try {
-    const slot = await takeWindowSlot(
-      c.env.KV,
-      `rl:login-refusal-audit:${clientIp(c)}`,
-      REFUSED_LOGIN_AUDIT_CAP,
-      REFUSED_LOGIN_AUDIT_WINDOW_S,
-    );
-    if (!slot.ok) {
-      console.warn("[audit] login refusal not recorded: per-IP cap reached");
-      return;
+  const ip = requestIp(c);
+  if (ip) {
+    try {
+      const slot = await takeWindowSlot(
+        c.env.KV,
+        `rl:login-refusal-audit:${ip}`,
+        REFUSED_LOGIN_AUDIT_CAP,
+        REFUSED_LOGIN_AUDIT_WINDOW_S,
+      );
+      if (!slot.ok) {
+        console.warn("[audit] login refusal not recorded: per-IP cap reached");
+        return;
+      }
+      lastBeforeCap = slot.remaining === 0;
+    } catch (err) {
+      // A counter that cannot be read never costs the entry.
+      console.error("[audit] login refusal cap unavailable", err instanceof Error ? err.name : "Error");
     }
-    lastBeforeCap = slot.remaining === 0;
-  } catch (err) {
-    // A counter that cannot be read never costs the entry.
-    console.error("[audit] login refusal cap unavailable", err instanceof Error ? err.name : "Error");
   }
   try {
     await auditFor(c).write({

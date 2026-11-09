@@ -243,6 +243,20 @@ describe("login", () => {
     for (const r of responses) expect(await gapRowsFor(rid(r))).toBe(0);
   });
 
+  it("refused sign-ins with no client IP are all recorded, never pooled under one cap", async () => {
+    // Without the header every caller would share one key: past the cap, no
+    // one's refusal would be recorded. A missing IP skips the cap instead.
+    for (let i = 0; i < REFUSED_LOGIN_AUDIT_CAP + 1; i++) {
+      const res = await dispatch("POST", "/auth/login", {
+        body: { email: `noip-${crypto.randomUUID()}@sign-in.test`, password: secret("pw") },
+      });
+      expect(res.status).toBe(401);
+      const rows = await rowsForRequest(rid(res));
+      expect(rows, `attempt ${i + 1}`).toHaveLength(1);
+      expect(rows[0]!.details_json).toBeNull();
+    }
+  });
+
   it("one IP reaching the cap does not stop another IP's refusals being recorded", async () => {
     const capped = nextIp();
     for (let i = 0; i < REFUSED_LOGIN_AUDIT_CAP; i++) expect((await sprayAttempt(capped)).status).toBe(401);
