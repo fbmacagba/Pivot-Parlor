@@ -85,7 +85,12 @@ if (live.applied === null) {
     console.error(
       `✗ ${dbName} has run migrations this branch does not have: ${unknown.join(", ")}\n` +
         "  Merge or rebase onto the branch that adds them. On staging this also happens when\n" +
-        "  another pull request's migration was applied there and has not been merged."
+        "  another pull request's migration was applied there and has not been merged.\n" +
+        "  If that pull request was closed without merging, restore staging (it is disposable)\n" +
+        "  to the bookmark its \"Run staging D1 migrations\" step printed, from apps/worker:\n" +
+        "    npx wrangler d1 time-travel restore pivot-parlor-db-staging --bookmark=<bookmark>\n" +
+        "  The next pull request's migrate step re-applies everything merged since.\n" +
+        "  See docs/DR-RUNBOOK.md before restoring."
     );
     process.exit(1);
   }
