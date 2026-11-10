@@ -1326,34 +1326,20 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
         },
       },
       async () => {
-        await c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id).run();
-        await c.env.DB
-          .prepare("DELETE FROM shop_settings WHERE shop_id = ?")
-          .bind(shop.id)
-          .run()
-          .catch(() => {
-            /* table may not exist in older DB snapshots */
-          });
-        await c.env.DB
-          .prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?")
-          .bind(shop.id)
-          .run()
-          .catch(() => {
-            /* best effort */
-          });
-
-        await c.env.KV.delete(`site:${shop.slug}`);
-        await c.env.KV.delete(`shop:theme:${shop.id}`);
-        await c.env.KV.delete(`gen:settings:${shop.id}`);
-        await c.env.KV.delete(`walkin:queue:${shop.id}`);
-
-        // Ruling 15: the redact schedule and the shop's removal commit
-        // together in one batch — a failed delete must never schedule
-        // blanking a live shop's people. Ruling 16: the date may only move
-        // forward, never back.
+        // All or nothing: everything the shop's removal touches in D1 commits
+        // in this one batch, so a refused delete changes nothing. (Before,
+        // the jobs, settings and enquiry link went first, and a refused
+        // shop delete left a live shop half wiped.) generation_jobs has no
+        // cascade, so it goes before the shop; shop_settings and every other
+        // shop-owned table cascade (checked on production and staging by
+        // scripts/schema-drift.mjs). Ruling 15: the redact schedule commits
+        // with the removal too, so a failed delete never schedules blanking a
+        // live shop's people. Ruling 16: the date may only move forward.
         // Spec 6.2: personal details of this shop's people are blanked 30 days after it leaves.
         const redactAfter = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
         await c.env.DB.batch([
+          c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id),
+          c.env.DB.prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?").bind(shop.id),
           c.env.DB
             .prepare(
               "UPDATE audit_subjects SET redact_after = ? WHERE shop_id = ? AND redacted_at IS NULL AND (redact_after IS NULL OR redact_after > ?)"
@@ -1363,6 +1349,15 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
         ]);
       }
     );
+    // KV last, and only once the shop is gone: gen:settings:<id> is the only
+    // copy of the shop's generation settings, so it must not go while the
+    // shop might stay. A key that fails to delete is an orphan of a deleted
+    // shop (the public site reads the shop from D1 before its cache), so it
+    // is logged, not turned into a failed delete.
+    const kvKeys = [`site:${shop.slug}`, `shop:theme:${shop.id}`, genSettingsKvKey(shop.id), `walkin:queue:${shop.id}`];
+    const kvResults = await Promise.allSettled(kvKeys.map((key) => c.env.KV.delete(key)));
+    const leftover = kvKeys.filter((_, i) => kvResults[i]?.status === "rejected");
+    if (leftover.length) console.error("[shops.delete] shop removed; KV keys left behind:", leftover.join(", "));
     return c.json({ success: true, data: { id: shop.id } });
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);

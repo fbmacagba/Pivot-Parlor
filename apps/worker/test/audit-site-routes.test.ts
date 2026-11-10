@@ -148,6 +148,69 @@ describe("site routes are audited", () => {
     expect(rows.map((r) => [r.phase, r.outcome])).toEqual([["started", null], ["outcome", "failed"]]);
   });
 
+  // A shop with settings, a generation job, a linked enquiry and its four KV
+  // keys. gen:settings:<id> is the only copy of the shop's generation settings.
+  async function seedShopWithEverything(name: string) {
+    const shopId = await seedShop(name);
+    const { slug } = (await env.DB.prepare("SELECT slug FROM shops WHERE id = ?").bind(shopId).first<{ slug: string }>())!;
+    await env.DB.prepare("INSERT INTO shop_settings (shop_id, address) VALUES (?, '1 High St')").bind(shopId).run();
+    await env.DB.prepare("INSERT INTO generation_jobs (id, shop_id, status) VALUES (?, ?, 'done')").bind(crypto.randomUUID(), shopId).run();
+    const contactId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO contacts (id, full_name, shop_name, shop_type, email, shop_id) VALUES (?, 'Ada', 'Ada Cuts', 'barber_shop', 'ada@test.local', ?)"
+    ).bind(contactId, shopId).run();
+    const kvKeys = [`site:${slug}`, `shop:theme:${shopId}`, `gen:settings:${shopId}`, `walkin:queue:${shopId}`];
+    for (const key of kvKeys) await env.KV.put(key, JSON.stringify({ key }));
+    return { shopId, contactId, kvKeys };
+  }
+
+  async function stateOf(shopId: string, contactId: string, kvKeys: string[]) {
+    const one = (sql: string, id: string) => env.DB.prepare(sql).bind(id).first<Record<string, unknown>>();
+    return {
+      shop: (await one("SELECT id FROM shops WHERE id = ?", shopId)) !== null,
+      settingsAddress: (await one("SELECT address FROM shop_settings WHERE shop_id = ?", shopId))?.address ?? null,
+      jobs: (await one("SELECT COUNT(*) AS n FROM generation_jobs WHERE shop_id = ?", shopId))!.n,
+      contactShopId: (await one("SELECT shop_id FROM contacts WHERE id = ?", contactId))!.shop_id,
+      kvPresent: await Promise.all(kvKeys.map(async (k) => (await env.KV.get(k)) !== null)),
+    };
+  }
+
+  it("a refused shop delete changes nothing: settings, jobs, the enquiry link and every KV key survive", async () => {
+    const { token } = await devToken();
+    const { shopId, contactId, kvKeys } = await seedShopWithEverything("All Or Nothing Shop");
+    // Same technique as Ruling 15 above: only DELETE FROM shops fails.
+    await env.DB.prepare(
+      "CREATE TRIGGER test_block_shop_delete_atomic BEFORE DELETE ON shops BEGIN SELECT RAISE(ABORT, 'blocked for test'); END"
+    ).run();
+    try {
+      const res = await dispatch("POST", `/api/shops/${shopId}/delete`, { headers: authHeaders(token) });
+      expect(res.status).toBe(500);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER test_block_shop_delete_atomic").run();
+    }
+    expect(await stateOf(shopId, contactId, kvKeys)).toEqual({
+      shop: true,
+      settingsAddress: "1 High St",
+      jobs: 1,
+      contactShopId: shopId,
+      kvPresent: [true, true, true, true],
+    });
+  });
+
+  it("a successful shop delete removes its settings, jobs and KV keys and unlinks its enquiry", async () => {
+    const { token } = await devToken();
+    const { shopId, contactId, kvKeys } = await seedShopWithEverything("Clean Delete Shop");
+    const res = await dispatch("POST", `/api/shops/${shopId}/delete`, { headers: authHeaders(token) });
+    expect(res.status).toBe(200);
+    expect(await stateOf(shopId, contactId, kvKeys)).toEqual({
+      shop: false,
+      settingsAddress: null,
+      jobs: 0,
+      contactShopId: null,
+      kvPresent: [false, false, false, false],
+    });
+  });
+
   it("generate-site records failed with the status when it returns an error Response", async () => {
     const { token } = await devToken();
     const shopId = await seedShop("Regen Shop");
