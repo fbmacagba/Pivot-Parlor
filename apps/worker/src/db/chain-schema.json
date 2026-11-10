@@ -1,0 +1,894 @@
+{
+  "tables": {
+    "ai_usage_log": {
+      "columns": {
+        "cost_basis": "text",
+        "created_at": "text not null default(datetime('now'))",
+        "estimated_cost_usd": "real not null default 0",
+        "id": "text primary key",
+        "input_tokens": "integer not null default 0",
+        "job_id": "text",
+        "model": "text not null",
+        "output_tokens": "integer not null default 0",
+        "shop_id": "text references shops(id)on delete set null",
+        "total_tokens": "integer not null default 0",
+        "usage_type": "text not null",
+        "worker_name": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "audit_log": {
+      "columns": {
+        "action": "text not null",
+        "actor_ref": "text",
+        "actor_role": "text",
+        "actor_type": "text not null",
+        "archive_key": "text",
+        "archived_at": "text",
+        "chain_hash": "text",
+        "changes_json": "text",
+        "details_json": "text",
+        "entity_id": "text",
+        "entity_type": "text",
+        "entry_hash": "text not null",
+        "historical": "integer not null default 0",
+        "id": "text primary key",
+        "ip_ref": "text",
+        "occurred_at": "text not null",
+        "outcome": "text",
+        "parent_id": "text",
+        "phase": "text not null",
+        "reason": "text",
+        "request_id": "text",
+        "sealed_at": "text",
+        "seq": "integer unique",
+        "shop_id": "text",
+        "via": "text not null",
+        "worker": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "audit_seal_state": {
+      "columns": {
+        "expired_chain_hash": "text",
+        "expired_through_seq": "integer not null default 0",
+        "holder": "text",
+        "id": "integer primary key check(id = 1)",
+        "last_verified_seq": "integer not null default 0",
+        "lease_until": "text",
+        "walk_cursor_seq": "integer not null default 0"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "audit_subjects": {
+      "columns": {
+        "created_at": "text not null",
+        "day": "text",
+        "display_name": "text",
+        "email": "text",
+        "id": "text primary key",
+        "ip": "text",
+        "kind": "text not null",
+        "redact_after": "text",
+        "redacted_at": "text",
+        "shop_id": "text",
+        "user_id": "text"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "bookings": {
+      "columns": {
+        "amount_pence": "integer not null default 0",
+        "booking_date": "text not null",
+        "commission_pence": "integer not null default 0",
+        "created_at": "text not null default(datetime('now'))",
+        "customer_email": "text not null",
+        "customer_name": "text not null",
+        "customer_phone": "text",
+        "end_time": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "notes": "text",
+        "reminder_sent": "integer not null default 0",
+        "service_id": "text not null references services(id)",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text not null references staff(id)",
+        "start_time": "text not null",
+        "status": "text not null default 'pending' check(status in('pending','confirmed','in_progress','completed','cancelled','no_show'))"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "bw_availability": {
+      "columns": {
+        "booking_id": "text",
+        "id": "text primary key",
+        "is_booked": "integer not null default 0",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "slot_date": "text not null",
+        "slot_time": "text not null",
+        "staff_id": "text not null references staff(id)on delete cascade"
+      },
+      "constraints": [
+        "unique(staff_id,slot_date,slot_time)"
+      ],
+      "options": ""
+    },
+    "bw_booking_state": {
+      "columns": {
+        "booking_id": "text primary key references bookings(id)on delete cascade",
+        "booking_type": "text not null default 'online'",
+        "checked_in_at": "text",
+        "completed_at": "text",
+        "deposit_amount_pence": "integer not null default 0",
+        "deposit_application_fee_pence": "integer not null default 0",
+        "deposit_paid_at": "text",
+        "promo_code": "text",
+        "promo_discount_percent": "real",
+        "qr_code_data": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "slot_time": "text",
+        "stripe_balance_pi": "text",
+        "stripe_checkout_session_id": "text",
+        "stripe_payment_intent_id": "text",
+        "total_amount_pence": "integer",
+        "updated_at": "text not null default(datetime('now'))",
+        "workflow_flag": "text"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "bw_business_days": {
+      "columns": {
+        "closed_at": "text",
+        "date": "text not null",
+        "id": "text primary key",
+        "opened_at": "text",
+        "performance_json": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null",
+        "summary_json": "text"
+      },
+      "constraints": [
+        "unique(shop_id,date)"
+      ],
+      "options": ""
+    },
+    "bw_commission_ledger": {
+      "columns": {
+        "booking_id": "text references bookings(id)on delete set null",
+        "business_day_id": "text references bw_business_days(id)on delete set null",
+        "commission_amount_pence": "integer not null default 0",
+        "commission_bearer": "text not null",
+        "commission_rate": "real not null default 0.10",
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "retail_amount_pence": "integer not null default 0",
+        "retail_commission_rate": "real",
+        "sale_id": "text references sales(id)on delete set null",
+        "services_amount_pence": "integer not null default 0",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null default 'pending'",
+        "stripe_transfer_id": "text"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "bw_platform_alerts": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "message": "text not null",
+        "resolved": "integer not null default 0",
+        "resolved_at": "text",
+        "severity": "text not null",
+        "shop_id": "text references shops(id)on delete cascade",
+        "title": "text not null",
+        "type": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "bw_transactions": {
+      "columns": {
+        "amount_pence": "integer not null default 0",
+        "booking_id": "text references bookings(id)on delete set null",
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "sale_id": "text references sales(id)on delete set null",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null",
+        "stripe_id": "text",
+        "type": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "chat_sessions": {
+      "columns": {
+        "booking_initiated": "integer not null default 0",
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "messages_json": "text not null default '[]'",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "updated_at": "text not null default(datetime('now'))",
+        "visitor_id": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "contacts": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "email": "text not null",
+        "full_name": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "message": "text",
+        "onboarded_at": "text",
+        "phone": "text",
+        "shop_id": "text",
+        "shop_name": "text not null",
+        "shop_type": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "generation_jobs": {
+      "columns": {
+        "audit_output": "text",
+        "build_output": "text",
+        "created_at": "text",
+        "error": "text",
+        "id": "text primary key",
+        "research_output": "text",
+        "shop_id": "text not null",
+        "stage": "text default 'research'",
+        "status": "text default 'queued'",
+        "updated_at": "text"
+      },
+      "constraints": [
+        "foreign key(shop_id)references shops(id)"
+      ],
+      "options": ""
+    },
+    "invites": {
+      "columns": {
+        "active": "integer default 0",
+        "created_at": "text not null default(datetime('now'))",
+        "email": "text not null",
+        "expires_at": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "role": "text not null default 'admin'",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "token": "text not null unique",
+        "used_at": "text"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "legal_acceptances": {
+      "columns": {
+        "accepted_at": "text not null default(datetime('now'))",
+        "document": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "shop_id": "text references shops(id)on delete cascade",
+        "user_id": "text not null references platform_users(id)on delete cascade",
+        "version": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "oauth_accounts": {
+      "columns": {
+        "avatar_url": "text",
+        "created_at": "text not null default(datetime('now'))",
+        "email": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "name": "text",
+        "provider": "text not null check(provider in('google','facebook','linkedin'))",
+        "provider_id": "text not null",
+        "user_id": "text not null references platform_users(id)on delete cascade"
+      },
+      "constraints": [
+        "unique(provider,provider_id)"
+      ],
+      "options": ""
+    },
+    "platform_users": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "email": "text not null unique",
+        "email_verified": "integer not null default 0",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "name": "text",
+        "password_hash": "text not null",
+        "phone": "text",
+        "role": "text not null check(role in('developer','admin','staff','customer'))",
+        "shop_id": "text references shops(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "processed_stripe_events": {
+      "columns": {
+        "id": "text primary key",
+        "received_at": "text not null default(datetime('now'))",
+        "type": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "product_categories": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "is_active": "integer not null default 1",
+        "name": "text not null",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "sort_order": "integer not null default 0"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "product_variants": {
+      "columns": {
+        "attributes_json": "text",
+        "barcode": "text",
+        "cost_price_pence": "integer not null default 0",
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "is_active": "integer not null default 1",
+        "name": "text not null",
+        "product_id": "text not null references products(id)on delete cascade",
+        "retail_price_pence": "integer not null default 0",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "sku": "text"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "products": {
+      "columns": {
+        "barcode": "text",
+        "brand": "text",
+        "category_id": "text references product_categories(id)on delete set null",
+        "cost_price_pence": "integer not null default 0",
+        "created_at": "text not null default(datetime('now'))",
+        "description": "text",
+        "id": "text primary key",
+        "image_url": "text",
+        "is_active": "integer not null default 1",
+        "is_professional": "integer not null default 0",
+        "name": "text not null",
+        "retail_price_pence": "integer not null default 0",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "sku": "text",
+        "supplier_id": "text references suppliers(id)on delete set null",
+        "tax_rate_bps": "integer not null default 0",
+        "track_stock": "integer not null default 1"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "purchase_order_items": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "po_id": "text not null references purchase_orders(id)on delete cascade",
+        "product_id": "text not null references products(id)",
+        "quantity": "integer not null check(quantity > 0)",
+        "received_qty": "integer not null default 0 check(received_qty >= 0)",
+        "shop_id": "text not null",
+        "unit_cost_pence": "integer not null default 0 check(unit_cost_pence >= 0)",
+        "variant_id": "text references product_variants(id)"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "purchase_orders": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "notes": "text",
+        "ordered_at": "text",
+        "received_at": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null default 'draft' check(status in('draft','ordered','partial','received','cancelled'))",
+        "supplier_id": "text references suppliers(id)"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "reviews": {
+      "columns": {
+        "body": "text not null",
+        "booking_id": "text references bookings(id)",
+        "created_at": "text not null default(datetime('now'))",
+        "customer_name": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "rating": "real not null",
+        "shop_id": "text not null references shops(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "sale_items": {
+      "columns": {
+        "cost_price_pence": "integer not null default 0",
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "is_commissionable": "integer not null default 1",
+        "item_type": "text not null check(item_type in('service','product'))",
+        "line_total_pence": "integer not null default 0",
+        "name": "text not null",
+        "product_id": "text references products(id)",
+        "quantity": "integer not null default 1",
+        "returned_quantity": "integer not null default 0",
+        "sale_id": "text not null references sales(id)on delete cascade",
+        "service_id": "text references services(id)",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text references staff(id)",
+        "tax_pence": "integer not null default 0",
+        "unit_price_pence": "integer not null default 0",
+        "variant_id": "text references product_variants(id)"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "sale_return_items": {
+      "columns": {
+        "id": "text primary key",
+        "quantity": "integer not null check(quantity > 0)",
+        "refund_pence": "integer not null check(refund_pence >= 0)",
+        "restocked": "integer not null default 0",
+        "return_id": "text not null references sale_returns(id)on delete cascade",
+        "sale_item_id": "text not null references sale_items(id)",
+        "shop_id": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "sale_returns": {
+      "columns": {
+        "commission_reversal_pence": "integer not null default 0",
+        "completed_at": "text",
+        "created_at": "text not null default(datetime('now'))",
+        "created_by": "text",
+        "id": "text primary key",
+        "reason": "text",
+        "refund_pence": "integer not null check(refund_pence >= 0)",
+        "sale_id": "text not null references sales(id)",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null default 'pending' check(status in('pending','completed'))",
+        "stripe_refund_id": "text",
+        "tender_type": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "sales": {
+      "columns": {
+        "booking_id": "text references bookings(id)on delete set null",
+        "business_day_id": "text references bw_business_days(id)on delete set null",
+        "completed_at": "text",
+        "created_at": "text not null default(datetime('now'))",
+        "customer_email": "text",
+        "customer_name": "text",
+        "discount_pence": "integer not null default 0",
+        "id": "text primary key",
+        "note": "text",
+        "refunded_pence": "integer not null default 0",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text references staff(id)",
+        "status": "text not null default 'pending' check(status in('pending','completed','refunded','disputed','voided'))",
+        "stripe_checkout_session_id": "text",
+        "stripe_payment_intent_id": "text",
+        "subtotal_pence": "integer not null default 0",
+        "tax_pence": "integer not null default 0",
+        "tender_type": "text not null check(tender_type in('cash','card_external','stripe'))",
+        "tip_pence": "integer not null default 0",
+        "total_pence": "integer not null default 0"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "schedules": {
+      "columns": {
+        "day_of_week": "integer not null check(day_of_week between 0 and 6)",
+        "end_time": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "is_active": "integer not null default 1",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text not null references staff(id)on delete cascade",
+        "start_time": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "service_products": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "product_id": "text not null references products(id)on delete cascade",
+        "quantity": "integer not null default 1 check(quantity > 0)",
+        "service_id": "text not null references services(id)on delete cascade",
+        "shop_id": "text not null"
+      },
+      "constraints": [
+        "primary key(service_id,product_id)"
+      ],
+      "options": ""
+    },
+    "services": {
+      "columns": {
+        "category": "text",
+        "duration_min": "integer not null default 30",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "image_url": "text",
+        "is_active": "integer not null default 1",
+        "name": "text not null",
+        "price_pence": "integer not null default 0",
+        "service_type": "text not null default 'service'",
+        "shop_id": "text not null references shops(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "shop_pages": {
+      "columns": {
+        "content": "text not null",
+        "generated_at": "text not null default(datetime('now'))",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "page_type": "text not null check(page_type in('privacy','terms','cookies'))",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "updated_at": "text not null default(datetime('now'))"
+      },
+      "constraints": [
+        "unique(shop_id,page_type)"
+      ],
+      "options": ""
+    },
+    "shop_settings": {
+      "columns": {
+        "address": "text",
+        "booking_confirmation_email": "integer not null default 1",
+        "booking_reminder_email": "integer not null default 1",
+        "commission_bearer": "text not null default 'shop'",
+        "deposit_min_pence": "integer not null default 500",
+        "deposit_percent": "integer not null default 50",
+        "deposits_enabled": "integer not null default 0",
+        "facebook_url": "text default ''",
+        "google_business_url": "text not null default ''",
+        "hours_json": "text",
+        "instagram_url": "text default ''",
+        "lat": "real",
+        "linkedin_url": "text default ''",
+        "lng": "real",
+        "phone": "text",
+        "product_commission_enabled": "integer not null default 0",
+        "promo_active": "integer not null default 0",
+        "promo_discount_code": "text",
+        "promo_discount_percent": "real",
+        "reminder_hours_before": "integer not null default 24",
+        "review_request_email": "integer not null default 1",
+        "sells_products": "integer not null default 0",
+        "shop_id": "text primary key references shops(id)on delete cascade",
+        "show_facebook": "integer not null default 0",
+        "show_google_business": "integer not null default 0",
+        "show_instagram": "integer not null default 0",
+        "show_linkedin": "integer not null default 0",
+        "show_tiktok": "integer not null default 0",
+        "show_twitter": "integer not null default 0",
+        "show_whatsapp": "integer not null default 0",
+        "show_youtube": "integer not null default 0",
+        "tiktok_url": "text default ''",
+        "twitter_url": "text default ''",
+        "whatsapp_url": "text default ''",
+        "youtube_url": "text default ''"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "shop_site_candidates": {
+      "columns": {
+        "created_at": "text not null",
+        "job_id": "text not null",
+        "payload_json": "text not null",
+        "shop_id": "text primary key references shops(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "shop_sites": {
+      "columns": {
+        "about": "text",
+        "about_title": "text",
+        "brand_voice": "text",
+        "catalog_images_json": "text",
+        "color_accent": "text",
+        "color_primary": "text",
+        "design_notes": "text",
+        "design_spec": "text",
+        "design_version": "integer not null default 1",
+        "font_body": "text",
+        "font_heading": "text",
+        "gallery_images_json": "text",
+        "generated_at": "text",
+        "heading_style": "text",
+        "heading_weight": "text",
+        "headline": "text",
+        "hero_cta": "text",
+        "hero_image_url": "text",
+        "id": "text primary key",
+        "layout_mood": "text",
+        "locked_images_json": "text",
+        "logo_url": "text",
+        "owner_color_accent": "text",
+        "owner_color_primary": "text",
+        "palette_json": "text",
+        "seo_description": "text",
+        "seo_title": "text",
+        "services_json": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text default 'active'",
+        "tagline": "text",
+        "template": "text not null",
+        "trust_signals_json": "text",
+        "usps_json": "text",
+        "website_status": "text not null default 'draft'"
+      },
+      "constraints": [
+        "foreign key(shop_id)references shops(id)"
+      ],
+      "options": ""
+    },
+    "shops": {
+      "columns": {
+        "ai_model": "text not null default 'claude-sonnet-4-6'",
+        "ai_theme": "text",
+        "ai_tier": "text not null default 'pro'",
+        "commission_rate": "real not null default 0.10",
+        "created_at": "text not null default(datetime('now'))",
+        "currency": "text not null default 'GBP'",
+        "id": "text primary key",
+        "is_active": "integer not null default 1",
+        "name": "text not null",
+        "operational_status": "text not null default 'closed'",
+        "owner_email": "text not null unique",
+        "owner_name": "text not null default ''",
+        "phone": "text not null default ''",
+        "plan": "text not null default 'standard'",
+        "retail_commission_rate": "real not null default 0.10",
+        "setup_completed": "integer not null default 0",
+        "shop_number": "integer not null unique",
+        "slug": "text not null unique",
+        "status": "text not null default 'pending' check(status in('pending','awaiting_payment','active','suspended'))",
+        "stripe_checkout_session_id": "text",
+        "stripe_checkout_url": "text",
+        "stripe_connect_account_id": "text",
+        "stripe_connect_onboarded": "integer not null default 0",
+        "stripe_payment_status": "text default 'unpaid'",
+        "timezone": "text not null default 'Europe/London'",
+        "type": "text not null default 'beauty_parlor' check(type in('beauty_parlor','barber_shop','both'))"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "staff": {
+      "columns": {
+        "avatar_url": "text",
+        "bio": "text",
+        "display_name": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "is_active": "integer not null default 1",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "speciality": "text",
+        "user_id": "text not null references platform_users(id)"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "staff_services": {
+      "columns": {
+        "service_id": "text not null references services(id)on delete cascade",
+        "staff_id": "text not null references staff(id)on delete cascade"
+      },
+      "constraints": [
+        "primary key(staff_id,service_id)"
+      ],
+      "options": ""
+    },
+    "staff_time_off": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "from_date": "text not null",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "reason": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text not null references staff(id)on delete cascade",
+        "status": "text not null default 'pending' check(status in('pending','approved','denied'))",
+        "to_date": "text not null"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "stock_levels": {
+      "columns": {
+        "id": "text primary key",
+        "product_id": "text not null references products(id)on delete cascade",
+        "quantity": "integer not null default 0",
+        "reorder_point": "integer not null default 0",
+        "reorder_qty": "integer not null default 0",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "updated_at": "text not null default(datetime('now'))",
+        "variant_id": "text references product_variants(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "stock_movements": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key",
+        "note": "text",
+        "product_id": "text not null references products(id)on delete cascade",
+        "quantity_delta": "integer not null check(quantity_delta <> 0)",
+        "reference_id": "text",
+        "reference_type": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text references staff(id)",
+        "type": "text not null check(type in('receive','sale','adjustment','waste','transfer','return','consumption'))",
+        "unit_cost_pence": "integer",
+        "variant_id": "text references product_variants(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "stock_take_items": {
+      "columns": {
+        "counted_qty": "integer not null check(counted_qty >= 0)",
+        "created_at": "text not null default(datetime('now'))",
+        "expected_qty": "integer not null default 0",
+        "id": "text primary key",
+        "product_id": "text not null",
+        "shop_id": "text not null",
+        "stock_take_id": "text not null references stock_takes(id)on delete cascade",
+        "variant_id": "text"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "stock_takes": {
+      "columns": {
+        "completed_at": "text",
+        "created_at": "text not null default(datetime('now'))",
+        "created_by": "text",
+        "id": "text primary key",
+        "notes": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null default 'open' check(status in('open','completed','cancelled'))"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "suppliers": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "email": "text",
+        "id": "text primary key",
+        "is_active": "integer not null default 1",
+        "name": "text not null",
+        "notes": "text",
+        "phone": "text",
+        "shop_id": "text not null references shops(id)on delete cascade"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "waitlist": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "customer_email": "text not null",
+        "customer_name": "text not null",
+        "customer_phone": "text",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "preferred_date": "text",
+        "service_id": "text references services(id)",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "staff_id": "text references staff(id)",
+        "status": "text not null default 'waiting' check(status in('waiting','notified','booked','expired'))"
+      },
+      "constraints": [],
+      "options": ""
+    },
+    "walkin_queue": {
+      "columns": {
+        "created_at": "text not null default(datetime('now'))",
+        "id": "text primary key default(lower(hex(randomblob(16))))",
+        "name": "text not null",
+        "notes": "text",
+        "phone": "text",
+        "position": "integer not null",
+        "service": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null default 'waiting' check(status in('waiting','serving','served','skipped','removed'))",
+        "updated_at": "text not null default(datetime('now'))"
+      },
+      "constraints": [],
+      "options": ""
+    }
+  },
+  "indexes": {
+    "idx_audit_log_action_time": "create index idx_audit_log_action_time on audit_log(action,occurred_at)",
+    "idx_audit_log_actor_time": "create index idx_audit_log_actor_time on audit_log(actor_ref,occurred_at)",
+    "idx_audit_log_parent": "create index idx_audit_log_parent on audit_log(parent_id)",
+    "idx_audit_log_request": "create index idx_audit_log_request on audit_log(request_id)",
+    "idx_audit_log_shop_time": "create index idx_audit_log_shop_time on audit_log(shop_id,occurred_at)",
+    "idx_audit_log_started": "create index idx_audit_log_started on audit_log(occurred_at)where phase = 'started'",
+    "idx_audit_log_time": "create index idx_audit_log_time on audit_log(occurred_at,id)",
+    "idx_audit_log_unarchived": "create index idx_audit_log_unarchived on audit_log(seq)where sealed_at is not null and archived_at is null",
+    "idx_audit_log_unsealed": "create index idx_audit_log_unsealed on audit_log(occurred_at)where sealed_at is null",
+    "idx_audit_subjects_ip_day": "create index idx_audit_subjects_ip_day on audit_subjects(kind,day,ip)",
+    "idx_audit_subjects_redact": "create index idx_audit_subjects_redact on audit_subjects(redact_after)where redacted_at is null",
+    "idx_audit_subjects_shop": "create index idx_audit_subjects_shop on audit_subjects(shop_id)",
+    "idx_bookings_active_slot": "create unique index idx_bookings_active_slot on bookings(staff_id,start_time)where status not in('cancelled','no_show')",
+    "idx_bookings_shop": "create index idx_bookings_shop on bookings(shop_id,booking_date)",
+    "idx_bookings_staff": "create index idx_bookings_staff on bookings(staff_id,booking_date)",
+    "idx_bw_ledger_sale": "create index idx_bw_ledger_sale on bw_commission_ledger(sale_id)",
+    "idx_bw_transactions_sale": "create index idx_bw_transactions_sale on bw_transactions(sale_id)",
+    "idx_contacts_created": "create index idx_contacts_created on contacts(created_at)",
+    "idx_contacts_email": "create index idx_contacts_email on contacts(email)",
+    "idx_generation_jobs_shop_id": "create index idx_generation_jobs_shop_id on generation_jobs(shop_id)",
+    "idx_invites_shop_id": "create index idx_invites_shop_id on invites(shop_id)",
+    "idx_invites_token": "create index idx_invites_token on invites(token)",
+    "idx_legal_acceptances_shop": "create index idx_legal_acceptances_shop on legal_acceptances(shop_id)",
+    "idx_legal_acceptances_user": "create index idx_legal_acceptances_user on legal_acceptances(user_id)",
+    "idx_oauth_accounts_provider": "create index idx_oauth_accounts_provider on oauth_accounts(provider,provider_id)",
+    "idx_oauth_accounts_user_id": "create index idx_oauth_accounts_user_id on oauth_accounts(user_id)",
+    "idx_po_items_po": "create index idx_po_items_po on purchase_order_items(po_id)",
+    "idx_po_items_shop": "create index idx_po_items_shop on purchase_order_items(shop_id)",
+    "idx_product_categories_shop": "create index idx_product_categories_shop on product_categories(shop_id)",
+    "idx_products_barcode": "create index idx_products_barcode on products(shop_id,barcode)",
+    "idx_products_shop": "create index idx_products_shop on products(shop_id)",
+    "idx_products_shop_sku": "create unique index idx_products_shop_sku on products(shop_id,sku)where sku is not null",
+    "idx_purchase_orders_shop": "create index idx_purchase_orders_shop on purchase_orders(shop_id,status)",
+    "idx_reviews_booking_id": "create unique index idx_reviews_booking_id on reviews(booking_id)where booking_id is not null",
+    "idx_reviews_shop_created": "create index idx_reviews_shop_created on reviews(shop_id,created_at desc)",
+    "idx_sale_items_sale": "create index idx_sale_items_sale on sale_items(sale_id)",
+    "idx_sale_items_shop": "create index idx_sale_items_shop on sale_items(shop_id)",
+    "idx_sale_return_items_return": "create index idx_sale_return_items_return on sale_return_items(return_id)",
+    "idx_sale_returns_sale": "create index idx_sale_returns_sale on sale_returns(sale_id)",
+    "idx_sale_returns_shop": "create index idx_sale_returns_shop on sale_returns(shop_id,created_at)",
+    "idx_sales_booking": "create index idx_sales_booking on sales(booking_id)",
+    "idx_sales_shop_created": "create index idx_sales_shop_created on sales(shop_id,created_at)",
+    "idx_schedules_staff": "create index idx_schedules_staff on schedules(staff_id)",
+    "idx_service_products_product": "create index idx_service_products_product on service_products(product_id)",
+    "idx_service_products_shop": "create index idx_service_products_shop on service_products(shop_id)",
+    "idx_services_shop": "create index idx_services_shop on services(shop_id)",
+    "idx_shop_sites_shop_id": "create unique index idx_shop_sites_shop_id on shop_sites(shop_id)",
+    "idx_staff_shop": "create index idx_staff_shop on staff(shop_id)",
+    "idx_stock_levels_product": "create unique index idx_stock_levels_product on stock_levels(shop_id,product_id)where variant_id is null",
+    "idx_stock_levels_variant": "create unique index idx_stock_levels_variant on stock_levels(shop_id,product_id,variant_id)where variant_id is not null",
+    "idx_stock_movements_product": "create index idx_stock_movements_product on stock_movements(shop_id,product_id,created_at)",
+    "idx_stock_take_items_product": "create unique index idx_stock_take_items_product on stock_take_items(stock_take_id,product_id)where variant_id is null",
+    "idx_stock_take_items_shop": "create index idx_stock_take_items_shop on stock_take_items(shop_id)",
+    "idx_stock_take_items_variant": "create unique index idx_stock_take_items_variant on stock_take_items(stock_take_id,product_id,variant_id)where variant_id is not null",
+    "idx_stock_takes_shop": "create index idx_stock_takes_shop on stock_takes(shop_id,status)",
+    "idx_suppliers_shop": "create index idx_suppliers_shop on suppliers(shop_id)",
+    "idx_time_off_shop": "create index idx_time_off_shop on staff_time_off(shop_id)",
+    "idx_time_off_staff": "create index idx_time_off_staff on staff_time_off(staff_id)",
+    "idx_time_off_status": "create index idx_time_off_status on staff_time_off(shop_id,status)",
+    "idx_users_email": "create index idx_users_email on platform_users(email)",
+    "idx_variants_product": "create index idx_variants_product on product_variants(product_id)",
+    "idx_variants_shop_sku": "create unique index idx_variants_shop_sku on product_variants(shop_id,sku)where sku is not null",
+    "idx_waitlist_shop": "create index idx_waitlist_shop on waitlist(shop_id)",
+    "idx_walkin_shop_status": "create index idx_walkin_shop_status on walkin_queue(shop_id,status,position)"
+  },
+  "triggers": {
+    "audit_log_no_delete": "create trigger audit_log_no_delete before delete on audit_log when old.occurred_at > strftime('%Y-%m-%dT%H:%M:%fZ','now','-2192 days')begin select raise(abort,'audit_log is append-only'); end",
+    "audit_log_seal_only": "create trigger audit_log_seal_only before update on audit_log when not(old.id is new.id and old.occurred_at is new.occurred_at and old.entry_hash is new.entry_hash and old.actor_type is new.actor_type and old.actor_ref is new.actor_ref and old.actor_role is new.actor_role and old.via is new.via and old.action is new.action and old.phase is new.phase and old.outcome is new.outcome and old.reason is new.reason and old.shop_id is new.shop_id and old.entity_type is new.entity_type and old.entity_id is new.entity_id and old.changes_json is new.changes_json and old.details_json is new.details_json and old.request_id is new.request_id and old.parent_id is new.parent_id and old.worker is new.worker and old.ip_ref is new.ip_ref and old.historical is new.historical and(old.seq is null or old.seq is new.seq)and(old.sealed_at is null or old.sealed_at is new.sealed_at)and(old.chain_hash is null or old.chain_hash is new.chain_hash)and(old.archived_at is null or old.archived_at is new.archived_at)and(old.archive_key is null or old.archive_key is new.archive_key))begin select raise(abort,'audit_log is append-only'); end"
+  },
+  "views": {}
+}

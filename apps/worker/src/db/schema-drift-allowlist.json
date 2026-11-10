@@ -1,0 +1,138 @@
+{
+  "pivot-parlor-db": [
+    {
+      "key": "table:chat_sessions.column:booking_initiated",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's chat_sessions existed before migration 019, whose CREATE TABLE IF NOT EXISTS therefore did nothing there. Harmless: production is the more permissive side, and no code writes this table (only the retention prune deletes from it). Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:chat_sessions.column:id",
+      "live": "text primary key default(lower(hex(randomblob(16))))",
+      "chain": "text primary key",
+      "reason": "Production's chat_sessions existed before migration 019, whose CREATE TABLE IF NOT EXISTS therefore did nothing there. Harmless: production is the more permissive side, and no code writes this table (only the retention prune deletes from it). Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:commission_bearer",
+      "live": "text not null default 'shop' check(commission_bearer in('shop','customer'))",
+      "chain": "text not null default 'shop'",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:facebook_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:id",
+      "live": "text primary key default(lower(hex(randomblob(16))))",
+      "chain": null,
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:instagram_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:linkedin_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:promo_discount_percent",
+      "live": "integer default 0",
+      "chain": "real",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:shop_id",
+      "live": "text not null unique references shops(id)on delete cascade",
+      "chain": "text primary key references shops(id)on delete cascade",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_facebook",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_instagram",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_linkedin",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_tiktok",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_twitter",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_whatsapp",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:show_youtube",
+      "live": "integer default 0",
+      "chain": "integer not null default 0",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:tiktok_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:twitter_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:whatsapp_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:shop_settings.column:youtube_url",
+      "live": "text",
+      "chain": "text default ''",
+      "reason": "Production's shop_settings existed before migration 016, whose CREATE TABLE IF NOT EXISTS therefore did nothing there, so it kept its original shape. Harmless: the only insert (queries.ts) names shop_id alone, every reader of the URL and show_* columns is NULL-safe, and nothing writes commission_bearer. Schema-drift audit, 2026-11-10."
+    }
+  ],
+  "pivot-parlor-db-staging": [
+    {
+      "key": "table:bookings.column:service_id",
+      "live": "text not null references services(id)on delete cascade",
+      "chain": "text not null references services(id)",
+      "reason": "Staging's bookings cascades deletes from staff and services, where the chain and production refuse them. Harmless to the app: nothing hard-deletes staff or services (checked 2026-11-10). E2E runs on staging, so a test that deleted staff or services would not see production's refusal. Schema-drift audit, 2026-11-10."
+    },
+    {
+      "key": "table:bookings.column:staff_id",
+      "live": "text not null references staff(id)on delete cascade",
+      "chain": "text not null references staff(id)",
+      "reason": "Staging's bookings cascades deletes from staff and services, where the chain and production refuse them. Harmless to the app: nothing hard-deletes staff or services (checked 2026-11-10). E2E runs on staging, so a test that deleted staff or services would not see production's refusal. Schema-drift audit, 2026-11-10."
+    }
+  ]
+}

@@ -67,6 +67,12 @@ jobs:
       - name: Run staging D1 migrations
         run: node scripts/migrate.mjs --remote --db pivot-parlor-db-staging
 
+      # Read-only. Fails when staging's schema differs from the migrations
+      # beyond what apps/worker/src/db/schema-drift-allowlist.json accepts, or
+      # when staging ran a migration this branch lacks (another open PR's).
+      - name: Staging schema matches the migrations
+        run: node scripts/schema-drift.mjs --remote --db pivot-parlor-db-staging
+
       # Booking worker first: the main staging worker's BOOKING service binding
       # must resolve to an existing worker (WS-1).
       - name: Deploy staging booking worker

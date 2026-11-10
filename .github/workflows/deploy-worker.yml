@@ -11,6 +11,8 @@ on:
       - "packages/llm/**"
       - "packages/audit/**"
       - "package-lock.json"
+      - "scripts/schema-compare.mjs"
+      - "scripts/schema-drift.mjs"
       - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
 
@@ -71,6 +73,16 @@ jobs:
 
       - name: Deploy Worker
         run: npx wrangler deploy --config apps/worker/wrangler.toml
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Read-only. Runs AFTER both deploys on purpose: production's migrations
+      # have already run by now, so failing earlier would only leave the new
+      # schema running old code. A difference beyond
+      # apps/worker/src/db/schema-drift-allowlist.json still fails the run.
+      - name: Production schema matches the migrations
+        run: node scripts/schema-drift.mjs --remote
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
