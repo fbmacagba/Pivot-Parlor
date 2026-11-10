@@ -3,6 +3,7 @@ import { createPagesFunctionHandler } from "@remix-run/cloudflare-pages";
 import type { ServerBuild } from "@remix-run/server-runtime";
 import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
+import { withSecurityHeaders } from "../app/lib/securityHeaders";
 
 interface Env {
   /** Service binding to the API worker (apps/web/wrangler.toml [[services]]). */
@@ -30,12 +31,17 @@ const handleRequest = createPagesFunctionHandler({
   },
 });
 
-export const onRequest: PagesFunction<Env> = (context) =>
-  apiRoute.run(
-    {
-      binding: context.env.API,
-      origin: originOf(context.env.API_URL),
-      clientIp: context.request.headers.get(CLIENT_IP_HEADER),
-    },
-    () => handleRequest(context)
+// public/_headers covers static assets only; every response from here gets
+// the security headers in code (app/lib/securityHeaders.ts).
+export const onRequest: PagesFunction<Env> = async (context) =>
+  withSecurityHeaders(
+    await apiRoute.run(
+      {
+        binding: context.env.API,
+        origin: originOf(context.env.API_URL),
+        clientIp: context.request.headers.get(CLIENT_IP_HEADER),
+      },
+      () => handleRequest(context)
+    ),
+    { apiOrigin: originOf(context.env.API_URL) }
   );
