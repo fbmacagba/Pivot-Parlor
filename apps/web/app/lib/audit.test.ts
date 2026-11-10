@@ -10,7 +10,47 @@ import {
   formatAuditDate,
   formatAuditDateTime,
   pipelineActorLabel,
+  verifyContinueFrom,
+  verifyMessage,
 } from "./audit";
+
+describe("Check now result", () => {
+  const ok = { ok: true, checked: 1000, fromSeq: 1, toSeq: 1000, firstBadSeq: null, problem: null, capped: false };
+
+  it("reports a full check as intact", () => {
+    expect(verifyMessage(ok)).toBe("Checked 1000 entries (1 to 1000): the trail is intact.");
+    expect(verifyContinueFrom(ok)).toBeNull();
+  });
+
+  it("reports a check that stopped at its read limit as intact so far, and continues from the next entry", () => {
+    const capped = { ...ok, checked: 200, toSeq: 200, capped: true };
+    expect(verifyMessage(capped)).toBe(
+      "Checked 200 entries (1 to 200): intact so far. This check stopped at its read limit; press Check now again to continue from entry 201."
+    );
+    expect(verifyContinueFrom(capped)).toBe(201);
+  });
+
+  it("never offers to continue past a problem", () => {
+    const bad = { ...ok, ok: false, checked: 41, firstBadSeq: 42, problem: "chain_hash breaks the chain" };
+    expect(verifyMessage(bad)).toBe("Problem at entry 42: chain_hash breaks the chain");
+    expect(verifyContinueFrom({ ...bad, capped: true })).toBeNull();
+  });
+
+  it("says when nothing has been sealed yet", () => {
+    expect(verifyMessage({ ...ok, checked: 0 })).toBe("Nothing has been sealed yet, so there was nothing to check. Try again in a minute.");
+  });
+
+  it("reads an older API answer without `capped` as a full check", () => {
+    const older = { ok: true, checked: 1000, fromSeq: 1, toSeq: 1000, firstBadSeq: null, problem: null };
+    expect(verifyContinueFrom(older)).toBeNull();
+  });
+
+  it("uses no em or en dashes", () => {
+    for (const v of [ok, { ...ok, capped: true }, { ...ok, ok: false, firstBadSeq: 2, problem: "x" }, { ...ok, checked: 0 }]) {
+      expect(verifyMessage(v)).not.toMatch(/[–—]/);
+    }
+  });
+});
 
 describe("audit page helpers", () => {
   it("keeps only known filters", () => {

@@ -106,8 +106,12 @@ test.describe("Audit trail — staging", () => {
         await expect(pauseEntry.getByText("Archived", { exact: true })).toBeVisible();
       }).toPass({ timeout: 150_000, intervals: [15_000] });
 
+      // A check reads up to MANUAL_VERIFY_ARCHIVE_OBJECTS archive objects
+      // (apps/worker/src/routes/audit.ts), several at once; give it longer
+      // than the default 10s. Either answer says "intact" (a check that hit
+      // its read limit says "intact so far").
       await page.getByRole("button", { name: "Check now" }).click();
-      await expect(page.getByRole("status")).toContainText("intact");
+      await expect(page.getByRole("status")).toContainText("intact", { timeout: 30_000 });
 
       // The pause above went through the website, which reaches the API over
       // a service binding carrying the visitor's IP (apps/web/app/lib/
