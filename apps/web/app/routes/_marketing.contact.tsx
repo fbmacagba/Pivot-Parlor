@@ -4,16 +4,18 @@ import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { TURNSTILE_SCRIPT_SRC, TurnstileWidget } from "~/components/TurnstileWidget";
 
 export const meta: MetaFunction = () => [
   { title: "Contact Us | Pivot Parlor" },
 ];
 
-// Load Turnstile script only on this route
+// Start fetching the Turnstile script early; TurnstileWidget runs it after
+// hydration (explicit render, never the implicit .cf-turnstile scan).
 export const links: LinksFunction = () => [
   {
     rel: "preload",
-    href: "https://challenges.cloudflare.com/turnstile/v0/api.js",
+    href: TURNSTILE_SCRIPT_SRC,
     as: "script",
   },
 ];
@@ -82,13 +84,6 @@ export default function Contact() {
 
   return (
     <main className="px-4 py-24 sm:px-6 lg:px-8">
-      {/* Load Turnstile script */}
-      <script
-        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-        async
-        defer
-      />
-
       <div className="mx-auto max-w-2xl">
         <div className="text-center mb-12">
           <h1 className="font-heading text-5xl font-bold text-white">
@@ -163,13 +158,8 @@ export default function Contact() {
               />
             </div>
 
-            {/* Turnstile widget — renders automatically, injects cf-turnstile-response hidden field */}
-            <div
-              className="cf-turnstile"
-              data-sitekey={TURNSTILE_SITE_KEY}
-              data-theme="dark"
-              data-size="normal"
-            />
+            {/* Rendered after hydration; adds the cf-turnstile-response field. */}
+            <TurnstileWidget siteKey={TURNSTILE_SITE_KEY} theme="dark" resetSignal={data} />
 
             <Button type="submit" disabled={submitting} className="w-full" size="lg">
               {submitting ? "Sending…" : "Send enquiry →"}
