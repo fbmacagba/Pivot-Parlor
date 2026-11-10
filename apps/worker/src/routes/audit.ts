@@ -150,6 +150,9 @@ audit.get("/", async (c) => {
   });
 });
 
+/** Archive objects one "Check now" may read (one R2 GET each). */
+export const MANUAL_VERIFY_ARCHIVE_OBJECTS = 200;
+
 // POST /api/audit/verify — body { from_seq?, to_seq? }; default = the latest
 // 1000 sealed entries. Deliberately does NOT pass { requireArchived: true }:
 // this is the manual "Check now" trigger, which should also cover entries
@@ -173,7 +176,10 @@ audit.post("/verify", async (c) => {
   const result =
     to < from
       ? { ok: true, fromSeq: from, toSeq: to, checked: 0, firstBadSeq: null, problem: null, capped: false, archiveObjects: 0 }
-      : await verifyRange(c.env.DB, c.env.AUDIT_ARCHIVE, from, to);
+      : // Bounded like the nightly (Ruling 54), so a click stays quick however
+        // long the range: a capped result ends at the last fully checked
+        // entry, and the page offers to continue from the next one.
+        await verifyRange(c.env.DB, c.env.AUDIT_ARCHIVE, from, to, { maxArchiveObjects: MANUAL_VERIFY_ARCHIVE_OBJECTS });
   const refused = await guarded(c, () =>
     auditFor(c).write({ action: "audit.verify", outcome: result.ok ? "succeeded" : "failed", reason: result.problem, details: { ...result } })
   );

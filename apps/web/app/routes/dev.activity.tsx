@@ -17,6 +17,9 @@ import {
   formatAuditDate,
   formatAuditDateTime,
   pipelineActorLabel,
+  verifyContinueFrom,
+  verifyMessage,
+  type VerifyResult,
 } from "~/lib/audit";
 
 interface Entry {
@@ -46,8 +49,6 @@ interface Entry {
   request_id: string | null;
   historical: number;
 }
-
-interface VerifyResult { ok: boolean; checked: number; fromSeq: number; toSeq: number; firstBadSeq: number | null; problem: string | null }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -179,6 +180,9 @@ export default function DevActivity() {
     setEraseError(null);
   };
   const sealed = entries.filter((e) => e.seq !== null).map((e) => e.seq as number);
+  // After a check that stopped at its read limit, the next click picks up
+  // from the entry after the last one it checked.
+  const continueFrom = result && "verify" in result && result.verify ? verifyContinueFrom(result.verify) : null;
   const qs = auditQuery(params);
   // The subject export takes only from/to, not the full filter set (see
   // dev.activity.export.tsx) — carried onto both "Export their/this
@@ -202,12 +206,10 @@ export default function DevActivity() {
           </a>
           <Form method="post">
             <input type="hidden" name="intent" value="verify" />
-            {sealed.length > 0 && (
-              <>
-                <input type="hidden" name="from_seq" value={Math.min(...sealed)} />
-                <input type="hidden" name="to_seq" value={Math.max(...sealed)} />
-              </>
+            {(continueFrom !== null || sealed.length > 0) && (
+              <input type="hidden" name="from_seq" value={continueFrom ?? Math.min(...sealed)} />
             )}
+            {sealed.length > 0 && <input type="hidden" name="to_seq" value={Math.max(...sealed)} />}
             <Button type="submit" className="tap-target" disabled={nav.state !== "idle"}>Check now</Button>
           </Form>
         </div>
@@ -220,11 +222,7 @@ export default function DevActivity() {
             result.verify.checked === 0 ? "text-white/70" : result.verify.ok ? "text-emerald-400" : "text-red-400"
           }
         >
-          {result.verify.checked === 0
-            ? "Nothing has been sealed yet, so there was nothing to check. Try again in a minute."
-            : result.verify.ok
-              ? `Checked ${result.verify.checked} entries (${result.verify.fromSeq} to ${result.verify.toSeq}): the trail is intact.`
-              : `Problem at entry ${result.verify.firstBadSeq}: ${result.verify.problem}`}
+          {verifyMessage(result.verify)}
         </p>
       )}
       {result && "imported" in result && result.imported && (

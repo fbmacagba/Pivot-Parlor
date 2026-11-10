@@ -31,6 +31,35 @@ export function entryStatus(e: { sealed_at: string | null; archived_at: string |
   return { label: "Pending", variant: "warning" };
 }
 
+/** POST /api/audit/verify's answer. `capped` is true when the check stopped at
+ *  its archive read limit: `toSeq` is then the last fully checked entry. */
+export interface VerifyResult {
+  ok: boolean;
+  checked: number;
+  fromSeq: number;
+  toSeq: number;
+  firstBadSeq: number | null;
+  problem: string | null;
+  capped?: boolean;
+}
+
+/** What "Check now" says about a result. */
+export function verifyMessage(v: VerifyResult): string {
+  if (v.checked === 0) return "Nothing has been sealed yet, so there was nothing to check. Try again in a minute.";
+  if (!v.ok) return `Problem at entry ${v.firstBadSeq}: ${v.problem}`;
+  const range = `Checked ${v.checked} entries (${v.fromSeq} to ${v.toSeq})`;
+  return v.capped
+    ? `${range}: intact so far. This check stopped at its read limit; press Check now again to continue from entry ${v.toSeq + 1}.`
+    : `${range}: the trail is intact.`;
+}
+
+/** Where the next "Check now" starts after a check that stopped at its read
+ *  limit, or null when the last check covered its whole range or found a
+ *  problem. */
+export function verifyContinueFrom(v: VerifyResult): number | null {
+  return v.ok && v.capped ? v.toSeq + 1 : null;
+}
+
 // Every action in the catalogue (packages/audit/src/actions.ts) has a label
 // here; apps/worker/test/audit-labels.test.ts fails when one is missing. Each
 // label says what the entry records, in past tense, and never claims success:

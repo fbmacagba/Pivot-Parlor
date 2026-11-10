@@ -12,7 +12,9 @@ export interface VerifyResult {
    *  `toSeq` is then the last fully verified seq (not the requested upper
    *  bound), so a caller advancing a cursor to `toSeq` stays correct. */
   capped: boolean;
-  /** Distinct archive objects read (one R2 GET each). */
+  /** Distinct archive objects read (one R2 GET each, failed ones included).
+   *  Objects are read a page ahead, so after a failure this can include
+   *  objects past the failing row; it never exceeds `maxArchiveObjects`. */
   archiveObjects: number;
 }
 
@@ -35,6 +37,10 @@ export interface VerifyOptions {
 
 const PAGE = 500;
 
+/** Archive objects read at once. A Worker invocation keeps at most six
+ *  connections open, so more would only queue. */
+export const ARCHIVE_FETCH_CONCURRENCY = 6;
+
 export async function verifyRange(
   db: D1Database,
   bucket: R2Bucket,
@@ -43,8 +49,13 @@ export async function verifyRange(
   opts: VerifyOptions = {}
 ): Promise<VerifyResult> {
   const archives = new Map<string, Map<string, { line: string; format: number | null }>>();
+  // Objects whose GET failed. The error is raised only when a row needs the
+  // object, exactly where the one-at-a-time version raised it.
+  const unreadable = new Map<string, unknown>();
+  /** GETs made so far, failed ones included: what the budget counts. */
+  const read = () => archives.size + unreadable.size;
   const fail = (checked: number, seq: number, problem: string): VerifyResult =>
-    ({ ok: false, fromSeq, toSeq, checked, firstBadSeq: seq, problem, capped: false, archiveObjects: archives.size });
+    ({ ok: false, fromSeq, toSeq, checked, firstBadSeq: seq, problem, capped: false, archiveObjects: read() });
 
   // Minor: a caller-supplied range that is empty or backwards is a caller
   // bug, not something to silently treat as "nothing to check."
@@ -64,10 +75,8 @@ export async function verifyRange(
     prev = p;
   }
 
-  async function archived(key: string): Promise<Map<string, { line: string; format: number | null }>> {
-    let m = archives.get(key);
-    if (m) return m;
-    m = new Map();
+  async function load(key: string): Promise<Map<string, { line: string; format: number | null }>> {
+    const m = new Map<string, { line: string; format: number | null }>();
     const obj = await bucket.get(key);
     const text = obj ? await obj.text() : "";
     for (const line of text.split("\n")) {
@@ -80,6 +89,41 @@ export async function verifyRange(
       if (!parsed) continue;
       m.set(parsed.id, { line, format: parsed.format });
     }
+    return m;
+  }
+
+  /** Read this page's objects ARCHIVE_FETCH_CONCURRENCY at a time, in the
+   *  order its rows first need them, and never past the budget: a row whose
+   *  object is left out is exactly the row the budget check stops before. */
+  async function prefetch(rows: AuditRow[]): Promise<void> {
+    const wanted: string[] = [];
+    const picked = new Set<string>();
+    for (const row of rows) {
+      const key = row.archive_key;
+      if (!key || archives.has(key) || unreadable.has(key) || picked.has(key)) continue;
+      if (maxObjects !== undefined && read() + wanted.length >= maxObjects) break;
+      picked.add(key);
+      wanted.push(key);
+    }
+    let next = 0;
+    const reader = async () => {
+      while (next < wanted.length) {
+        const key = wanted[next++]!;
+        try {
+          archives.set(key, await load(key));
+        } catch (err) {
+          unreadable.set(key, err);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(ARCHIVE_FETCH_CONCURRENCY, wanted.length) }, reader));
+  }
+
+  async function archived(key: string): Promise<Map<string, { line: string; format: number | null }>> {
+    if (unreadable.has(key)) throw unreadable.get(key);
+    let m = archives.get(key);
+    if (m) return m;
+    m = await load(key);
     archives.set(key, m);
     return m;
   }
@@ -93,6 +137,7 @@ export async function verifyRange(
       .all<AuditRow>();
     const rows = page.results ?? [];
     if (!rows.length) return fail(checked, expected, `missing seq ${expected}`);
+    await prefetch(rows);
     for (const row of rows) {
       if (row.seq !== expected) return fail(checked, expected, `missing seq ${expected}`);
       if ((await entryHash(row)) !== row.entry_hash) return fail(checked, expected, "entry_hash does not match the entry");
@@ -105,8 +150,13 @@ export async function verifyRange(
         // Ruling 54: stop BEFORE this row if its object would exceed the
         // budget. Every row before it is fully verified (hash, chain and
         // archive comparison), so expected - 1 is a safe cursor position.
-        if (maxObjects !== undefined && !archives.has(row.archive_key) && archives.size >= maxObjects) {
-          return { ok: true, fromSeq, toSeq: expected - 1, checked, firstBadSeq: null, problem: null, capped: true, archiveObjects: archives.size };
+        if (
+          maxObjects !== undefined &&
+          !archives.has(row.archive_key) &&
+          !unreadable.has(row.archive_key) &&
+          read() >= maxObjects
+        ) {
+          return { ok: true, fromSeq, toSeq: expected - 1, checked, firstBadSeq: null, problem: null, capped: true, archiveObjects: read() };
         }
         const copy = (await archived(row.archive_key)).get(row.id);
         if (copy === undefined) return fail(checked, expected, `entry missing from archive ${row.archive_key}`);
@@ -120,5 +170,5 @@ export async function verifyRange(
       expected++;
     }
   }
-  return { ok: true, fromSeq, toSeq, checked, firstBadSeq: null, problem: null, capped: false, archiveObjects: archives.size };
+  return { ok: true, fromSeq, toSeq, checked, firstBadSeq: null, problem: null, capped: false, archiveObjects: read() };
 }
