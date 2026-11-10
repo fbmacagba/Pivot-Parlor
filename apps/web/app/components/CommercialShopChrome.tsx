@@ -146,6 +146,7 @@ export function CommercialShopChrome({
   const [navOpen, setNavOpen] = useState(false);
   const [cookieForce, setCookieForce] = useState(false);
   const [cookieHeight, setCookieHeight] = useState(0);
+  const [cookieOpen, setCookieOpen] = useState(false);
   const demoInfo = portfolioDemoForSlug(shopSlug);
   // The shop's one booking label (see lib/shopLabels): the same verb and case
   // on the header, the phone menu and the phone bar as on the page itself.
@@ -316,7 +317,9 @@ export function CommercialShopChrome({
 
   // The bar and the menu are phone-only fixed layers at the same z-index; the
   // bar yields whenever the menu is open, and the chat-launcher lift follows it.
-  const barShown = pastHero && !navOpen;
+  // It also yields to the cookie notice (z 60), which would otherwise cover it
+  // completely while its link stayed focusable underneath.
+  const barShown = pastHero && !navOpen && !cookieOpen;
 
   // Fonts resolve onto the curated SELF-HOSTED set (WS-6 item 5 / LEG-5) —
   // exact matches keep their family; unknown legacy names fall to the role's
@@ -805,6 +808,7 @@ export function CommercialShopChrome({
         forceOpen={cookieForce}
         onClose={() => setCookieForce(false)}
         onHeightChange={setCookieHeight}
+        onOpenChange={setCookieOpen}
       />
 
       {bookingBar ? (
@@ -814,7 +818,7 @@ export function CommercialShopChrome({
       {chatOpen ? (
         <div
           ref={chatDialogRef}
-          className="pp-chat-panel flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl"
+          className={`pp-chat-panel flex w-[360px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-15)] bg-[color:var(--st-bg)] shadow-2xl${navOpen ? " invisible" : ""}`}
           role="dialog"
           aria-label={demo ? "Scripted demonstration assistant" : `Chat with ${site.shop_name}'s AI assistant`}
           onClick={(e) => e.stopPropagation()}
@@ -1011,9 +1015,12 @@ export function CommercialShopChrome({
         </div>
       ) : null}
 
+      {/* The launcher and panel (z 60) would float over the full-screen menu
+          (z 50) outside its modal; visibility:hidden also takes them out of
+          the tab order and the accessibility tree while the menu is open. */}
       <button
         type="button"
-        className="pp-chat-fab flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95 active:scale-95"
+        className={`pp-chat-fab flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-[color:var(--color-accent)] text-[color:var(--st-on-accent)] shadow-xl transition hover:opacity-95 active:scale-95${navOpen ? " invisible" : ""}`}
         aria-label={chatOpen ? "Close chat" : "Open chat"}
         aria-expanded={chatOpen}
         onClick={() => {
