@@ -432,6 +432,25 @@ BEGIN
   SELECT RAISE(ABORT, 'audit_log is append-only');
 END;
 
+-- Migration 053: no REPLACE, no pre-sealed or id-less entry, and no deleting
+-- a row before it is sealed and archived (occurred_at is writer-supplied).
+CREATE TRIGGER IF NOT EXISTS audit_log_insert_new_only
+BEFORE INSERT ON audit_log
+WHEN NEW.id IS NULL
+  OR NEW.seq IS NOT NULL OR NEW.sealed_at IS NOT NULL OR NEW.chain_hash IS NOT NULL
+  OR NEW.archived_at IS NOT NULL OR NEW.archive_key IS NOT NULL
+  OR EXISTS (SELECT 1 FROM audit_log WHERE id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS audit_log_no_delete_unarchived
+BEFORE DELETE ON audit_log
+WHEN OLD.sealed_at IS NULL OR OLD.archived_at IS NULL
+BEGIN
+  SELECT RAISE(ABORT, 'audit_log is append-only');
+END;
+
 -- 047_audit_started_index
 CREATE INDEX IF NOT EXISTS idx_audit_log_started ON audit_log (occurred_at) WHERE phase = 'started';
 

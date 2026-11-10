@@ -101,7 +101,7 @@ node scripts/migrate.mjs --remote --db pivot-parlor-db-staging   # staging
 node scripts/migrate.mjs --remote --baseline
 ```
 
-**Adding a migration:** create `apps/worker/src/db/migrations/0NN_name.sql` (next number; currently up to `052`), also reflect the change in `schema.sql` (it is the rolling snapshot used as migration `000`), and run the worker test suite — it replays the full chain and fails if the migration is not replayable. Then refresh the chain's schema snapshot and commit it: `cd apps/worker && npx vitest run test/schema-drift.test.ts -u` (updates `apps/worker/src/db/chain-schema.json`; CI fails while it is stale).
+**Adding a migration:** create `apps/worker/src/db/migrations/0NN_name.sql` (next number; currently up to `053`), also reflect the change in `schema.sql` (it is the rolling snapshot used as migration `000`), and run the worker test suite — it replays the full chain and fails if the migration is not replayable. Then refresh the chain's schema snapshot and commit it: `cd apps/worker && npx vitest run test/schema-drift.test.ts -u` (updates `apps/worker/src/db/chain-schema.json`; CI fails while it is stale).
 
 **Schema drift guard:** `node scripts/schema-drift.mjs --remote [--db <name>]` compares a live database's schema with that snapshot (read-only). CI runs it on staging for every PR and on production after every worker deploy. A difference known to be harmless goes in `apps/worker/src/db/schema-drift-allowlist.json`, exactly as the check reports it, with its reason; anything else fails. It also fails when the database ran a migration the branch lacks: on staging, another open PR's migration (rebase once it merges). If that PR was closed without merging, restore staging to the bookmark its "Run staging D1 migrations" step printed (`npx wrangler d1 time-travel restore pivot-parlor-db-staging --bookmark=<bookmark>`, from `apps/worker`; see `docs/DR-RUNBOOK.md`); the next PR's migrate step re-applies everything merged since. Rebuild migrations must copy by named column, never `SELECT *`: production's column order differs from the chain's in several tables.
 
@@ -146,7 +146,7 @@ Those calls travel over the `API` service binding (`apps/web/wrangler.toml`), no
 ### Database
 
 - Cloudflare D1 (SQLite): `pivot-parlor-db` (production), `pivot-parlor-db-staging` (staging).
-- Schema snapshot in `apps/worker/src/db/schema.sql`; sequential migrations in `apps/worker/src/db/migrations/` (currently up to `052`), tracked in `schema_migrations` and applied via `scripts/migrate.mjs` (see Database migrations above).
+- Schema snapshot in `apps/worker/src/db/schema.sql`; sequential migrations in `apps/worker/src/db/migrations/` (currently up to `053`), tracked in `schema_migrations` and applied via `scripts/migrate.mjs` (see Database migrations above).
 - The main worker's migration chain is the **canonical schema owner** — including tables used by `apps/workers/*` (`bw_*`, `chat_sessions`, `ai_usage_log`, `shop_settings`). The background workers' `ensure-schema` files are **assert-only** (WS-8): they verify the shape and throw a named error when a migration is missing — they never execute DDL. All DDL goes in a migration.
 - Query helpers in `apps/worker/src/db/queries.ts`. Add new helpers there, do not inline SQL.
 - UUIDs are generated with `crypto.randomUUID()`.
