@@ -179,6 +179,9 @@ describe("CommercialShopChrome: booking bar and the mobile menu", () => {
       disconnect() {}
     }
     vi.stubGlobal("IntersectionObserver", MockIO);
+    // A returning visitor: the cookie notice is already acknowledged (the bar
+    // also yields to the notice; that case has its own test below).
+    localStorage.setItem("pp_cookie_consent", "{}");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -221,5 +224,87 @@ describe("CommercialShopChrome: booking bar and the mobile menu", () => {
     act(() => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+});
+
+// Found on prod 2026-11-10 (v3 phone checklist): the chrome root makes no
+// stacking context, so fixed layers overlap by z-index and tree order.
+describe("CommercialShopChrome: overlapping phone layers", () => {
+  function mount() {
+    let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null = null;
+    class MockIO {
+      constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+        ioCallback = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", MockIO);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommercialShopChrome site={site} settings={{}} shopSlug="test-shop">
+          <main>content</main>
+        </CommercialShopChrome>,
+      ),
+    );
+    const click = (el: Element | null) =>
+      act(() => {
+        el!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    return {
+      container,
+      click,
+      scrollPastHero: () => act(() => ioCallback!([{ isIntersecting: false }])),
+      bar: () => container.querySelector(".pp-bottom-bar")!,
+      launcher: () => container.querySelector(".pp-chat-fab")!,
+      async done() {
+        await act(async () => {});
+        act(() => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+        localStorage.clear();
+      },
+    };
+  }
+
+  it("keeps the bar hidden under a first visit's cookie notice, and shows it once the notice is dismissed", async () => {
+    // The notice (z 60) covered the shown bar (z 50) completely, and the
+    // bar's link stayed focusable underneath it.
+    localStorage.clear();
+    const ui = mount();
+    ui.scrollPastHero();
+    const notice = ui.container.querySelector('[aria-label="Cookie notice"]');
+    expect(notice).toBeTruthy();
+    expect(ui.bar().getAttribute("data-visible")).toBe("false");
+    expect(ui.bar().querySelector("a")!.tabIndex).toBe(-1);
+
+    ui.click([...notice!.querySelectorAll("button")].find((b) => b.textContent === "Got it")!);
+    expect(ui.container.querySelector('[aria-label="Cookie notice"]')).toBeNull();
+    expect(ui.bar().getAttribute("data-visible")).toBe("true");
+    await ui.done();
+  });
+
+  it("hides the chat launcher and an open chat panel while the menu is open", async () => {
+    // The launcher (z 60) floated over the full-screen menu (z 50): tappable,
+    // but outside the menu's modal, so keyboard and screen readers missed it.
+    localStorage.setItem("pp_cookie_consent", "{}");
+    const ui = mount();
+    expect(ui.launcher().classList.contains("invisible")).toBe(false);
+    ui.click(ui.container.querySelector('button[aria-label="Open chat"]'));
+    expect(ui.container.querySelector(".pp-chat-panel")).toBeTruthy();
+
+    ui.click(ui.container.querySelector('button[aria-label="Open menu"]'));
+    expect(ui.launcher().classList.contains("invisible")).toBe(true);
+    expect(ui.container.querySelector(".pp-chat-panel")!.classList.contains("invisible")).toBe(true);
+
+    ui.click(ui.container.querySelector('button[aria-label="Close menu"]'));
+    expect(ui.launcher().classList.contains("invisible")).toBe(false);
+    expect(ui.container.querySelector(".pp-chat-panel")!.classList.contains("invisible")).toBe(false);
+    await ui.done();
   });
 });

@@ -34,14 +34,21 @@ export function ShopSiteCookieConsent({
   forceOpen,
   onClose,
   onHeightChange,
+  onOpenChange,
 }: {
   forceOpen: boolean;
   onClose: () => void;
   onHeightChange?: (height: number) => void;
+  /** Whether the notice is on screen: the phone booking bar yields to it. */
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [visible, setVisible] = useState(false);
   const dismissRef = useRef<HTMLButtonElement>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    onOpenChange?.(visible);
+  }, [visible, onOpenChange]);
 
   // Include wrapping and safe-area padding in the lift for floating chat controls.
   useEffect(() => {

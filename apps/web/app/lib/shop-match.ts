@@ -15,12 +15,16 @@ export interface ShopMatch {
  */
 export function useShopMatch(): ShopMatch | null {
   const matches = useMatches();
+  // Every match carries the URL's full params (the root too), but only the
+  // $shopSlug layout loads the shop, so read the name from whichever match
+  // has it rather than from the first match with the param.
+  let slug: string | null = null;
   for (const m of matches) {
-    const slug = (m.params as { shopSlug?: string }).shopSlug;
-    if (slug) {
-      const data = m.data as { shop?: { name?: string } } | undefined;
-      return { slug, name: data?.shop?.name ?? slug };
-    }
+    const matchSlug = (m.params as { shopSlug?: string }).shopSlug;
+    if (!matchSlug) continue;
+    slug ??= matchSlug;
+    const name = (m.data as { shop?: { name?: unknown } } | undefined)?.shop?.name;
+    if (typeof name === "string" && name.trim()) return { slug: matchSlug, name };
   }
-  return null;
+  return slug ? { slug, name: slug } : null;
 }
