@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /**
  * Public customer booking flow, end-to-end against the bookable E2E fixture shop

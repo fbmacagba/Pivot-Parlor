@@ -81,6 +81,14 @@ describe("the content security policy", () => {
     );
   });
 
+  it("lets a form submission end at Stripe and nowhere else", () => {
+    // Chrome applies form-action to the redirect that follows a native form
+    // submission. The booking form's action redirects to the Stripe Checkout
+    // session URL and the payments form's to a Connect account link; a
+    // submit before hydration is native, and would be refused without these.
+    expect(directive(csp, "form-action")).toEqual(["'self'", "https://checkout.stripe.com", "https://connect.stripe.com"]);
+  });
+
   it("forbids framing our pages", () => {
     expect(directive(csp, "frame-ancestors")).toEqual(["'none'"]);
     expect(SECURITY_HEADERS["X-Frame-Options"]).toBe("DENY");

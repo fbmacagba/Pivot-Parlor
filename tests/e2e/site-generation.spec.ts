@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { acknowledgePlatformCookieNotice, setE2eCookiesOnPage } from "./e2e-cookies";
 import { installSiteGenerationOwnerFlowMocks } from "./shop-onboarding-routes";
 

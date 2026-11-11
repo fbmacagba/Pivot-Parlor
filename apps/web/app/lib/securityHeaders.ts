@@ -51,7 +51,10 @@ export function contentSecurityPolicy(extraConnect: readonly string[] = []): str
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    // A native submit (before hydration) follows the action's redirect, and
+    // Chrome checks it: the booking deposit goes to Stripe Checkout and the
+    // payments setup to a Connect account link.
+    "form-action 'self' https://checkout.stripe.com https://connect.stripe.com",
     "frame-ancestors 'none'",
   ].join("; ");
 }

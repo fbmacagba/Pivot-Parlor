@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 import { setE2eCookies } from "./e2e-cookies";
 import { installShopOnboardingNetworkMocks } from "./shop-onboarding-routes";
 
