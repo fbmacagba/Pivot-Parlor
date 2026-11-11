@@ -8,17 +8,19 @@ import { seedShop } from "./helpers";
  * WS-6: GET /api/shops/:slug/site must serve the persisted design intent
  * (trust_signals, usps, layout_mood, brand_voice, hero_cta, about_title) on
  * both the fresh-build path and the KV-cached path (pre-WS-6 cache snapshots
- * lack the fields, so the handler overlays them from D1).
+ * lack the fields, so the handler overlays them from D1). The fixtures are
+ * live sites: a site that is not live tells the public only its status
+ * (unpublished-site.test.ts).
  */
 
 async function seedSite(shopId: string, withIntent: boolean): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO shop_sites (
        id, shop_id, template, headline, tagline, about, services_json,
-       color_primary, color_accent, font_heading, font_body, status,
+       color_primary, color_accent, font_heading, font_body, status, website_status,
        trust_signals_json, usps_json, layout_mood, brand_voice, hero_cta, about_title, palette_json,
        heading_weight, heading_style, design_version
-     ) VALUES (?, ?, 'minimal', 'H', 'T', 'A', '[]', '#111111', '#c9a84c', 'Playfair Display', 'DM Sans', 'active',
+     ) VALUES (?, ?, 'minimal', 'H', 'T', 'A', '[]', '#111111', '#c9a84c', 'Playfair Display', 'DM Sans', 'active', 'live',
        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
@@ -52,9 +54,9 @@ async function seedSiteWithDesignSpec(
   await env.DB.prepare(
     `INSERT INTO shop_sites (
        id, shop_id, template, headline, tagline, about, services_json,
-       color_primary, color_accent, font_heading, font_body, status,
+       color_primary, color_accent, font_heading, font_body, status, website_status,
        design_spec, design_version
-     ) VALUES (?, ?, 'minimal', 'H', 'T', 'A', '[]', '#111111', '#c9a84c', 'Playfair Display', 'DM Sans', 'active', ?, ?)`
+     ) VALUES (?, ?, 'minimal', 'H', 'T', 'A', '[]', '#111111', '#c9a84c', 'Playfair Display', 'DM Sans', 'active', 'live', ?, ?)`
   )
     .bind(
       crypto.randomUUID(),

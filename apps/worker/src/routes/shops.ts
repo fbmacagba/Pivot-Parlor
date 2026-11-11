@@ -51,6 +51,7 @@ import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
 import { buildSiteData, siteDesignIntent, siteWebsiteStatus } from "../lib/siteData.js";
+import { canReadUnpublishedSite, isLiveSite } from "../lib/siteVisibility.js";
 import {
   overlayCandidate,
   parseCandidatePayload,
@@ -201,8 +202,19 @@ shops.get("/:shopId/site", async (c) => {
   const site = await getShopSiteByShopId(c.env.DB, shop.id);
   if (!site) return c.json({ success: false, error: "No site generated for this shop" }, 404);
 
-  const freshServices = safeJsonParse<unknown[]>(site.services_json) ?? [];
   const websiteStatus = siteWebsiteStatus(site);
+  if (!isLiveSite(site)) {
+    // Not public yet (draft) or taken down (paused). The public shop page needs
+    // only the status to answer 404 or 503, so that is all the public gets;
+    // the generated copy stays private until the site goes live.
+    if (!(await canReadUnpublishedSite(c, shop.id))) {
+      return c.json({ success: true, data: { website_status: websiteStatus } });
+    }
+    // A private read: never let a shared cache hold it.
+    c.header("Cache-Control", "private, no-store");
+  }
+
+  const freshServices = safeJsonParse<unknown[]>(site.services_json) ?? [];
   // Design intent persisted by the assembler (WS-6 onward); shared with the
   // owner-review preview so both read the same shape.
   const designIntent = siteDesignIntent(site);
