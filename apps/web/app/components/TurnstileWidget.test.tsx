@@ -95,6 +95,35 @@ describe("TurnstileWidget", () => {
     ui.unmount();
   });
 
+  // Without an error-callback Turnstile threw its errors uncaught (seen on
+  // staging), and the visitor saw nothing explain a Send that the server
+  // then refused. Retries are automatic, so a later success clears it.
+  it("tells the visitor when the security check fails, and clears it once a retry succeeds", () => {
+    const ts = fakeTurnstile();
+    win.turnstile = ts;
+    const ui = mount(<TurnstileWidget siteKey="site-key" />);
+    const opts = ts.render.mock.calls[0][1] as Record<string, (arg?: string) => unknown>;
+    expect(ui.container.querySelector('[role="alert"]')).toBeNull();
+
+    let handled: unknown;
+    act(() => {
+      handled = opts["error-callback"]("200500");
+    });
+    expect(handled).toBe(true);
+    const alert = ui.container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toMatch(/security check/i);
+    expect(alert?.textContent).not.toMatch(/[–—]/);
+    // The message sits beside Turnstile's container, never inside it.
+    const [el] = ts.render.mock.calls[0];
+    expect((el as Node).contains(alert)).toBe(false);
+
+    act(() => {
+      opts.callback("token");
+    });
+    expect(ui.container.querySelector('[role="alert"]')).toBeNull();
+    ui.unmount();
+  });
+
   it("does not render after unmounting before the script loaded", () => {
     const ui = mount(<TurnstileWidget siteKey="site-key" />);
     const script = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`)!;

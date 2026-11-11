@@ -30,4 +30,20 @@ describe("/contact markup", () => {
       }
     }
   });
+
+  // The shop type select and the message textarea had bare <label>s, so a
+  // screen reader announced them with no name.
+  it("labels every visible form control", () => {
+    const html = renderToStaticMarkup(<Contact />);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const controls = [...doc.querySelectorAll("input, select, textarea")].filter(
+      (el) => el.getAttribute("type") !== "hidden",
+    );
+    expect(controls).toHaveLength(6);
+    for (const el of controls) {
+      const name = el.getAttribute("name");
+      expect(el.id, `${name} has no id`).not.toBe("");
+      expect(doc.querySelector(`label[for="${el.id}"]`), `${name} has no label`).not.toBeNull();
+    }
+  });
 });
