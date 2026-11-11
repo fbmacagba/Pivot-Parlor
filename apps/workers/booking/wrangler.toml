@@ -7,6 +7,13 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 head_sampling_rate = 1
 
+# Workers Issues: groups crashes, 5xx replies and logged errors, and the
+# account's Real-Time Issue alert emails the owner. Needs Wrangler 4.134.0+;
+# a deploy without this key turns Issues off. Runbook:
+# docs/runbooks/production-alerting.md
+[observability.issues]
+enabled = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "pivot-parlor-db"
@@ -51,6 +58,10 @@ name = "pivot-parlor-booking-staging"
 [env.staging.observability]
 enabled = true
 head_sampling_rate = 1
+
+# Off on staging: E2E runs log errors on purpose, and the alert is account-wide.
+[env.staging.observability.issues]
+enabled = false
 
 [[env.staging.d1_databases]]
 binding = "DB"

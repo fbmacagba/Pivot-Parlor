@@ -16,7 +16,8 @@
     "dotenv": "^17.3.1",
     "prettier": "^3.7.4",
     "turbo": "^2.8.17",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "wrangler": "^4.154.0"
   },
   "engines": {
     "node": ">=18"
@@ -37,6 +38,7 @@
     "apps/workers/images",
     "apps/workers/research",
     "apps/workers/text",
+    "apps/workers/uptime",
     "packages/*"
   ]
 }
