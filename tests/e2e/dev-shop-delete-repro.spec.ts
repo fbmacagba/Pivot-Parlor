@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /** Headed when PLAYWRIGHT_HEADED=1; default headless for automation. */
 test.use({ headless: process.env.PLAYWRIGHT_HEADED !== "1" });
