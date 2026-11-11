@@ -16,6 +16,7 @@ import {
 import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { normalizeServiceName, serviceDescriptionsByName } from "../lib/serviceCopy.js";
+import { canReadUnpublishedSite, isLiveSite } from "../lib/siteVisibility.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 
@@ -61,9 +62,13 @@ services.get("/", async (c) => {
   );
 
   // One extra read joins the generated copy; a shop with no site yet simply
-  // gets empty descriptions, exactly as before.
+  // gets empty descriptions, exactly as before. The copy is part of the
+  // generated site, so it is public only once that site is live.
   const site = await getShopSiteByShopId(c.env.DB, shop.id);
-  const descriptions = serviceDescriptionsByName(site?.services_json);
+  const descriptions =
+    site && (isLiveSite(site) || (await canReadUnpublishedSite(c, shop.id)))
+      ? serviceDescriptionsByName(site.services_json)
+      : undefined;
   return c.json({ success: true, data: list.map((row) => toPublicService(row, descriptions)) });
 });
 
