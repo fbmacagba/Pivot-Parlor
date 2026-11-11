@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildChecks, runAll, runCheck, type Fetcher } from "./checks";
+import { CONTROL_DETAIL, buildChecks, runAll, runCheck, type Fetcher } from "./checks";
 import worker, { runScheduled } from "./index";
 
 const env = { SITE_ORIGIN: "https://site.test", API_ORIGIN: "https://api.test", DEMO_SHOP_SLUG: "demo-shop" };
@@ -21,7 +21,6 @@ const HEALTHY: Record<string, () => Response> = {
   "https://site.test/": () => html(),
   "https://site.test/login": () => html(),
   "https://site.test/demo-shop": () => html(),
-  "https://site.test/no-such-shop-zzz-999": () => html(404),
   "https://api.test/auth/me": () => json({ success: false, error: "Unauthorized" }, 401),
   "https://api.test/api/shops/demo-shop": () => json({ success: true, data: { id: "shop-1" } }),
   "https://api.test/api/shops/shop-1/services": () => json({ success: true, data: [{ id: "svc-1" }, { id: "svc-2" }] }),
@@ -133,10 +132,21 @@ describe("uptime checks", () => {
 
   it("adds the deliberate-failure control only when asked, and it fails against a healthy site", async () => {
     expect(buildChecks(env, NOW).map((c) => c.name)).not.toContain("control-deliberate-failure");
-    const { fetcher } = production();
+    const { fetcher, calls } = production();
     const results = byName(await runAll({ ...env, CONTROL_FAIL: "true" }, fetcher, { now: NOW, sleep: noSleep }));
-    expect(results["control-deliberate-failure"]).toMatchObject({ ok: false, detail: "HTTP 404 (want 200)" });
+    expect(results["control-deliberate-failure"]).toMatchObject({ ok: false, detail: CONTROL_DETAIL });
     expect(Object.values(results).filter((r) => !r.ok).map((r) => r.name)).toEqual(["control-deliberate-failure"]);
+    // The control asks production for nothing, so it can never stand in for a real outage.
+    const plain = production();
+    await runAll(env, plain.fetcher, { now: NOW, sleep: noSleep });
+    expect(calls).toHaveLength(plain.calls.length);
+  });
+
+  it("gives the control a reason no real check produces, so it never shares an issue with an outage", async () => {
+    // Workers Issues groups errors by message with the check name masked, so a
+    // control reading "HTTP 404 (want 200)" joined the issue a real missing
+    // page would join, and silenced that outage's email for an hour.
+    expect(CONTROL_DETAIL).not.toMatch(/HTTP \d{3}|timed out|network error|not HTML|Content-Security-Policy|shop:|services:|slots:/);
   });
 });
 

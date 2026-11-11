@@ -52,10 +52,22 @@ What that means in practice:
   message, check name included.
 - A failure that matches an issue seen before (Active or Resolved) is not new,
   so it can alert only through the returning-issue rule. For example, a real
-  `HTTP 404 (want 200)` on a site page joins the firing control's issue.
-- Proven on 2026-11-11: an automation sent the control issue to this policy,
-  and the email reached the owner's inbox 30 seconds after the failing run.
-  The returning-issue rule has not yet been fired in a test.
+  `HTTP 404 (want 200)` on a site page joins the issue opened by the 2026-11-11
+  firing-control runs, which used that reason. The control now fails with a
+  reason of its own (see Deploying the monitor).
+- Both rules proven on 2026-11-11, emails checked in the owner's inbox:
+  - an occurrence-threshold automation sent the control issue to this policy,
+    and the email arrived 30 seconds after the failing run;
+  - the returning-issue rule fired on the same issue, while it was Resolved,
+    64 minutes after its previous occurrence. The issue went back to Active and
+    the email arrived 33 seconds after the failing run.
+
+Issues also opens **security** issues on its own, for requests that look like
+a vulnerability scan. The first one arrived on 2026-11-11: "Potential
+vulnerability scan · source-control · low risk", a scanner asking
+`api.pivotparlor.com` for `/.svn/wc.db`. The API answered 404, and the
+occurrence reads "No matching outbound fetch was observed". Each new kind of
+scan sends one email through the new-issue rule.
 
 The automations are not in this repository. They live in the account and are
 read and changed through the Cloudflare API
@@ -85,6 +97,13 @@ not necessarily to the owner, so they are not part of this alerting.
    - `booking-slots` failing with `api-auth` passing: the booking worker or the
      BOOKING binding (`pivot-parlor-booking` Issues), or the demo shop's data.
    - Everything failing at once: also check https://www.cloudflarestatus.com.
+   - A security issue ("Potential vulnerability scan ..."): open its
+     occurrence and read the request and the answer. If the worker turned it
+     away (a 4xx, and no matching outbound fetch), it is background noise:
+     mark the issue **Ignored**. An Ignored issue stays Ignored when new
+     occurrences arrive, so the same kind of scan does not keep reopening it.
+     If the answer was a 2xx, or the occurrence shows an outbound fetch, treat
+     it as an incident.
 3. **After fixing, mark the issue Resolved**, so the Issues list shows only
    what is still open. Issues never resolve on their own. Resolving does not
    make the issue new again: if the same failure comes back, plan on it
@@ -107,16 +126,19 @@ npx wrangler deploy
 ```bash
 npx wrangler deploy --var CONTROL_FAIL:true   # adds a check built to fail
 # within ~5 minutes: an occurrence of the issue
-# "Uptime check failed: <token>: HTTP 404 (want 200)"
+# "Uptime check failed: <token>: deliberate test failure, not an outage"
 npx wrangler deploy                            # back to the normal checks
 ```
 
-The control's issue was first seen on 2026-11-11, so a control run is no
-longer a new issue:
+The control asks production for nothing and fails with a reason no real check
+produces, so it always lands in its own issue and never silences a real
+outage's email. Which rule sends its email:
 
-- If the control has been quiet for more than an hour, its first failure should
-  email through the returning-issue rule. (Not yet proven.)
-- To prove the send path at any time, add a temporary automation for
+- The first control run with this reason opens a new issue, so the new-issue
+  rule emails.
+- Later runs email through the returning-issue rule, as long as the control
+  has been quiet for more than an hour.
+- To re-test within the hour, add a temporary automation for
   `pivot-parlor-uptime`: trigger "occurrence threshold", threshold = the
   issue's current occurrence count + 1, policy "Pivot Parlor: Worker issue".
   The next control failure crosses it and sends the email. Delete the
