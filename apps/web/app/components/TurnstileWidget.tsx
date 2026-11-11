@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Cloudflare Turnstile, rendered EXPLICITLY after hydration.
@@ -56,13 +56,29 @@ export function TurnstileWidget({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
     const render = () => {
       const api = turnstileApi();
       if (!active || !api || !containerRef.current || widgetId.current) return;
-      widgetId.current = api.render(containerRef.current, { sitekey: siteKey, theme, size }) ?? null;
+      widgetId.current =
+        api.render(containerRef.current, {
+          sitekey: siteKey,
+          theme,
+          size,
+          callback: () => {
+            if (active) setFailed(false);
+          },
+          // Without this, Turnstile throws its errors uncaught and the
+          // visitor sees nothing. Retries stay automatic (retry: auto), so a
+          // later success clears the message. Returning true marks it handled.
+          "error-callback": () => {
+            if (active) setFailed(true);
+            return true;
+          },
+        }) ?? null;
     };
     let script: HTMLScriptElement | null = null;
     if (turnstileApi()) render();
@@ -85,5 +101,16 @@ export function TurnstileWidget({
     if (widgetId.current) turnstileApi()?.reset(widgetId.current);
   }, [resetSignal]);
 
-  return <div ref={containerRef} className={className} />;
+  // Turnstile owns the inner container's contents, so React renders the
+  // message beside it, never inside it.
+  return (
+    <div className={className}>
+      <div ref={containerRef} />
+      {failed && (
+        <p role="alert" className="mt-2 text-sm text-red-400">
+          The security check didn&apos;t complete. If this message stays, refresh the page and try again.
+        </p>
+      )}
+    </div>
+  );
 }

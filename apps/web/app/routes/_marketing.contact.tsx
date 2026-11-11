@@ -129,8 +129,9 @@ export default function Contact() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">Shop type</label>
+              <label htmlFor="shop-type" className="block text-sm font-medium text-white/80 mb-1.5">Shop type</label>
               <select
+                id="shop-type"
                 name="shop_type"
                 required
                 className="flex h-10 w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold"
@@ -148,8 +149,9 @@ export default function Contact() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-white/80 mb-1.5">Message</label>
+              <label htmlFor="message" className="block text-sm font-medium text-white/80 mb-1.5">Message</label>
               <textarea
+                id="message"
                 name="message"
                 rows={4}
                 required
