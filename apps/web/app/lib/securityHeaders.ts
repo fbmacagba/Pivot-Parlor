@@ -18,11 +18,16 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Report-only for now: browsers log what the policy WOULD block and block
- * nothing. Switching this to "Content-Security-Policy" enforces it; do that
- * only after a staging sweep of every page type reports no violations.
+ * Enforced. It was report-only from #139 until the E2E collector
+ * (tests/e2e/fixtures.ts, which fails any spec on a violation of this policy)
+ * and a production sweep showed no violations. Rollback: set this back to
+ * "Content-Security-Policy-Report-Only".
+ *
+ * script-src keeps 'unsafe-inline' (Remix's inline scripts), so this does not
+ * stop an injected inline script; it blocks off-list script, connect, frame
+ * and font origins, off-site form targets, <base> hijacking and plugins.
  */
-export const CSP_HEADER = "Content-Security-Policy-Report-Only";
+export const CSP_HEADER = "Content-Security-Policy";
 
 const CONNECT_SRC = [
   "'self'",
@@ -64,15 +69,15 @@ export function contentSecurityPolicy(extraConnect: readonly string[] = []): str
  * place: redirects and upstream fetch() responses (the api.* proxies return
  * them as-is) have immutable headers, and setting on those throws. The body
  * stream and status carry over. A header the route already set wins, and a
- * route with its own enforced policy (dev.activity.export) gets no
- * report-only one.
+ * route that sets its own policy, enforced (dev.activity.export) or
+ * report-only, gets no second one.
  */
 export function withSecurityHeaders(res: Response, opts: { apiOrigin?: string } = {}): Response {
   const out = new Response(res.body, res);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     if (!out.headers.has(name)) out.headers.set(name, value);
   }
-  if (!out.headers.has("Content-Security-Policy") && !out.headers.has(CSP_HEADER)) {
+  if (!out.headers.has("Content-Security-Policy") && !out.headers.has("Content-Security-Policy-Report-Only")) {
     out.headers.set(CSP_HEADER, contentSecurityPolicy(opts.apiOrigin ? [opts.apiOrigin] : []));
   }
   return out;

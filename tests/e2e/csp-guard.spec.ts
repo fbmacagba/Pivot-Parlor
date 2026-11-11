@@ -39,7 +39,8 @@ test.describe("CSP collector control", () => {
     const res = await page.goto("/");
     const headers = res?.headers() ?? {};
     const enforced = Boolean(headers["content-security-policy"]);
-    expect(enforced || Boolean(headers["content-security-policy-report-only"]), "a CSP header is served").toBe(true);
+    expect(enforced, "the policy is enforced (apps/web/app/lib/securityHeaders.ts CSP_HEADER)").toBe(true);
+    expect(headers["content-security-policy-report-only"], "no second, report-only policy").toBeUndefined();
 
     await page.evaluate(() => {
       const s = document.createElement("script");

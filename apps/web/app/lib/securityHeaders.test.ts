@@ -31,6 +31,13 @@ describe("withSecurityHeaders", () => {
     expect(res.headers.get(CSP_HEADER)).toBe(contentSecurityPolicy());
   });
 
+  it("keeps a route's own report-only policy and adds no second policy", () => {
+    const own = "default-src 'self'; report-uri /x";
+    const res = withSecurityHeaders(new Response("x", { headers: { "Content-Security-Policy-Report-Only": own } }));
+    expect(res.headers.get("Content-Security-Policy-Report-Only")).toBe(own);
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+  });
+
   it("works on a response whose headers are immutable (a redirect)", () => {
     // Response.redirect() and upstream fetch() responses (the api.* proxies
     // return them as-is) have immutable headers; setting on them throws.
@@ -47,7 +54,7 @@ describe("withSecurityHeaders", () => {
       new Response("x", { headers: { "Content-Security-Policy": own, "Referrer-Policy": "no-referrer" } }),
     );
     expect(res.headers.get("Content-Security-Policy")).toBe(own);
-    expect(res.headers.get(CSP_HEADER)).toBeNull();
+    expect(res.headers.get("Content-Security-Policy-Report-Only")).toBeNull();
     expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
@@ -65,8 +72,10 @@ describe("withSecurityHeaders", () => {
 describe("the content security policy", () => {
   const csp = contentSecurityPolicy();
 
-  it("is report-only until a staging sweep shows no violations", () => {
-    expect(CSP_HEADER).toBe("Content-Security-Policy-Report-Only");
+  it("is enforced", () => {
+    // Report-only from #139 until the E2E collector (tests/e2e/fixtures.ts)
+    // and a production sweep showed no violations.
+    expect(CSP_HEADER).toBe("Content-Security-Policy");
   });
 
   it("allows what the pages really load", () => {
