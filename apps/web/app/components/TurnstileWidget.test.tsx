@@ -124,6 +124,65 @@ describe("TurnstileWidget", () => {
     ui.unmount();
   });
 
+  it("passes appearance through only when one is given", () => {
+    const ts = fakeTurnstile();
+    win.turnstile = ts;
+    const a = mount(<TurnstileWidget siteKey="site-key" />);
+    const b = mount(<TurnstileWidget siteKey="site-key" appearance="interaction-only" />);
+    expect(ts.render.mock.calls[0][1]).not.toHaveProperty("appearance");
+    expect(ts.render.mock.calls[1][1]).toMatchObject({ appearance: "interaction-only" });
+    a.unmount();
+    b.unmount();
+  });
+
+  // The shop chat reads tokens from here: a spent or expired token must never
+  // be offered again, and a new callback must not re-render the widget.
+  it("reports each token to onToken, and null once it errors or expires", () => {
+    const ts = fakeTurnstile();
+    win.turnstile = ts;
+    const first = vi.fn();
+    const ui = mount(<TurnstileWidget siteKey="site-key" onToken={first} />);
+    const opts = ts.render.mock.calls[0][1] as Record<string, (arg?: string) => unknown>;
+    act(() => {
+      opts.callback("tok-1");
+    });
+    expect(first).toHaveBeenLastCalledWith("tok-1");
+    act(() => {
+      opts["expired-callback"]();
+    });
+    expect(first).toHaveBeenLastCalledWith(null);
+    act(() => {
+      opts.callback("tok-2");
+    });
+    act(() => {
+      opts["error-callback"]("300030");
+    });
+    expect(first).toHaveBeenLastCalledWith(null);
+    expect(first).toHaveBeenCalledTimes(4);
+
+    const second = vi.fn();
+    ui.rerender(<TurnstileWidget siteKey="site-key" onToken={second} />);
+    expect(ts.render).toHaveBeenCalledTimes(1);
+    act(() => {
+      opts.callback("tok-3");
+    });
+    expect(second).toHaveBeenCalledWith("tok-3");
+    expect(first).toHaveBeenCalledTimes(4);
+    ui.unmount();
+  });
+
+  it("styles its failure message with messageClassName when given", () => {
+    const ts = fakeTurnstile();
+    win.turnstile = ts;
+    const ui = mount(<TurnstileWidget siteKey="site-key" messageClassName="theme-ink" />);
+    const opts = ts.render.mock.calls[0][1] as Record<string, (arg?: string) => unknown>;
+    act(() => {
+      opts["error-callback"]("200500");
+    });
+    expect(ui.container.querySelector('[role="alert"]')!.className).toBe("theme-ink");
+    ui.unmount();
+  });
+
   it("does not render after unmounting before the script loaded", () => {
     const ui = mount(<TurnstileWidget siteKey="site-key" />);
     const script = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`)!;

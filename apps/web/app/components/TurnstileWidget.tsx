@@ -18,6 +18,12 @@ import { useEffect, useRef, useState } from "react";
 
 export const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
 
+/** The "Pivot Parlor Contact Form" widget (managed mode; hostname
+ *  pivotparlor.com). Shop sites live at pivotparlor.com/<slug>, and the
+ *  chatbot worker's secret pairs with this key (probed 2026-11-11), so the
+ *  contact form and the shop chat share it. */
+export const TURNSTILE_SITE_KEY = "0x4AAAAAACxPFNWfoxKge7a9";
+
 interface TurnstileApi {
   render: (container: HTMLElement, options: Record<string, unknown>) => string | null | undefined;
   remove: (widgetId: string) => void;
@@ -45,6 +51,9 @@ export function TurnstileWidget({
   size = "normal",
   resetSignal,
   className,
+  appearance,
+  onToken,
+  messageClassName = "mt-2 text-sm text-red-400",
 }: {
   siteKey: string;
   theme?: "light" | "dark" | "auto";
@@ -53,10 +62,21 @@ export function TurnstileWidget({
    *  submission (the action's data) and the widget issues a fresh one. */
   resetSignal?: unknown;
   className?: string;
+  /** "interaction-only" keeps the widget invisible unless Cloudflare needs
+   *  the visitor to tick it. Omitted, Turnstile's default ("always") applies. */
+  appearance?: "always" | "execute" | "interaction-only";
+  /** Each fresh token, then null once it errors or expires, for callers that
+   *  send the token themselves rather than through a form field. */
+  onToken?: (token: string | null) => void;
+  /** Classes for the failure message (the default suits a dark form). */
+  messageClassName?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
   const [failed, setFailed] = useState(false);
+  // Read through a ref, so a new callback never re-renders the widget.
+  const onTokenRef = useRef(onToken);
+  onTokenRef.current = onToken;
 
   useEffect(() => {
     let active = true;
@@ -68,14 +88,22 @@ export function TurnstileWidget({
           sitekey: siteKey,
           theme,
           size,
-          callback: () => {
-            if (active) setFailed(false);
+          ...(appearance ? { appearance } : {}),
+          callback: (token: string) => {
+            if (!active) return;
+            setFailed(false);
+            onTokenRef.current?.(token);
+          },
+          "expired-callback": () => {
+            if (active) onTokenRef.current?.(null);
           },
           // Without this, Turnstile throws its errors uncaught and the
           // visitor sees nothing. Retries stay automatic (retry: auto), so a
           // later success clears the message. Returning true marks it handled.
           "error-callback": () => {
-            if (active) setFailed(true);
+            if (!active) return true;
+            setFailed(true);
+            onTokenRef.current?.(null);
             return true;
           },
         }) ?? null;
@@ -92,7 +120,7 @@ export function TurnstileWidget({
       if (widgetId.current) turnstileApi()?.remove(widgetId.current);
       widgetId.current = null;
     };
-  }, [siteKey, theme, size]);
+  }, [siteKey, theme, size, appearance]);
 
   const lastSignal = useRef(resetSignal);
   useEffect(() => {
@@ -107,7 +135,7 @@ export function TurnstileWidget({
     <div className={className}>
       <div ref={containerRef} />
       {failed && (
-        <p role="alert" className="mt-2 text-sm text-red-400">
+        <p role="alert" className={messageClassName}>
           The security check didn&apos;t complete. If this message stays, refresh the page and try again.
         </p>
       )}
