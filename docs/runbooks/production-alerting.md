@@ -27,13 +27,45 @@ starts redirecting fails.
 
 ## Where alerts go
 
-All Workers Issues alerts on this Cloudflare account go through ONE
-notification policy, of type "Real-Time Issue". That type has no filters, so it
-covers every Worker with Issues on. It was created for another project and is
-named **"BytesFX: Worker error (crm-api, chatbot-api)"**: Pivot Parlor alerts
-arrive under that name, emailed to the owner's address. Do not create a second
-Real-Time Issue policy for Pivot Parlor; every alert would arrive twice.
-Renaming the existing one is the owner's call.
+Workers Issues only groups errors. It sends nothing on its own: an issue is
+emailed only when an **automation** sends it to a notification policy. Pivot
+Parlor has:
+
+- the notification policy **"Pivot Parlor: Worker issue"** (type Real-Time
+  Issue), which emails the owner's address;
+- two automations for each of `pivot-parlor-api`, `pivot-parlor-booking` and
+  `pivot-parlor-uptime`, both sending to that policy:
+  - `Pivot Parlor <worker>: new issue` fires once, on an issue's first
+    occurrence;
+  - `Pivot Parlor <worker>: returning issue` fires when an issue occurs
+    again after at least an hour with no occurrences.
+
+What that means in practice:
+
+- One email per new kind of failure, not one per failure. An outage that keeps
+  failing every 5 minutes sends one email, then nothing more until it has been
+  quiet for an hour and comes back.
+- Issues groups errors with their variable parts masked. The uptime error
+  `Uptime check failed: site-login: HTTP 503 (want 200)` is grouped as
+  `Uptime check failed: <token>: HTTP 503 (want 200)`, so the same reason on
+  different checks is one issue. Each occurrence still carries the full
+  message, check name included.
+- A failure that matches an issue seen before (Active or Resolved) is not new,
+  so it can alert only through the returning-issue rule. For example, a real
+  `HTTP 404 (want 200)` on a site page joins the firing control's issue.
+- Proven on 2026-11-11: an automation sent the control issue to this policy,
+  and the email reached the owner's inbox 30 seconds after the failing run.
+  The returning-issue rule has not yet been fired in a test.
+
+The automations are not in this repository. They live in the account and are
+read and changed through the Cloudflare API
+(`/accounts/<account>/workers/observability/issues/automations`, at most 50 per
+account). A worker that gets Issues later needs its own pair.
+
+The policy **"BytesFX: Worker error (crm-api, chatbot-api)"** belongs to
+another project. It is also a Real-Time Issue policy: leave it alone. A
+Real-Time Issue policy has no filters; the automations that point at it decide
+which workers it hears about.
 
 The Pages deployment alert is its own policy and emails the same address.
 
@@ -53,10 +85,12 @@ not necessarily to the owner, so they are not part of this alerting.
    - `booking-slots` failing with `api-auth` passing: the booking worker or the
      BOOKING binding (`pivot-parlor-booking` Issues), or the demo shop's data.
    - Everything failing at once: also check https://www.cloudflarestatus.com.
-3. **After fixing, mark the issue Resolved.** Issues never resolve on their own.
-   A new occurrence of a Resolved issue reopens it. Whether a recurrence of an
-   issue left Active emails again is not documented, so always resolve, or the
-   next outage of the same kind may be silent.
+3. **After fixing, mark the issue Resolved**, so the Issues list shows only
+   what is still open. Issues never resolve on their own. Resolving does not
+   make the issue new again: if the same failure comes back, plan on it
+   alerting through the returning-issue rule (after an hour of quiet), not the
+   new-issue rule. While an issue is still failing, no further emails come, so
+   check the worker's Issues page rather than waiting for one.
 
 ## Deploying the monitor
 
@@ -72,13 +106,25 @@ npx wrangler deploy
 
 ```bash
 npx wrangler deploy --var CONTROL_FAIL:true   # adds a check built to fail
-# within ~5 minutes: an issue "Uptime check failed: control-deliberate-failure:
-# HTTP 404 (want 200)" and an alert email
+# within ~5 minutes: an occurrence of the issue
+# "Uptime check failed: <token>: HTTP 404 (want 200)"
 npx wrangler deploy                            # back to the normal checks
 ```
 
-Then mark the control issue Resolved. Never put `CONTROL_FAIL` in
-`wrangler.toml`: it would alert forever (the guard test refuses it).
+The control's issue was first seen on 2026-11-11, so a control run is no
+longer a new issue:
+
+- If the control has been quiet for more than an hour, its first failure should
+  email through the returning-issue rule. (Not yet proven.)
+- To prove the send path at any time, add a temporary automation for
+  `pivot-parlor-uptime`: trigger "occurrence threshold", threshold = the
+  issue's current occurrence count + 1, policy "Pivot Parlor: Worker issue".
+  The next control failure crosses it and sends the email. Delete the
+  temporary automation afterwards.
+
+Then redeploy without the control and mark the control issue Resolved. Never
+put `CONTROL_FAIL` in `wrangler.toml`: it would fail every run (the guard test
+refuses it).
 
 To change the demo shop, edit `DEMO_SHOP_SLUG` in
 `apps/workers/uptime/wrangler.toml`. The shop needs a public page and at least
@@ -100,8 +146,8 @@ the Issues keys or the Wrangler floor drift.
 - Runtime errors inside the Pages app (Remix SSR) are seen only through the
   uptime checks: Workers Issues does not cover Pages Functions.
 - The AI and background workers (chatbot, research, text, images, builder,
-  assembler, audit) have no Issues. A deploy of one of them without the key
-  keeps it off.
+  assembler, audit) have no Issues. Turning it on needs the key in that
+  worker's `wrangler.toml` and a pair of automations (see Where alerts go).
 - A whole-Cloudflare outage silences the monitor along with the site.
 - Staging has Issues off on purpose: E2E runs log errors deliberately, and the
   alert is account-wide.
