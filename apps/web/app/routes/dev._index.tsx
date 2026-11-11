@@ -2,7 +2,7 @@ import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { Link, useLoaderData } from "@remix-run/react";
 import { BarChart3, MessageSquare, ShoppingBag, TrendingUp } from "lucide-react";
-import { getSessionToken } from "~/lib/auth";
+import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
@@ -27,6 +27,7 @@ interface EnquiryRow {
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
+  await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
 
