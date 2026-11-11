@@ -37,7 +37,11 @@ export function ErrorScreen({ fullscreen = false }: ErrorScreenProps) {
   }
 
   return (
+    // data-testid: the E2E dashboard sweep (tests/e2e/dashboards.spec.ts)
+    // fails any screen that renders this fallback.
     <div
+      data-testid="error-screen"
+      data-status={status}
       className={`flex ${fullscreen ? "min-h-screen" : "min-h-[50vh]"} flex-col items-center justify-center px-6 text-center`}
     >
       <p className="font-heading text-6xl font-bold text-gold">{status}</p>
