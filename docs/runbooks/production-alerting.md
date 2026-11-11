@@ -66,8 +66,31 @@ Issues also opens **security** issues on its own, for requests that look like
 a vulnerability scan. The first one arrived on 2026-11-11: "Potential
 vulnerability scan · source-control · low risk", a scanner asking
 `api.pivotparlor.com` for `/.svn/wc.db`. The API answered 404, and the
-occurrence reads "No matching outbound fetch was observed". Each new kind of
-scan sends one email through the new-issue rule.
+occurrence reads "No matching outbound fetch was observed". Kinds are coarse:
+a later `/.git/config` probe joined the same issue.
+
+Scanner issues email like any other issue, and **marking one Ignored does not
+stop that**. Measured on 2026-11-11: the source-control issue was Ignored, a
+`/.git/config` probe arrived three hours later, and the returning-issue rule
+still emailed. So scanner paths are now blocked before they reach the API, by
+the Cloudflare firewall rule **"Pivot Parlor: block scanner paths on the API
+(hidden files, .php, WordPress)"** (zone `pivotparlor.com`, Security, WAF,
+custom rules). On `api.pivotparlor.com` it blocks:
+
+- any path containing `/.` (hidden files such as `/.git/config` or
+  `/backend/.env`), except `/.well-known/`;
+- any path ending in `.php`;
+- WordPress paths: starting with `/wp-`, or containing `/wp-admin`,
+  `/wp-content/` or `/wp-includes/`.
+
+No API route has such a path: routes start with `/api`, `/auth`, `/assets`,
+`/staff`, `/contact` or `/health`, and shop slugs are lowercase words and a
+number. A blocked request
+gets Cloudflare's 403 page and never runs the worker, so it raises no issue.
+Verified 2026-11-11: six scanner paths answered 403 from Cloudflare and did not
+appear in the API's logs, while `/auth/me` still answered its JSON 401 and the
+demo shop's site and services their JSON 200s. The Free plan allows 5 custom
+rules, and this is the only one.
 
 The automations are not in this repository. They live in the account and are
 read and changed through the Cloudflare API
@@ -98,12 +121,14 @@ not necessarily to the owner, so they are not part of this alerting.
      BOOKING binding (`pivot-parlor-booking` Issues), or the demo shop's data.
    - Everything failing at once: also check https://www.cloudflarestatus.com.
    - A security issue ("Potential vulnerability scan ..."): open its
-     occurrence and read the request and the answer. If the worker turned it
-     away (a 4xx, and no matching outbound fetch), it is background noise:
-     mark the issue **Ignored**. An Ignored issue stays Ignored when new
-     occurrences arrive, so the same kind of scan does not keep reopening it.
-     If the answer was a 2xx, or the occurrence shows an outbound fetch, treat
-     it as an incident.
+     occurrence and read the request and the answer.
+     - The answer was a 2xx, or the occurrence shows an outbound fetch: treat
+       it as an incident.
+     - The worker turned it away (a 4xx, and no matching outbound fetch): it is
+       a scan the firewall rule does not cover yet. Add its path pattern to the
+       rule (see Where alerts go), check that the path now gets Cloudflare's
+       403 while `/auth/me` still answers JSON 401, then mark the issue
+       Resolved. Ignored does not stop its emails.
 3. **After fixing, mark the issue Resolved**, so the Issues list shows only
    what is still open. Issues never resolve on their own. Resolving does not
    make the issue new again: if the same failure comes back, plan on it
