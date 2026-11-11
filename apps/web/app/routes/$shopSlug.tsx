@@ -3,6 +3,7 @@ import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare"
 import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
 import { decodeToken, getSessionToken } from "~/lib/auth";
+import { requireShopSlug } from "~/lib/shopSlug";
 import { ErrorScreen } from "~/components/ErrorScreen";
 import { CandidatePreviewBar } from "~/components/CandidatePreviewBar";
 import { skipRevalidationForWizardParams } from "~/lib/bookingUrl";
@@ -181,7 +182,7 @@ export const headers: HeadersFunction = ({ loaderHeaders, parentHeaders }) => {
 export const shouldRevalidate = skipRevalidationForWizardParams;
 
 export async function loader({ params, context, request }: LoaderFunctionArgs) {
-  const slug = params.shopSlug!;
+  const slug = requireShopSlug(params);
   // A portfolio demo renders its FICTIONAL backing shop, read by fixed id with
   // public GETs only, so the alias URL can never show a real tenant's records.
   // Until that shop is provisioned and live, the barber alias keeps serving

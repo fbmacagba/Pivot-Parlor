@@ -5,6 +5,8 @@
  *   const api = createApiClient(context.env.API_URL, token);
  *   const data = await api.get<Shop[]>("/api/shops");
  */
+import { isTraversalApiPath } from "~/lib/pathSafety";
+
 export interface ApiClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
@@ -29,6 +31,12 @@ export function createApiClient(
     path: string,
     body?: unknown
   ): Promise<T> {
+    // Paths carry values from URLs (params, query strings). One that the URL
+    // parser would resolve elsewhere (`\`, `..`, %2e) must not be sent,
+    // least of all with the visitor's token.
+    if (isTraversalApiPath(path)) {
+      throw new Error("Refused an API path that resolves elsewhere");
+    }
     const res = await fetch(`${baseUrl}${path}`, {
       method,
       headers,

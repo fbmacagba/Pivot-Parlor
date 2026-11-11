@@ -3,6 +3,7 @@ import { createPagesFunctionHandler } from "@remix-run/cloudflare-pages";
 import type { ServerBuild } from "@remix-run/server-runtime";
 import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
+import { hasUnsafePathSegment } from "../app/lib/pathSafety";
 import { withSecurityHeaders } from "../app/lib/securityHeaders";
 
 interface Env {
@@ -33,8 +34,14 @@ const handleRequest = createPagesFunctionHandler({
 
 // public/_headers covers static assets only; every response from here gets
 // the security headers in code (app/lib/securityHeaders.ts).
-export const onRequest: PagesFunction<Env> = async (context) =>
-  withSecurityHeaders(
+export const onRequest: PagesFunction<Env> = async (context) => {
+  // A path segment that decodes to a separator, a control character or
+  // another encoding layer would become a route param that loaders put into
+  // API URLs and links (app/lib/pathSafety.ts). No route takes one.
+  if (hasUnsafePathSegment(new URL(context.request.url).pathname)) {
+    return withSecurityHeaders(new Response("Not found", { status: 404 }));
+  }
+  return withSecurityHeaders(
     await apiRoute.run(
       {
         binding: context.env.API,
@@ -45,3 +52,4 @@ export const onRequest: PagesFunction<Env> = async (context) =>
     ),
     { apiOrigin: originOf(context.env.API_URL) }
   );
+};

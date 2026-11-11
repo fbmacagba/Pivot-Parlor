@@ -1,5 +1,6 @@
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
+import { requireShopSlug } from "~/lib/shopSlug";
 
 /**
  * Per-shop web app manifest (resource route: /:shopSlug/manifest.webmanifest).
@@ -14,8 +15,8 @@ import { createApiClient } from "~/lib/api";
  * of arbitrary logos (a job for the images worker) and can follow.
  */
 export async function loader({ params, context }: LoaderFunctionArgs) {
+  const slug = requireShopSlug(params);
   const env = context.env as { API_URL: string };
-  const slug = params.shopSlug!;
 
   let shop: { slug: string; name: string; is_active?: number } | null = null;
   try {
