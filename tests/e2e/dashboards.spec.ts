@@ -33,6 +33,20 @@ const EXCLUDED: Record<string, string> = {
   "dev.activity.export": "a CSV download with its own enforced policy, not a screen",
 };
 
+/**
+ * Screens whose designed outcome for the sweep's fresh shop is not a clean
+ * render. The problems listed must be EXACTLY what the screen reports, so a
+ * crash (500), a wrong landing or a page error still fails it.
+ */
+const EXPECTED_PROBLEMS: Record<string, { problems: string[]; reason: string }> = {
+  "dev.shops.$shopId.preview": {
+    problems: ["HTTP 404", "error screen (status 404)"],
+    reason:
+      "previews a generated site, and the loader answers 404 'No site generated yet' without one. The dev UI shows " +
+      "Preview only when has_site (dev.shops._index.tsx), staging has no site pipeline, and generating one is a paid call.",
+  },
+};
+
 /** Screens designed to redirect: requested pathname -> the pathname they land on. */
 const REDIRECTS: Record<string, string> = {
   "/staff/availability": "/staff/bookings",
@@ -111,7 +125,8 @@ async function sweep(page: Page, mods: string[], shopId: string) {
   for (const mod of mods) {
     const url = pathFor(mod, { shopId });
     await test.step(`${mod} (${url})`, async () => {
-      expect.soft(await screenProblems(page, url), `${mod} at ${url}`).toEqual([]);
+      const expected = EXPECTED_PROBLEMS[mod]?.problems ?? [];
+      expect.soft(await screenProblems(page, url), `${mod} at ${url}`).toEqual(expected);
     });
   }
 }
@@ -121,6 +136,7 @@ test.describe("dashboard sweep: wiring", () => {
     const mods = dashboardModules();
     expect(mods.length).toBeGreaterThan(25);
     for (const mod of Object.keys(EXCLUDED)) expect(mods, `excluded module ${mod} exists`).toContain(mod);
+    for (const mod of Object.keys(EXPECTED_PROBLEMS)) expect(mods, `expected-outcome module ${mod} exists`).toContain(mod);
     for (const mod of mods.filter((m) => !(m in EXCLUDED))) {
       expect(() => pathFor(mod, { shopId: "x" }), mod).not.toThrow();
     }
