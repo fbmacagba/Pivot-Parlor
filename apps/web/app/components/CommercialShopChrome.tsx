@@ -1,6 +1,7 @@
 import { Link } from "@remix-run/react";
 import { MessageCircle, X } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -21,12 +22,22 @@ import { useScrolledPastHero } from "~/lib/useScrolledPastHero";
 import { bookingLabel, isRetailCategory, shopNameInitials, VIEW_SERVICES_LABEL } from "~/lib/shopLabels";
 import { MobileBookingBar } from "~/components/MobileBookingBar";
 import { InstallAppButton } from "~/components/InstallAppButton";
+import { TURNSTILE_SITE_KEY, TurnstileWidget } from "~/components/TurnstileWidget";
 import "~/components/shop-chrome.css";
 
 const CHATBOT_CHAT_URL =
   "https://pivot-parlor-chatbot.bmorris0565.workers.dev/chat";
 
-type ChatTurn = { role: "user" | "assistant"; content: string };
+/** How long a send waits for the bot check's token before going without one
+ *  (the worker then decides whether it needs one). */
+export const CHAT_TOKEN_WAIT_MS = 5000;
+
+/** The worker's two refusals for a missing or invalid Turnstile token. */
+const CHAT_SECURITY_ERRORS = new Set(["Security check required", "Security check failed"]);
+const CHAT_SECURITY_NOTE = "Please complete the security check, then send your message again.";
+
+/** `local` turns are notes for the visitor only, never sent as history. */
+type ChatTurn = { role: "user" | "assistant"; content: string; local?: boolean };
 
 function isSafeChatHref(href: string): boolean {
   const t = href.trim();
@@ -158,19 +169,35 @@ export function CommercialShopChrome({
   // Track whether the visitor has interacted (sent a message or tapped a chip)
   const [chatStarted, setChatStarted] = useState(false);
   const [chatSending, setChatSending] = useState(false);
-  const turnstileWidgetId = useRef<string | null>(null);
 
-  // Turnstile invisible widget — obtain a fresh token before each chat message
-  useEffect(() => {
-    if (demo || typeof window === "undefined") return;
-    if ((window as unknown as { turnstile?: unknown }).turnstile) return; // already loaded
-    const script = document.createElement("script");
-    script.src =
-      "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.defer = true;
-    document.head.appendChild(script);
-  }, [demo]);
+  // Bot check for the chatbot worker, which refuses a message without a
+  // valid Turnstile token while its secret is set. The panel's widget
+  // reports each token here; a send spends it and bumps the round, which
+  // resets the widget for a fresh one (tokens are single-use).
+  const chatToken = useRef<string | null>(null);
+  const chatTokenWaiters = useRef<Array<(token: string | null) => void>>([]);
+  const [chatTokenRound, setChatTokenRound] = useState(0);
+  const onChatToken = useCallback((token: string | null) => {
+    chatToken.current = token;
+    if (!token) return;
+    const waiters = chatTokenWaiters.current;
+    chatTokenWaiters.current = [];
+    for (const settle of waiters) settle(token);
+  }, []);
+  const waitForChatToken = (ms: number): Promise<string | null> => {
+    if (chatToken.current) return Promise.resolve(chatToken.current);
+    return new Promise((resolve) => {
+      // settle runs only after the timer exists (from the timer itself, or
+      // from onChatToken once it has been queued below).
+      const settle = (token: string | null) => {
+        clearTimeout(timer);
+        chatTokenWaiters.current = chatTokenWaiters.current.filter((w) => w !== settle);
+        resolve(token);
+      };
+      const timer = setTimeout(() => settle(null), ms);
+      chatTokenWaiters.current.push(settle);
+    });
+  };
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const closeNav = () => setNavOpen(false);
 
@@ -216,39 +243,24 @@ export function CommercialShopChrome({
       return;
     }
 
-    // Get Turnstile token if widget is available (gracefully skip if not configured)
-    let turnstileToken = "";
-    try {
-      const ts = (
-        window as unknown as {
-          turnstile?: {
-            execute: (
-              id: string,
-              opts: { callback: (t: string) => void },
-            ) => void;
-          };
-        }
-      ).turnstile;
-      if (ts && turnstileWidgetId.current) {
-        turnstileToken = await new Promise<string>((resolve) => {
-          ts.execute(turnstileWidgetId.current!, { callback: resolve });
-          setTimeout(() => resolve(""), 3000); // fallback after 3s
-        });
-      }
-    } catch {
-      /* non-fatal — proceed without token */
-    }
-
     // Mark as started so the welcome UI disappears
     setChatStarted(true);
 
-    const historyPayload = chatMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-    setChatMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    const historyPayload = chatMessages
+      .filter((m) => !m.local)
+      .map((m) => ({ role: m.role, content: m.content }));
+    const turn: ChatTurn = { role: "user", content: trimmed };
+    setChatMessages((prev) => [...prev, turn]);
     setChatSending(true);
     try {
+      // Spend the bot check's current token (waiting briefly for one) and
+      // ask the widget for a fresh one. With no token the message still
+      // goes: the worker decides whether it needs one.
+      const turnstileToken = await waitForChatToken(CHAT_TOKEN_WAIT_MS);
+      if (turnstileToken) {
+        chatToken.current = null;
+        setChatTokenRound((n) => n + 1);
+      }
       const res = await fetch(CHATBOT_CHAT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -270,7 +282,18 @@ export function CommercialShopChrome({
         ]);
         return;
       }
-      const data = (await res.json()) as { reply?: string };
+      const data = (await res.json()) as { reply?: string; error?: string };
+      if (typeof data.error === "string" && CHAT_SECURITY_ERRORS.has(data.error)) {
+        // Not the assistant's fallback reply: take the message back, keep
+        // it in the box, and get a fresh check.
+        setChatMessages((prev) => [
+          ...prev.filter((m) => m !== turn),
+          { role: "assistant", content: CHAT_SECURITY_NOTE, local: true },
+        ]);
+        setChatDraft(trimmed);
+        if (!turnstileToken) setChatTokenRound((n) => n + 1);
+        return;
+      }
       const reply =
         typeof data.reply === "string" && data.reply.trim()
           ? data.reply.trim()
@@ -978,6 +1001,22 @@ export function CommercialShopChrome({
             <p className="shrink-0 border-t border-[color:var(--st-line-10)] px-4 py-2 text-center text-xs text-[color:var(--st-ink-50)]">
               Chat is unavailable on this page.
             </p>
+          ) : null}
+
+          {/* Bot check: invisible unless Cloudflare needs a tick. A demo's
+              replies are scripted and never reach the worker. */}
+          {!demo && shopId ? (
+            <TurnstileWidget
+              siteKey={TURNSTILE_SITE_KEY}
+              appearance="interaction-only"
+              size="flexible"
+              onToken={onChatToken}
+              resetSignal={chatTokenRound}
+              // "flexible" needs 300px: a 360px phone's panel leaves 312px,
+              // so the side padding stays small below sm.
+              className="shrink-0 px-1.5 sm:px-3"
+              messageClassName="px-1.5 pb-2 text-xs text-[color:var(--st-ink-80)]"
+            />
           ) : null}
 
           {/* Input bar */}

@@ -20,7 +20,8 @@ vi.mock("lucide-react", () => {
   return { MessageCircle: Icon, X: Icon, Download: Icon };
 });
 
-import { CommercialShopChrome } from "./CommercialShopChrome";
+import { CHAT_TOKEN_WAIT_MS, CommercialShopChrome } from "./CommercialShopChrome";
+import { TURNSTILE_SITE_KEY } from "./TurnstileWidget";
 
 const site = { shop_id: "shop-1", shop_name: "Test Shop", tagline: "", design_version: 3 };
 
@@ -306,5 +307,157 @@ describe("CommercialShopChrome: overlapping phone layers", () => {
     expect(ui.launcher().classList.contains("invisible")).toBe(false);
     expect(ui.container.querySelector(".pp-chat-panel")!.classList.contains("invisible")).toBe(false);
     await ui.done();
+  });
+});
+
+// Found 2026-11-11: the chatbot worker enforces Turnstile (its secret is set
+// on production), but the chat loaded api.js and never rendered a widget, so
+// no message ever carried a token. Every message on a real shop got 400
+// "Security check required" and the visitor saw only the fallback reply.
+describe("CommercialShopChrome: shop chat bot check", () => {
+  type Fn = ReturnType<typeof vi.fn>;
+  const services = [{ name: "Cut", price_gbp: 20, duration_minutes: 30, category: "Hair" }];
+  const FALLBACK = "I'm having a quick moment. Please try again, or book directly at the link above.";
+  const reply = (status: number, body: unknown) => ({ status, ok: status < 400, json: async () => body });
+
+  function mountChat(shopSlug = "test-shop") {
+    document.querySelectorAll("script").forEach((s) => s.remove());
+    localStorage.setItem("pp_cookie_consent", "{}");
+    const ts: { render: Fn; remove: Fn; reset: Fn } = { render: vi.fn(() => "w-1"), remove: vi.fn(), reset: vi.fn() };
+    (window as unknown as { turnstile?: unknown }).turnstile = ts;
+    const fetchMock: Fn = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommercialShopChrome site={site} settings={{}} shopSlug={shopSlug} services={services}>
+          <main>content</main>
+        </CommercialShopChrome>,
+      ),
+    );
+    const click = (el: Element | null | undefined) =>
+      act(() => {
+        el!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    click(container.querySelector('button[aria-label="Open chat"]'));
+    const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Message"]')!;
+    return {
+      ts,
+      fetchMock,
+      container,
+      input,
+      opts: () => ts.render.mock.calls[0][1] as Record<string, (arg?: string) => unknown>,
+      token: (t: string) =>
+        act(() => {
+          (ts.render.mock.calls[0][1] as Record<string, (arg?: string) => unknown>).callback(t);
+        }),
+      chip: () => click([...container.querySelectorAll(".pp-chat-panel button")].find((b) => b.textContent?.includes("Cut"))),
+      type: (text: string) =>
+        act(() => {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), text);
+          input().dispatchEvent(new Event("input", { bubbles: true }));
+        }),
+      send: () => click([...container.querySelectorAll(".pp-chat-panel button")].find((b) => b.textContent === "Send")),
+      flush: async () => {
+        for (let i = 0; i < 5; i++) await act(async () => {});
+      },
+      bodies: () => fetchMock.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body)),
+      log: () => container.querySelector('[role="log"]')!.textContent ?? "",
+      async done() {
+        await act(async () => {});
+        act(() => root.unmount());
+        container.remove();
+        vi.unstubAllGlobals();
+        localStorage.clear();
+        delete (window as unknown as { turnstile?: unknown }).turnstile;
+      },
+    };
+  }
+
+  it("mounts no bot check for a portfolio demo, whose replies are scripted", async () => {
+    const ui = mountChat("linden-and-lark-demo");
+    expect(ui.container.querySelector(".pp-chat-panel")).toBeTruthy();
+    expect(ui.ts.render).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('script[src*="challenges.cloudflare.com"]')).toHaveLength(0);
+    await ui.done();
+  });
+
+  it("renders the bot check before the message box and sends its token with the message", async () => {
+    const ui = mountChat();
+    expect(ui.ts.render).toHaveBeenCalledTimes(1);
+    const [el, opts] = ui.ts.render.mock.calls[0];
+    expect(opts).toMatchObject({ sitekey: TURNSTILE_SITE_KEY, appearance: "interaction-only" });
+    expect(ui.container.querySelector(".pp-chat-panel")!.contains(el as Node)).toBe(true);
+    expect((el as Node).compareDocumentPosition(ui.input()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    ui.token("tok-1");
+    ui.fetchMock.mockResolvedValueOnce(reply(200, { reply: "A cut is 20 pounds." }));
+    ui.chip();
+    await ui.flush();
+    expect(ui.bodies()).toHaveLength(1);
+    expect(ui.bodies()[0]).toMatchObject({ shopId: "shop-1", message: "Tell me about Cut", turnstileToken: "tok-1" });
+    expect(ui.log()).toContain("A cut is 20 pounds.");
+    // Tokens are single-use: the widget is asked for a fresh one.
+    expect(ui.ts.reset).toHaveBeenCalledWith("w-1");
+
+    // The next message waits for that fresh token instead of reusing tok-1.
+    ui.fetchMock.mockResolvedValueOnce(reply(200, { reply: "Yes, beard trims too." }));
+    ui.type("And beards?");
+    ui.send();
+    await ui.flush();
+    expect(ui.bodies()).toHaveLength(1);
+    ui.token("tok-2");
+    await ui.flush();
+    expect(ui.bodies()).toHaveLength(2);
+    expect(ui.bodies()[1]).toMatchObject({ message: "And beards?", turnstileToken: "tok-2" });
+    await ui.done();
+  });
+
+  it.each([
+    [400, "Security check required"],
+    [403, "Security check failed"],
+  ])("when the worker refuses the check (%i %s), asks for it again and keeps the message", async (status, error) => {
+    const ui = mountChat();
+    ui.token("tok-1");
+    ui.fetchMock.mockResolvedValueOnce(reply(status, { reply: FALLBACK, error }));
+    ui.type("Hello there");
+    ui.send();
+    await ui.flush();
+    expect(ui.log()).not.toContain("quick moment");
+    expect(ui.log()).toMatch(/complete the security check/i);
+    expect(ui.log()).not.toContain("Hello there");
+    expect(ui.input().value).toBe("Hello there");
+    expect(ui.ts.reset).toHaveBeenCalledWith("w-1");
+
+    // The note is local: it never goes to the assistant as history.
+    ui.token("tok-2");
+    ui.fetchMock.mockResolvedValueOnce(reply(200, { reply: "Hi!" }));
+    ui.send();
+    await ui.flush();
+    expect(ui.bodies()[1]).toMatchObject({ message: "Hello there", turnstileToken: "tok-2", history: [] });
+    await ui.done();
+  });
+
+  it("sends without a token after a short wait, so the worker decides", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const ui = mountChat();
+      ui.fetchMock.mockResolvedValueOnce(reply(200, { reply: "Hello!" }));
+      ui.chip();
+      await ui.flush();
+      expect(ui.fetchMock).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CHAT_TOKEN_WAIT_MS);
+      });
+      await ui.flush();
+      expect(ui.bodies()).toHaveLength(1);
+      expect(ui.bodies()[0]).not.toHaveProperty("turnstileToken");
+      expect(ui.log()).toContain("Hello!");
+      await ui.done();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

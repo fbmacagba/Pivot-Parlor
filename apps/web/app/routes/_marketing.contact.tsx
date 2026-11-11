@@ -4,7 +4,7 @@ import { json } from "@remix-run/cloudflare";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
-import { TURNSTILE_SCRIPT_SRC, TurnstileWidget } from "~/components/TurnstileWidget";
+import { TURNSTILE_SCRIPT_SRC, TURNSTILE_SITE_KEY, TurnstileWidget } from "~/components/TurnstileWidget";
 
 export const meta: MetaFunction = () => [
   { title: "Contact Us | Pivot Parlor" },
@@ -72,10 +72,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
-
-// Turnstile site key — replace with your real key from Cloudflare dashboard
-// https://dash.cloudflare.com → Turnstile → Add site
-const TURNSTILE_SITE_KEY = "0x4AAAAAACxPFNWfoxKge7a9";
 
 export default function Contact() {
   const data = useActionData<typeof action>();
