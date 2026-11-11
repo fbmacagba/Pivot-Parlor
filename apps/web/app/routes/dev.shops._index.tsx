@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { Bot, Copy, ExternalLink, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { getSessionToken } from "~/lib/auth";
+import { getSessionToken, requireRole } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
@@ -19,6 +19,7 @@ import { OnboardShopDialog } from "~/components/dev-shops/OnboardShopDialog";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
+  await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   const cookieHeader = request.headers.get("Cookie");
   const url = new URL(request.url);
@@ -43,6 +44,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
+  await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
   const form = await request.formData();

@@ -4,7 +4,7 @@ import { json } from "@remix-run/cloudflare";
 import { Loader2, X } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "~/components/ui/Button";
-import { getSessionToken } from "~/lib/auth";
+import { getSessionToken, requireRole } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import type { ShopSiteData } from "./$shopSlug";
@@ -22,10 +22,13 @@ function shopNameInitials(name: string): string {
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
   const shopId = params.shopId!;
+  const env = context.env as { API_URL: string };
+  // The shop and site reads below are public API endpoints, so this is the
+  // only check that keeps the developer preview to developers.
+  await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   if (!token) throw new Response("Unauthorized", { status: 401 });
 
-  const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
 
   let shop: PreviewShop;

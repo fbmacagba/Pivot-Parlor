@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { useEffect, useRef, useState } from "react";
 import { Copy, ExternalLink } from "lucide-react";
-import { getSessionToken } from "~/lib/auth";
+import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
@@ -39,6 +39,7 @@ function slugBaseFromShopName(name: string): string {
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
+  await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
 
@@ -62,6 +63,7 @@ type OnboardFail = { success: false; error: string };
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
+  await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   if (!token) {
     return json<OnboardFail>({ success: false, error: "Not signed in" }, { status: 401 });
