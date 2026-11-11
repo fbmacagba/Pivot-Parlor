@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { CheckCircle, Loader2, XCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { createApiClient } from "~/lib/api";
+import { requireShopSlug } from "~/lib/shopSlug";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
 import { ThemedButton, lightDark, platformFallbackVars } from "~/components/ThemedBookingControls";
@@ -21,7 +22,8 @@ type BookingStatus = {
 };
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
-  if (isPortfolioDemoShop(params.shopSlug)) return redirect(`/${params.shopSlug}/book`);
+  const slug = requireShopSlug(params);
+  if (isPortfolioDemoShop(slug)) return redirect(`/${slug}/book`);
   const env = context.env as { API_URL: string };
   const url = new URL(request.url);
   const bookingId = url.searchParams.get("id");
@@ -37,7 +39,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   }
 
   return json({
-    slug: params.shopSlug,
+    slug,
     booking,
     bookingId,
     awaitingPayment,

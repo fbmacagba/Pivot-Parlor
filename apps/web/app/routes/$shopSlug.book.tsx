@@ -12,6 +12,7 @@ import { json, redirect } from "@remix-run/cloudflare";
 import { useEffect, useRef, useState } from "react";
 import { createApiClient } from "~/lib/api";
 import type { ApiClient } from "~/lib/api";
+import { requireShopSlug } from "~/lib/shopSlug";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
 import {
@@ -128,11 +129,12 @@ async function demoBookingData(api: ApiClient, shopId: string, slug: string, url
 }
 
 export async function loader({ params, request, context }: LoaderFunctionArgs) {
+  const slug = requireShopSlug(params);
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
   const url = new URL(request.url);
-  const demo = portfolioDemoForSlug(params.shopSlug);
-  if (demo) return json(await demoBookingData(api, demo.shopId, params.shopSlug!, url));
+  const demo = portfolioDemoForSlug(slug);
+  if (demo) return json(await demoBookingData(api, demo.shopId, slug, url));
 
   const date = url.searchParams.get("date");
   const serviceId = url.searchParams.get("service_id");
@@ -159,7 +161,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   let hoursJson: string | undefined;
 
   try {
-    const shopRes = await api.get<{ id: string; timezone?: string }>(`/api/shops/${params.shopSlug}`);
+    const shopRes = await api.get<{ id: string; timezone?: string }>(`/api/shops/${slug}`);
     shopTimezone = shopRes.timezone || "Europe/London";
     // Do not use Promise.all: /staff requires auth and would reject the whole loader, clearing services.
     const [svcResult, staffResult, settingsResult] = await Promise.allSettled([
@@ -196,7 +198,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   } catch { /* empty */ }
 
   return json({
-    slug: params.shopSlug,
+    slug,
     services,
     staff,
     slots,
@@ -214,7 +216,8 @@ const CONFIRM_FAILED =
   "We couldn't confirm that time. It may have just been taken. Choose another time and try again.";
 
 export async function action({ params, request, context }: ActionFunctionArgs) {
-  if (isPortfolioDemoShop(params.shopSlug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
+  const slug = requireShopSlug(params);
+  if (isPortfolioDemoShop(slug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
   const form = await request.formData();
@@ -222,7 +225,7 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
   let booking: { id: string; checkout_url?: string };
   try {
     booking = await api.post<{ id: string; checkout_url?: string }>("/api/bookings", {
-      shop_slug: params.shopSlug,
+      shop_slug: slug,
       service_id: form.get("service_id"),
       staff_id: form.get("staff_id"),
       date: form.get("date"),
@@ -246,7 +249,7 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
     return redirect(booking.checkout_url);
   }
 
-  return redirect(`/${params.shopSlug}/confirm?id=${booking.id}`);
+  return redirect(`/${slug}/confirm?id=${booking.id}`);
 }
 
 const STEPS = ["Service", "Team member", "Date and time", "Your details", "Review"];

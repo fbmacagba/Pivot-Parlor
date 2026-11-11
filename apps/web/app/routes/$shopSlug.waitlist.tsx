@@ -3,6 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json, redirect } from "@remix-run/cloudflare";
 import { isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
+import { requireShopSlug } from "~/lib/shopSlug";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { siteDataForChrome } from "~/lib/shopCommercialChrome";
 import {
@@ -14,17 +15,19 @@ import {
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
 export async function loader({ params }: LoaderFunctionArgs) {
-  if (isPortfolioDemoShop(params.shopSlug)) return redirect(`/${params.shopSlug}/book`);
-  return json({ slug: params.shopSlug });
+  const slug = requireShopSlug(params);
+  if (isPortfolioDemoShop(slug)) return redirect(`/${slug}/book`);
+  return json({ slug });
 }
 
 export async function action({ params, request, context }: ActionFunctionArgs) {
-  if (isPortfolioDemoShop(params.shopSlug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
+  const slug = requireShopSlug(params);
+  if (isPortfolioDemoShop(slug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
   const env = context.env as { API_URL: string };
   const form = await request.formData();
   try {
     await createApiClient(env.API_URL).post("/api/waitlist", {
-      shop_slug: params.shopSlug,
+      shop_slug: slug,
       customer_name: form.get("name"),
       customer_email: form.get("email"),
       customer_phone: form.get("phone"),

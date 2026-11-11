@@ -6,11 +6,13 @@ import { useParams } from "@remix-run/react";
 import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json, redirect } from "@remix-run/cloudflare";
 import { isPortfolioDemoShop } from "@repo/utils";
+import { requireShopSlug } from "~/lib/shopSlug";
 
 export const meta: MetaFunction = () => [{ title: "Join the Queue | Pivot Parlor" }];
 
 export function loader({ params }: LoaderFunctionArgs) {
-  return isPortfolioDemoShop(params.shopSlug) ? redirect(`/${params.shopSlug}/book`) : json({});
+  const slug = requireShopSlug(params);
+  return isPortfolioDemoShop(slug) ? redirect(`/${slug}/book`) : json({});
 }
 
 type Step = "form" | "waiting" | "serving" | "done";
