@@ -16,6 +16,9 @@ export interface UptimeEnv {
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** The firing control's failure reason: unlike any real check's, so it gets its own issue. */
+export const CONTROL_DETAIL = "deliberate test failure, not an outage";
+
 export interface Check {
   name: string;
   run: (get: (url: string, accept: string) => Promise<Response>) => Promise<string | null>;
@@ -140,11 +143,11 @@ export function buildChecks(env: UptimeEnv, now: Date): Check[] {
   ];
 
   if (env.CONTROL_FAIL === "true") {
-    // Asks a page that does not exist to answer 200: fails on a healthy site.
-    checks.push({
-      name: "control-deliberate-failure",
-      run: async (get) => page(await get(`${site}/no-such-shop-zzz-999`, HTML), false),
-    });
+    // Fails without asking production for anything, with a reason no real
+    // check produces. Workers Issues groups errors by message with the check
+    // name masked, so a control reading like a real failure would share that
+    // outage's issue and silence its email for an hour after every test.
+    checks.push({ name: "control-deliberate-failure", run: async () => CONTROL_DETAIL });
   }
   return checks;
 }
