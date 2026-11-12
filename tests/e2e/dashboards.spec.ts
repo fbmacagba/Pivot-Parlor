@@ -75,7 +75,8 @@ type LoaderData = Record<string, unknown>;
  * Per admin screen, something only the API's answer fills in. The loaders
  * swallow API errors and render empty, so the right shopId alone does not
  * prove the shop's data arrived. Screens missing here have nothing that
- * tells "empty shop" from "no answer" (a fresh shop has no bookings).
+ * tells "empty shop" from "no answer": a fresh shop has no bookings, and no
+ * settings row, so the public GET /settings answers {} for it.
  */
 const ARRIVED: Record<string, (d: LoaderData) => boolean> = {
   "admin._index": (d) => Boolean(d.shopSlug) && d.setupStatus != null,
@@ -84,7 +85,6 @@ const ARRIVED: Record<string, (d: LoaderData) => boolean> = {
   "admin.queue": (d) => Boolean(d.shopSlug),
   "admin.revenue": (d) => d.data != null,
   "admin.schedule": (d) => Array.isArray(d.staff) && d.staff.length >= 1,
-  "admin.settings": (d) => typeof d.settings === "object" && d.settings !== null && Object.keys(d.settings).length > 0,
   "admin.staff": (d) => Array.isArray(d.staff) && d.staff.length >= 1,
 };
 
