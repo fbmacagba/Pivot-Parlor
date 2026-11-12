@@ -4,6 +4,7 @@ export * from "./emailTemplate";
 export * from "./designSpec";
 export * from "./serviceImagePrompt";
 export * from "./portfolioDemo";
+export * from "./errorText";
 
 /** Generate a URL-friendly slug from a string */
 export function slugify(text: string): string {

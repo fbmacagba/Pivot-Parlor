@@ -2,6 +2,10 @@ import type { AppLoadContext, EntryContext } from "@remix-run/cloudflare";
 import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToReadableStream } from "react-dom/server";
+import { reportServerError, type ReportingContext } from "./lib/serverErrors";
+
+// Loader, action and render errors reach the owner's alert email (app/lib/serverErrors.ts).
+export { handleError } from "./lib/serverErrors";
 
 export default async function handleRequest(
   request: Request,
@@ -10,13 +14,13 @@ export default async function handleRequest(
   remixContext: EntryContext,
   loadContext: AppLoadContext
 ) {
-  void loadContext;
+  const { env, waitUntil } = loadContext as ReportingContext;
   const body = await renderToReadableStream(
     <RemixServer context={remixContext} url={request.url} />,
     {
       signal: request.signal,
       onError(error: unknown) {
-        console.error(error);
+        reportServerError(error, { request, env, waitUntil, where: "render" });
         responseStatusCode = 500;
       },
     }

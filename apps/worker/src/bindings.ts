@@ -43,4 +43,6 @@ export type Bindings = {
    *  in wrangler.toml). Unset means no limit, so the alerting guard test checks
    *  that production and staging declare it. */
   CSP_REPORT_LIMITER?: RateLimit;
+  /** Per-route limit on website server errors (web-errors.ts; [[ratelimits]]). */
+  WEB_ERROR_LIMITER?: RateLimit;
 };

@@ -272,6 +272,10 @@ function isStripeWebhookPost(request: Request, url: URL): boolean {
 // Exported for the audit coverage test (test/audit-coverage.test.ts).
 export { app, stripeWebhookApp, cspReportApp };
 
+// Named entrypoint the website binds to for its server errors (reachable only
+// through a service binding; apps/web/wrangler.toml WEB_ERRORS).
+export { WebErrors } from "./web-errors.js";
+
 export default {
   fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
     const url = new URL(request.url);
