@@ -63,6 +63,10 @@ What that means in practice:
   - the returning-issue rule fired on the same issue, while it was Resolved,
     64 minutes after its previous occurrence. The issue went back to Active and
     the email arrived 33 seconds after the failing run.
+- The AI workers' path proven on 2026-11-12, after their Issues deploy: one
+  malformed message on `site-text-queue` opened the issue
+  `[pivot-parlor-text] invalid message {"probe":"<string>"}`, and the
+  new-issue email arrived 28 seconds later (see Deploying the AI workers).
 
 Issues also opens **security** issues on its own, for requests that look like
 a vulnerability scan. The first one arrived on 2026-11-11: "Potential
@@ -207,6 +211,20 @@ npx wrangler deploy
 The deploy output must not contain
 `Unexpected fields found in observability field: "issues"`. If it does, that
 Wrangler is too old (see below) and the deploy has just turned Issues off.
+Then read the setting back: the worker's script settings
+(`/accounts/<account>/workers/scripts/<name>/script-settings`) must show
+`observability.issues.enabled: true`.
+
+**Firing control** (to re-prove the AI workers' alert path): send one message
+with no `jobId` to `site-text-queue` through the Cloudflare API:
+`POST /accounts/<account>/queues/<site-text-queue id>/messages` with the body
+`{"content_type": "json", "body": {"probe": "alert-path check"}}` (the queue id
+is in the `GET /accounts/<account>/queues` listing). The text worker logs
+`[pivot-parlor-text] invalid message`, acknowledges the message and stops: it
+reads and writes nothing and makes no AI call. The first such probe opens a new
+issue and the new-issue rule emails; a later one emails through the
+returning-issue rule if the probe issue has been quiet for over an hour. Mark
+the issue Resolved afterwards.
 
 ## Wrangler version
 
