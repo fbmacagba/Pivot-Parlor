@@ -10,6 +10,7 @@ import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { parsePoundsToPence } from "@repo/utils";
 
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -119,17 +120,18 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
-  if (!user.shop_id || !token) {
+  const shopId = pageShopId(request, user);
+  if (!shopId || !token) {
     return json({ shopId: null as string | null, settings: {} as ShopSettingsPayload, error: "no_shop" as const });
   }
   const api = createApiClient(env.API_URL, token);
   let settings: ShopSettingsPayload = {};
   try {
-    settings = (await api.get(`/api/shops/${user.shop_id}/settings`)) as ShopSettingsPayload;
+    settings = (await api.get(`/api/shops/${shopId}/settings`)) as ShopSettingsPayload;
   } catch {
     settings = {};
   }
-  return json({ shopId: user.shop_id, settings, error: null as null });
+  return json({ shopId, settings, error: null as null });
 }
 
 type ActionData = { ok: boolean; message?: string; error?: string; ts: number };
@@ -139,7 +141,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json<ActionData>({ ok: false, error: "Unauthorized", ts: Date.now() }, 401);
   const user = await requireRole(request, "admin", env.API_URL);
-  if (!user.shop_id) {
+  const shopId = pageShopId(request, user);
+  if (!shopId) {
     return json<ActionData>({ ok: false, error: "No shop assigned", ts: Date.now() }, 400);
   }
   let body: Record<string, unknown>;
@@ -150,7 +153,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
   const api = createApiClient(env.API_URL, token);
   try {
-    await api.patch(`/api/shops/${user.shop_id}/settings`, body);
+    await api.patch(`/api/shops/${shopId}/settings`, body);
     return json<ActionData>({ ok: true, message: "Saved successfully.", ts: Date.now() });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Save failed";

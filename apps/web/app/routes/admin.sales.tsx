@@ -10,7 +10,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { Receipt, Undo2 } from "lucide-react";
 import { useState } from "react";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { formatPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
@@ -57,20 +57,12 @@ interface SaleDetail extends SaleRow {
 
 type ActionData = { ok: true; message: string } | { error: string };
 
-function resolveShopId(request: Request, user: SessionPayload, formShopId: string | null): string | null {
-  const url = new URL(request.url);
-  if (user.role === "developer") {
-    return formShopId?.trim() || url.searchParams.get("shopId")?.trim() || null;
-  }
-  return user.shop_id?.trim() || null;
-}
-
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user, null);
+  const shopId = pageShopId(request, user, null);
   const url = new URL(request.url);
   const today = new Date().toISOString().slice(0, 10);
   const date = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get("date") ?? "") ? url.searchParams.get("date")! : today;
@@ -99,7 +91,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (!token) return json<ActionData>({ error: "Unauthorized" }, { status: 401 });
 
   const form = await request.formData();
-  const shopId = resolveShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
+  const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   const saleId = String(form.get("saleId") ?? "").trim();
   if (!shopId || !saleId) return json<ActionData>({ error: "Missing shop or sale." }, { status: 400 });
 

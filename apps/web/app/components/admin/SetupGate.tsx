@@ -1,5 +1,6 @@
 // apps/web/app/components/admin/SetupGate.tsx
 import { Link } from "@remix-run/react";
+import { useShopHref } from "~/lib/useShopHref";
 
 export interface SetupStatus {
   staff:    { done: boolean; count: number };
@@ -84,6 +85,7 @@ function StepRow({
   done: boolean;
   active: boolean;
 }) {
+  const shopHref = useShopHref();
   return (
     <div className={`flex items-center gap-4 rounded-xl border px-5 py-4 transition-all ${
       done
@@ -114,7 +116,7 @@ function StepRow({
       {/* Action */}
       {!done && active && (
         <Link
-          to={link}
+          to={shopHref(link)}
           className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-dark bg-gold hover:bg-gold/90 px-3 py-2 rounded-lg transition-colors"
         >
           {linkLabel}

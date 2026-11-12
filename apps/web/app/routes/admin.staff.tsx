@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { Plus, Mail, Pencil, UserX, Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
@@ -32,17 +32,6 @@ interface Staff {
   services?: Service[];
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function resolveShopId(request: Request, user: SessionPayload, formShopId: string | null): string | null {
-  if (user.role === "developer") {
-    const fromForm = formShopId?.trim();
-    const fromQuery = new URL(request.url).searchParams.get("shopId")?.trim();
-    return fromForm || fromQuery || null;
-  }
-  return user.shop_id?.trim() || null;
-}
-
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -50,7 +39,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user, null);
+  const shopId = pageShopId(request, user, null);
 
   let staff: Staff[] = [];
   let services: Service[] = [];
@@ -79,7 +68,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
   const formShopId = String(form.get("shopId") ?? "").trim() || null;
-  const shopId = resolveShopId(request, user, formShopId);
+  const shopId = pageShopId(request, user, formShopId);
   if (!shopId) return json({ error: "Missing shop ID" }, { status: 400 });
 
   const api = createApiClient(env.API_URL, token);

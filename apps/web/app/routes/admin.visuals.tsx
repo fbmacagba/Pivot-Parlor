@@ -1,23 +1,17 @@
 import { useLoaderData } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { VisualManager, type VisualsData } from "~/components/VisualManager";
-
-function resolveShopId(request: Request, user: SessionPayload): string | null {
-  const url = new URL(request.url);
-  if (user.role === "developer") return url.searchParams.get("shopId")?.trim() || null;
-  return user.shop_id?.trim() || null;
-}
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user);
+  const shopId = pageShopId(request, user);
 
   let visuals: VisualsData | null = null;
   if (shopId) {

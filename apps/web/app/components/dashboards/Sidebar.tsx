@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { clsx } from "clsx";
 import type { UserRole } from "@repo/types";
+import { useShopHref } from "~/lib/useShopHref";
 
 export interface NavItem {
   href: string;
@@ -119,6 +120,7 @@ export function Sidebar({
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const navItems = NAV_MAP[role] ?? [];
+  const shopHref = useShopHref();
 
   return (
     <aside className="flex h-full w-full flex-col bg-dark">
@@ -178,7 +180,7 @@ export function Sidebar({
             return (
               <li key={href}>
                 <Link
-                  to={href}
+                  to={shopHref(href)}
                   onClick={onNavigate}
                   aria-current={active ? "page" : undefined}
                   className={clsx(

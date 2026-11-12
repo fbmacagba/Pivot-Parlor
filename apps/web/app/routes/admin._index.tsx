@@ -17,7 +17,9 @@ import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
 import { SetupGate } from "~/components/admin/SetupGate";
 import type { SetupStatus } from "~/components/admin/SetupGate";
 import { SiteCandidateCard } from "~/components/SiteCandidateCard";
-import { formatDate, formatTime as formatUkTime } from "~/lib/dateFormat";
+import { formatDate, formatTime as formatUkTime, ukToday } from "~/lib/dateFormat";
+import { pageShopId } from "~/lib/pageShop";
+import { useShopHref } from "~/lib/useShopHref";
 
 interface AdminStats {
   date: string;
@@ -71,11 +73,11 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
 
-  // shop_id always from JWT — never from URL params
-  const shopId = user.shop_id;
+  // The admin's own shop; a developer names one with ?shopId=.
+  const shopId = pageShopId(request, user);
 
   let stats: AdminStats = {
-    date: new Date().toISOString().slice(0, 10),
+    date: ukToday(),
     todays_bookings: 0,
     todays_revenue_pence: 0,
     active_staff: 0,
@@ -84,12 +86,13 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   let todayBookings: TodayBooking[] = [];
 
   if (shopId) {
-    const today = new Date().toISOString().slice(0, 10);
     try {
       stats = await api.get<AdminStats>(`/api/shops/${shopId}/stats`);
     } catch {
       /* use defaults */
     }
+    // The API's "today" is the shop's own (London) date; the list matches it.
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(stats.date ?? "") ? stats.date : ukToday();
 
     try {
       const res = await api.get<TodayBooking[]>(
@@ -139,6 +142,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 export default function AdminOverview() {
   const { stats, todayBookings, shopId, setupStatus, shopShare, shopSlug } =
     useLoaderData<typeof loader>();
+  const shopHref = useShopHref();
 
   const upcoming = todayBookings.filter(
     (b) =>
@@ -180,7 +184,7 @@ export default function AdminOverview() {
           </p>
         </div>
         <Link
-          to="/admin/bookings"
+          to={shopHref("/admin/bookings")}
           className="flex items-center gap-1.5 text-sm text-gold hover:text-gold/80 transition-colors"
         >
           All bookings <ArrowRight className="h-3.5 w-3.5" />

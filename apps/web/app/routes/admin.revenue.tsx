@@ -1,9 +1,12 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData, useNavigate } from "@remix-run/react";
 import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { TrendingUp, PoundSterling, BarChart2, Users } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { ukParts } from "~/lib/dateFormat";
+import { pageShopId } from "~/lib/pageShop";
+import { useShopHref } from "~/lib/useShopHref";
 import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
 
@@ -29,12 +32,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = user.shop_id;
+  const shopId = pageShopId(request, user);
 
+  // This month on the London clock; the picker counts back from it, so the
+  // server and the browser list the same months.
   const url = new URL(request.url);
-  const now = new Date();
-  const year  = Number(url.searchParams.get("year")  ?? now.getFullYear());
-  const month = Number(url.searchParams.get("month") ?? (now.getMonth() + 1));
+  const now = ukParts();
+  const current = { year: now.year, month: now.month };
+  const askedYear = Number(url.searchParams.get("year"));
+  const askedMonth = Number(url.searchParams.get("month"));
+  const year = Number.isInteger(askedYear) && askedYear >= 2000 && askedYear <= 2100 ? askedYear : current.year;
+  const month = Number.isInteger(askedMonth) && askedMonth >= 1 && askedMonth <= 12 ? askedMonth : current.month;
 
   let data: RevenueData | null = null;
   if (shopId) {
@@ -45,21 +53,24 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     } catch { /* empty */ }
   }
 
-  return json({ data, year, month, shopId });
+  return json({ data, year, month, shopId, current });
 }
 
 export default function AdminRevenue() {
-  const { data, year, month } = useLoaderData<typeof loader>();
-  const now = new Date();
+  const { data, year, month, current } = useLoaderData<typeof loader>();
+  const navigate = useNavigate();
+  const shopHref = useShopHref();
 
   const s = data?.summary ?? { booking_count: 0, gross_pence: 0, commission_pence: 0 };
   const net_pence = s.gross_pence - s.commission_pence;
 
-  // Build month selector options — current month back 12 months
+  // Month picker: this month (London) and the 11 before it.
   const monthOptions: { year: number; month: number; label: string }[] = [];
   for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    monthOptions.push({ year: d.getFullYear(), month: d.getMonth() + 1, label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}` });
+    const index = current.year * 12 + (current.month - 1) - i;
+    const y = Math.floor(index / 12);
+    const m = (index % 12) + 1;
+    monthOptions.push({ year: y, month: m, label: `${MONTHS[m - 1]} ${y}` });
   }
 
   // Chart: max gross for bar scale
@@ -80,7 +91,7 @@ export default function AdminRevenue() {
             defaultValue={`${year}-${pad(month)}`}
             onChange={e => {
               const [y, m] = e.target.value.split("-");
-              window.location.href = `/admin/revenue?year=${y}&month=${m}`;
+              navigate(shopHref(`/admin/revenue?year=${y}&month=${Number(m)}`));
             }}
             className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
           >
@@ -104,7 +115,7 @@ export default function AdminRevenue() {
       {/* Daily chart */}
       {daily.length > 0 && (
         <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
-          <h2 className="font-heading text-base font-semibold text-white mb-4">Daily revenue — {MONTHS[month - 1]}</h2>
+          <h2 className="font-heading text-base font-semibold text-white mb-4">Daily revenue in {MONTHS[month - 1]}</h2>
           <div className="flex items-end gap-1 h-32">
             {daily.map(d => {
               const pct = (d.gross_pence / maxGross) * 100;

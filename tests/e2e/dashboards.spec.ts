@@ -24,8 +24,13 @@ import { expect, test } from "./fixtures";
  * runner is, the two sides agree by luck). app/lib/dateFormat.ts is the fix.
  *
  * A fresh shop has empty lists, so this proves each screen renders cleanly,
- * not that populated tables do. Load only: nothing is clicked, so nothing is
- * generated, paid for or sent.
+ * not that populated tables do. Load only, with one exception: the
+ * developer pass saves the throwaway shop's schedule once, to prove a page
+ * action reaches the shop it is viewing. Nothing is generated, paid for or
+ * sent.
+ *
+ * The admin screens run twice: as the shop's admin, and as the developer
+ * managing that shop through ?shopId=.
  *
  * The screen list comes from apps/web/app/routes at run time: a new dashboard
  * route is swept automatically or fails "every dashboard route is covered".
@@ -255,6 +260,66 @@ test.describe.serial("dashboard sweep", () => {
     expect(me.role).toBe("staff");
     expect(me.shop_id).toBe(shopId);
     await sweep(page, dashboardModules().filter((m) => roleFor(m) === "staff" && !(m in EXCLUDED)), shopId);
+  });
+
+  test("admin screens, as the developer managing that shop", async ({ page }) => {
+    // A developer has no shop of their own and names one with ?shopId=.
+    // Pages that read the session's shop instead rendered empty for them
+    // (analytics "No data yet", settings "No shop is assigned").
+    test.setTimeout(240_000);
+    expect(shopId, "the admin test created the shop").toBeTruthy();
+    await signIn(page, "dev@pivotparlor.com", devPassword!);
+    expect((await session(page)).role).toBe("developer");
+    const q = `?shopId=${encodeURIComponent(shopId)}`;
+
+    for (const mod of dashboardModules().filter((m) => roleFor(m) === "admin" && !(m in EXCLUDED))) {
+      const url = `${pathFor(mod, { shopId })}${q}`;
+      await test.step(`${mod} (${url})`, async () => {
+        const expected = EXPECTED_PROBLEMS[mod]?.problems ?? [];
+        expect.soft(await screenProblems(page, url), `${mod} at ${url}`).toEqual(expected);
+        // The loader worked on this shop, not on "no shop".
+        const res = await page.request.get(`${url}&_data=${encodeURIComponent(`routes/${mod}`)}`);
+        expect.soft(res.status(), `${mod} loader status`).toBe(200);
+        const data = (await res.json().catch(() => ({}))) as { shopId?: unknown; data?: unknown };
+        expect.soft(data.shopId, `${mod} loader shopId`).toBe(shopId);
+        if (mod === "admin.analytics") expect.soft(data.data, "analytics loaded the shop's numbers").not.toBeNull();
+      });
+    }
+
+    await test.step("the banner names the shop, and a sidebar link stays on it", async () => {
+      await page.goto(`/admin/settings${q}`);
+      await expect(page.locator("body")).toContainText(`you are managing E2E Dashboards ${uniqueId} as its admin`);
+      await page.getByRole("navigation", { name: "Dashboard" }).getByRole("link", { name: "Bookings", exact: true }).first().click();
+      await page.waitForURL((u) => u.pathname === "/admin/bookings");
+      expect(new URL(page.url()).searchParams.get("shopId")).toBe(shopId);
+    });
+
+    await test.step("a page action reaches the shop (saving the schedule)", async () => {
+      // The one write in this sweep, on the throwaway e2e- shop: the staff
+      // member's default hours. A form post with no action keeps ?shopId=.
+      await page.goto(`/admin/schedule${q}`, { waitUntil: "networkidle" });
+      const button = page.getByRole("button", { name: "Save schedule" });
+      // Until the page has hydrated a press does nothing, so press until it posts.
+      let posted = "";
+      await expect(async () => {
+        const request = page.waitForRequest(
+          (r) => new URL(r.url()).pathname === "/admin/schedule" && r.method() === "POST",
+          { timeout: 5_000 },
+        );
+        await button.click();
+        posted = (await request).url();
+      }).toPass({ timeout: 30_000 });
+      expect(new URL(posted).searchParams.get("shopId"), "the post kept ?shopId=").toBe(shopId);
+      await expect(page.getByRole("status").filter({ hasText: /schedule saved|failed|unauthorized/i })).toHaveText(
+        "Schedule saved.",
+      );
+    });
+
+    await test.step("payments: the developer sees the status, the owner connects Stripe", async () => {
+      await page.goto(`/admin/payments${q}`);
+      await expect(page.getByText("Only the shop's owner can connect its Stripe account.")).toBeVisible();
+      await expect(page.getByRole("button", { name: /stripe/i })).toHaveCount(0);
+    });
   });
 
   test("account and dev screens, as the developer", async ({ page }) => {

@@ -21,6 +21,7 @@ import {
 import { buildRegeneratePayload, decidePollAction, regenJobStepStates } from "~/components/dev-shops/helpers";
 import { VisualManager, type VisualsData } from "~/components/VisualManager";
 import { SiteCandidateCard } from "~/components/SiteCandidateCard";
+import { withShopId } from "~/lib/pageShop";
 import type { Shop } from "~/components/dev-shops/types";
 import type { AIModel } from "@repo/types";
 import type { DevGenerationPrefs, DevShopOwnerDetails } from "./dev.shops.$shopId";
@@ -525,6 +526,10 @@ export default function DevShopDetailIndex() {
       <p className="text-sm text-white/60">
         <Link to="/dev/shops" className="text-gold hover:underline">
           Back to shops list
+        </Link>
+        {" · "}
+        <Link to={withShopId("/admin", shop.id)} className="text-gold hover:underline">
+          Manage as admin
         </Link>
         {" · "}
         <a

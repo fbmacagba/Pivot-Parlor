@@ -3,6 +3,7 @@ import { Menu } from "lucide-react";
 import { clsx } from "clsx";
 import type { UserRole } from "@repo/types";
 import { NAV_MAP, isNavActive, type NavItem } from "./Sidebar";
+import { useShopHref } from "~/lib/useShopHref";
 
 /** Admin destinations that earn a thumb-reach tab; the rest live behind More. */
 const ADMIN_TAB_HREFS = ["/admin", "/admin/bookings", "/admin/queue", "/admin/pos"];
@@ -59,6 +60,7 @@ export function MobileTabBar({
 }) {
   const { pathname } = useLocation();
   const { tabs, more } = mobileTabsFor(role);
+  const shopHref = useShopHref();
   if (tabs.length === 0) return null;
 
   return (
@@ -72,7 +74,7 @@ export function MobileTabBar({
           return (
             <li key={href} className="min-w-0 flex-1">
               <Link
-                to={href}
+                to={shopHref(href)}
                 aria-current={active ? "page" : undefined}
                 className={clsx(TAB_CLASS, active ? "text-gold" : "text-white/60 hover:text-white")}
               >

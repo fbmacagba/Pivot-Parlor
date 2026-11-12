@@ -2,7 +2,7 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatDay } from "~/lib/dateFormat";
@@ -25,22 +25,6 @@ interface WaitlistEntry {
 
 type ActionData = { ok: true } | { error: string };
 
-// ─── Shop ID resolution (matches admin.services.tsx pattern) ─────────────────
-
-function resolveShopId(
-  request: Request,
-  user: SessionPayload,
-  formShopId: string | null
-): string | null {
-  const url = new URL(request.url);
-  if (user.role === "developer") {
-    const fromForm = formShopId?.trim();
-    const fromQuery = url.searchParams.get("shopId")?.trim();
-    return fromForm || fromQuery || null;
-  }
-  return user.shop_id?.trim() || null;
-}
-
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -48,7 +32,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user, null);
+  const shopId = pageShopId(request, user, null);
 
   let entries: WaitlistEntry[] = [];
   let loadError = false;
@@ -81,7 +65,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const intent = String(form.get("intent") ?? "").trim();
   const entryId = String(form.get("entryId") ?? "").trim();
   const formShopId = String(form.get("shopId") ?? "").trim() || null;
-  const shopId = resolveShopId(request, user, formShopId);
+  const shopId = pageShopId(request, user, formShopId);
 
   if (!shopId) {
     return json<ActionData>(
