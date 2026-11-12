@@ -356,8 +356,10 @@ What a report carries: the kind, the route id, the error type, the message
 (emails, ids, tokens and long numbers masked, in the browser and again on the
 website and the API) and the top five stack lines, with our own script paths
 and every other location replaced by `<other>`. Never the page URL or its
-query, the page's content, cookies (the post sends none), the visitor or their
-browser. The visitor's IP goes to the API for the per-visitor limit only and
+query, the page's content, cookies, the visitor or their browser. (The post
+asks the browser to send no cookies; WebKit sent the session cookie anyway when
+measured on 2026-11-12. It goes only to our own site, which gets it on every
+request, and the website never reads it here.) The visitor's IP goes to the API for the per-visitor limit only and
 is never logged.
 
 Not reported at all:

@@ -4,8 +4,9 @@
  * it listens for uncaught errors and unhandled rejections, and the app hands
  * in hydration errors (entry.client.tsx) and render errors (ErrorScreen).
  *
- * Each page load reports a few distinct errors at most. Sending never throws
- * and never sends cookies.
+ * Each page load reports a few distinct errors at most. Sending never throws.
+ * It asks for no cookies; WebKit sent the session cookie anyway when measured
+ * (2026-11-12), and the website never reads it (clientErrorsEndpoint.ts).
  */
 import {
   CLIENT_ERRORS_PATH,
@@ -42,7 +43,7 @@ function post(payload: BrowserErrorPayload): void {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-    // Survives the visitor leaving the page; our own site, no cookies.
+    // Survives the visitor leaving the page; our own site, no cookies asked for.
     keepalive: true,
     credentials: "omit",
   }).catch(() => undefined);
