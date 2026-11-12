@@ -1,6 +1,6 @@
 /** The shop's calendar and clock (src/lib/shopTime.ts). Workers run in UTC. */
 import { describe, expect, it } from "vitest";
-import { peakHoursInShopTime, shopMonthStart, shopToday } from "../src/lib/shopTime";
+import { peakHoursInShopTime, scheduleDayOf, shopMonthStart, shopToday } from "../src/lib/shopTime";
 
 describe("shopToday", () => {
   it("starts the London day at midnight London time, an hour before UTC in summer", () => {
@@ -70,5 +70,19 @@ describe("peakHoursInShopTime", () => {
       { hour: 1, booking_count: 2 },
       { hour: 2, booking_count: 1 },
     ]);
+  });
+});
+
+describe("scheduleDayOf", () => {
+  it("numbers the week from Monday, as the schedule editor writes it", () => {
+    expect(scheduleDayOf("2026-07-06")).toBe(0); // Monday
+    expect(scheduleDayOf("2026-07-02")).toBe(3); // Thursday
+    expect(scheduleDayOf("2026-07-05")).toBe(6); // Sunday
+  });
+
+  it("answers -1, which no schedule row has, for anything but a calendar date", () => {
+    for (const bad of ["", "2026-7-2", "2026-02-30", "today", "2026-07-02T00:00:00Z"]) {
+      expect(scheduleDayOf(bad), bad).toBe(-1);
+    }
   });
 });
