@@ -5,11 +5,14 @@ import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
 import { hasUnsafePathSegment } from "../app/lib/pathSafety";
 import { withSecurityHeaders } from "../app/lib/securityHeaders";
+import { reportServerError, type WebErrorsBinding } from "../app/lib/serverErrors";
 
 interface Env {
   /** Service binding to the API worker (apps/web/wrangler.toml [[services]]). */
   API?: { fetch(request: Request): Promise<Response> };
   API_URL?: string;
+  /** The API's WebErrors entrypoint: server errors reach the alert email. */
+  WEB_ERRORS?: WebErrorsBinding;
 }
 
 // The route of the request each fetch belongs to. Requests run concurrently in
@@ -25,10 +28,11 @@ const handleRequest = createPagesFunctionHandler({
   build: build as unknown as ServerBuild,
   /**
    * Expose Cloudflare environment bindings to Remix loaders/actions as
-   * `context.env` so code like `context.env.API_URL` works.
+   * `context.env` so code like `context.env.API_URL` works, and waitUntil so
+   * an error report outlives the response (app/lib/serverErrors.ts).
    */
   getLoadContext(context) {
-    return { env: context.env };
+    return { env: context.env, waitUntil: (promise: Promise<unknown>) => context.waitUntil(promise) };
   },
 });
 
@@ -41,15 +45,28 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   if (hasUnsafePathSegment(new URL(context.request.url).pathname)) {
     return withSecurityHeaders(new Response("Not found", { status: 404 }));
   }
-  return withSecurityHeaders(
-    await apiRoute.run(
-      {
-        binding: context.env.API,
-        origin: originOf(context.env.API_URL),
-        clientIp: context.request.headers.get(CLIENT_IP_HEADER),
-      },
-      () => handleRequest(context)
-    ),
-    { apiOrigin: originOf(context.env.API_URL) }
-  );
+  // Route errors reach Remix's handleError (entry.server.tsx). This catch is
+  // for this file's own code; whatever fails inside Remix's Pages adapter
+  // itself comes back as its bare "Internal Error" 500, not as a throw.
+  try {
+    return withSecurityHeaders(
+      await apiRoute.run(
+        {
+          binding: context.env.API,
+          origin: originOf(context.env.API_URL),
+          clientIp: context.request.headers.get(CLIENT_IP_HEADER),
+        },
+        () => handleRequest(context)
+      ),
+      { apiOrigin: originOf(context.env.API_URL) }
+    );
+  } catch (error) {
+    reportServerError(error, {
+      request: context.request,
+      env: context.env,
+      waitUntil: (promise) => context.waitUntil(promise),
+      where: "middleware",
+    });
+    throw error;
+  }
 };

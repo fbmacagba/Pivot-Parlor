@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { STAGING_API_WORKER, toStagingWebToml } from "../../../../scripts/web-staging-toml.mjs";
 
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const read = (rel: string) => readFileSync(ROOT + rel, "utf8");
@@ -109,6 +110,51 @@ describe("production alerting configuration", () => {
       limit: "20",
       period: "60",
     });
+  });
+
+  it("the API rate-limits website error reports in production and staging", () => {
+    // apps/worker/src/web-errors.ts: without the binding one failing route
+    // could log without limit. 7101 and 7102 are the CSP limiter's.
+    const toml = read(API);
+    expect(rateLimits(toml, "")).toContainEqual({ name: "\"WEB_ERROR_LIMITER\"", namespace_id: "\"7103\"", limit: "30", period: "60" });
+    expect(rateLimits(toml, "env.staging.")).toContainEqual({
+      name: "\"WEB_ERROR_LIMITER\"",
+      namespace_id: "\"7104\"",
+      limit: "30",
+      period: "60",
+    });
+  });
+
+  it("the website hands its server errors to the API's WebErrors entrypoint", () => {
+    // app/lib/serverErrors.ts reports over this binding; Pages Functions
+    // have no Issues of their own. scripts/ci-set-web-staging-vars.mjs moves
+    // it to the staging API, whose Issues are off (the next test).
+    const web = read("apps/web/wrangler.toml");
+    const services = web.split(/^\[\[services\]\]\s*$/m).slice(1);
+    expect(services.some((block) =>
+      /^binding\s*=\s*"WEB_ERRORS"\s*$/m.test(block) &&
+      /^service\s*=\s*"pivot-parlor-api"\s*$/m.test(block) &&
+      /^entrypoint\s*=\s*"WebErrors"\s*$/m.test(block),
+    )).toBe(true);
+  });
+
+  it("the staging website deploy moves every binding off the production API", () => {
+    // A WEB_ERRORS binding left on production would email the owner about
+    // every staging E2E failure (scripts/ci-set-web-staging-vars.mjs).
+    const prod = read("apps/web/wrangler.toml");
+    const staging = toStagingWebToml(prod);
+    const services = (toml: string) => [...toml.matchAll(/^service[ \t]*=[ \t]*"([^"]+)"/gm)].map((m) => m[1]);
+    expect(services(prod)).toEqual(["pivot-parlor-api", "pivot-parlor-api"]);
+    expect(services(staging)).toEqual([STAGING_API_WORKER, STAGING_API_WORKER]);
+    expect(tomlValue(staging, "vars", "API_URL")).toBe("\"https://pivot-parlor-api-staging.bmorris0565.workers.dev\"");
+    expect(tomlValue(staging, "vars", "APP_DOMAIN")).toBe("\"localhost\"");
+    // Only those values change: no line is lost and a rerun changes nothing.
+    expect(staging.split("\n")).toHaveLength(prod.split("\n").length);
+    expect(toStagingWebToml(staging)).toBe(staging);
+    // A production name the rewrite cannot place fails the deploy.
+    const commented = prod.replace(/(binding = "WEB_ERRORS"\r?\nservice = "pivot-parlor-api")/, "$1 # production");
+    expect(commented).not.toBe(prod);
+    expect(() => toStagingWebToml(commented)).toThrow(/still names pivot-parlor-api/);
   });
 
   it("staging keeps Issues off, so E2E runs never email the owner", () => {

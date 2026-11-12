@@ -10,6 +10,7 @@ to do when one arrives. Set up 2026-11-11.
 | Workers Issues on `pivot-parlor-api` and `pivot-parlor-booking` (production only) | Uncaught exceptions, 5xx replies, failed cron and queue runs, and anything logged with `console.error` | `[observability.issues]` in each `wrangler.toml` |
 | Workers Issues on the AI workers `pivot-parlor-research`, `pivot-parlor-text`, `pivot-parlor-images`, `pivot-parlor-assembler` (the `builder` directory) and `pivot-parlor-chatbot` | A site generation job that fails, an AI model or image call that fails (even when the job falls back and finishes), failed queue runs, and shop chat errors | `[observability.issues]` in each `wrangler.toml` |
 | CSP violation reports, through Workers Issues on `pivot-parlor-api` | The site's Content-Security-Policy blocking something on a real visitor's page (a script, style, connection, frame, image, font or form), which usually means a feature broke for that visitor | `POST /csp-report` (`apps/worker/src/routes/csp-report.ts`); the policy asks for reports in `apps/web/app/lib/securityHeaders.ts` |
+| Website server errors, through Workers Issues on `pivot-parlor-api` | An unexpected error in the website's server code: loading a page or its data, a form post, or the server render. The visitor saw an error page or a failed action | `apps/web/app/lib/serverErrors.ts` reports over the `WEB_ERRORS` service binding to `apps/worker/src/web-errors.ts` |
 | Uptime monitor `pivot-parlor-uptime`, every 5 minutes | The public site answers, the API answers as itself, and a booking lookup reaches the booking worker and the database | `apps/workers/uptime` |
 | Pages deployment alert for `pivot-parlor-web` | A production Pages deployment that fails on Cloudflare's side | Cloudflare notification policy "Pivot Parlor: Pages production deploy failed" |
 
@@ -157,6 +158,19 @@ not necessarily to the owner, so they are not part of this alerting.
      - Reports caused by browser extensions, reports about other sites'
        pages, and reports from staging or preview pages are dropped before
        logging, so they never alert.
+   - A website server error on `pivot-parlor-api`
+     (`[web] <error type> in <where> <method> <route>`): the website's server
+     code failed. `where` says what was running: `page` (loading a page),
+     `data` (a page's data, fetched while browsing), `action` (a form post or
+     button), `render` (drawing the page) or `middleware` (the website's own
+     request handling). The route has its values replaced by names
+     (`/book/:shopSlug`). The occurrence gives the error's message
+     (`detail`), with emails, ids and tokens masked, and the top stack lines
+     (`frames`).
+     - Find the route file in `apps/web/app/routes/`, reproduce on staging,
+       fix and deploy the site.
+     - `AlertTestError` is the dashboard's test button (see Website server
+       errors): resolve it.
    - A security issue ("Potential vulnerability scan ..."): open its
      occurrence and read the request and the answer.
      - The answer was a 2xx, or the occurrence shows an outbound fetch: treat
@@ -242,6 +256,55 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST https://api.pivotparlor.com/csp
 It answers 204, and `pivot-parlor-api` opens (or, after an hour of quiet,
 reopens) the issue `[csp] blocked a script ...`. Mark it Resolved afterwards.
 
+## Website server errors
+
+Pages Functions have no Workers Issues, so the website hands each server error
+to the API. Remix's `handleError` (`apps/web/app/entry.server.tsx`) catches
+errors in loaders, actions and the render. `functions/_middleware.ts` catches
+errors in its own code. Both call `reportServerError`
+(`apps/web/app/lib/serverErrors.ts`), which keeps the local log line and sends
+one report over the `WEB_ERRORS` service binding to the API's `WebErrors`
+entrypoint (`apps/worker/src/web-errors.ts`). That entrypoint is reachable
+only over the binding, not from the internet. Its `console.error` is what
+Issues turns into the email, through the API's existing automations.
+
+What a report carries:
+
+- what was running (`where`) and the method;
+- the route with every value replaced by its name;
+- the error type and its message, with emails, ids, tokens and long numbers
+  masked (again on the API side);
+- the top five stack lines, without file paths.
+
+Never the query string, headers, cookies, form contents or who the visitor
+was. Not reported at all:
+
+- a visitor who left before the page finished;
+- a deliberate response thrown by a route (a redirect, 404 or 403);
+- Remix's own not-found and method-not-allowed answers.
+
+The API logs at most 30 reports a minute for one route and kind (per
+Cloudflare location, the `WEB_ERROR_LIMITER` binding) and drops the rest.
+
+Staging's website binds to the staging API, where Issues is off:
+`scripts/ci-set-web-staging-vars.mjs` moves every API binding (`API` and
+`WEB_ERRORS`) to `pivot-parlor-api-staging`, and
+`apps/workers/uptime/test/alerting-config.test.ts` fails if one stays on
+production. So E2E failures on staging never email.
+
+**Firing control** (to re-prove the path): sign in as a developer, open the
+developer dashboard's Overview, and press **Send a test alert** under Alert
+check. The website raises one `AlertTestError` from
+`POST /api/dev/alert-test` and says "Test error raised". `pivot-parlor-api`
+opens (or, after an hour of quiet, reopens) the issue
+`[web] AlertTestError in action POST /api/dev/alert-test ...`. The issue title
+may mask parts of the route; the occurrence keeps it in full. Nothing else
+changes. Mark the issue Resolved afterwards.
+
+On staging, `tests/e2e/alert-test.spec.ts` presses the button on every FULL
+E2E run. Staging's Issues is off, so it emails nobody. Its report shows in the
+staging API's Workers Logs as the same `[web] AlertTestError ...` event.
+
 ## Deploying the AI workers
 
 Each AI worker is also deployed by hand, from its own directory, with the
@@ -283,8 +346,12 @@ under one of the AI workers.
 
 ## Not covered
 
-- Runtime errors inside the Pages app (Remix SSR) are seen only through the
-  uptime checks: Workers Issues does not cover Pages Functions.
+- Errors in visitors' browsers (the site's JavaScript after the page has
+  loaded) are not reported. Only the website's server code is (see Website
+  server errors).
+- A failure inside Remix's Pages adapter itself, outside any route, comes back
+  as a bare `Internal Error` 500 with no log line. Only the uptime checks see
+  it.
 - `pivot-parlor-audit` has no Issues on purpose: nothing sends to its queue
   (`site-audit-queue` had no producers, checked 2026-11-12), so there is
   nothing to alert on. Retiring it is an open owner decision. If it is ever

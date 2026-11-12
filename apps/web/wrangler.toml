@@ -20,6 +20,16 @@ APP_DOMAIN = "pivotparlor.com"
 binding = "API"
 service = "pivot-parlor-api"
 
+# Server errors in loaders, actions and the render reach the owner's alert
+# email through the API's WebErrors entrypoint (app/lib/serverErrors.ts and
+# apps/worker/src/web-errors.ts): Pages Functions have no Workers Issues.
+# It is not reachable from the internet. scripts/ci-set-web-staging-vars.mjs
+# points it at the staging worker, whose Issues are off.
+[[services]]
+binding = "WEB_ERRORS"
+service = "pivot-parlor-api"
+entrypoint = "WebErrors"
+
 # KV binding — shared with worker for rate limiting the marketing chatbot
 [[kv_namespaces]]
 binding = "KV"

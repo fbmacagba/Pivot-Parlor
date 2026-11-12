@@ -6,6 +6,7 @@ import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
+import { AlertTestButton } from "~/components/dashboards/AlertTestButton";
 
 interface DevStats {
   total_shops: number;
@@ -138,6 +139,8 @@ export default function DevOverview() {
           </table>
         </div>
       </section>
+
+      <AlertTestButton />
     </div>
   );
 }
