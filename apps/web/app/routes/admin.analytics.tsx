@@ -4,6 +4,7 @@ import { json } from "@remix-run/cloudflare";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
+import { formatCount, ukParts } from "~/lib/dateFormat";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,11 +146,12 @@ export default function AdminAnalytics() {
   const { totals, monthly, peak_hours, peak_days, status_breakdown, top_services, top_staff } = data;
   const net_pence = totals.total_revenue_pence - totals.total_commission_pence;
 
-  // Fill all 12 months for trend chart (include zeros)
-  const now = new Date();
+  // Fill all 12 months for trend chart (include zeros), ending with this
+  // month in London so the server and the browser draw the same months.
+  const { year: nowYear, month: nowMonth } = ukParts();
   const allMonths = Array.from({ length: 12 }, (_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const index = nowYear * 12 + (nowMonth - 1) - 11 + i;
+    const key = `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, "0")}`;
     const found = monthly.find(m => m.month === key);
     return { month: key, booking_count: found?.booking_count ?? 0, gross_pence: found?.gross_pence ?? 0 };
   });
@@ -181,10 +183,10 @@ export default function AdminAnalytics() {
 
       {/* All-time totals */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total bookings" value={totals.total_bookings.toLocaleString()} sub="all time" />
+        <StatCard label="Total bookings" value={formatCount(totals.total_bookings)} sub="all time" />
         <StatCard label="Total revenue" value={formatPence(totals.total_revenue_pence)} sub="completed bookings" />
         <StatCard label="Net earnings" value={formatPence(net_pence)} sub={`after ${formatPence(totals.total_commission_pence)} commission`} />
-        <StatCard label="Unique customers" value={totals.unique_customers.toLocaleString()} sub="all time" />
+        <StatCard label="Unique customers" value={formatCount(totals.unique_customers)} sub="all time" />
       </div>
 
       {/* Monthly trend */}

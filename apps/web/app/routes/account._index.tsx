@@ -2,6 +2,7 @@ import { Link, useOutletContext } from "@remix-run/react";
 import { useEffect, useState } from "react";
 import { Calendar, Clock, ArrowRight, RefreshCw, MailWarning } from "lucide-react";
 import { formatPence } from "@repo/utils";
+import { formatDate, formatTime } from "~/lib/dateFormat";
 
 type Me = { id: string; name: string | null; email: string; phone?: string | null; role: string };
 
@@ -39,8 +40,7 @@ function canCancelOnline(b: Booking): boolean {
 function formatBookingWhen(b: Booking) {
   const t = bookingStartMs(b);
   if (t == null) return b.booking_date;
-  const d = new Date(t);
-  return `${d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })} · ${d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  return `${formatDate(t, { weekday: "short", day: "numeric", month: "short" })} · ${formatTime(t, { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 const STATUS_PILL: Record<string, string> = {

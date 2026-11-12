@@ -17,6 +17,7 @@ import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
 import { SetupGate } from "~/components/admin/SetupGate";
 import type { SetupStatus } from "~/components/admin/SetupGate";
 import { SiteCandidateCard } from "~/components/SiteCandidateCard";
+import { formatDate, formatTime as formatUkTime } from "~/lib/dateFormat";
 
 interface AdminStats {
   date: string;
@@ -59,15 +60,9 @@ const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> =
     no_show: { bg: "bg-white/5", text: "text-white/60", dot: "bg-white/30" },
   };
 
+/** "09:05" on the London clock (app/lib/dateFormat.ts). */
 function formatTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  return formatUkTime(iso, { hour: "2-digit", minute: "2-digit" }) || iso;
 }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -177,7 +172,7 @@ export default function AdminOverview() {
             Overview
           </h1>
           <p className="mt-0.5 text-sm text-white/60">
-            {new Date().toLocaleDateString("en-GB", {
+            {formatDate(new Date(), {
               weekday: "long",
               day: "numeric",
               month: "long",

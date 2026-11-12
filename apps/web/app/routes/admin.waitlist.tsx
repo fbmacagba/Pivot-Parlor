@@ -5,6 +5,7 @@ import { json } from "@remix-run/cloudflare";
 import type { SessionPayload } from "~/lib/auth";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { formatDay } from "~/lib/dateFormat";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -134,9 +135,7 @@ function timeAgo(iso: string): string {
 
 function formatDate(iso: string | null): string {
   if (!iso) return "Any date";
-  const d = new Date(`${iso}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  return formatDay(iso, { weekday: "short", day: "numeric", month: "short" });
 }
 
 function EntryRow({ entry, shopId }: { entry: WaitlistEntry; shopId: string | null }) {

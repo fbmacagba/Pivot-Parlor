@@ -7,6 +7,7 @@ import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { BookingsCalendar } from "~/components/admin/BookingsCalendar";
 import { useModalA11y } from "~/lib/useModalA11y";
+import { formatDate as formatUkDate, formatDay, ukParts } from "~/lib/dateFormat";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
 
@@ -113,14 +114,15 @@ const STATUS_META: Record<BookingStatus, { label: string; bg: string; text: stri
   no_show:   { label: "No Show",   bg: "bg-white/5",        text: "text-white/60",    dot: "bg-white/30"   },
 };
 
+/** "9:05am" on the London clock (app/lib/dateFormat.ts). */
 function formatTime(iso: string) {
-  const d = new Date(iso);
-  const h = d.getHours(); const m = d.getMinutes();
+  const { hour: h, minute: m } = ukParts(iso);
   return `${h % 12 || 12}:${String(m).padStart(2, "0")}${h >= 12 ? "pm" : "am"}`;
 }
 
+/** A booking's calendar day, "12 Nov 2026". */
 function formatDate(d: string) {
-  return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return formatDay(d, { day: "numeric", month: "short", year: "numeric" });
 }
 
 function StatusBadge({ status }: { status: BookingStatus }) {
@@ -364,7 +366,7 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
               <p className="text-sm text-white/60 rounded-xl border border-white/10 bg-white/5 p-4">{booking.notes}</p>
             </div>
           )}
-          <p className="text-xs text-white/60">Created {new Date(booking.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</p>
+          <p className="text-xs text-white/60">Created {formatUkDate(booking.created_at, { day: "numeric", month: "short", year: "numeric" })}</p>
         </div>
       </div>
       {confirmCancel && (

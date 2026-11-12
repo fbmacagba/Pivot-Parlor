@@ -7,6 +7,7 @@ import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { StatCard } from "~/components/dashboards/StatCard";
 import { AlertTestButton } from "~/components/dashboards/AlertTestButton";
+import { formatDateTime } from "~/lib/dateFormat";
 
 interface DevStats {
   total_shops: number;
@@ -130,7 +131,7 @@ export default function DevOverview() {
                     <td className="px-4 py-3 text-white/60">{e.email}</td>
                     <td className="px-4 py-3 text-white/50 text-xs">{e.phone || "—"}</td>
                     <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
-                      {new Date(e.created_at).toLocaleString()}
+                      {formatDateTime(e.created_at)}
                     </td>
                   </tr>
                 ))

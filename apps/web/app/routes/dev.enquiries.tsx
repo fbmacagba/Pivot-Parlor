@@ -8,6 +8,7 @@ import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { formatDateTime } from "~/lib/dateFormat";
 import {
   Dialog,
   DialogContent,
@@ -233,7 +234,7 @@ export default function DevEnquiries() {
                       ) : "—"}
                     </td>
                     <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
-                      {new Date(e.created_at).toLocaleString()}
+                      {formatDateTime(e.created_at)}
                     </td>
                     {/* Always render Actions cell — onboarded_at only toggles button vs disabled state */}
                     <td className="px-4 py-3 whitespace-nowrap align-middle">
@@ -400,7 +401,7 @@ export default function DevEnquiries() {
                 )}
                 <div>
                   <p className="text-xs text-white/60 mb-0.5">Received</p>
-                  <p className="text-white/60">{new Date(messageEnquiry.created_at).toLocaleString()}</p>
+                  <p className="text-white/60">{formatDateTime(messageEnquiry.created_at)}</p>
                 </div>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap leading-relaxed">

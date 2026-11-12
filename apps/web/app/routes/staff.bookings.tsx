@@ -7,6 +7,7 @@ import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { formatDay, formatTime as formatUkTime } from "~/lib/dateFormat";
 
 interface Booking {
   id: string;
@@ -40,13 +41,13 @@ const STATUS_BADGE: Record<string, "warning"|"success"|"error"|"gold"|"outline"|
   no_show:   "default",
 };
 
-function formatDate(iso: string) {
-  try { return new Date(iso).toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" }); }
-  catch { return iso; }
+/** A calendar day ("2026-11-12": booking_date, from_date, to_date) as "12 Nov 2026". */
+function formatDate(day: string) {
+  return formatDay(day, { day: "numeric", month: "short", year: "numeric" });
 }
+/** "09:05" on the London clock (app/lib/dateFormat.ts). */
 function formatTime(iso: string) {
-  try { return new Date(iso).toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" }); }
-  catch { return iso; }
+  return formatUkTime(iso, { hour: "2-digit", minute: "2-digit" }) || iso;
 }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {

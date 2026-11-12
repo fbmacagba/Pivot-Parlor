@@ -77,14 +77,6 @@ export function parsePoundsToPence(input: string): number | null {
   return Number(whole) * 100 + Number((frac + "00").slice(0, 2));
 }
 
-/** Format a date-time string to a readable locale string */
-export function formatDateTime(iso: string, locale = "en-US"): string {
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(iso));
-}
-
 /** Format minutes into "Xhr Ymin" display */
 export function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);

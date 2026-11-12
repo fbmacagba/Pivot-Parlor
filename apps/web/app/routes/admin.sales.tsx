@@ -16,6 +16,7 @@ import { formatPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { formatDateTime, formatTime } from "~/lib/dateFormat";
 
 interface SaleRow {
   id: string;
@@ -201,7 +202,7 @@ export default function AdminSales() {
                 <p className="truncate text-sm text-white">
                   {sale.customer_name || (sale.booking_id ? "Appointment checkout" : "Counter sale")}
                   <span className="ml-2 text-xs text-white/50">
-                    {new Date(sale.created_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                    {formatTime(sale.created_at, { hour: "2-digit", minute: "2-digit" })}
                     {" · "}{sale.tender_type.replace("_", " ")}
                   </span>
                 </p>
@@ -264,7 +265,7 @@ function RefundPanel({
         <ul className="mb-4 space-y-1 text-xs text-white/60">
           {detail.returns.map((r) => (
             <li key={r.id}>
-              {new Date(r.created_at).toLocaleString("en-GB")} — {formatPence(r.refund_pence)} ({r.status})
+              {formatDateTime(r.created_at)} · {formatPence(r.refund_pence)} ({r.status})
               {r.reason && ` · ${r.reason}`}
             </li>
           ))}

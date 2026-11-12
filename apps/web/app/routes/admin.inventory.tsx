@@ -17,6 +17,7 @@ import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/components/ui/Dialog";
+import { formatDate, formatDateTime } from "~/lib/dateFormat";
 
 // ─── Types (worker rows are snake_case) ───────────────────────────────────────
 
@@ -504,7 +505,7 @@ function PurchaseOrdersSection({
               <div className="min-w-[9rem] flex-1">
                 <p className="truncate text-sm font-medium text-white">
                   {po.supplier_name ?? "No supplier"}
-                  <span className="ml-2 text-xs text-white/50">{new Date(po.created_at).toLocaleDateString("en-GB")}</span>
+                  <span className="ml-2 text-xs text-white/50">{formatDate(po.created_at)}</span>
                 </p>
                 <p className="mt-0.5 text-xs text-white/60">
                   {po.total_received_qty}/{po.total_qty} received · {formatPence(po.total_pence)}
@@ -652,7 +653,7 @@ function StockTakeSection({
           <p className="mb-3 text-sm font-semibold text-gold">
             Stock take in progress
             <span className="ml-2 text-xs font-normal text-white/60">
-              started {new Date(openStockTake.created_at).toLocaleString("en-GB")} · {openStockTake.items.length} counted
+              started {formatDateTime(openStockTake.created_at)} · {openStockTake.items.length} counted
             </span>
           </p>
 
@@ -722,7 +723,7 @@ function StockTakeSection({
           {stockTakes.filter((s) => s.status !== "open").slice(0, 8).map((st) => (
             <div key={st.id} className="flex items-center gap-4 rounded-xl border border-white/10 bg-dark-100 px-4 py-3 text-sm">
               <span className="flex-1 text-white/70">
-                {new Date(st.created_at).toLocaleDateString("en-GB")}
+                {formatDate(st.created_at)}
                 <span className="ml-2 text-xs text-white/50">{st.item_count} items counted</span>
               </span>
               {st.status === "completed" && (
