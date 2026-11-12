@@ -220,6 +220,7 @@ publicRoutes.post(
       resolvedStaffId,
       startISO,
       endISO,
+      shop.timezone || "Europe/London",
     );
     if (conflict) {
       return c.json(
