@@ -76,7 +76,10 @@ export class WebErrors extends WorkerEntrypoint<Bindings> {
       if (!success) return { logged: false };
     }
 
-    console.error(`[web] ${r.name} in ${r.where} ${r.method} ${r.route}`, { message: r.message, frames: r.frames });
+    // The details must not have a `message` key: Workers Logs would take the
+    // object's `message` as the event and drop this title (seen on staging
+    // 2026-11-12), and Issues would title the email with the bare error text.
+    console.error(`[web] ${r.name} in ${r.where} ${r.method} ${r.route}`, { detail: r.message, frames: r.frames });
     return { logged: true };
   }
 }

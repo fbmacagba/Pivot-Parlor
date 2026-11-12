@@ -46,11 +46,22 @@ describe("WebErrors.report", () => {
       [
         `[web] TypeError in page GET ${input.route}`,
         {
-          message: "Cannot read properties of undefined (reading 'name')",
+          detail: "Cannot read properties of undefined (reading 'name')",
           frames: "at loader (index.js:1200:15) | at callRouteLoader (index.js:5300:2)",
         },
       ],
     ]);
+  });
+
+  it("keeps its title: the details carry no `message` key", async () => {
+    // Workers Logs takes an object's `message` as the event and drops the
+    // string before it: on staging 2026-11-12 the "[web] ..." title vanished
+    // and only the error text was left, so Issues would have titled the email
+    // with it. The CSP reporter's details have no such key and keep theirs.
+    await reporter().report(sample());
+    const [[title, details]] = webLines();
+    expect(String(title).startsWith("[web] TypeError in page GET /")).toBe(true);
+    expect(Object.keys(details as object)).not.toContain("message");
   });
 
   it("masks emails, tokens, ids and long numbers again, in case the website missed one", async () => {
@@ -61,7 +72,7 @@ describe("WebErrors.report", () => {
       }),
     );
     const [[, details]] = webLines();
-    const message = (details as { message: string }).message;
+    const message = (details as { detail: string }).detail;
     expect(message).not.toMatch(/jane|eyJ|3f2b9c1e|07700900123/);
     expect(message).toContain("<email>");
     expect(message).toContain("<token>");
@@ -78,15 +89,15 @@ describe("WebErrors.report", () => {
       message: 42,
       frames: "not a list",
     });
-    expect(webLines()).toEqual([["[web] Error in unknown UNKNOWN unknown", { message: "none", frames: "none" }]]);
+    expect(webLines()).toEqual([["[web] Error in unknown UNKNOWN unknown", { detail: "none", frames: "none" }]]);
   });
 
   it("caps the message and the stack lines", async () => {
     const long = "x ".repeat(400);
     await reporter().report(sample({ message: long, frames: Array.from({ length: 9 }, (_, i) => `at f${i} (${"y".repeat(300)})`) }));
     const [[, details]] = webLines();
-    const d = details as { message: string; frames: string };
-    expect(d.message.length).toBeLessThanOrEqual(300);
+    const d = details as { detail: string; frames: string };
+    expect(d.detail.length).toBeLessThanOrEqual(300);
     expect(d.frames.split(" | ")).toHaveLength(5);
     for (const f of d.frames.split(" | ")) expect(f.length).toBeLessThanOrEqual(160);
   });

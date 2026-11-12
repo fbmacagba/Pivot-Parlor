@@ -164,8 +164,9 @@ not necessarily to the owner, so they are not part of this alerting.
      `data` (a page's data, fetched while browsing), `action` (a form post or
      button), `render` (drawing the page) or `middleware` (the website's own
      request handling). The route has its values replaced by names
-     (`/book/:shopSlug`). The occurrence gives the message, with emails, ids
-     and tokens masked, and the top stack lines (`frames`).
+     (`/book/:shopSlug`). The occurrence gives the error's message
+     (`detail`), with emails, ids and tokens masked, and the top stack lines
+     (`frames`).
      - Find the route file in `apps/web/app/routes/`, reproduce on staging,
        fix and deploy the site.
      - `AlertTestError` is the dashboard's test button (see Website server
