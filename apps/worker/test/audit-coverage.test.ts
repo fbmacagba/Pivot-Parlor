@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAuditAction } from "@repo/audit";
-import { app, stripeWebhookApp } from "../src/index";
+import { app, cspReportApp, stripeWebhookApp } from "../src/index";
 import { CRON_AUDIT, PENDING_CEILING, QUEUE_AUDIT, ROUTE_AUDIT, type AuditDeclaration } from "../src/audit/registry";
 import wranglerToml from "../wrangler.toml?raw";
 
@@ -19,7 +19,8 @@ function isWildcardMiddleware(method: string, path: string): boolean {
 }
 
 function mutatingRoutes(): string[] {
-  const all = [...app.routes, ...stripeWebhookApp.routes];
+  // Every app the worker's fetch() dispatches to (src/index.ts).
+  const all = [...app.routes, ...stripeWebhookApp.routes, ...cspReportApp.routes];
   return [
     ...new Set(
       all

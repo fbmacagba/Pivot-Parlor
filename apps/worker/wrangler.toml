@@ -66,6 +66,17 @@ queue = "site-research-queue"
 binding = "BOOKING"
 service = "pivot-parlor-booking"
 
+# Per-IP limit on CSP violation reports (src/routes/csp-report.ts). Counted in
+# memory per Cloudflare location, no KV writes. namespace_id is account-wide:
+# 4201 and 4202 belong to another project's worker.
+[[ratelimits]]
+name = "CSP_REPORT_LIMITER"
+namespace_id = "7101"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
+
 # Cron triggers:
 # * * * * * — audit sealer (seal new entries into the chain + archive)
 # 03:00 UTC — LEG-6 retention sweep (WS-8, bounded + idempotent)
@@ -142,6 +153,17 @@ queue = "site-research-queue-staging"
 [[env.staging.services]]
 binding = "BOOKING"
 service = "pivot-parlor-booking-staging"
+
+# Per-IP limit on CSP violation reports (src/routes/csp-report.ts). Counted in
+# memory per Cloudflare location, no KV writes. namespace_id is account-wide:
+# 4201 and 4202 belong to another project's worker.
+[[env.staging.ratelimits]]
+name = "CSP_REPORT_LIMITER"
+namespace_id = "7102"
+
+  [env.staging.ratelimits.simple]
+  limit = 20
+  period = 60
 
 [env.staging.triggers]
 crons = ["* * * * *", "0 3 * * *", "0 8 * * *", "0 20 * * *"]

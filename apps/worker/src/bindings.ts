@@ -1,4 +1,4 @@
-import type { D1Database, KVNamespace, R2Bucket, Queue, Fetcher } from "@cloudflare/workers-types";
+import type { D1Database, KVNamespace, R2Bucket, Queue, Fetcher, RateLimit } from "@cloudflare/workers-types";
 
 export type Bindings = {
   DB: D1Database;
@@ -39,4 +39,8 @@ export type Bindings = {
    *  "alert email not configured" problem on the nightly audit.verify entry
    *  instead of silently sending nothing. */
   AUDIT_OPERATOR_EMAIL?: string;
+  /** Per-IP limit on CSP violation reports (routes/csp-report.ts; [[ratelimits]]
+   *  in wrangler.toml). Unset means no limit, so the alerting guard test checks
+   *  that production and staging declare it. */
+  CSP_REPORT_LIMITER?: RateLimit;
 };

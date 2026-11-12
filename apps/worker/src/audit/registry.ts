@@ -90,6 +90,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "PUT /api/shops/:shopId/suppliers/:supplierId": "inventory.supplier.update",
   "PUT /api/staff/me/bookings/:bookingId/status": "booking.status",
 
+  // Browsers' CSP violation reports: logged for alerting, nothing stored or changed (routes/csp-report.ts).
+  "POST /csp-report": { exempt: "browser CSP violation report: logged for alerting, nothing is stored or changed" },
+
   // Plan 3: forwarded to the booking worker, which records each change itself, so the hop is exempt.
   "POST /api/bookings": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
   "POST /api/bookings/:bookingId/abandon": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },

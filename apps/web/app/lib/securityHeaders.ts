@@ -40,10 +40,24 @@ const CONNECT_SRC = [
   "https://challenges.cloudflare.com",
 ];
 
-/** The site's policy. `extraConnect` adds origins (a staging API) to connect-src. */
-export function contentSecurityPolicy(extraConnect: readonly string[] = []): string {
+/**
+ * Where browsers send violation reports: the API logs each one so Workers
+ * Issues emails the owner (apps/worker/src/routes/csp-report.ts, same path).
+ */
+export const CSP_REPORT_PATH = "/csp-report";
+/** The Reporting-Endpoints name the policy's report-to refers to. */
+const CSP_REPORT_GROUP = "csp-endpoint";
+
+/**
+ * The site's policy. `extraConnect` adds origins (a staging API) to
+ * connect-src. `reportUri` adds report-uri and report-to (the matching
+ * Reporting-Endpoints header is set by withSecurityHeaders); without it the
+ * policy asks for no reports, which is the static copy in public/_headers.
+ */
+export function contentSecurityPolicy(extraConnect: readonly string[] = [], opts: { reportUri?: string } = {}): string {
   const connect = [...CONNECT_SRC];
   for (const origin of extraConnect) if (origin && !connect.includes(origin)) connect.push(origin);
+  const reporting = opts.reportUri ? [`report-uri ${opts.reportUri}`, `report-to ${CSP_REPORT_GROUP}`] : [];
   return [
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' https://js.stripe.com https://challenges.cloudflare.com",
@@ -61,6 +75,9 @@ export function contentSecurityPolicy(extraConnect: readonly string[] = []): str
     // payments setup to a Connect account link.
     "form-action 'self' https://checkout.stripe.com https://connect.stripe.com",
     "frame-ancestors 'none'",
+    // report-to for current browsers, report-uri for older ones (a browser
+    // that understands report-to ignores report-uri).
+    ...reporting,
   ].join("; ");
 }
 
@@ -71,6 +88,10 @@ export function contentSecurityPolicy(extraConnect: readonly string[] = []): str
  * stream and status carry over. A header the route already set wins, and a
  * route that sets its own policy, enforced (dev.activity.export) or
  * report-only, gets no second one.
+ *
+ * With `apiOrigin` (this deployment's API_URL) the policy also sends its
+ * violation reports to that API. Each deployment reports to its own API:
+ * staging pages to the staging API, whose Workers Issues is off.
  */
 export function withSecurityHeaders(res: Response, opts: { apiOrigin?: string } = {}): Response {
   const out = new Response(res.body, res);
@@ -78,7 +99,11 @@ export function withSecurityHeaders(res: Response, opts: { apiOrigin?: string } 
     if (!out.headers.has(name)) out.headers.set(name, value);
   }
   if (!out.headers.has("Content-Security-Policy") && !out.headers.has("Content-Security-Policy-Report-Only")) {
-    out.headers.set(CSP_HEADER, contentSecurityPolicy(opts.apiOrigin ? [opts.apiOrigin] : []));
+    const reportUri = opts.apiOrigin ? `${opts.apiOrigin}${CSP_REPORT_PATH}` : undefined;
+    out.headers.set(CSP_HEADER, contentSecurityPolicy(opts.apiOrigin ? [opts.apiOrigin] : [], { reportUri }));
+    if (reportUri && !out.headers.has("Reporting-Endpoints")) {
+      out.headers.set("Reporting-Endpoints", `${CSP_REPORT_GROUP}="${reportUri}"`);
+    }
   }
   return out;
 }

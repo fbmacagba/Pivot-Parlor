@@ -48,6 +48,7 @@ import { auditGapGuard } from "./audit/gap-guard.js";
 import { runSealer } from "./audit/sealer.js";
 import { runAuditNightly } from "./audit/nightly.js";
 import auditRouter from "./routes/audit.js";
+import { cspReportApp, isCspReportRequest } from "./routes/csp-report.js";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -269,11 +270,15 @@ function isStripeWebhookPost(request: Request, url: URL): boolean {
 }
 
 // Exported for the audit coverage test (test/audit-coverage.test.ts).
-export { app, stripeWebhookApp };
+export { app, stripeWebhookApp, cspReportApp };
 
 export default {
   fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
     const url = new URL(request.url);
+    // CSP violation reports: public CORS, no audit guard (routes/csp-report.ts).
+    if (isCspReportRequest(request, url)) {
+      return cspReportApp.fetch(request, env, ctx);
+    }
     if (isStripeWebhookPost(request, url)) {
       return stripeWebhookApp.fetch(request, env, ctx);
     }
