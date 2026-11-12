@@ -6,6 +6,13 @@ compatibility_date = "2025-06-01"
 enabled = true
 head_sampling_rate = 1
 
+# Workers Issues: groups crashes, failed queue runs and logged errors, and
+# the account's Real-Time Issue alert emails the owner. Needs Wrangler
+# 4.134.0+; a deploy without this key turns Issues off. Runbook:
+# docs/runbooks/production-alerting.md
+[observability.issues]
+enabled = true
+
 [[queues.consumers]]
 queue = "site-images-queue"
 max_batch_size = 1

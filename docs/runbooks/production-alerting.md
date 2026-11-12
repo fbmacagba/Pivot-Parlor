@@ -8,6 +8,7 @@ to do when one arrives. Set up 2026-11-11.
 | Signal | Covers | Source |
 | --- | --- | --- |
 | Workers Issues on `pivot-parlor-api` and `pivot-parlor-booking` (production only) | Uncaught exceptions, 5xx replies, failed cron and queue runs, and anything logged with `console.error` | `[observability.issues]` in each `wrangler.toml` |
+| Workers Issues on the AI workers `pivot-parlor-research`, `pivot-parlor-text`, `pivot-parlor-images`, `pivot-parlor-assembler` (the `builder` directory) and `pivot-parlor-chatbot` | A site generation job that fails, an AI model or image call that fails (even when the job falls back and finishes), failed queue runs, and shop chat errors | `[observability.issues]` in each `wrangler.toml` |
 | Uptime monitor `pivot-parlor-uptime`, every 5 minutes | The public site answers, the API answers as itself, and a booking lookup reaches the booking worker and the database | `apps/workers/uptime` |
 | Pages deployment alert for `pivot-parlor-web` | A production Pages deployment that fails on Cloudflare's side | Cloudflare notification policy "Pivot Parlor: Pages production deploy failed" |
 
@@ -33,8 +34,9 @@ Parlor has:
 
 - the notification policy **"Pivot Parlor: Worker issue"** (type Real-Time
   Issue), which emails the owner's address;
-- two automations for each of `pivot-parlor-api`, `pivot-parlor-booking` and
-  `pivot-parlor-uptime`, both sending to that policy:
+- two automations for each of `pivot-parlor-api`, `pivot-parlor-booking`,
+  `pivot-parlor-uptime` and the five AI workers (16 in all), both sending to
+  that policy:
   - `Pivot Parlor <worker>: new issue` fires once, on an issue's first
     occurrence;
   - `Pivot Parlor <worker>: returning issue` fires when an issue occurs
@@ -120,6 +122,20 @@ not necessarily to the owner, so they are not part of this alerting.
    - `booking-slots` failing with `api-auth` passing: the booking worker or the
      BOOKING binding (`pivot-parlor-booking` Issues), or the demo shop's data.
    - Everything failing at once: also check https://www.cloudflarestatus.com.
+   - An AI worker (research, text, images, assembler): the message starts
+     with the job id in brackets.
+     - `Job failed`, `could not produce a valid spec` or `outer failure`:
+       that shop's site generation failed. Read the error, then regenerate
+       the site from the developer dashboard once the cause is fixed.
+     - `model call failed`, `HERO FAILED`, or an image call's
+       `network error`, `HTTP <status>`, `invalid JSON` or
+       `no image in response`: the AI provider refused or failed. The job
+       carries on (text falls back to another model, then to the research
+       copy; images leaves that picture out, and the site keeps the one it
+       had), so the site may be thinner than it should be. Check the
+       provider's status and the model chosen on AI Deploy.
+   - The chatbot (`[chatbot] public /chat error`): a shop's chat answered
+     with an error. Read the occurrence for the shop and the cause.
    - A security issue ("Potential vulnerability scan ..."): open its
      occurrence and read the request and the answer.
      - The answer was a 2xx, or the occurrence shows an outbound fetch: treat
@@ -178,6 +194,20 @@ To change the demo shop, edit `DEMO_SHOP_SLUG` in
 one service. The pre-launch purge (`docs/PURGE-daf88508.sql`) keeps the FerdyM
 demo shop, its services and staff, so the default survives it.
 
+## Deploying the AI workers
+
+Each AI worker is also deployed by hand, from its own directory, with the
+owner's go-ahead:
+
+```bash
+cd apps/workers/<research|text|images|builder|chatbot>
+npx wrangler deploy
+```
+
+The deploy output must not contain
+`Unexpected fields found in observability field: "issues"`. If it does, that
+Wrangler is too old (see below) and the deploy has just turned Issues off.
+
 ## Wrangler version
 
 Issues needs Wrangler 4.134.0 or later. An older Wrangler only warns
@@ -186,15 +216,19 @@ which turns Issues OFF. The deploy tool is pinned as a root devDependency (CI
 runs `npx wrangler deploy` from the repo root). `@cloudflare/vitest-pool-workers`
 pins its own older Wrangler for the test runtime, so there are two copies on
 purpose. `apps/workers/uptime/test/alerting-config.test.ts` fails the suite if
-the Issues keys or the Wrangler floor drift.
+the Issues keys or the Wrangler floor drift, including a nested older Wrangler
+under one of the AI workers.
 
 ## Not covered
 
 - Runtime errors inside the Pages app (Remix SSR) are seen only through the
   uptime checks: Workers Issues does not cover Pages Functions.
-- The AI and background workers (chatbot, research, text, images, builder,
-  assembler, audit) have no Issues. Turning it on needs the key in that
-  worker's `wrangler.toml` and a pair of automations (see Where alerts go).
+- `pivot-parlor-audit` has no Issues on purpose: nothing sends to its queue
+  (`site-audit-queue` had no producers, checked 2026-11-12), so there is
+  nothing to alert on. Retiring it is an open owner decision. If it is ever
+  brought back, its own `package-lock.json` pins Wrangler 4.76.0, which would
+  drop the Issues key: raise it first, then add the key and a pair of
+  automations.
 - A whole-Cloudflare outage silences the monitor along with the site.
 - Staging has Issues off on purpose: E2E runs log errors deliberately, and the
   alert is account-wide.
