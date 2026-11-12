@@ -41,6 +41,11 @@ const ISSUES_MIN_WRANGLER = "4.134.0";
 const API = "apps/worker/wrangler.toml";
 const BOOKING = "apps/workers/booking/wrangler.toml";
 const UPTIME = "apps/workers/uptime/wrangler.toml";
+/**
+ * The AI workers (the builder directory deploys as pivot-parlor-assembler),
+ * each deployed by hand from the repo root's Wrangler. None has a staging env.
+ */
+const AI_WORKERS = ["builder", "chatbot", "images", "research", "text"].map((dir) => `apps/workers/${dir}`);
 
 describe("production alerting configuration", () => {
   it("control: the TOML reader reports a missing table or key as absent", () => {
@@ -56,6 +61,17 @@ describe("production alerting configuration", () => {
   it("the production API and booking workers report errors to Workers Issues", () => {
     for (const file of [API, BOOKING]) {
       expect(tomlValue(read(file), "observability.issues", "enabled"), file).toBe("true");
+    }
+  });
+
+  it("the AI workers report errors to Workers Issues", () => {
+    for (const dir of AI_WORKERS) {
+      const file = `${dir}/wrangler.toml`;
+      const toml = read(file);
+      expect(tomlValue(toml, "observability", "enabled"), file).toBe("true");
+      expect(tomlValue(toml, "observability.issues", "enabled"), file).toBe("true");
+      // A staging env here would inherit Issues and email the owner from test runs.
+      expect(toml, file).not.toMatch(/^\[+env\./m);
     }
   });
 
@@ -84,6 +100,12 @@ describe("production alerting configuration", () => {
       const range = (JSON.parse(read(`${pkg}/package.json`)) as { devDependencies?: Record<string, string> }).devDependencies?.wrangler ?? "";
       const floor = range.replace(/^[\^~>=\s]+/, "");
       expect(atLeast(floor, ISSUES_MIN_WRANGLER), `${pkg} declares wrangler ${range}`).toBe(true);
+    }
+    // The AI workers are workspaces that resolve the hoisted copy; a nested older
+    // copy under one of them would win for `npx wrangler deploy` in that directory.
+    for (const dir of AI_WORKERS) {
+      const nested = lock.packages[`${dir}/node_modules/wrangler`]?.version;
+      if (nested) expect(atLeast(nested, ISSUES_MIN_WRANGLER), `${dir} nests wrangler ${nested}`).toBe(true);
     }
   });
 });
