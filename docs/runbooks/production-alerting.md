@@ -300,6 +300,10 @@ opens (or, after an hour of quiet, reopens) the issue
 may mask parts of the route; the occurrence keeps it in full. Nothing else
 changes. Mark the issue Resolved afterwards.
 
+On staging, `tests/e2e/alert-test.spec.ts` presses the button on every FULL
+E2E run. Staging's Issues is off, so it emails nobody. Its report shows in the
+staging API's Workers Logs as the same `[web] AlertTestError ...` event.
+
 ## Deploying the AI workers
 
 Each AI worker is also deployed by hand, from its own directory, with the
