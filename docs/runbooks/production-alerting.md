@@ -157,7 +157,11 @@ not necessarily to the owner, so they are not part of this alerting.
        resolving the issue.
      - Reports caused by browser extensions, reports about other sites'
        pages, and reports from staging or preview pages are dropped before
-       logging, so they never alert.
+       logging, so they never alert. Chrome names an extension's script by
+       its scheme alone (`source` reads `chrome-extension`). Until
+       2026-11-12 those got through and alerted. If one appears again, the
+       filter in `apps/worker/src/routes/csp-report.ts` has a gap: fix it,
+       don't treat it as a site problem.
    - A website server error on `pivot-parlor-api`
      (`[web] <error type> in <where> <method> <route>`): the website's server
      code failed. `where` says what was running: `page` (loading a page),
@@ -297,9 +301,14 @@ developer dashboard's Overview, and press **Send a test alert** under Alert
 check. The website raises one `AlertTestError` from
 `POST /api/dev/alert-test` and says "Test error raised". `pivot-parlor-api`
 opens (or, after an hour of quiet, reopens) the issue
-`[web] AlertTestError in action POST /api/dev/alert-test ...`. The issue title
-may mask parts of the route; the occurrence keeps it in full. Nothing else
+`[web] AlertTestError in action POST /api/dev/alert-test ...`. Nothing else
 changes. Mark the issue Resolved afterwards.
+
+Proven live on 2026-11-12: the press at 12:51:17Z opened the issue
+`[web] AlertTestError in action POST /api/dev/alert-test {"detail":"<string>","frames":"<string>"}`
+and the new-issue email arrived 33 seconds later. Issues keeps the route in
+the title (it masks only the details' values), so each error type, kind and
+route is its own issue and emails on its own.
 
 On staging, `tests/e2e/alert-test.spec.ts` presses the button on every FULL
 E2E run. Staging's Issues is off, so it emails nobody. Its report shows in the

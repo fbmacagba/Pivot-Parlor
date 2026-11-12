@@ -122,7 +122,10 @@ function violationsIn(payload: unknown): RawViolation[] {
   return out.slice(0, MAX_REPORTS_PER_REQUEST);
 }
 
-const EXTENSION = /^(?:[a-z-]+-extension|webkit-masked-url):/i;
+// A full extension URL, or the bare scheme: Chrome's report-to names an
+// extension's script as just "chrome-extension" (seen in production
+// 2026-11-12, where the colon-only pattern let it through and alerted).
+const EXTENSION = /^(?:[a-z-]+-extension|webkit-masked-url)(?::|$)/i;
 const KEYWORD = /^[a-z][a-z0-9-]{0,39}$/;
 
 /**
