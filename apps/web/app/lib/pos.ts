@@ -6,7 +6,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { parsePoundsToPence } from "@repo/utils";
@@ -52,20 +52,12 @@ export type PosActionData =
   | { ok: true; voided: true }
   | { error: string };
 
-function resolveShopId(request: Request, user: SessionPayload, formShopId: string | null): string | null {
-  if (user.role === "developer") {
-    const fromQuery = new URL(request.url).searchParams.get("shopId")?.trim();
-    return formShopId?.trim() || fromQuery || null;
-  }
-  return user.shop_id?.trim() || null;
-}
-
 export async function posLoader({ request, context }: LoaderFunctionArgs, role: "admin" | "staff") {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, role, env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user, null);
+  const shopId = pageShopId(request, user, null);
 
   let services: PosService[] = [];
   let products: PosProduct[] = [];
@@ -98,7 +90,7 @@ export async function posAction({ request, context }: ActionFunctionArgs, role: 
 
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "").trim();
-  const shopId = resolveShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
+  const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   if (!shopId) {
     return json<PosActionData>(
       { error: "Missing shop. Developers open this page with ?shopId=…" },

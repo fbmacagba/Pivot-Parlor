@@ -7,7 +7,8 @@ import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { BookingsCalendar } from "~/components/admin/BookingsCalendar";
 import { useModalA11y } from "~/lib/useModalA11y";
-import { clockOf, formatDate as formatUkDate, formatDay } from "~/lib/dateFormat";
+import { clockOf, formatDate as formatUkDate, formatDay, ukToday } from "~/lib/dateFormat";
+import { pageShopId } from "~/lib/pageShop";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
 
@@ -49,7 +50,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = user.shop_id;
+  const shopId = pageShopId(request, user);
 
   const url = new URL(request.url);
   const statusFilter = url.searchParams.get("status") ?? "";
@@ -70,7 +71,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ukToday();
   const todayCount = bookings.filter((b) => b.booking_date === today).length;
   const pendingCount = bookings.filter((b) => b.status === "pending").length;
   const completedRevenuePence = bookings
@@ -85,8 +86,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = user.shop_id;
   const form = await request.formData();
+  const shopId = pageShopId(request, user, String(form.get("shopId") ?? "") || null);
+  if (!shopId) return json({ ok: false, error: "Choose a shop first." }, { status: 400 });
   const bookingId = form.get("bookingId") as string;
   const newStatus = form.get("status") as BookingStatus;
   const refundDeposit = form.get("refund_deposit");
@@ -480,6 +482,13 @@ export default function AdminBookings() {
     setSearchParams(next, { replace: true });
   }
 
+  /** Drops the filters but keeps the rest of the query (a developer's ?shopId=). */
+  function clearFilters() {
+    const next = new URLSearchParams(searchParams);
+    for (const key of ["status", "from", "to"]) next.delete(key);
+    setSearchParams(next, { replace: true });
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -521,7 +530,7 @@ export default function AdminBookings() {
           <input type="date" value={dateTo} onChange={(e) => updateFilter("to", e.target.value)}
             className="text-sm border border-white/20 rounded-xl px-3 py-2.5 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-gold" />
           {(statusFilter || dateFrom || dateTo) && (
-            <button onClick={() => setSearchParams({}, { replace: true })} className="text-sm text-white/60 hover:text-white px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">Clear</button>
+            <button onClick={() => clearFilters()} className="text-sm text-white/60 hover:text-white px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors">Clear</button>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 
 let pathname = "/staff";
+let search = "";
 const navigate = vi.fn();
 
 vi.mock("@remix-run/react", async () => {
@@ -17,7 +18,7 @@ vi.mock("@remix-run/react", async () => {
     Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>
       React.createElement("a", { href: String(to), ...rest }, children as never),
     Outlet: () => React.createElement("div", { "data-outlet": "" }, "page"),
-    useLocation: () => ({ pathname }),
+    useLocation: () => ({ pathname, search }),
     useNavigate: () => navigate,
   };
 });
@@ -99,6 +100,20 @@ describe("DashboardLayout: server markup", () => {
     expect(bar).toContain(">More<");
     expect(bar).not.toContain('href="/admin/settings"');
     expect(bar).not.toContain('aria-current="page"');
+  });
+
+  it("a developer viewing a shop keeps its ?shopId= on every admin link", () => {
+    pathname = "/admin/settings";
+    search = "?shopId=shop-1";
+    try {
+      const html = ssr({ role: "admin", showDeveloperViewSwitcher: true, userName: "dev" });
+      const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]).filter((h) => h.startsWith("/admin"));
+      expect(hrefs.length).toBeGreaterThan(15);
+      for (const href of hrefs) expect(href).toMatch(/[?&]shopId=shop-1(&|$)/);
+      expect(tabBar(html)).toContain('href="/admin/bookings?shopId=shop-1"');
+    } finally {
+      search = "";
+    }
   });
 
   // Ruling 50: the owner locked developer's phone tab bar to its original

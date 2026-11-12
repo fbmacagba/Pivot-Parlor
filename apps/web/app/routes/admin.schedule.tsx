@@ -4,6 +4,7 @@ import { json } from "@remix-run/cloudflare";
 import { useEffect, useState } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { pageShopId } from "~/lib/pageShop";
 import { Button } from "~/components/ui/Button";
 
 const DAY_LABELS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -51,7 +52,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = user.shop_id;
+  const shopId = pageShopId(request, user);
 
   let staff: StaffMember[] = [];
   let schedules: ScheduleRow[] = [];
@@ -71,13 +72,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
-  if (!token || !user.shop_id) return json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  const shopId = pageShopId(request, user);
+  if (!token || !shopId) return json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const api = createApiClient(env.API_URL, token);
   const body = await request.json() as { entries: unknown[] };
 
   try {
-    await api.put(`/api/shops/${user.shop_id}/schedule`, body);
+    await api.put(`/api/shops/${shopId}/schedule`, body);
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, error: e instanceof Error ? e.message : "Save failed" }, { status: 400 });

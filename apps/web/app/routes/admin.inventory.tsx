@@ -10,7 +10,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { ClipboardList, FlaskConical, Package, Plus, Truck, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { formatPence, parsePoundsToPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
@@ -88,14 +88,6 @@ interface Report {
 
 type ActionData = { ok: true; intent: string } | { error: string };
 
-function resolveShopId(request: Request, user: SessionPayload, formShopId: string | null): string | null {
-  const url = new URL(request.url);
-  if (user.role === "developer") {
-    return formShopId?.trim() || url.searchParams.get("shopId")?.trim() || null;
-  }
-  return user.shop_id?.trim() || null;
-}
-
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -103,7 +95,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user, null);
+  const shopId = pageShopId(request, user, null);
   const url = new URL(request.url);
   const poId = url.searchParams.get("po");
 
@@ -164,7 +156,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "").trim();
-  const shopId = resolveShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
+  const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   if (!shopId) {
     return json<ActionData>(
       { error: "Missing shop. Admins need a linked shop; developers add ?shopId=… to the URL." },

@@ -4,6 +4,7 @@ import { json, redirect } from "@remix-run/cloudflare";
 import { Button } from "~/components/ui/Button";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 
 interface ConnectStatus {
   account_id: string | null;
@@ -16,17 +17,21 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
-  if (!user.shop_id || !token) {
-    return json({ shopId: null as string | null, status: null as ConnectStatus | null, error: "no_shop" as const });
+  const shopId = pageShopId(request, user);
+  // Connecting Stripe binds the shop's payouts to a bank account: that is the
+  // owner's step. A developer sees the status but cannot start it.
+  const canOnboard = user.role !== "developer";
+  if (!shopId || !token) {
+    return json({ shopId: null as string | null, status: null as ConnectStatus | null, error: "no_shop" as const, canOnboard });
   }
   const api = createApiClient(env.API_URL, token);
   let status: ConnectStatus | null = null;
   try {
-    status = (await api.get(`/api/shops/${user.shop_id}/connect/status`)) as ConnectStatus;
+    status = (await api.get(`/api/shops/${shopId}/connect/status`)) as ConnectStatus;
   } catch {
     status = null;
   }
-  return json({ shopId: user.shop_id, status, error: null as null });
+  return json({ shopId, status, error: null as null, canOnboard });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -34,12 +39,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json({ ok: false, error: "Unauthorized" }, 401);
   const user = await requireRole(request, "admin", env.API_URL);
-  if (!user.shop_id) return json({ ok: false, error: "No shop assigned" }, 400);
+  if (user.role === "developer") {
+    return json({ ok: false, error: "Only the shop's owner can connect its Stripe account." }, 403);
+  }
+  const shopId = pageShopId(request, user);
+  if (!shopId) return json({ ok: false, error: "No shop assigned" }, 400);
 
   const origin = new URL(request.url).origin;
   const api = createApiClient(env.API_URL, token);
   try {
-    const data = (await api.post(`/api/shops/${user.shop_id}/connect/onboard`, {
+    const data = (await api.post(`/api/shops/${shopId}/connect/onboard`, {
       return_url: `${origin}/admin/payments?connect=return`,
       refresh_url: `${origin}/admin/payments?connect=refresh`,
     })) as { url: string };
@@ -51,7 +60,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export default function AdminPayments() {
-  const { status, error } = useLoaderData<typeof loader>();
+  const { status, error, canOnboard } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const [searchParams] = useSearchParams();
   const justReturned = searchParams.get("connect") === "return";
@@ -104,7 +113,10 @@ export default function AdminPayments() {
           </span>
         </div>
 
-        {!onboarded && (
+        {!onboarded && !canOnboard && (
+          <p className="mt-5 text-sm text-white/60">Only the shop&apos;s owner can connect its Stripe account.</p>
+        )}
+        {!onboarded && canOnboard && (
           <fetcher.Form method="post" className="mt-5">
             <Button type="submit" disabled={busy}>
               {busy ? "Redirecting to Stripe..." : started ? "Continue Stripe setup" : "Set up payments with Stripe"}

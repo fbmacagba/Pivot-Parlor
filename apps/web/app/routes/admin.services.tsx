@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { Plus, Pencil, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState, useEffect } from "react";
-import type { SessionPayload } from "~/lib/auth";
+import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { formatPence, parsePoundsToPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
@@ -34,22 +34,6 @@ type ActionData =
   | { ok: true; intent: string }
   | { error: string };
 
-// ─── Shop ID resolution (matches admin.staff.tsx pattern) ────────────────────
-
-function resolveShopId(
-  request: Request,
-  user: SessionPayload,
-  formShopId: string | null
-): string | null {
-  const url = new URL(request.url);
-  if (user.role === "developer") {
-    const fromForm = formShopId?.trim();
-    const fromQuery = url.searchParams.get("shopId")?.trim();
-    return fromForm || fromQuery || null;
-  }
-  return user.shop_id?.trim() || null;
-}
-
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -57,7 +41,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = resolveShopId(request, user, null);
+  const shopId = pageShopId(request, user, null);
 
   let services: Service[] = [];
   if (shopId) {
@@ -89,7 +73,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "").trim();
   const formShopId = String(form.get("shopId") ?? "").trim() || null;
-  const shopId = resolveShopId(request, user, formShopId);
+  const shopId = pageShopId(request, user, formShopId);
 
   if (!shopId) {
     return json<ActionData>(

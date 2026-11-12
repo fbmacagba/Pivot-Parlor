@@ -5,6 +5,7 @@ import { json } from "@remix-run/cloudflare";
 import { useState, useEffect } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { pageShopId } from "~/lib/pageShop";
 
 interface QueueEntry {
   id: string;
@@ -22,15 +23,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = user.shop_id;
+  const shopId = pageShopId(request, user);
 
   let queue: QueueEntry[] = [];
   let shopSlug = "";
-  try {
-    queue = await api.get<QueueEntry[]>(`/api/shops/${shopId}/walkin`);
-    const shop = await api.get<{ slug: string }>(`/api/shops/${shopId}`);
-    shopSlug = shop.slug ?? "";
-  } catch { /* empty */ }
+  if (shopId) {
+    try {
+      queue = await api.get<QueueEntry[]>(`/api/shops/${shopId}/walkin`);
+      const shop = await api.get<{ slug: string }>(`/api/shops/${shopId}`);
+      shopSlug = shop.slug ?? "";
+    } catch { /* empty */ }
+  }
 
   return json({ queue, shopId, shopSlug });
 }
@@ -40,8 +43,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const shopId = user.shop_id;
   const form = await request.formData();
+  const shopId = pageShopId(request, user, String(form.get("shopId") ?? "") || null);
+  if (!shopId) return json({ ok: false }, 400);
   const intent = form.get("intent") as string;
 
   if (intent === "updateStatus") {
@@ -87,6 +91,7 @@ export default function AdminQueue() {
 
   // Poll queue every 30s
   useEffect(() => {
+    if (!shopId) return;
     const poll = async () => {
       try {
         const res = await fetch(`/api/shops/${shopId}/walkin-poll`);

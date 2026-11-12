@@ -5,6 +5,7 @@ import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { formatCount, ukParts } from "~/lib/dateFormat";
+import { pageShopId } from "~/lib/pageShop";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,14 +33,16 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
 
+  const shopId = pageShopId(request, user);
+
   let data: AnalyticsData | null = null;
-  if (user.shop_id) {
+  if (shopId) {
     try {
-      data = await api.get<AnalyticsData>(`/api/shops/${user.shop_id}/analytics`);
+      data = await api.get<AnalyticsData>(`/api/shops/${shopId}/analytics`);
     } catch { /* empty */ }
   }
 
-  return json({ data });
+  return json({ data, shopId });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
