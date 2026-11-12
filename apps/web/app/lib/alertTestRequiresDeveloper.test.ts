@@ -3,9 +3,18 @@
  *  developer may raise it: anyone else is turned away before it throws, so
  *  nobody else can send the owner an alert. Lives in lib/ rather than routes/
  *  so Remix never mounts it as a route. */
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as route from "~/routes/api.dev.alert-test";
-import { ALERT_TEST_MESSAGE, ALERT_TEST_PATH, alertTestOutcome } from "./alertTest";
+import {
+  ALERT_TEST_MESSAGE,
+  ALERT_TEST_PATH,
+  alertTestOutcome,
+  BROWSER_ALERT_TEST_MESSAGE,
+  BrowserAlertTestError,
+  raiseBrowserAlertTest,
+} from "./alertTest";
 import { describeServerError } from "./serverErrors";
 
 const API_URL = "https://api.test";
@@ -103,5 +112,44 @@ describe("the dashboard button's outcome", () => {
   it("says what happened in plain words, without dashes", () => {
     expect(ALERT_TEST_MESSAGE.raised).toMatch(/email/);
     for (const text of Object.values(ALERT_TEST_MESSAGE)) expect(text).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+// "Send a test browser alert" throws in the developer's own browser, which
+// app/lib/browserErrors.ts reports like any visitor's error. The page is
+// developer-only (dev.tsx), so nobody else has the button.
+describe("the browser test alert", () => {
+  function raised(): unknown {
+    let raise: (() => void) | undefined;
+    raiseBrowserAlertTest((fn) => {
+      raise = fn;
+    });
+    if (!raise) throw new Error("nothing was scheduled");
+    try {
+      raise();
+    } catch (e) {
+      return e;
+    }
+    throw new Error("the scheduled function did not throw");
+  }
+
+  it("throws one labelled error, later and outside React, as an uncaught error does", () => {
+    const error = raised();
+    expect(error).toBeInstanceOf(BrowserAlertTestError);
+    // A string literal: a minifier renames the class, never this.
+    expect((error as Error).name).toBe("BrowserAlertTestError");
+    expect((error as Error).message).toBe("Deliberate test error from the developer dashboard, in the browser");
+  });
+
+  it("is an error type the API puts in an alert title", () => {
+    const worker = readFileSync(path.resolve(__dirname, "../../../worker/src/web-errors.ts"), "utf8");
+    const start = worker.indexOf("const BROWSER_NAMES");
+    expect(start).toBeGreaterThan(-1);
+    expect(worker.slice(start, worker.indexOf("]);", start))).toContain('"BrowserAlertTestError"');
+  });
+
+  it("says what happened in plain words, without dashes", () => {
+    expect(BROWSER_ALERT_TEST_MESSAGE).toMatch(/email/);
+    expect(BROWSER_ALERT_TEST_MESSAGE).not.toMatch(/[\u2013\u2014]/);
   });
 });

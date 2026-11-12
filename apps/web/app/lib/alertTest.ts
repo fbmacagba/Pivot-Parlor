@@ -19,3 +19,32 @@ export const ALERT_TEST_MESSAGE: Record<AlertTestOutcome, string> = {
   refused: "The test error was not raised. Sign in again as a developer and retry.",
   unreachable: "The website could not be reached. Check your connection and retry.",
 };
+
+/**
+ * The developer dashboard's "Send a test browser alert": one labelled error in
+ * the developer's own browser, reported like any visitor's
+ * (app/lib/browserErrors.ts). The API knows this name
+ * (apps/worker/src/web-errors.ts), so the alert title reads
+ * "[browser] BrowserAlertTestError in script on <the page's route>".
+ */
+export class BrowserAlertTestError extends Error {
+  constructor() {
+    super("Deliberate test error from the developer dashboard, in the browser");
+    // A string literal: a minifier renames the class, never this.
+    this.name = "BrowserAlertTestError";
+  }
+}
+
+/** Throws the test error later, outside React, as an uncaught error does. */
+export function raiseBrowserAlertTest(
+  schedule: (raise: () => void) => void = (raise) => {
+    setTimeout(raise, 0);
+  },
+): void {
+  schedule(() => {
+    throw new BrowserAlertTestError();
+  });
+}
+
+export const BROWSER_ALERT_TEST_MESSAGE =
+  "Test browser error raised. The alert email should reach you within a few minutes.";

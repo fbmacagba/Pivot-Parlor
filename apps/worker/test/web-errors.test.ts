@@ -124,6 +124,87 @@ describe("WebErrors.report", () => {
   });
 });
 
+describe("WebErrors.reportBrowser", () => {
+  // Browser errors reach the website from anyone's browser, so the title is
+  // built only from known values: a forged report cannot invent new titles
+  // (each new title is a new issue and a new email).
+  let ipSeq = 0;
+  const ip = () => `198.51.100.${++ipSeq}`;
+  const browser = (over: Record<string, unknown> = {}) => ({
+    kind: "script",
+    route: `routes/t${++seq}`,
+    name: "TypeError",
+    message: "Cannot read properties of null (reading 'focus')",
+    frames: ["at onClick (contact-AbC123.js:1:2345)", "at HTMLButtonElement.dispatch (entry.client-XyZ.js:9:87)"],
+    ip: ip(),
+    ...over,
+  });
+  const browserLines = () => errors.mock.calls.filter((c) => String(c[0]).startsWith("[browser]"));
+
+  it("logs one error titled by type, kind and route, the details as strings without a `message` key", async () => {
+    const input = browser({ route: "routes/contact" });
+    expect(await reporter().reportBrowser(input)).toEqual({ logged: true });
+    expect(browserLines()).toEqual([
+      [
+        "[browser] TypeError in script on routes/contact",
+        {
+          detail: "Cannot read properties of null (reading 'focus')",
+          frames: "at onClick (contact-AbC123.js:1:2345) | at HTMLButtonElement.dispatch (entry.client-XyZ.js:9:87)",
+        },
+      ],
+    ]);
+  });
+
+  it("builds the title only from known values, whatever it is sent", async () => {
+    await reporter().reportBrowser(browser({ kind: "anything", route: "routes/x\nInjected title", name: "EvilName" }));
+    await reporter().reportBrowser(browser({ kind: "hydration", route: "root", name: "BrowserAlertTestError" }));
+    await reporter().reportBrowser(browser({ kind: "promise", route: "routes/$shopSlug.book", name: "DOMException" }));
+    expect(browserLines().map((c) => c[0])).toEqual([
+      "[browser] Error in unknown on unknown",
+      "[browser] BrowserAlertTestError in hydration on root",
+      "[browser] DOMException in promise on routes/$shopSlug.book",
+    ]);
+  });
+
+  it("masks the message and caps the stack lines", async () => {
+    await reporter().reportBrowser(
+      browser({
+        message: "no booking for jane.doe@example.com id 3f2b9c1e-8a7d-4e5f-9b0c-1d2e3f4a5b6c " + "x ".repeat(300),
+        frames: Array.from({ length: 9 }, (_, i) => `at f${i} (${"y".repeat(300)})`),
+      }),
+    );
+    const [[, details]] = browserLines();
+    const d = details as { detail: string; frames: string };
+    expect(d.detail).not.toMatch(/jane|3f2b9c1e/);
+    expect(d.detail.length).toBeLessThanOrEqual(300);
+    expect(d.frames.split(" | ")).toHaveLength(5);
+    for (const f of d.frames.split(" | ")) expect(f.length).toBeLessThanOrEqual(160);
+  });
+
+  it("limits each visitor: past the limit their reports are dropped", async () => {
+    const visitor = ip();
+    const results: boolean[] = [];
+    for (let i = 0; i < 31; i++) results.push((await reporter().reportBrowser(browser({ ip: visitor }))).logged);
+    expect(results.slice(0, 30).every(Boolean)).toBe(true);
+    expect(results[30]).toBe(false);
+    // Another visitor is unaffected.
+    expect((await reporter().reportBrowser(browser())).logged).toBe(true);
+  });
+
+  it("limits each title: one failing page cannot log without end", async () => {
+    const route = `routes/busy${++seq}`;
+    const results: boolean[] = [];
+    for (let i = 0; i < 31; i++) results.push((await reporter().reportBrowser(browser({ route }))).logged);
+    expect(results.slice(0, 30).every(Boolean)).toBe(true);
+    expect(results[30]).toBe(false);
+  });
+
+  it("ignores anything that is not a report object", async () => {
+    for (const bad of [null, "boom", 7, []]) expect(await reporter().reportBrowser(bad)).toEqual({ logged: false });
+    expect(browserLines()).toEqual([]);
+  });
+});
+
 describe("the API worker", () => {
   it("exports the WebErrors entrypoint the website binds to", () => {
     expect((entry as Record<string, unknown>).WebErrors).toBe(WebErrors);

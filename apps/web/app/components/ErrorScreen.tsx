@@ -1,5 +1,7 @@
 import { isRouteErrorResponse, Link, useRouteError } from "@remix-run/react";
+import { useEffect } from "react";
 import { Button } from "~/components/ui/Button";
+import { reportBrowserError } from "~/lib/browserErrorReporter";
 
 interface ErrorScreenProps {
   /** When true, fills the viewport (root-level fallback). Otherwise fills its container. */
@@ -13,6 +15,14 @@ interface ErrorScreenProps {
  */
 export function ErrorScreen({ fullscreen = false }: ErrorScreenProps) {
   const error = useRouteError();
+
+  // A page that broke while rendering in the browser reaches the alert email.
+  // A deliberate response (404, 403) is not a bug, and a server error arrives
+  // here with no stack and is skipped: the server already reported it
+  // (app/lib/browserErrors.ts).
+  useEffect(() => {
+    if (!isRouteErrorResponse(error)) reportBrowserError(error, "render");
+  }, [error]);
 
   let status = 500;
   let title = "Something went wrong";
