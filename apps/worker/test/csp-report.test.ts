@@ -152,6 +152,39 @@ describe("POST /csp-report", () => {
     expect(cspLines()).toEqual([]);
   });
 
+  it("drops an extension report that names only the scheme, as Chrome's report-to does", async () => {
+    // Production 2026-11-12: an extension's eval on /login and /dev arrived
+    // with sourceFile "chrome-extension" (no colon, no path), slipped past the
+    // filter and emailed the owner twice. Both report formats, each scheme.
+    const bare = ["chrome-extension", "moz-extension", "safari-web-extension", "webkit-masked-url"];
+    const res = await send("POST", {
+      body: reportingBatch(
+        bare.map((sourceFile) => ({ documentURL: "https://pivotparlor.com/dev", blockedURL: "eval", effectiveDirective: "script-src", sourceFile, lineNumber: 3 })),
+      ),
+      type: "application/reports+json",
+      environment: "production",
+    });
+    expect(res.status).toBe(204);
+    for (const scheme of bare) {
+      await send("POST", { body: legacyReport({ "blocked-uri": "eval", "source-file": scheme }), type: "application/csp-report", environment: "production" });
+      await send("POST", { body: legacyReport({ "blocked-uri": scheme }), type: "application/csp-report", environment: "production" });
+    }
+    expect(cspLines()).toEqual([]);
+
+    // Control: the same eval from our own script is still reported.
+    await send("POST", {
+      body: reportingBatch([{ documentURL: "https://pivotparlor.com/dev", blockedURL: "eval", effectiveDirective: "script-src", sourceFile: "https://pivotparlor.com/assets/app.js", lineNumber: 3 }]),
+      type: "application/reports+json",
+      environment: "production",
+    });
+    expect(cspLines()).toEqual([
+      [
+        "[csp] blocked a script",
+        { directive: "script-src", blocked: "eval", page: "https://pivotparlor.com/dev", source: "https://pivotparlor.com/assets/app.js", line: "3", disposition: "enforce" },
+      ],
+    ]);
+  });
+
   it("drops a report about a page that is not ours", async () => {
     const res = await send("POST", {
       body: legacyReport({ "document-uri": "https://evil.example/page" }),
