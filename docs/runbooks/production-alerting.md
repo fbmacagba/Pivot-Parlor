@@ -11,6 +11,7 @@ to do when one arrives. Set up 2026-11-11.
 | Workers Issues on the AI workers `pivot-parlor-research`, `pivot-parlor-text`, `pivot-parlor-images`, `pivot-parlor-assembler` (the `builder` directory) and `pivot-parlor-chatbot` | A site generation job that fails, an AI model or image call that fails (even when the job falls back and finishes), failed queue runs, and shop chat errors | `[observability.issues]` in each `wrangler.toml` |
 | CSP violation reports, through Workers Issues on `pivot-parlor-api` | The site's Content-Security-Policy blocking something on a real visitor's page (a script, style, connection, frame, image, font or form), which usually means a feature broke for that visitor | `POST /csp-report` (`apps/worker/src/routes/csp-report.ts`); the policy asks for reports in `apps/web/app/lib/securityHeaders.ts` |
 | Website server errors, through Workers Issues on `pivot-parlor-api` | An unexpected error in the website's server code: loading a page or its data, a form post, or the server render. The visitor saw an error page or a failed action | `apps/web/app/lib/serverErrors.ts` reports over the `WEB_ERRORS` service binding to `apps/worker/src/web-errors.ts` |
+| Browser errors, through Workers Issues on `pivot-parlor-api` | A JavaScript error in a visitor's browser, in the site's own scripts: an uncaught error, an unhandled rejection, a page that failed to hydrate, or a page that broke while rendering | The browser posts to the website's `/client-errors` (`apps/web/app/lib/browserErrorReporter.ts`, `clientErrorsEndpoint.ts`), which reports over `WEB_ERRORS` to `apps/worker/src/web-errors.ts` |
 | Uptime monitor `pivot-parlor-uptime`, every 5 minutes | The public site answers, the API answers as itself, and a booking lookup reaches the booking worker and the database | `apps/workers/uptime` |
 | Pages deployment alert for `pivot-parlor-web` | A production Pages deployment that fails on Cloudflare's side | Cloudflare notification policy "Pivot Parlor: Pages production deploy failed" |
 
@@ -175,6 +176,26 @@ not necessarily to the owner, so they are not part of this alerting.
        fix and deploy the site.
      - `AlertTestError` is the dashboard's test button (see Website server
        errors): resolve it.
+   - A browser error on `pivot-parlor-api`
+     (`[browser] <error type> in <kind> on <route id>`): the site's own
+     JavaScript failed in a visitor's browser. `kind` is `script` (an uncaught
+     error), `promise` (an unhandled rejection), `hydration` (the page did not
+     match what the server sent, so React redrew it) or `render` (the page
+     broke and showed the error screen). The route id names the route file
+     (`routes/$shopSlug.book` is `apps/web/app/routes/$shopSlug.book.tsx`). The
+     occurrence gives the message (`detail`) and the top stack lines
+     (`frames`), our own script paths only.
+     - `script`, `promise` or `render`: reproduce on that page (staging, or
+       production read-only), fix and deploy the site.
+     - `hydration`, or a `DOMException` such as `NotFoundError: Failed to
+       execute 'removeChild'`: often a browser extension or the browser's own
+       translation changing the page before React starts. If it does not
+       reproduce in a clean browser and the issue stays small, it is that:
+       resolve it. If it reproduces, the server and the browser render
+       different markup (a date, a random value, `window` read during render):
+       fix that.
+     - `BrowserAlertTestError` is the dashboard's test browser button (see
+       Browser errors): resolve it.
    - A security issue ("Potential vulnerability scan ..."): open its
      occurrence and read the request and the answer.
      - The answer was a 2xx, or the occurrence shows an outbound fetch: treat
@@ -314,6 +335,77 @@ On staging, `tests/e2e/alert-test.spec.ts` presses the button on every FULL
 E2E run. Staging's Issues is off, so it emails nobody. Its report shows in the
 staging API's Workers Logs as the same `[web] AlertTestError ...` event.
 
+## Browser errors
+
+`apps/web/app/entry.client.tsx` starts the reporter
+(`apps/web/app/lib/browserErrorReporter.ts`) before the page hydrates. It
+catches uncaught errors and unhandled rejections; React's hydration failures
+and the error screen (`ErrorScreen`) hand theirs in. Each report is posted to
+the website's own `/client-errors`, which `functions/_middleware.ts` answers
+before Remix (`apps/web/app/lib/clientErrorsEndpoint.ts`). The website passes
+it over `WEB_ERRORS` to `WebErrors.reportBrowser` on the API, whose
+`console.error` is what Issues emails, through the same automations.
+
+Only errors in our own scripts are reported: at least one of the top five
+stack lines must be a script under `/assets/` on our own site, and none may
+be a browser extension's. Measured on 2026-11-12 in Chromium 145, Firefox 146
+and WebKit 26 (Safari's engine): an error in our script is kept and an error in
+a page's inline script is dropped, in all three.
+
+What a report carries: the kind, the route id, the error type, the message
+(emails, ids, tokens and long numbers masked, in the browser and again on the
+website and the API) and the top five stack lines, with our own script paths
+and every other location replaced by `<other>`. Never the page URL or its
+query, the page's content, cookies (the post sends none), the visitor or their
+browser. The visitor's IP goes to the API for the per-visitor limit only and
+is never logged.
+
+Not reported at all:
+
+- errors in other code: browser extensions, Stripe, Turnstile, other sites'
+  scripts, and `Script error.` (a foreign script's error, which carries no
+  detail);
+- a lost connection (`Failed to fetch`, `NetworkError when attempting to fetch
+  resource.`, `Load failed`) and a script removed by a deploy while a page was
+  open (`Failed to fetch dynamically imported module`, `Importing a module
+  script failed.`): neither is a bug, and both would alert on every flaky
+  mobile connection;
+- an aborted request (`AbortError`);
+- a server error shown on the error screen: Remix hands it to the browser with
+  no stack, and the server already reported it (see Website server errors);
+- bots and crawlers (by user agent), reports from other sites, and reports
+  that name a route the site does not have or one that renders no page (an
+  `api.*` route).
+
+Each page load reports at most five errors, each distinct error once. The API
+logs at most 30 reports a minute from one visitor and 30 a minute for one
+title (per Cloudflare location, `WEB_ERROR_LIMITER`), and drops the rest. The title is built only from
+known values: one of four kinds, one of ten error types (any other type reads
+`Error`), and a route id that the website has checked against the site's
+pages. Staging's website binds to the staging API, so staging never emails.
+
+`/client-errors` is public, as it has to be. Someone could post made-up
+reports on purpose: they can only produce titles from that bounded set, each
+limited as above, but every new title is a new issue and a new email. If that
+ever happens, block `POST /client-errors` with a firewall rule on
+`pivotparlor.com` until it stops; the site works the same without it.
+
+**Firing control** (to re-prove the path): sign in as a developer, open the
+developer dashboard's Overview (`/dev`), and press **Send a test browser
+alert** under Alert check. The page says "Test browser error raised" and
+throws one `BrowserAlertTestError` in your browser a moment later.
+`pivot-parlor-api` opens (or, after an hour of quiet, reopens) the issue
+`[browser] BrowserAlertTestError in script on routes/dev._index ...`. Pressing
+again on the same page sends nothing more (each error once per page load):
+reload to press again. Nothing else changes. Mark the issue Resolved
+afterwards. A browser that blocks the page's scripts or runs a strict privacy
+extension may drop the report; press from a plain browser profile.
+
+On staging, `tests/e2e/alert-test.spec.ts` presses it on every FULL E2E run,
+as a desktop Chrome: the website treats Playwright's own headless browser as a
+bot and drops its report without a word. Its report shows in the staging API's
+Workers Logs as the same `[browser] BrowserAlertTestError ...` event.
+
 ## Deploying the AI workers
 
 Each AI worker is also deployed by hand, from its own directory, with the
@@ -355,9 +447,11 @@ under one of the AI workers.
 
 ## Not covered
 
-- Errors in visitors' browsers (the site's JavaScript after the page has
-  loaded) are not reported. Only the website's server code is (see Website
-  server errors).
+- Browser errors outside our own scripts, a lost connection, a script removed
+  by a deploy, more than five errors in one page load, and anything from a
+  visitor whose browser blocks the report are not reported (see Browser
+  errors). An error before our scripts load (a page whose HTML itself is
+  broken) is not either: the uptime checks see a page that does not answer.
 - A failure inside Remix's Pages adapter itself, outside any route, comes back
   as a bare `Internal Error` 500 with no log line. Only the uptime checks see
   it.

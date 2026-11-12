@@ -3,6 +3,8 @@ import { createPagesFunctionHandler } from "@remix-run/cloudflare-pages";
 import type { ServerBuild } from "@remix-run/server-runtime";
 import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
+import { CLIENT_ERRORS_PATH } from "../app/lib/browserErrors";
+import { handleClientErrors, pageRouteIds, type BrowserErrorsBinding } from "../app/lib/clientErrorsEndpoint";
 import { hasUnsafePathSegment } from "../app/lib/pathSafety";
 import { withSecurityHeaders } from "../app/lib/securityHeaders";
 import { reportServerError, type WebErrorsBinding } from "../app/lib/serverErrors";
@@ -11,9 +13,13 @@ interface Env {
   /** Service binding to the API worker (apps/web/wrangler.toml [[services]]). */
   API?: { fetch(request: Request): Promise<Response> };
   API_URL?: string;
-  /** The API's WebErrors entrypoint: server errors reach the alert email. */
-  WEB_ERRORS?: WebErrorsBinding;
+  /** The API's WebErrors entrypoint: server and browser errors reach the alert email. */
+  WEB_ERRORS?: WebErrorsBinding & BrowserErrorsBinding;
 }
+
+// The routes a browser error can come from: the site's pages, never its
+// resource routes (app/lib/clientErrorsEndpoint.ts).
+const PAGE_ROUTES = pageRouteIds((build as unknown as ServerBuild).routes);
 
 // The route of the request each fetch belongs to. Requests run concurrently in
 // one isolate, so this is per async context, not a module variable.
@@ -44,6 +50,17 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   // API URLs and links (app/lib/pathSafety.ts). No route takes one.
   if (hasUnsafePathSegment(new URL(context.request.url).pathname)) {
     return withSecurityHeaders(new Response("Not found", { status: 404 }));
+  }
+  // A visitor's browser reporting a JavaScript error: checked and passed on
+  // here, before Remix (app/lib/clientErrorsEndpoint.ts). Always 204.
+  if (context.request.method === "POST" && new URL(context.request.url).pathname === CLIENT_ERRORS_PATH) {
+    return withSecurityHeaders(
+      await handleClientErrors(context.request, {
+        pageRoutes: PAGE_ROUTES,
+        binding: context.env.WEB_ERRORS,
+        waitUntil: (promise) => context.waitUntil(promise),
+      })
+    );
   }
   // Route errors reach Remix's handleError (entry.server.tsx). This catch is
   // for this file's own code; whatever fails inside Remix's Pages adapter
