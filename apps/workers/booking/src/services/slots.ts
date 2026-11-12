@@ -11,6 +11,7 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { addMinutes, rangesOverlap, safeJsonParse } from "@repo/utils";
 import { zonedTimeToUtc } from "../lib/timezone.js";
+import { CLOCK_START_SQL, INSTANT_START_SQL, bookingInterval, shiftDate } from "../lib/bookingTimes.js";
 
 export interface SlotResult {
   staff_id: string;
@@ -27,8 +28,9 @@ interface ScheduleRow {
 
 interface BookingRow {
   staff_id: string;
-  start_time: string;  // ISO string
-  end_time: string;    // ISO string
+  booking_date: string;
+  start_time: string;  // ISO string, or "HH:MM" for a walk-in or deposit booking
+  end_time: string;    // likewise
 }
 
 const SLOT_STEP_MIN = 30;         // slot start interval
@@ -103,26 +105,32 @@ export async function getAvailableSlots(
   //    slot can land on the next UTC date). Filtering by the UTC instant window
   //    avoids missing those bookings; the in-memory rangesOverlap below still
   //    does the exact per-slot filtering.
+  //    Walk-in and deposit bookings hold the shop's clock reading on
+  //    booking_date instead (lib/bookingTimes.ts): those are read by date,
+  //    including the day before, whose last booking can run past midnight.
   const dayStartUtc = zonedTimeToUtc(date, "00:00", tz).toISOString();
-  const nextDateObj = new Date(`${date}T00:00:00Z`);
-  nextDateObj.setUTCDate(nextDateObj.getUTCDate() + 1);
-  const dayEndUtc = zonedTimeToUtc(nextDateObj.toISOString().slice(0, 10), "00:00", tz).toISOString();
+  const dayEndUtc = zonedTimeToUtc(shiftDate(date, 1), "00:00", tz).toISOString();
 
   let bookingQuery =
-    `SELECT staff_id, start_time, end_time FROM bookings
+    `SELECT staff_id, booking_date, start_time, end_time FROM bookings
      WHERE shop_id = ?
        AND status NOT IN ('cancelled', 'no_show')
-       AND start_time < ? AND end_time > ?`;
-  const bookingParams: unknown[] = [shopId, dayEndUtc, dayStartUtc];
+       AND ((${INSTANT_START_SQL} AND start_time < ? AND end_time > ?)
+         OR (${CLOCK_START_SQL} AND booking_date BETWEEN ? AND ?))`;
+  const bookingParams: unknown[] = [shopId, dayEndUtc, dayStartUtc, shiftDate(date, -1), date];
   if (staffId) {
     bookingQuery += " AND staff_id = ?";
     bookingParams.push(staffId);
   }
 
-  const { results: existingBookings } = await db
+  const { results: bookingRows } = await db
     .prepare(bookingQuery)
     .bind(...bookingParams)
     .all<BookingRow>();
+  const existingBookings = bookingRows.flatMap((b) => {
+    const interval = bookingInterval(b, tz);
+    return interval ? [{ staff_id: b.staff_id, ...interval }] : [];
+  });
 
   // 4 & 5. Generate slots, filter booked
   const slots: SlotResult[] = [];
@@ -141,7 +149,7 @@ export async function getAvailableSlots(
       const isBooked = existingBookings.some(
         (b) =>
           b.staff_id === schedule.staff_id &&
-          rangesOverlap(current, slotEnd, new Date(b.start_time), new Date(b.end_time))
+          rangesOverlap(current, slotEnd, b.start, b.end)
       );
 
       slots.push({

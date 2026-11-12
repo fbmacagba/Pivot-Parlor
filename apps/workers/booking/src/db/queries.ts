@@ -3,6 +3,14 @@
 // writer of public booking creation. Row types carry only the fields this
 // worker reads.
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
+import { rangesOverlap } from "@repo/utils";
+import {
+  CLOCK_START_SQL,
+  INSTANT_START_SQL,
+  bookingInterval,
+  shiftDate,
+  type BookingTimes,
+} from "../lib/bookingTimes.js";
 
 export interface ShopRow {
   id: string;
@@ -96,23 +104,33 @@ export async function checkSlotConflict(
   db: D1Database,
   staffId: string,
   startTime: string,
-  endTime: string
+  endTime: string,
+  timeZone: string = "Europe/London"
 ): Promise<boolean> {
   // Overlap is a pure instant-range comparison — do NOT gate on booking_date.
   // booking_date is the UTC calendar date, so an overlapping booking whose
   // instant straddles UTC midnight onto an adjacent date would be missed by a
   // single-date filter, letting two different-start bookings double-book.
-  const row = await db
+  //
+  // Walk-in and deposit bookings hold the shop's clock reading ("09:30") on
+  // booking_date (lib/bookingTimes.ts). Those are fetched by a date range wide
+  // enough for any zone and a past-midnight end, then read in `timeZone`.
+  const { results } = await db
     .prepare(
-      `SELECT 1 FROM bookings
+      `SELECT booking_date, start_time, end_time FROM bookings
        WHERE staff_id = ?
          AND status NOT IN ('cancelled', 'no_show')
-         AND start_time < ? AND end_time > ?
-       LIMIT 1`
+         AND ((${INSTANT_START_SQL} AND start_time < ? AND end_time > ?)
+           OR (${CLOCK_START_SQL} AND booking_date BETWEEN ? AND ?))`
     )
-    .bind(staffId, endTime, startTime)
-    .first();
-  return !!row;
+    .bind(staffId, endTime, startTime, shiftDate(startTime.slice(0, 10), -2), shiftDate(endTime.slice(0, 10), 1))
+    .all<BookingTimes>();
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  return results.some((row) => {
+    const interval = bookingInterval(row, timeZone);
+    return interval !== null && rangesOverlap(start, end, interval.start, interval.end);
+  });
 }
 
 /** Cancel an unpaid deposit booking, but only while it is still 'pending'.
