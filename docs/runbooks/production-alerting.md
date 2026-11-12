@@ -9,6 +9,7 @@ to do when one arrives. Set up 2026-11-11.
 | --- | --- | --- |
 | Workers Issues on `pivot-parlor-api` and `pivot-parlor-booking` (production only) | Uncaught exceptions, 5xx replies, failed cron and queue runs, and anything logged with `console.error` | `[observability.issues]` in each `wrangler.toml` |
 | Workers Issues on the AI workers `pivot-parlor-research`, `pivot-parlor-text`, `pivot-parlor-images`, `pivot-parlor-assembler` (the `builder` directory) and `pivot-parlor-chatbot` | A site generation job that fails, an AI model or image call that fails (even when the job falls back and finishes), failed queue runs, and shop chat errors | `[observability.issues]` in each `wrangler.toml` |
+| CSP violation reports, through Workers Issues on `pivot-parlor-api` | The site's Content-Security-Policy blocking something on a real visitor's page (a script, style, connection, frame, image, font or form), which usually means a feature broke for that visitor | `POST /csp-report` (`apps/worker/src/routes/csp-report.ts`); the policy asks for reports in `apps/web/app/lib/securityHeaders.ts` |
 | Uptime monitor `pivot-parlor-uptime`, every 5 minutes | The public site answers, the API answers as itself, and a booking lookup reaches the booking worker and the database | `apps/workers/uptime` |
 | Pages deployment alert for `pivot-parlor-web` | A production Pages deployment that fails on Cloudflare's side | Cloudflare notification policy "Pivot Parlor: Pages production deploy failed" |
 
@@ -140,6 +141,22 @@ not necessarily to the owner, so they are not part of this alerting.
        provider's status and the model chosen on AI Deploy.
    - The chatbot (`[chatbot] public /chat error`): a shop's chat answered
      with an error. Read the occurrence for the shop and the cause.
+   - A CSP block on `pivot-parlor-api` (`[csp] blocked a script`, `a style`,
+     `a connection`, `a frame`, `an image`, `a font`, `a form submission` or
+     `something else`): a visitor's browser refused something the page asked
+     for. Each kind is its own issue. The occurrence gives the rule
+     (`directive`), what was blocked (`blocked`, without its query string),
+     the page, and the script and line that asked for it.
+     - Something of ours was blocked (a new script host, an API origin, an
+       embed): the policy in `apps/web/app/lib/securityHeaders.ts` is missing
+       it. Add it there (and to `public/_headers`, which its test compares),
+       then deploy the site.
+     - Something foreign was blocked on our page (an unknown script host):
+       the policy did its job. Find out how it got onto the page before
+       resolving the issue.
+     - Reports caused by browser extensions, reports about other sites'
+       pages, and reports from staging or preview pages are dropped before
+       logging, so they never alert.
    - A security issue ("Potential vulnerability scan ..."): open its
      occurrence and read the request and the answer.
      - The answer was a 2xx, or the occurrence shows an outbound fetch: treat
@@ -197,6 +214,33 @@ To change the demo shop, edit `DEMO_SHOP_SLUG` in
 `apps/workers/uptime/wrangler.toml`. The shop needs a public page and at least
 one service. The pre-launch purge (`docs/PURGE-daf88508.sql`) keeps the FerdyM
 demo shop, its services and staff, so the default survives it.
+
+## CSP violation reports
+
+Every page sent with the site's standard policy (all but a route that sets its
+own, such as the activity export) asks the browser to report CSP violations to
+its own deployment's API (`report-to`, with `report-uri` for older browsers):
+production pages to `https://api.pivotparlor.com/csp-report`, staging pages to
+the staging API, where Issues is off. So the E2E collector's deliberate
+violation, which runs on every PR, never emails.
+
+The endpoint drops, without logging: reports past 20 a minute from one IP (per
+Cloudflare location, the `CSP_REPORT_LIMITER` binding, answered 429), bodies
+over 16 KB (413), anything that is not JSON (400), reports caused by browser
+extensions, and reports about pages that are not the live site. It writes
+nothing to the database or the audit trail.
+
+**Firing control** (to re-prove the path): send one hand-made report with a
+blocked URL that names the test in its path, for example:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://api.pivotparlor.com/csp-report \
+  -H "Content-Type: application/csp-report" \
+  -d '{"csp-report":{"document-uri":"https://pivotparlor.com/","effective-directive":"script-src-elem","blocked-uri":"https://alert-path-check.invalid/probe.js","disposition":"enforce"}}'
+```
+
+It answers 204, and `pivot-parlor-api` opens (or, after an hour of quiet,
+reopens) the issue `[csp] blocked a script ...`. Mark it Resolved afterwards.
 
 ## Deploying the AI workers
 

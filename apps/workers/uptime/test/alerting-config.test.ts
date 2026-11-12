@@ -30,6 +30,23 @@ function tomlValue(toml: string, section: string, key: string): string | undefin
   return undefined;
 }
 
+/** Each `[[<prefix>ratelimits]]` block, with its `[<prefix>ratelimits.simple]` keys merged in. */
+function rateLimits(toml: string, prefix: string): Record<string, string>[] {
+  const blocks: Record<string, string>[] = [];
+  let current: Record<string, string> | null = null;
+  for (const raw of toml.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("[")) {
+      if (line === `[[${prefix}ratelimits]]`) blocks.push((current = {}));
+      else if (line !== `[${prefix}ratelimits.simple]`) current = null;
+      continue;
+    }
+    const m = line.match(/^([A-Za-z0-9_]+)\s*=\s*(.*?)\s*(?:#.*)?$/);
+    if (current && m) current[m[1]] = m[2];
+  }
+  return blocks;
+}
+
 function atLeast(version: string, floor: string): boolean {
   const a = version.split(".").map(Number);
   const b = floor.split(".").map(Number);
@@ -73,6 +90,25 @@ describe("production alerting configuration", () => {
       // A staging env here would inherit Issues and email the owner from test runs.
       expect(toml, file).not.toMatch(/^\[+env\./m);
     }
+  });
+
+  it("the API rate-limits CSP violation reports in production and staging", () => {
+    // Control: the reader finds a block, its simple table, and nothing when absent.
+    const sample = "[[ratelimits]]\nname = \"L\"\nnamespace_id = \"1\"\n\n  [ratelimits.simple]\n  limit = 5\n  period = 10\n\n[vars]\nx = 1\n";
+    expect(rateLimits(sample, "")).toEqual([{ name: "\"L\"", namespace_id: "\"1\"", limit: "5", period: "10" }]);
+    expect(rateLimits(sample, "env.staging.")).toEqual([]);
+
+    // Without the binding the endpoint has no limit, so this fails the suite
+    // instead. The namespace ids are account-wide: 4201 and 4202 belong to
+    // another project's worker.
+    const toml = read(API);
+    expect(rateLimits(toml, "")).toContainEqual({ name: "\"CSP_REPORT_LIMITER\"", namespace_id: "\"7101\"", limit: "20", period: "60" });
+    expect(rateLimits(toml, "env.staging.")).toContainEqual({
+      name: "\"CSP_REPORT_LIMITER\"",
+      namespace_id: "\"7102\"",
+      limit: "20",
+      period: "60",
+    });
   });
 
   it("staging keeps Issues off, so E2E runs never email the owner", () => {

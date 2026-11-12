@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CSP_HEADER,
+  CSP_REPORT_PATH,
   SECURITY_HEADERS,
   contentSecurityPolicy,
   withSecurityHeaders,
@@ -66,6 +67,47 @@ describe("withSecurityHeaders", () => {
     const connect = directive(prod.headers.get(CSP_HEADER)!, "connect-src");
     expect(connect.filter((s) => s === "https://api.pivotparlor.com")).toHaveLength(1);
     expect(withSecurityHeaders(new Response("x"), { apiOrigin: "" }).headers.get(CSP_HEADER)).toBe(contentSecurityPolicy());
+  });
+});
+
+describe("violation reports", () => {
+  // The API logs each report so Workers Issues emails the owner
+  // (apps/worker/src/routes/csp-report.ts). Each deployment reports to its
+  // OWN API: staging pages to the staging API, whose Issues is off, so the
+  // E2E collector's deliberate violation never emails anyone.
+  it("go to the deployment's own API, through report-to and report-uri", () => {
+    const res = withSecurityHeaders(new Response("x"), { apiOrigin: "https://api.pivotparlor.com" });
+    const csp = res.headers.get(CSP_HEADER)!;
+    expect(directive(csp, "report-uri")).toEqual(["https://api.pivotparlor.com/csp-report"]);
+    expect(directive(csp, "report-to")).toEqual(["csp-endpoint"]);
+    expect(res.headers.get("Reporting-Endpoints")).toBe('csp-endpoint="https://api.pivotparlor.com/csp-report"');
+
+    const staging = withSecurityHeaders(new Response("x"), { apiOrigin: "https://api-staging.example.dev" });
+    expect(directive(staging.headers.get(CSP_HEADER)!, "report-uri")).toEqual(["https://api-staging.example.dev/csp-report"]);
+    expect(staging.headers.get("Reporting-Endpoints")).toBe('csp-endpoint="https://api-staging.example.dev/csp-report"');
+  });
+
+  it("are not asked for without an API origin, so the static copy in _headers is unchanged", () => {
+    const res = withSecurityHeaders(new Response("x"));
+    expect(directive(res.headers.get(CSP_HEADER)!, "report-uri")).toEqual([]);
+    expect(directive(res.headers.get(CSP_HEADER)!, "report-to")).toEqual([]);
+    expect(res.headers.get("Reporting-Endpoints")).toBeNull();
+    expect(contentSecurityPolicy()).not.toMatch(/report-(uri|to)/);
+  });
+
+  it("are not added to a route's own policy", () => {
+    const own = "default-src 'none'";
+    const res = withSecurityHeaders(new Response("x", { headers: { "Content-Security-Policy": own } }), {
+      apiOrigin: "https://api.pivotparlor.com",
+    });
+    expect(res.headers.get("Content-Security-Policy")).toBe(own);
+    expect(res.headers.get("Reporting-Endpoints")).toBeNull();
+  });
+
+  it("use the path the API answers", () => {
+    const route = readFileSync(path.resolve(process.cwd(), "../worker/src/routes/csp-report.ts"), "utf8");
+    expect(route).toContain(`export const CSP_REPORT_PATH = "${CSP_REPORT_PATH}";`);
+    expect(CSP_REPORT_PATH).toBe("/csp-report");
   });
 });
 

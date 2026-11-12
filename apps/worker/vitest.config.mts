@@ -10,6 +10,8 @@ export default defineConfig({
         d1Databases: ["DB"],
         kvNamespaces: ["KV"],
         r2Buckets: ["ASSETS", "AUDIT_ARCHIVE"],
+        // Same limit as wrangler.toml's CSP_REPORT_LIMITER (test/csp-report.test.ts).
+        ratelimits: { CSP_REPORT_LIMITER: { simple: { limit: 20, period: 60 } } },
         bindings: {
           JWT_SECRET: "test-secret",
           OPENROUTER_API_KEY: "test-openrouter-key",
