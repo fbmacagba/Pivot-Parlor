@@ -1,6 +1,6 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Page, Request as PwRequest } from "@playwright/test";
 import { acknowledgePlatformCookieNotice, setE2eCookies } from "./e2e-cookies";
 import { expect, test } from "./fixtures";
 
@@ -13,8 +13,15 @@ import { expect, test } from "./fixtures";
  * session, then signed in), and the account and dev screens as the
  * developer. A screen fails on an HTTP error, a landing page other than the
  * one asked for (an unrecognised session redirects, and a redirect target has
- * no errors of its own), the error fallback, an uncaught page error, or a CSP
- * violation (the collector in fixtures.ts).
+ * no errors of its own), the error fallback, an uncaught page error, a CSP
+ * violation (the collector in fixtures.ts), or any error the page's own
+ * reporter posts to /client-errors (app/lib/browserErrorReporter.ts), a
+ * hydration failure included.
+ *
+ * The browser runs in UK English but Tokyo time, while the server renders in
+ * UTC. A date or time formatted without a fixed locale and time zone then
+ * renders differently on the two sides and fails hydration (in UTC, as CI's
+ * runner is, the two sides agree by luck). app/lib/dateFormat.ts is the fix.
  *
  * A fresh shop has empty lists, so this proves each screen renders cleanly,
  * not that populated tables do. Load only: nothing is clicked, so nothing is
@@ -27,6 +34,11 @@ import { expect, test } from "./fixtures";
  */
 
 const ROUTES_DIR = path.resolve(__dirname, "../../apps/web/app/routes");
+
+// Far from the server's UTC, so an unpinned time zone always shows.
+test.use({ locale: "en-GB", timezoneId: "Asia/Tokyo" });
+
+const CLIENT_ERRORS_PATH = "/client-errors";
 
 /** Dashboard route modules that are never swept, with the reason. */
 const EXCLUDED: Record<string, string> = {
@@ -83,8 +95,22 @@ function pathFor(mod: string, params: { shopId: string }): string {
 async function screenProblems(page: Page, url: string): Promise<string[]> {
   const problems: string[] = [];
   const pageErrors: string[] = [];
+  const browserErrors: string[] = [];
   const onError = (e: Error) => pageErrors.push(e.message);
+  // The page reports its own errors here even though the website then drops
+  // a headless browser's report as a bot's: seeing the post is enough.
+  const onRequest = (req: PwRequest) => {
+    if (req.method() !== "POST" || new URL(req.url()).pathname !== CLIENT_ERRORS_PATH) return;
+    let report: { kind?: unknown; name?: unknown; message?: unknown } = {};
+    try {
+      report = req.postDataJSON() ?? {};
+    } catch {
+      /* reported below as unreadable */
+    }
+    browserErrors.push(`browser ${String(report.kind)} error: ${String(report.name)}: ${String(report.message).slice(0, 160)}`);
+  };
   page.on("pageerror", onError);
+  page.on("request", onRequest);
   try {
     const res = await page.goto(url, { waitUntil: "load" });
     if (!res) problems.push("no response");
@@ -99,8 +125,10 @@ async function screenProblems(page: Page, url: string): Promise<string[]> {
     if (await fallback.count()) problems.push(`error screen (status ${await fallback.first().getAttribute("data-status")})`);
   } finally {
     page.off("pageerror", onError);
+    page.off("request", onRequest);
   }
   for (const e of pageErrors) problems.push(`page error: ${e.slice(0, 200)}`);
+  for (const e of browserErrors) problems.push(e);
   return problems;
 }
 
