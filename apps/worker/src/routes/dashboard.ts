@@ -13,7 +13,15 @@ import {
   getPlatformRevenueByMonth,
   getRevenueByShop,
   getShopById,
+  getShopTimezone,
 } from "../db/queries.js";
+import {
+  PLATFORM_TIME_ZONE,
+  START_HOUR_BUCKET_SQL,
+  peakHoursInShopTime,
+  shopMonthStart,
+  shopToday,
+} from "../lib/shopTime.js";
 import { notifyWaitlistForOpenedSlot } from "../services/waitlist-notify.js";
 import { reportError } from "../services/report-error.js";
 
@@ -124,7 +132,7 @@ shopStatsRouter.get("/", async (c) => {
   }
 
   const dateParam = c.req.query("date");
-  const today = dateParam ?? new Date().toISOString().slice(0, 10);
+  const today = dateParam ?? shopToday(await getShopTimezone(c.env.DB, shopId));
 
   const [todayRow, activeStaffRow, waitlistRow] = await Promise.all([
     c.env.DB
@@ -322,7 +330,7 @@ staffMeRouter.get("/today", async (c) => {
     return c.json({ success: true, data: [] });
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = shopToday(await getShopTimezone(c.env.DB, shopId!));
 
   const { results } = await c.env.DB
     .prepare(
@@ -370,11 +378,10 @@ staffMeRouter.get("/bookings", async (c) => {
   const filter = c.req.query("filter") ?? "upcoming";
   const limit = Math.min(Number(c.req.query("limit") ?? 20), 100);
   const offset = Number(c.req.query("offset") ?? 0);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = shopToday(await getShopTimezone(c.env.DB, shopId!));
 
-  const dateCond = filter === "past"
-    ? `b.booking_date < '${today}'`
-    : `b.booking_date >= '${today}'`;
+  // The operator is fixed SQL; the date is bound below, never interpolated.
+  const dateCond = filter === "past" ? "b.booking_date < ?" : "b.booking_date >= ?";
 
   const orderDir = filter === "past" ? "DESC" : "ASC";
 
@@ -389,7 +396,7 @@ staffMeRouter.get("/bookings", async (c) => {
        ORDER BY b.booking_date ${orderDir}, b.start_time ${orderDir}
        LIMIT ? OFFSET ?`
     )
-    .bind(staffId, limit, offset)
+    .bind(staffId, today, limit, offset)
     .all<{
       id: string;
       booking_date: string;
@@ -671,7 +678,9 @@ meRouter.get("/bookings", async (c) => {
     );
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  // A customer's list spans shops, so it splits on the platform's day: every
+  // shop is on London time (shops.timezone is never written; src/lib/shopTime.ts).
+  const today = shopToday(PLATFORM_TIME_ZONE);
 
   const [upcoming, past] = await Promise.all([
     c.env.DB
@@ -1004,10 +1013,11 @@ shopAnalyticsRouter.get("/", async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
 
-  const now = new Date();
-  const toDate = now.toISOString().slice(0, 10);
-  const fromDate = new Date(now.getFullYear(), now.getMonth() - 11, 1)
-    .toISOString().slice(0, 10);
+  // The last 12 months of the shop's calendar, ending on its today: the same
+  // months the website's chart draws (London time).
+  const timeZone = await getShopTimezone(c.env.DB, shopId);
+  const toDate = shopToday(timeZone);
+  const fromDate = shopMonthStart(11, timeZone);
 
   const [
     monthlyRows,
@@ -1031,15 +1041,16 @@ shopAnalyticsRouter.get("/", async (c) => {
        ORDER BY month ASC`
     ).bind(shopId, fromDate, toDate).all<{ month: string; booking_count: number; gross_pence: number }>(),
 
-    // Peak hours (0-23) — all time
+    // Peak hours (0-23) of the shop's day, all time. Counted per UTC date and
+    // hour (or a walk-in's own clock hour) here, then moved to the shop's
+    // clock by peakHoursInShopTime: SQLite has no time zones.
     c.env.DB.prepare(
-      `SELECT CAST(strftime('%H', start_time) AS INTEGER) AS hour,
+      `SELECT ${START_HOUR_BUCKET_SQL} AS bucket,
               COUNT(*) AS booking_count
        FROM bookings
        WHERE shop_id = ? AND status NOT IN ('cancelled','no_show')
-       GROUP BY hour
-       ORDER BY hour ASC`
-    ).bind(shopId).all<{ hour: number; booking_count: number }>(),
+       GROUP BY bucket`
+    ).bind(shopId).all<{ bucket: string | null; booking_count: number }>(),
 
     // Peak days of week (0=Sun,1=Mon…6=Sat) — all time
     c.env.DB.prepare(
@@ -1106,7 +1117,7 @@ shopAnalyticsRouter.get("/", async (c) => {
       period: { from: fromDate, to: toDate },
       totals: totalsRow,
       monthly: monthlyRows.results ?? [],
-      peak_hours: peakHourRows.results ?? [],
+      peak_hours: peakHoursInShopTime(peakHourRows.results ?? [], timeZone),
       peak_days: peakDayRows.results ?? [],
       status_breakdown: statusRows.results ?? [],
       top_services: topServiceRows.results ?? [],
