@@ -50,6 +50,18 @@ export function shopToday(timeZone?: string | null, now: Date = new Date()): str
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
+/**
+ * The schedules.day_of_week for a calendar date: Monday-first (0=Mon..6=Sun),
+ * as the admin schedule editor writes it. -1, which no row has, for anything
+ * but a real "YYYY-MM-DD".
+ */
+export function scheduleDayOf(date: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return -1;
+  const noon = new Date(`${date}T12:00:00Z`);
+  if (Number.isNaN(noon.getTime()) || noon.toISOString().slice(0, 10) !== date) return -1;
+  return (noon.getUTCDay() + 6) % 7;
+}
+
 /** The first day of the month `monthsBack` months before the shop's current month, "YYYY-MM-01". */
 export function shopMonthStart(monthsBack: number, timeZone?: string | null, now: Date = new Date()): string {
   const { year, month } = partsAt(now, timeZone);

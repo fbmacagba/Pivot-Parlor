@@ -19,6 +19,7 @@ import {
   PLATFORM_TIME_ZONE,
   START_HOUR_BUCKET_SQL,
   peakHoursInShopTime,
+  scheduleDayOf,
   shopMonthStart,
   shopToday,
 } from "../lib/shopTime.js";
@@ -145,15 +146,24 @@ shopStatsRouter.get("/", async (c) => {
       .bind(shopId, today)
       .first<{ bookings_count: number; revenue_pence: number }>(),
 
-    // "Active staff" = staff with at least one booking today OR a schedule entry for today's DOW
+    // "Staff on shift" = active staff scheduled for today's weekday, plus
+    // anyone with a live booking today; UNION counts each person once.
     c.env.DB
       .prepare(
-        `SELECT COUNT(DISTINCT staff_id) AS active
-         FROM bookings
-         WHERE shop_id = ? AND booking_date = ?
-           AND status NOT IN ('cancelled', 'no_show')`
+        `SELECT COUNT(*) AS active FROM (
+           SELECT sc.staff_id
+           FROM schedules sc
+           JOIN staff s ON s.id = sc.staff_id
+           WHERE sc.shop_id = ? AND s.shop_id = ? AND s.is_active = 1
+             AND sc.day_of_week = ? AND sc.is_active = 1
+           UNION
+           SELECT staff_id
+           FROM bookings
+           WHERE shop_id = ? AND booking_date = ?
+             AND status NOT IN ('cancelled', 'no_show')
+         )`
       )
-      .bind(shopId, today)
+      .bind(shopId, shopId, scheduleDayOf(today), shopId, today)
       .first<{ active: number }>(),
 
     c.env.DB
