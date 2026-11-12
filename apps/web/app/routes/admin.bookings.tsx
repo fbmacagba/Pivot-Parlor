@@ -7,7 +7,7 @@ import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { BookingsCalendar } from "~/components/admin/BookingsCalendar";
 import { useModalA11y } from "~/lib/useModalA11y";
-import { formatDate as formatUkDate, formatDay, ukParts } from "~/lib/dateFormat";
+import { clockOf, formatDate as formatUkDate, formatDay } from "~/lib/dateFormat";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
 
@@ -114,9 +114,12 @@ const STATUS_META: Record<BookingStatus, { label: string; bg: string; text: stri
   no_show:   { label: "No Show",   bg: "bg-white/5",        text: "text-white/60",    dot: "bg-white/30"   },
 };
 
-/** "9:05am" on the London clock (app/lib/dateFormat.ts). */
-function formatTime(iso: string) {
-  const { hour: h, minute: m } = ukParts(iso);
+/** "9:05am": a walk-in's own clock time, or an instant on the London clock
+ *  (app/lib/dateFormat.ts). Anything else is shown as it is. */
+function formatTime(start: string) {
+  const clock = clockOf(start);
+  if (!clock) return start;
+  const { hour: h, minute: m } = clock;
   return `${h % 12 || 12}:${String(m).padStart(2, "0")}${h >= 12 ? "pm" : "am"}`;
 }
 

@@ -8,9 +8,8 @@ afterAll(() => {
   vi.unstubAllEnvs();
 });
 
-const { formatCount, formatDate, formatDateTime, formatDay, formatTime, toInstant, ukParts, ukToday } = await import(
-  "./dateFormat"
-);
+const { clockOf, formatCount, formatDate, formatDateTime, formatDay, formatTime, toInstant, ukParts, ukToday } =
+  await import("./dateFormat");
 
 describe("control: this file runs in Tokyo time", () => {
   it("reads local time as Tokyo's, so a London answer below cannot come from the machine", () => {
@@ -100,5 +99,36 @@ describe("formatCount", () => {
   it("groups thousands in UK English", () => {
     expect(formatCount(1234567)).toBe("1,234,567");
     expect(formatCount(0)).toBe("0");
+  });
+});
+
+// Walk-ins and deposit bookings store start_time as the shop's own clock
+// reading, "09:30", with no date (booking worker: bw_availability.slot_time).
+describe("wall-clock times", () => {
+  it("clockOf reads a bare 'HH:MM' as written, and an instant on the London clock", () => {
+    expect(clockOf("09:30")).toEqual({ hour: 9, minute: 30 });
+    expect(clockOf("9:05")).toEqual({ hour: 9, minute: 5 });
+    expect(clockOf("2026-07-01T09:00:00Z")).toEqual({ hour: 10, minute: 0 });
+  });
+
+  it("clockOf gives null for anything that is not a time", () => {
+    expect(clockOf("not a time")).toBeNull();
+    expect(clockOf("25:00")).toBeNull();
+    expect(clockOf("")).toBeNull();
+  });
+
+  it("formatTime shows a wall-clock time as written, in any zone", () => {
+    expect(formatTime("09:30", { hour: "2-digit", minute: "2-digit" })).toBe("09:30");
+    expect(formatTime("09:30", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" })).toBe("09:30");
+  });
+
+  it("a wall-clock time has no date", () => {
+    expect(formatDate("09:30")).toBe("");
+    expect(formatDateTime("09:30")).toBe("");
+  });
+
+  it("ukParts never throws on a value it cannot read (it is called while rendering)", () => {
+    expect(() => ukParts("09:30")).not.toThrow();
+    expect(() => ukParts("nope")).not.toThrow();
   });
 });

@@ -26,6 +26,18 @@ type Options = Intl.DateTimeFormatOptions;
 // "2026-11-12 15:00:00" or "2026-11-12T15:00:00(.123)", with no offset.
 const NO_OFFSET = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+// A clock reading with no date: walk-ins and deposit bookings store their
+// start_time as the shop's own "09:30" (the booking worker's slot_time).
+const WALL_TIME = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
+
+function wallClock(value: DateInput): { hour: number; minute: number } | null {
+  if (typeof value !== "string") return null;
+  const match = WALL_TIME.exec(value.trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  return hour < 24 && minute < 60 ? { hour, minute } : null;
+}
 
 /** A timestamp from the API as an instant. An offset-less date and time is UTC. */
 export function toInstant(value: DateInput): Date {
@@ -37,6 +49,13 @@ export function toInstant(value: DateInput): Date {
 }
 
 function format(value: DateInput, options: Options, as: "date" | "time" | "both"): string {
+  const wall = wallClock(value);
+  if (wall) {
+    // Already the shop's clock: shown as written, never shifted, and it has no date.
+    if (as !== "time") return "";
+    const at = Date.UTC(1970, 0, 1, wall.hour, wall.minute);
+    return new Date(at).toLocaleTimeString(UK_LOCALE, { ...options, timeZone: "UTC" });
+  }
   const d = toInstant(value);
   if (Number.isNaN(d.getTime())) return "";
   const render = (timeZone: string) => {
@@ -112,10 +131,18 @@ const PARTS = new Intl.DateTimeFormat(UK_LOCALE, {
 });
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-/** The London clock's reading for an instant (now by default), instead of the machine's getHours() and friends. */
+/**
+ * The London clock's reading for an instant (now by default), instead of the
+ * machine's getHours() and friends. Never throws, since it runs while a page
+ * renders: a value that is not an instant gives NaN fields and weekday -1.
+ */
 export function ukParts(value: DateInput = new Date()): UkParts {
+  const instant = toInstant(value);
+  if (Number.isNaN(instant.getTime())) {
+    return { year: NaN, month: NaN, day: NaN, hour: NaN, minute: NaN, weekday: -1 };
+  }
   const parts: Record<string, string> = {};
-  for (const p of PARTS.formatToParts(toInstant(value))) parts[p.type] = p.value;
+  for (const p of PARTS.formatToParts(instant)) parts[p.type] = p.value;
   return {
     year: Number(parts.year),
     month: Number(parts.month),
@@ -124,6 +151,18 @@ export function ukParts(value: DateInput = new Date()): UkParts {
     minute: Number(parts.minute),
     weekday: WEEKDAYS.indexOf(parts.weekday ?? ""),
   };
+}
+
+/**
+ * The hour and minute a booking starts, for a page to lay out: a walk-in's
+ * "09:30" as written, an instant on the London clock. null when the value is
+ * neither, so the caller can show it as it is.
+ */
+export function clockOf(value: DateInput): { hour: number; minute: number } | null {
+  const wall = wallClock(value);
+  if (wall) return wall;
+  const { hour, minute } = ukParts(value);
+  return Number.isNaN(hour) ? null : { hour, minute };
 }
 
 /** Today's date in London, as "YYYY-MM-DD". */

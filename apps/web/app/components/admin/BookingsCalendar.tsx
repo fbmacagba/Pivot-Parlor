@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import type { Booking, BookingStatus } from "~/routes/admin.bookings";
 import { formatPence } from "@repo/utils";
-import { formatDay, ukParts, ukToday } from "~/lib/dateFormat";
+import { clockOf, formatDay, ukParts, ukToday } from "~/lib/dateFormat";
 
 const STATUS_COLORS: Record<BookingStatus, string> = {
   confirmed: "bg-emerald-400",
@@ -19,9 +19,12 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
   no_show:   "No Show",
 };
 
-/** "9:05am" on the London clock (app/lib/dateFormat.ts). */
-function formatTime(iso: string) {
-  const { hour: h, minute: m } = ukParts(iso);
+/** "9:05am": a walk-in's own clock time, or an instant on the London clock
+ *  (app/lib/dateFormat.ts). Anything else is shown as it is. */
+function formatTime(start: string) {
+  const clock = clockOf(start);
+  if (!clock) return start;
+  const { hour: h, minute: m } = clock;
   const p = h >= 12 ? "pm" : "am";
   return `${h % 12 || 12}:${String(m).padStart(2, "0")}${p}`;
 }
