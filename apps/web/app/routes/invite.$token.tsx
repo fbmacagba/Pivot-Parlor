@@ -8,6 +8,7 @@ import { useActionData, useLoaderData } from "@remix-run/react";
 import { invitePageSendsE2eMock } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import { sessionCookieHeaders } from "~/lib/auth";
+import { formatDate } from "~/lib/dateFormat";
 
 interface InviteData {
   email: string;
@@ -291,7 +292,7 @@ export default function InviteAccept() {
         {/* Expiry notice */}
         <p className="text-center text-xs text-white/50">
           This invite expires on{" "}
-          {new Date(invite.expires_at).toLocaleDateString("en-GB", {
+          {formatDate(invite.expires_at, {
             day: "numeric",
             month: "long",
             year: "numeric",

@@ -1,4 +1,5 @@
 import type { Density, Motif } from "@repo/utils";
+import { formatDate, toInstant } from "~/lib/dateFormat";
 
 type HoursRecord = Record<string, string | null | undefined>;
 
@@ -21,9 +22,8 @@ export function hasOpenDay(json?: string): boolean {
 }
 
 export function formatReviewDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  if (Number.isNaN(toInstant(iso).getTime())) return iso;
+  return formatDate(iso, { day: "numeric", month: "short", year: "numeric" });
 }
 
 export function StarRow({ rating, className }: { rating: number; className?: string }) {

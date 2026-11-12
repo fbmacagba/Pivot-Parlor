@@ -1,3 +1,5 @@
+import { formatDate, formatDateTime } from "./dateFormat";
+
 export const AUDIT_FILTERS = ["shop_id", "actor", "action", "outcome", "from", "to", "request_id", "cursor"] as const;
 
 export function auditQuery(params: URLSearchParams): string {
@@ -180,15 +182,14 @@ export function actionLabel(action: string): string {
 
 /** The trail is a UK business record: show its times in UK time (GMT/BST)
  *  whatever zone the server rendering the page, or the viewer's browser, is
- *  in, so the server render and the browser agree (M6). */
-const UK_TIME_ZONE = "Europe/London";
-
+ *  in, so the server render and the browser agree (M6). app/lib/dateFormat.ts
+ *  does that for every page. */
 export function formatAuditDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-GB", { timeZone: UK_TIME_ZONE });
+  return formatDateTime(iso);
 }
 
 export function formatAuditDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-GB", { timeZone: UK_TIME_ZONE });
+  return formatDate(iso);
 }
 
 /** Escapes the five HTML-significant characters. The audit export error page

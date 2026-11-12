@@ -26,6 +26,7 @@ import type { Service } from "@repo/types";
 import { formatPence, isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR, PORTFOLIO_DEMO_SLUG, portfolioDemoForSlug } from "@repo/utils";
 import { portfolioDemoServices, portfolioDemoStaff } from "~/lib/portfolioDemo";
 import { demoSlots, openingWindow, weekdayName } from "~/lib/demoBooking";
+import { formatDay, formatTime } from "~/lib/dateFormat";
 import { restorableDay, restoredStep, skipRevalidationForWizardParams, wizardSearch } from "~/lib/bookingUrl";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 
@@ -266,10 +267,7 @@ function displayPence(pence: number): string {
 }
 
 function displayDate(date: string): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  return Number.isFinite(d.getTime())
-    ? d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
-    : date;
+  return formatDay(date, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
 /**
@@ -682,11 +680,7 @@ function BookingWizard({ shopName }: { shopName?: string }) {
 }
 
 function formatSlotTime(iso: string, tz: string): string {
-  return new Date(iso).toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: tz,
-  });
+  return formatTime(iso, { hour: "2-digit", minute: "2-digit", timeZone: tz });
 }
 
 function Row({ label, value }: { label: string; value: string }) {

@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import type { Booking, BookingStatus } from "~/routes/admin.bookings";
 import { formatPence } from "@repo/utils";
+import { formatDay, ukParts, ukToday } from "~/lib/dateFormat";
 
 const STATUS_COLORS: Record<BookingStatus, string> = {
   confirmed: "bg-emerald-400",
@@ -18,10 +19,9 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
   no_show:   "No Show",
 };
 
+/** "9:05am" on the London clock (app/lib/dateFormat.ts). */
 function formatTime(iso: string) {
-  const d = new Date(iso);
-  const h = d.getHours();
-  const m = d.getMinutes();
+  const { hour: h, minute: m } = ukParts(iso);
   const p = h >= 12 ? "pm" : "am";
   return `${h % 12 || 12}:${String(m).padStart(2, "0")}${p}`;
 }
@@ -32,11 +32,12 @@ interface BookingsCalendarProps {
 }
 
 export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendarProps) {
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  // Today in London, the same on the server and in the browser.
+  const todayStr = ukToday();
+  const { year: todayYear, month: todayMonth } = ukParts();
 
-  const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(todayMonth - 1);
+  const [viewYear, setViewYear] = useState(todayYear);
   const [selectedDate, setSelectedDate] = useState<string | null>(todayStr);
 
   const bookingsByDate = useMemo(() => {
@@ -52,7 +53,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
     const firstDay = new Date(viewYear, viewMonth, 1);
     const lastDay = new Date(viewYear, viewMonth + 1, 0);
     const startDow = (firstDay.getDay() + 6) % 7;
-    const label = firstDay.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+    const label = formatDay(`${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-01`, { month: "long", year: "numeric" });
 
     const days: Array<{ date: string | null; dayNum: number | null }> = [];
     for (let i = 0; i < startDow; i++) days.push({ date: null, dayNum: null });
@@ -95,7 +96,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold text-white">{monthLabel}</h2>
             <button
-              onClick={() => { setViewMonth(today.getMonth()); setViewYear(today.getFullYear()); setSelectedDate(todayStr); }}
+              onClick={() => { setViewMonth(todayMonth - 1); setViewYear(todayYear); setSelectedDate(todayStr); }}
               className="text-xs px-2.5 py-1 rounded-full bg-white/10 text-white/60 hover:bg-white/20 font-medium transition-colors"
             >
               Today
@@ -186,7 +187,7 @@ export function BookingsCalendar({ bookings, onSelectBooking }: BookingsCalendar
           <div className="bg-white/5 px-5 py-4 border-b border-white/10">
             <h3 className="font-semibold text-white text-sm">
               {selectedDate
-                ? new Date(selectedDate + "T00:00:00").toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+                ? formatDay(selectedDate, { weekday: "long", day: "numeric", month: "long" })
                 : "Select a day"}
             </h3>
             {selectedDate && (

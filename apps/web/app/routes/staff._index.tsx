@@ -6,6 +6,7 @@ import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
+import { formatDate, formatTime as formatUkTime, ukParts } from "~/lib/dateFormat";
 
 interface TodayBooking {
   id: string;
@@ -19,15 +20,9 @@ interface TodayBooking {
   notes?: string | null;
 }
 
+/** "09:05" on the London clock (app/lib/dateFormat.ts). */
 function formatTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  return formatUkTime(iso, { hour: "2-digit", minute: "2-digit" }) || iso;
 }
 
 function minutesUntil(iso: string): number {
@@ -48,7 +43,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     /* empty */
   }
 
-  const hour = new Date().getHours();
+  const { hour } = ukParts();
   const greeting =
     hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const displayName = user.sub ?? "there";
@@ -95,7 +90,7 @@ export default function StaffToday() {
             {greeting}
           </h1>
           <p className="mt-0.5 text-sm text-white/60">
-            {new Date().toLocaleDateString("en-GB", {
+            {formatDate(new Date(), {
               weekday: "long",
               day: "numeric",
               month: "long",
