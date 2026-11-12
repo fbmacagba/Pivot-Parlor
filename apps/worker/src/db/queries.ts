@@ -33,6 +33,8 @@ export interface DBShop {
   is_active: number;
   status: string;
   plan: string;
+  /** IANA zone (migration 020), default Europe/London. See src/lib/shopTime.ts. */
+  timezone: string;
   created_at: string;
 }
 
@@ -272,6 +274,15 @@ export function getShopBySlug(db: D1Database, slug: string) {
     .prepare("SELECT * FROM shops WHERE slug = ? LIMIT 1")
     .bind(slug)
     .first<DBShop>();
+}
+
+/** The shop's IANA time zone, or null for an unknown shop (src/lib/shopTime.ts reads null as London). */
+export async function getShopTimezone(db: D1Database, shopId: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT timezone FROM shops WHERE id = ? LIMIT 1")
+    .bind(shopId)
+    .first<{ timezone: string | null }>();
+  return row?.timezone ?? null;
 }
 
 export async function getAllShops(db: D1Database) {

@@ -52,6 +52,7 @@ import { authMiddleware, getUser } from "../middleware/auth.js";
 import { buildSiteResearchBusiness } from "../lib/siteResearchContext.js";
 import { buildSiteData, siteDesignIntent, siteWebsiteStatus } from "../lib/siteData.js";
 import { canReadUnpublishedSite, isLiveSite } from "../lib/siteVisibility.js";
+import { shopToday } from "../lib/shopTime.js";
 import {
   overlayCandidate,
   parseCandidatePayload,
@@ -528,7 +529,8 @@ shops.post(
     if (!booking || booking.status === "cancelled" || booking.status === "no_show") {
       return c.json({ success: false, error: "Invalid booking" }, 400);
     }
-    const today = new Date().toISOString().slice(0, 10);
+    // By the shop's day: from midnight in the shop, today's booking counts.
+    const today = shopToday(shop.timezone);
     if (booking.booking_date > today) {
       return c.json({ success: false, error: "You can leave a review after your visit" }, 400);
     }
