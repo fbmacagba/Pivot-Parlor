@@ -69,6 +69,25 @@ const REDIRECTS: Record<string, string> = {
   "/staff/availability": "/staff/bookings",
 };
 
+type LoaderData = Record<string, unknown>;
+
+/**
+ * Per admin screen, something only the API's answer fills in. The loaders
+ * swallow API errors and render empty, so the right shopId alone does not
+ * prove the shop's data arrived. Screens missing here have nothing that
+ * tells "empty shop" from "no answer" (a fresh shop has no bookings).
+ */
+const ARRIVED: Record<string, (d: LoaderData) => boolean> = {
+  "admin._index": (d) => Boolean(d.shopSlug) && d.setupStatus != null,
+  "admin.analytics": (d) => d.data != null,
+  "admin.payments": (d) => d.status != null,
+  "admin.queue": (d) => Boolean(d.shopSlug),
+  "admin.revenue": (d) => d.data != null,
+  "admin.schedule": (d) => Array.isArray(d.staff) && d.staff.length >= 1,
+  "admin.settings": (d) => typeof d.settings === "object" && d.settings !== null && Object.keys(d.settings).length > 0,
+  "admin.staff": (d) => Array.isArray(d.staff) && d.staff.length >= 1,
+};
+
 type Role = "admin" | "staff" | "developer";
 
 function dashboardModules(dir = ROUTES_DIR): string[] {
@@ -170,6 +189,7 @@ test.describe("dashboard sweep: wiring", () => {
     expect(mods.length).toBeGreaterThan(25);
     for (const mod of Object.keys(EXCLUDED)) expect(mods, `excluded module ${mod} exists`).toContain(mod);
     for (const mod of Object.keys(EXPECTED_PROBLEMS)) expect(mods, `expected-outcome module ${mod} exists`).toContain(mod);
+    for (const mod of Object.keys(ARRIVED)) expect(mods, `data-arrived module ${mod} exists`).toContain(mod);
     for (const mod of mods.filter((m) => !(m in EXCLUDED))) {
       expect(() => pathFor(mod, { shopId: "x" }), mod).not.toThrow();
     }
@@ -280,18 +300,19 @@ test.describe.serial("dashboard sweep", () => {
         // The loader worked on this shop, not on "no shop".
         const res = await page.request.get(`${url}&_data=${encodeURIComponent(`routes/${mod}`)}`);
         expect.soft(res.status(), `${mod} loader status`).toBe(200);
-        const data = (await res.json().catch(() => ({}))) as { shopId?: unknown; data?: unknown };
+        const data = (await res.json().catch(() => ({}))) as LoaderData;
         expect.soft(data.shopId, `${mod} loader shopId`).toBe(shopId);
-        if (mod === "admin.analytics") expect.soft(data.data, "analytics loaded the shop's numbers").not.toBeNull();
+        const arrived = ARRIVED[mod];
+        if (arrived) expect.soft(arrived(data), `${mod} loaded the shop's data`).toBe(true);
       });
     }
 
     await test.step("the banner names the shop, and a sidebar link stays on it", async () => {
       await page.goto(`/admin/settings${q}`);
-      await expect(page.locator("body")).toContainText(`you are managing E2E Dashboards ${uniqueId} as its admin`);
+      await expect.soft(page.locator("body")).toContainText(`you are managing E2E Dashboards ${uniqueId} as its admin`);
       await page.getByRole("navigation", { name: "Dashboard" }).getByRole("link", { name: "Bookings", exact: true }).first().click();
       await page.waitForURL((u) => u.pathname === "/admin/bookings");
-      expect(new URL(page.url()).searchParams.get("shopId")).toBe(shopId);
+      expect.soft(new URL(page.url()).searchParams.get("shopId"), "the sidebar link kept ?shopId=").toBe(shopId);
     });
 
     await test.step("a page action reaches the shop (saving the schedule)", async () => {
