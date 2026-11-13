@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { batchWithAudit } from "../audit/context.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { isOptionalText, readJsonObject } from "@repo/utils";
 
 const contact = new Hono<{ Bindings: Bindings }>();
 
@@ -12,14 +13,18 @@ contact.post(
   rateLimit({ name: "contact", limit: 5, windowS: 3600, key: clientIp }),
   async (c) => {
   try {
-    const body = await c.req.json<{
-      full_name?: string;
-      shop_name?: string;
-      shop_type?: string;
-      email?: string;
-      phone?: string;
-      message?: string;
-    }>();
+    // A body that is not a JSON object, or a field that is not text, is the
+    // caller's mistake: a 400, never the catch's 500 below.
+    const body = await readJsonObject(c.req);
+    if (!body) {
+      return c.json({ success: false, error: "Invalid JSON" }, 400);
+    }
+    const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+    const fullName = text(body.full_name);
+    const shopName = text(body.shop_name);
+    const shopType = text(body.shop_type);
+    const email = text(body.email);
+    const message = text(body.message);
 
     // Log structured fields, not the raw body (avoids dumping the free-text
     // message / PII blob and any control chars into logs).
@@ -30,30 +35,33 @@ contact.post(
       has_message: !!body.message,
     });
 
-    if (!body.full_name?.trim()) {
+    if (!fullName) {
       console.warn("[worker contact] missing full_name");
       return c.json({ success: false, error: "full_name is required" }, 400);
     }
-    if (!body.shop_name?.trim()) {
+    if (!shopName) {
       console.warn("[worker contact] missing shop_name");
       return c.json({ success: false, error: "shop_name is required" }, 400);
     }
-    if (!body.shop_type?.trim()) {
+    if (!shopType) {
       console.warn("[worker contact] missing shop_type");
       return c.json({ success: false, error: "shop_type is required" }, 400);
     }
-    if (!body.email?.trim()) {
+    if (!email) {
       console.warn("[worker contact] missing email");
       return c.json({ success: false, error: "email is required" }, 400);
     }
-    if (!body.message?.trim()) {
+    if (!message) {
       console.warn("[worker contact] missing message");
       return c.json({ success: false, error: "message is required" }, 400);
     }
+    if (!isOptionalText(body.phone)) {
+      return c.json({ success: false, error: "phone must be text" }, 400);
+    }
 
     const validShopTypes = ["barber_shop", "beauty_parlor", "both"];
-    if (!validShopTypes.includes(body.shop_type)) {
-      console.warn("[worker contact] invalid shop_type", body.shop_type);
+    if (!validShopTypes.includes(shopType)) {
+      console.warn("[worker contact] invalid shop_type", shopType);
       return c.json({ success: false, error: "Invalid shop_type" }, 400);
     }
 
@@ -69,12 +77,12 @@ contact.post(
            VALUES (?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           id,
-          body.full_name.trim(),
-          body.shop_name.trim(),
-          body.shop_type.trim(),
-          body.email.trim().toLowerCase(),
+          fullName,
+          shopName,
+          shopType,
+          email.toLowerCase(),
           body.phone?.trim() ?? null,
-          body.message?.trim() ?? null
+          message
         ),
       ],
       {
@@ -82,7 +90,7 @@ contact.post(
         outcome: "succeeded",
         entityType: "contact",
         entityId: id,
-        details: { shop_type: validShopTypes.includes(body.shop_type) ? body.shop_type : null },
+        details: { shop_type: shopType },
       }
     );
     if (refused) return refused;

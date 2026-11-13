@@ -44,6 +44,7 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   parseComposer,
   buildServiceImagePrompt,
+  readJsonObject,
 } from "@repo/utils";
 import { AuditWriteError, userSubjectId } from "@repo/audit";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
@@ -497,12 +498,10 @@ shops.post(
       (await getShopBySlug(c.env.DB, shopIdParam)) ?? (await getShopById(c.env.DB, shopIdParam));
     if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-    const body = await c.req.json<{
-      customer_name?: string;
-      rating?: number;
-      body?: string;
-      booking_id?: string;
-    }>();
+    // A body that is not a JSON object is the caller's mistake: a 400, never
+    // the catch's 500 below.
+    const body = await readJsonObject(c.req);
+    if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
 
     const name = typeof body.customer_name === "string" ? body.customer_name.trim() : "";
     const text = typeof body.body === "string" ? body.body.trim() : "";

@@ -411,10 +411,8 @@ describe("anonymous refusals write nothing to the audit log", () => {
     expect(seen).toEqual(paths.map((p) => `${p} -> 401 []`));
   });
 
-  // Scope: a JSON body missing every field. A body that is not JSON, or has
-  // fields of the wrong type, still makes some rate-limited public routes
-  // answer 500 and record their action as failed (input validation, a
-  // separate item).
+  // Scope: a JSON body missing every field. A body that is not a JSON object,
+  // and fields of the wrong type, are covered in malformed-body.test.ts.
   it("every declared mutating route, sent an anonymous JSON body missing its fields, writes nothing", async () => {
     const shopId = await seedShop("Gap Declared Route Shop");
     const keys = Object.keys(ROUTE_AUDIT).sort();
@@ -447,20 +445,44 @@ describe("the real app mounts the gap guard", () => {
   });
 
   it("a declared route that answers 5xx before its own entry gets the declared action as failed", async () => {
-    // POST /api/contact parses its body inside a try whose catch answers 500
-    // before its batchWithAudit, so a body that is not JSON takes exactly that
-    // path and the handler writes nothing. Only the guard can write this row.
+    // POST /api/contact writes the enquiry and its entry in one D1 batch, inside
+    // a try whose catch answers 500. Here the enquiry's insert fails, as in a D1
+    // outage, so the handler writes nothing and only the guard can write this
+    // row. Only that one statement is refused, whichever order the tests run in.
     expect(ROUTE_AUDIT["POST /api/contact"]).toBe("enquiry.create");
+    let insertRefused = false;
+    const db = new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "prepare") {
+          return (sql: string) => {
+            if (!insertRefused && sql.trimStart().startsWith("INSERT INTO contacts")) {
+              insertRefused = true;
+              throw new Error("D1 unavailable (test)");
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
     const ctx = createExecutionContext();
     const res = (await worker.fetch(
       new Request("https://worker.test/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.131" },
-        body: "this is not json {",
+        body: JSON.stringify({
+          full_name: "Casey Example",
+          shop_name: "Example Cuts",
+          shop_type: "barber_shop",
+          email: "casey@example.test",
+          message: "Hello",
+        }),
       }) as never,
-      env as never,
+      { ...env, DB: db } as never,
       ctx as never
     )) as unknown as Response;
+    expect(insertRefused, "the enquiry's insert was refused").toBe(true);
     await waitOnExecutionContext(ctx);
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ success: false, error: "Internal error" });
