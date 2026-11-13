@@ -6,7 +6,7 @@ export const meta: MetaFunction = () => [
   {
     name: "description",
     content:
-      "Terms of Service for Pivot Parlor — the booking platform for beauty parlours and barber shops.",
+      "Terms of Service for Pivot Parlor, the booking platform for beauty parlours and barber shops.",
   },
 ];
 
@@ -232,7 +232,7 @@ export default function Terms() {
               These Terms are governed by the laws of England and Wales. Any
               disputes arising in connection with these Terms shall be subject
               to the exclusive jurisdiction of the courts of England and Wales.
-              We are committed to resolving disputes fairly — please contact us
+              We are committed to resolving disputes fairly. Please contact us
               at dev@pivotparlor.com before commencing any legal proceedings.
             </p>
           </section>

@@ -84,12 +84,12 @@ export default function ShopCookiePolicy() {
         </p>
         <ul className="list-disc space-y-1 pl-5 text-sm">
           <li>
-            <strong>pp_session</strong> — stores your login session token. Set
+            <strong>pp_session</strong>: stores your login session token. Set
             when you sign in. Expires after 7 days or on logout. HttpOnly,
             Secure.
           </li>
           <li>
-            <strong>Cookie preference</strong> — records that you have seen our
+            <strong>Cookie preference</strong>: records that you have seen our
             cookie notice so it is not shown again. Stored in your
             browser&rsquo;s local storage.
           </li>
@@ -118,7 +118,7 @@ export default function ShopCookiePolicy() {
         </p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
-            <strong>Stripe</strong> — used to process payments securely. Stripe
+            <strong>Stripe</strong>: used to process payments securely. Stripe
             may set cookies related to fraud prevention and payment
             authentication. See{" "}
             <a
@@ -132,8 +132,8 @@ export default function ShopCookiePolicy() {
             .
           </li>
           <li>
-            <strong>Social login providers</strong> (Google, Facebook, LinkedIn)
-            — if you use social login, these providers may set their own
+            <strong>Social login providers</strong> (Google, Facebook, LinkedIn):
+            if you use social login, these providers may set their own
             cookies. Please refer to their respective privacy policies.
           </li>
         </ul>

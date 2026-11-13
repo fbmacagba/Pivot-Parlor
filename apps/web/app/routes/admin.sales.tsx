@@ -114,7 +114,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       message:
         result.status === "completed"
           ? `Refunded ${formatPence(result.refund_pence)}.`
-          : `Refund of ${formatPence(result.refund_pence)} sent to Stripe — it completes when Stripe confirms.`,
+          : `Refund of ${formatPence(result.refund_pence)} sent to Stripe. It completes when Stripe confirms.`,
     });
   } catch (e) {
     return json<ActionData>({ error: e instanceof Error ? e.message : "Refund failed" }, { status: 400 });
@@ -315,7 +315,7 @@ function RefundPanel({
           <Input label="Reason" name="reason" placeholder="e.g. product returned unopened" />
           <p className="text-xs text-white/60">
             Tips are not refunded here. Back-bar products used during a service are not restocked.
-            {detail.tender_type !== "stripe" && " You hand the money back at the till — this records it."}
+            {detail.tender_type !== "stripe" && " You hand the money back at the till. This records it."}
           </p>
           <Button type="submit" size="sm" disabled={isSubmitting || lines.length === 0}>
             {isSubmitting ? "Refunding…" : "Refund selected →"}

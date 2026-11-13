@@ -130,26 +130,26 @@ export default function Privacy() {
             </h2>
             <ul className="mt-3 list-disc space-y-2 pl-5">
               <li>
-                <strong>To respond to enquiries and onboard new shops</strong> —
+                <strong>To respond to enquiries and onboard new shops</strong>;
                 lawful basis: legitimate interests / performance of a contract.
               </li>
               <li>
                 <strong>To operate and deliver the platform</strong>, including
                 processing bookings, managing staff schedules, and sending
-                appointment reminders — lawful basis: performance of a contract.
+                appointment reminders; lawful basis: performance of a contract.
               </li>
               <li>
-                <strong>To process payments and calculate commissions</strong> —
+                <strong>To process payments and calculate commissions</strong>;
                 lawful basis: performance of a contract.
               </li>
               <li>
                 <strong>To send service-related communications</strong> such as
                 booking confirmations, platform updates, and account
-                notifications — lawful basis: performance of a contract /
+                notifications; lawful basis: performance of a contract /
                 legitimate interests.
               </li>{" "}
               <li>
-                <strong>To comply with legal obligations</strong> — lawful
+                <strong>To comply with legal obligations</strong>; lawful
                 basis: compliance with a legal obligation (Article 6(1)(c) UK
                 GDPR).
               </li>
@@ -259,27 +259,27 @@ export default function Privacy() {
             </p>
             <ul className="mt-3 list-disc space-y-2 pl-5">
               <li>
-                <strong>Right of access</strong> — to request a copy of the
+                <strong>Right of access</strong>: to request a copy of the
                 personal data we hold about you.
               </li>
               <li>
-                <strong>Right to rectification</strong> — to request correction
+                <strong>Right to rectification</strong>: to request correction
                 of inaccurate or incomplete data.
               </li>
               <li>
-                <strong>Right to erasure</strong> — to request deletion of your
+                <strong>Right to erasure</strong>: to request deletion of your
                 data in certain circumstances.
               </li>
               <li>
-                <strong>Right to restrict processing</strong> — to request that
+                <strong>Right to restrict processing</strong>: to request that
                 we limit how we use your data.
               </li>
               <li>
-                <strong>Right to data portability</strong> — to receive your
+                <strong>Right to data portability</strong>: to receive your
                 data in a structured, machine-readable format.
               </li>
               <li>
-                <strong>Right to object</strong> — to object to processing based
+                <strong>Right to object</strong>: to object to processing based
                 on legitimate interests or for direct marketing.
               </li>
             </ul>

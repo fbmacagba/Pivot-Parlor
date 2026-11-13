@@ -231,15 +231,15 @@ export default function DevShopDetailIndex() {
                   <dl className="space-y-2">
                     <div className="flex gap-2">
                       <dt className="w-28 shrink-0 text-white/60">Owner name</dt>
-                      <dd className="text-white">{ownerDetails.owner_name?.trim() || "—"}</dd>
+                      <dd className="text-white">{ownerDetails.owner_name?.trim() || "Not set"}</dd>
                     </div>
                     <div className="flex gap-2">
                       <dt className="w-28 shrink-0 text-white/60">Owner email</dt>
-                      <dd className="break-all text-white">{ownerDetails.owner_email?.trim() || "—"}</dd>
+                      <dd className="break-all text-white">{ownerDetails.owner_email?.trim() || "Not set"}</dd>
                     </div>
                     <div className="flex gap-2">
                       <dt className="w-28 shrink-0 text-white/60">Shop phone</dt>
-                      <dd className="text-white">{ownerDetails.phone?.trim() || "—"}</dd>
+                      <dd className="text-white">{ownerDetails.phone?.trim() || "Not set"}</dd>
                     </div>
                   </dl>
                 </div>
@@ -263,7 +263,7 @@ export default function DevShopDetailIndex() {
                           {ownerDetails.platform_users.map((u) => (
                             <tr key={u.id}>
                               <td className="px-3 py-2 capitalize text-white/90">{u.role}</td>
-                              <td className="px-3 py-2 text-white/80">{u.name ?? "—"}</td>
+                              <td className="px-3 py-2 text-white/80">{u.name ?? "Not set"}</td>
                               <td className="px-3 py-2 break-all text-white/70">{u.email}</td>
                             </tr>
                           ))}
@@ -401,7 +401,7 @@ export default function DevShopDetailIndex() {
             />
             <span>
               Generate new images (hero, logo, service photos)
-              <span className="ml-1 text-white/60">(slower, 1–3 min). Uncheck to reuse the current images.</span>
+              <span className="ml-1 text-white/60">(slower, 1 to 3 min). Uncheck to reuse the current images.</span>
             </span>
           </label>
 

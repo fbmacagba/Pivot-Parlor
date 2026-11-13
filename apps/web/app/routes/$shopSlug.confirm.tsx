@@ -120,7 +120,7 @@ export default function BookingConfirm() {
         </div>
         <h1 className="font-heading text-3xl font-bold text-[color:var(--st-ink)]">Finalising your payment…</h1>
         <p className="mt-3 text-[color:var(--st-ink-60)]">
-          Your deposit went through — we&apos;re confirming your booking. This normally takes a few
+          Your deposit went through. We&apos;re confirming your booking. This normally takes a few
           seconds. You&apos;ll also receive a confirmation email.
         </p>
         {pollTimedOut && (
@@ -128,7 +128,7 @@ export default function BookingConfirm() {
             className="mt-3 text-sm text-amber-300/80"
             style={lightDark("#92400e", "rgba(252, 211, 77, 0.8)")}
           >
-            This is taking longer than usual. Your payment is safe — the confirmation email will
+            This is taking longer than usual. Your payment is safe. The confirmation email will
             arrive once processing completes, or contact the shop quoting the reference below.
           </p>
         )}
@@ -145,7 +145,7 @@ export default function BookingConfirm() {
         </div>
         <h1 className="font-heading text-3xl font-bold text-[color:var(--st-ink)]">Booking not completed</h1>
         <p className="mt-3 text-[color:var(--st-ink-60)]">
-          This booking was cancelled before payment completed. No money has been taken — you can
+          This booking was cancelled before payment completed. No money has been taken. You can
           book again below.
         </p>
         <div className="mt-8">

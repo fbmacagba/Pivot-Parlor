@@ -471,7 +471,7 @@ export default function DevShops() {
                             {shop.ai_model.replace(/-/g, " ")}
                           </Badge>
                         ) : (
-                          <span className="text-white/50">—</span>
+                          <span className="text-white/50">Not set</span>
                         )}
                       </td>
                       <td className="px-4 py-3">{<StatusBadge shop={shop} />}</td>

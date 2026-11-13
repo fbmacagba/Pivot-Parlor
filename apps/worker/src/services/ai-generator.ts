@@ -95,7 +95,7 @@ function defaultTheme(shopName: string, shopType: string): BrandConfig {
     aestheticKeywords: ["luxury", "professional", "modern", "welcoming"],
     servicesIntro: "Discover treatments designed to enhance your natural best",
     trustStatement: `Trusted by hundreds of satisfied clients across London`,
-    urgencyText: "Limited slots this week — secure your spot today",
+    urgencyText: "Limited slots this week. Secure your spot today",
   };
 }
 

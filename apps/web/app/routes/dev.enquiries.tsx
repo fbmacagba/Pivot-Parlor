@@ -219,7 +219,7 @@ export default function DevEnquiries() {
                     <td className="px-4 py-3 text-white/60 capitalize">{e.shop_type.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3 text-white/60">{e.email}</td>
                     <td className="px-4 py-3 text-white/50 text-xs max-w-[120px] truncate" title={e.phone ?? ""}>
-                      {e.phone || "—"}
+                      {e.phone || "Not given"}
                     </td>
                     <td className="px-4 py-3 text-white/50 text-xs max-w-[200px]">
                       {e.message ? (
@@ -231,7 +231,7 @@ export default function DevEnquiries() {
                         >
                           {e.message}
                         </button>
-                      ) : "—"}
+                      ) : "No message"}
                     </td>
                     <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
                       {formatDateTime(e.created_at)}
@@ -340,7 +340,7 @@ export default function DevEnquiries() {
           {successPayload && (
             <div className="space-y-4">
               <p className="text-sm text-white/70">
-                <span className="text-white font-medium">{successPayload.shop.name}</span> — slug{" "}
+                <span className="text-white font-medium">{successPayload.shop.name}</span>, slug{" "}
                 <code className="text-gold text-xs">{successPayload.shop.slug}</code>
               </p>
 

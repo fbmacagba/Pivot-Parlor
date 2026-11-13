@@ -18,7 +18,7 @@ interface InviteData {
 }
 
 export const meta: MetaFunction = () => [
-  { title: "Accept invite — Pivot Parlor" },
+  { title: "Accept invite | Pivot Parlor" },
 ];
 
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
