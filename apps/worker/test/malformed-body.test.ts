@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { seedShop } from "./helpers";
+import { seedShop, seedUser, tokenFor } from "./helpers";
 import { ROUTE_AUDIT } from "../src/audit/registry.js";
 
 /**
@@ -22,7 +22,7 @@ function nextIp(): string {
 type Sent = { status: number; body: unknown; rows: string[]; errors: number };
 
 /** One request with a raw body through the real worker; the audit rows it wrote and its console.error calls. */
-async function send(method: string, path: string, rawBody: string): Promise<Sent> {
+async function send(method: string, path: string, rawBody: string, headers: Record<string, string> = {}): Promise<Sent> {
   const last = await env.DB.prepare("SELECT COALESCE(MAX(rowid), 0) AS n FROM audit_log").first<{ n: number }>();
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
@@ -30,7 +30,7 @@ async function send(method: string, path: string, rawBody: string): Promise<Sent
     const res = (await worker.fetch(
       new Request(`https://worker.test${path}`, {
         method,
-        headers: { "Content-Type": "application/json", "CF-Connecting-IP": nextIp() },
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": nextIp(), ...headers },
         body: rawBody,
       }) as never,
       env as never,
@@ -57,7 +57,8 @@ async function send(method: string, path: string, rawBody: string): Promise<Sent
   }
 }
 
-const sendJson = (method: string, path: string, value: unknown): Promise<Sent> => send(method, path, JSON.stringify(value));
+const sendJson = (method: string, path: string, value: unknown, headers: Record<string, string> = {}): Promise<Sent> =>
+  send(method, path, JSON.stringify(value), headers);
 
 // Not JSON at all, an empty body, and JSON that is not an object.
 const MALFORMED = ["this is not json {", "", "null", "[]", "42", '"text"'];
@@ -189,5 +190,21 @@ describe("a field of the wrong type", () => {
     expect(r).toMatchObject({ status: 400, body: { success: false, error }, rows: [], errors: 0 });
     const after = await env.DB.prepare("SELECT COUNT(*) AS n FROM platform_users").first<{ n: number }>();
     expect(after!.n).toBe(before!.n);
+  });
+
+  it("register: a developer's shop_id that is not text answers 400 and creates nothing", async () => {
+    // Only a signed-in developer may set shop_id, so this branch needs one.
+    const devId = await seedUser("developer", null);
+    const token = await tokenFor(devId, "developer", null);
+    const email = `dev-made-${crypto.randomUUID()}@example.test`;
+    const r = await sendJson(
+      "POST",
+      "/auth/register",
+      { name: "Casey", email, password: "pw-123456", role: "staff", shop_id: { id: "x" } },
+      { Authorization: `Bearer ${token}` },
+    );
+    expect(r).toMatchObject({ status: 400, body: { success: false, error: "shop_id must be text" }, rows: [], errors: 0 });
+    const row = await env.DB.prepare("SELECT id FROM platform_users WHERE email = ?").bind(email).first();
+    expect(row).toBeNull();
   });
 });
