@@ -357,7 +357,39 @@ async function anonymous(method: string, path: string, body?: unknown): Promise<
   return { status: res.status, rows: (rows.results ?? []).map((r) => `${r.action}/${r.outcome}`) };
 }
 
-describe("anonymous callers cannot write to the audit log", () => {
+/** Registry keys whose route patterns match the same concrete request. */
+function overlappingKeys(registry: Record<string, unknown>): string[] {
+  const pats = Object.keys(registry).map((k) => {
+    const [m, p] = k.split(" ");
+    const source = p!
+      .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\/\*$/, "(?:/.*)?")
+      .replace(/:[A-Za-z]+/g, "[^/]+");
+    return { k, m: m!, re: new RegExp(`^${source}$`), concrete: p!.replace(/:[A-Za-z]+/g, "x").replace(/\/\*$/, "/x") };
+  });
+  // Control: each pattern matches its own concrete path, so an empty result
+  // cannot come from patterns that match nothing.
+  expect(pats.filter((p) => !p.re.test(p.concrete)).map((p) => p.k)).toEqual([]);
+  const out: string[] = [];
+  for (const a of pats) {
+    for (const b of pats) {
+      const sameMethod = a.m === b.m || a.m === "ALL" || b.m === "ALL";
+      if (a.k !== b.k && sameMethod && b.re.test(a.concrete)) out.push(`${a.k} also matches ${b.k}`);
+    }
+  }
+  return out;
+}
+
+it("no two registry keys match the same request (the guard's search over every matched route relies on it)", () => {
+  expect(Object.keys(ROUTE_AUDIT).length).toBeGreaterThan(50);
+  expect(overlappingKeys(ROUTE_AUDIT)).toEqual([]);
+  // Control: an overlap is reported when one exists.
+  expect(overlappingKeys({ "ALL /fx/proxy/*": "pending", "POST /fx/proxy/thing": "pending" })).toEqual([
+    "POST /fx/proxy/thing also matches ALL /fx/proxy/*",
+  ]);
+});
+
+describe("anonymous refusals write nothing to the audit log", () => {
   it("an unknown path under an auth-guarded router answers 401 and writes nothing", async () => {
     const shopId = await seedShop("Gap Unknown Path Shop");
     const paths = [
@@ -379,7 +411,11 @@ describe("anonymous callers cannot write to the audit log", () => {
     expect(seen).toEqual(paths.map((p) => `${p} -> 401 []`));
   });
 
-  it("every declared mutating route, called anonymously with a junk body, writes nothing", async () => {
+  // Scope: a JSON body missing every field. A body that is not JSON, or has
+  // fields of the wrong type, still makes some rate-limited public routes
+  // answer 500 and record their action as failed (input validation, a
+  // separate item).
+  it("every declared mutating route, sent an anonymous JSON body missing its fields, writes nothing", async () => {
     const shopId = await seedShop("Gap Declared Route Shop");
     const keys = Object.keys(ROUTE_AUDIT).sort();
     expect(keys.length).toBeGreaterThan(50);
