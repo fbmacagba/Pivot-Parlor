@@ -296,7 +296,7 @@ const CANDIDATE_JOB_ID = /^[A-Za-z0-9-]{1,64}$/;
 shops.post("/:shopId/site-candidate/publish", authMiddleware, requireShopRole("admin"), async (c) => {
   const shop = await shopForReview(c);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
-  const body = (await c.req.json().catch(() => ({}))) as { job_id?: unknown };
+  const body: { job_id?: unknown } = (await readJsonObject(c.req)) ?? {};
   const jobId = typeof body.job_id === "string" ? body.job_id.trim() : "";
   if (!jobId) return c.json({ success: false, error: "job_id is required: publish the version you previewed" }, 400);
   if (!CANDIDATE_JOB_ID.test(jobId)) return c.json({ success: false, error: "job_id is not a valid version id" }, 400);
@@ -709,10 +709,8 @@ shops.patch("/:shopId/settings", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = (await c.req.json()) as Record<string, unknown>;
-  } catch {
+  const body = await readJsonObject<Record<string, unknown>>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -840,7 +838,7 @@ shops.post("/:shopId/settings", authMiddleware, async (c) => {
     image_model?: string;
     composer?: string;
   };
-  const body = await c.req.json<GenSettingsBody>().catch((): GenSettingsBody => ({}));
+  const body: GenSettingsBody = (await readJsonObject<GenSettingsBody>(c.req)) ?? {};
 
   const textModelIn = typeof body.text_model === "string" ? body.text_model.trim() : "";
   const imageModelIn = typeof body.image_model === "string" ? body.image_model.trim() : "";
@@ -917,21 +915,24 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
     return c.json({ error: "OPENROUTER_API_KEY not configured" }, 503);
   }
 
+  // A malformed request is the caller's mistake: it gets a 400 and a warning in
+  // the logs, never a console.error (Workers Issues emails the owner about each).
   const contentType = c.req.header("Content-Type") || "";
   let rawText: string;
   try {
     rawText = await c.req.text();
   } catch (e) {
-    console.error("[generate-image] failed to read request body", { shopId: shop.id, err: String(e) });
+    console.warn("[generate-image] failed to read request body", { shopId: shop.id, err: String(e) });
     return c.json({ error: "Could not read request body" }, 400);
   }
 
   let body: Record<string, unknown> = {};
   if (rawText.trim()) {
+    let parsed: unknown;
     try {
-      body = JSON.parse(rawText) as Record<string, unknown>;
+      parsed = JSON.parse(rawText);
     } catch (e) {
-      console.error("[generate-image] invalid JSON body", {
+      console.warn("[generate-image] invalid JSON body", {
         shopId: shop.id,
         contentType,
         bodyPreview: rawText.slice(0, 2000),
@@ -944,8 +945,13 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
         400
       );
     }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      console.warn("[generate-image] JSON body is not an object", { shopId: shop.id, contentType });
+      return c.json({ error: 'Invalid JSON body: send an object with the field "type"' }, 400);
+    }
+    body = parsed as Record<string, unknown>;
   } else {
-    console.error("[generate-image] empty body", { shopId: shop.id, contentType });
+    console.warn("[generate-image] empty body", { shopId: shop.id, contentType });
     return c.json(
       {
         error:
@@ -957,7 +963,7 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
 
   const target = parseVisualType(body.type);
   if (!target) {
-    console.error("[generate-image] invalid or missing type", { shopId: shop.id, typeField: body.type });
+    console.warn("[generate-image] invalid or missing type", { shopId: shop.id, typeField: body.type });
     return c.json({ error: `Invalid field "type": must be "logo", "hero" or "service:<id>"` }, 400);
   }
   let serviceRow: Awaited<ReturnType<typeof getServiceById>> = null;
@@ -1129,9 +1135,7 @@ shops.post("/:shopId/save-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
 
-  const body = await c.req
-    .json<{ type?: string; imageUrl?: string }>()
-    .catch((): { type?: string; imageUrl?: string } => ({}));
+  const body: { type?: string; imageUrl?: string } = (await readJsonObject(c.req)) ?? {};
   const target = parseVisualType(body.type);
   const imageUrl = typeof body.imageUrl === "string" ? body.imageUrl.trim() : "";
   if (!target || !imageUrl) {
@@ -1180,7 +1184,7 @@ shops.post("/:shopId/remove-image", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
 
-  const body = await c.req.json<{ type?: string }>().catch((): { type?: string } => ({}));
+  const body: { type?: string } = (await readJsonObject(c.req)) ?? {};
   const target = parseVisualType(body.type);
   if (!target) {
     return c.json({ success: false, error: "type must be logo, hero or service:<id>" }, 400);
@@ -1458,8 +1462,7 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
       composer: form.composer?.toString(),
     };
   } else {
-    const json = await c.req.json<typeof body>().catch((): typeof body => ({}));
-    body = json;
+    body = (await readJsonObject<typeof body>(c.req)) ?? {};
   }
 
   // Cap before any buffering — same limit as the other image uploads.
@@ -1754,7 +1757,7 @@ const KNOWN_SHOP_TYPES: readonly string[] = ["beauty_parlor", "barber_shop", "bo
 const KNOWN_SHOP_PLANS: readonly string[] = ["standard"];
 
 shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     owner_email?: string;
     slug?: string;
@@ -1763,7 +1766,10 @@ shops.post("/", authMiddleware, requireRole("developer"), async (c) => {
     commission_rate?: number;
     /** When set (e.g. enquiry flow), links created shop to contacts row by email. */
     contact_email?: string;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.name?.trim() || !body.owner_email?.trim()) {
     return c.json({ success: false, error: "name and owner_email are required" }, 400);
@@ -1921,13 +1927,16 @@ shops.patch("/:shopId", authMiddleware, requireShopRole("admin"), async (c) => {
   const { shopId } = c.req.param();
   const user = getUser(c);
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     phone?: string;
     is_active?: number;
     commission_rate?: number;
     retail_commission_rate?: number;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   // Commission rates are platform economics: only a developer may change
   // them — a shop admin must not be able to zero their own commission.

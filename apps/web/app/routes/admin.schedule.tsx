@@ -1,6 +1,7 @@
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 import { useEffect, useState } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
@@ -75,8 +76,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const shopId = pageShopId(request, user);
   if (!token || !shopId) return json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
+  const body = await readJsonObject<{ entries?: unknown[] }>(request);
+  if (!body) return json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+
   const api = createApiClient(env.API_URL, token);
-  const body = await request.json() as { entries: unknown[] };
 
   try {
     await api.put(`/api/shops/${shopId}/schedule`, body);

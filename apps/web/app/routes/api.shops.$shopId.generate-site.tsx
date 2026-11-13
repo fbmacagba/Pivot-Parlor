@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
@@ -78,14 +79,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     return json({ success: false, error: "Unauthorized" }, 401);
   }
 
-  let bodyJson: unknown = {};
-  if (ct.includes("application/json")) {
-    try {
-      bodyJson = await request.json();
-    } catch {
-      bodyJson = {};
-    }
-  }
+  // The body is optional: anything that is not a JSON object goes on as {}.
+  const bodyJson = ct.includes("application/json") ? ((await readJsonObject(request)) ?? {}) : {};
 
   const headers: Record<string, string> = {
     ...buildWorkerUpstreamHeaders(request, token),

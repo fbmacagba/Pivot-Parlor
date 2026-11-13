@@ -5,6 +5,7 @@ import {
 } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 import { clsx } from "clsx";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
@@ -145,10 +146,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (!shopId) {
     return json<ActionData>({ ok: false, error: "No shop assigned", ts: Date.now() }, 400);
   }
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
+  const body = await readJsonObject(request);
+  if (!body) {
     return json<ActionData>({ ok: false, error: "Invalid JSON", ts: Date.now() }, 400);
   }
   const api = createApiClient(env.API_URL, token);

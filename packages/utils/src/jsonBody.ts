@@ -7,17 +7,21 @@
  *
  * Takes anything with a json() method: a Fetch Request, or Hono's c.req (whose
  * parsed body is cached, so middleware and handler may both call this).
+ *
+ * T names the fields a route expects. It is a description, not a check: the
+ * values are whatever the caller sent, so a route still checks each field's
+ * type before it uses it.
  */
-export async function readJsonObject(source: { json(): Promise<unknown> }): Promise<Record<string, unknown> | null> {
+export async function readJsonObject<T extends object = Record<string, unknown>>(source: {
+  json(): Promise<unknown>;
+}): Promise<T | null> {
   let value: unknown;
   try {
     value = await source.json();
   } catch {
     return null;
   }
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as T) : null;
 }
 
 /** An optional text field as a form sends it: absent, null, or a string. */

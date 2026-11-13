@@ -16,7 +16,7 @@ import {
   type ResolvedLine,
 } from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
-import { calculateCommissionPence } from "@repo/utils";
+import { calculateCommissionPence, readJsonObject } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
 import { checkSlotConflict, createBookingIfFree, reinstateCancelledIfFree } from "../db/queries.js";
@@ -75,14 +75,12 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
 
   // Products are catalogue references now (WS-3): the server prices them and
   // decrements stock — free-text {name, price} lines are no longer accepted.
-  let body: {
+  const body = await readJsonObject<{
     extraServices?: { serviceId: string; quantity: number }[];
     products?: { productId: string; variantId?: string | null; quantity: number }[];
     tipPercent?: number;
-  };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -457,7 +455,7 @@ r.post("/:shopId/bookings", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  let body: {
+  const body = await readJsonObject<{
     serviceId: string;
     staffId: string;
     slotDate: string;
@@ -466,10 +464,8 @@ r.post("/:shopId/bookings", async (c) => {
     customerEmail: string;
     customerPhone: string;
     promoCode?: string;
-  };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -717,10 +713,8 @@ r.post("/:shopId/walk-ins", async (c) => {
     return c.json({ success: false, error: "Shop is not open today" }, 400);
   }
 
-  let body: { serviceId: string; staffId: string; customerName: string; customerPhone?: string };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  const body = await readJsonObject<{ serviceId: string; staffId: string; customerName: string; customerPhone?: string }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -859,10 +853,8 @@ r.post("/:shopId/check-in", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  let body: { qrCodeData: string };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  const body = await readJsonObject<{ qrCodeData: string }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -964,12 +956,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  let body: { refundDeposit?: boolean };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
-    body = {};
-  }
+  const body: { refundDeposit?: boolean } = (await readJsonObject(c.req)) ?? {};
   // Fresh cancels default to refund; the RECOVERY path (already-cancelled
   // booking) acts only on an EXPLICIT true, so a bare re-cancel can never
   // silently refund a deposit staff deliberately chose to keep.

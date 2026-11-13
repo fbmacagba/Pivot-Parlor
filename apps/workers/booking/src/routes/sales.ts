@@ -27,7 +27,7 @@ import {
 } from "../lib/stripe.js";
 import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import { voidRefusal, voidSale, type VoidableSale } from "../lib/sale-void.js";
-import { calculateCommissionPence } from "@repo/utils";
+import { calculateCommissionPence, readJsonObject } from "@repo/utils";
 import {
   SaleInputError,
   resolveSaleLines,
@@ -60,7 +60,7 @@ r.post("/:shopId/sales", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  let body: {
+  const body = await readJsonObject<{
     items?: SaleLineInput[];
     discount_pence?: number;
     tip_pence?: number;
@@ -71,10 +71,8 @@ r.post("/:shopId/sales", async (c) => {
     note?: string | null;
     success_url?: string;
     cancel_url?: string;
-  };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
@@ -367,13 +365,11 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
     return c.json({ success: false, error: "Admin role required" }, 403);
   }
 
-  let body: {
+  const body = await readJsonObject<{
     lines?: Array<{ sale_item_id?: string; quantity?: number; restock?: boolean }>;
     reason?: string;
-  };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
   if (!Array.isArray(body.lines) || body.lines.length === 0) {

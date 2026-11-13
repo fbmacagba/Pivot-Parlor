@@ -141,7 +141,10 @@ waitlist.patch("/:id/status", authMiddleware, async (c) => {
     return c.json({ success: false, error: "Forbidden" }, 403);
   }
   const { id } = c.req.param();
-  const body = await c.req.json<{ status?: string }>();
+  const body = await readJsonObject<{ status?: string }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const valid = ["waiting", "notified", "booked", "expired"];
   if (!body.status || !valid.includes(body.status)) {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);

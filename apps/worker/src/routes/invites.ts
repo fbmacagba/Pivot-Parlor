@@ -20,6 +20,7 @@ import {
   LEGAL_DOC_TERMS_DPA,
   LEGAL_DOC_TERMS,
 } from "../lib/legal.js";
+import { readJsonObject } from "@repo/utils";
 
 const invites = new Hono<{ Bindings: Bindings }>();
 
@@ -97,11 +98,14 @@ invites.post("/:token/accept", async (c) => {
     return c.json({ success: false, error: "Invite has expired" }, 410);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     password?: string;
     accept_terms?: boolean;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   if (!body.name?.trim() || !body.password || body.password.length < 8) {
     return c.json(
       {

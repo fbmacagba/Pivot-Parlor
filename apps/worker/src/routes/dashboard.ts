@@ -31,6 +31,7 @@ import {
 } from "../lib/shopTime.js";
 import { notifyWaitlistForOpenedSlot } from "../services/waitlist-notify.js";
 import { reportError } from "../services/report-error.js";
+import { readJsonObject } from "@repo/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // /api/dev  — Developer-only platform stats
@@ -512,7 +513,10 @@ staffMeRouter.put("/bookings/:bookingId/status", async (c) => {
     return c.json({ success: false, error: "Staff record not found" }, 404);
   }
 
-  const body = await c.req.json<{ status?: string }>();
+  const body = await readJsonObject<{ status?: string }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const allowed = ["in_progress", "completed"];
   if (!body.status || !allowed.includes(body.status)) {
     return c.json({ success: false, error: `status must be one of: ${allowed.join(", ")}` }, 400);
@@ -608,11 +612,14 @@ staffMeRouter.post("/time-off", async (c) => {
     return c.json({ success: false, error: "Staff record not found" }, 404);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     from_date?: string;
     to_date?: string;
     reason?: string;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.from_date || !body.to_date) {
     return c.json({ success: false, error: "from_date and to_date are required" }, 400);
@@ -1003,9 +1010,7 @@ shopSetupStatusRouter.get("/", async (c) => {
 meRouter.patch("/profile", async (c) => {
   const user = getUser(c);
 
-  const body = await c.req
-    .json<{ name?: string; phone?: string }>()
-    .catch((): { name?: string; phone?: string } => ({}));
+  const body: { name?: string; phone?: string } = (await readJsonObject(c.req)) ?? {};
 
   const name  = typeof body.name  === "string" ? body.name.trim()  : undefined;
   const phone = typeof body.phone === "string" ? body.phone.trim() : undefined;
