@@ -13,6 +13,7 @@ import {
   platformFallbackVars,
 } from "~/components/ThemedBookingControls";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export async function loader({ params }: LoaderFunctionArgs) {
   const slug = requireShopSlug(params);
@@ -24,7 +25,8 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
   const slug = requireShopSlug(params);
   if (isPortfolioDemoShop(slug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
   const env = context.env as { API_URL: string };
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
   try {
     await createApiClient(env.API_URL).post("/api/waitlist", {
       shop_slug: slug,

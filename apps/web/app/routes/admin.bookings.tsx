@@ -10,6 +10,7 @@ import { BookingStatusSelect } from "~/components/admin/BookingStatusSelect";
 import { useModalA11y } from "~/lib/useModalA11y";
 import { clockOf, formatDate as formatUkDate, formatDay, ukToday } from "~/lib/dateFormat";
 import { pageShopId } from "~/lib/pageShop";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
 
@@ -87,7 +88,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ ok: false, error: UNREADABLE_FORM }, { status: 400 });
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "") || null);
   if (!shopId) return json({ ok: false, error: "Choose a shop first." }, { status: 400 });
   const bookingId = form.get("bookingId") as string;

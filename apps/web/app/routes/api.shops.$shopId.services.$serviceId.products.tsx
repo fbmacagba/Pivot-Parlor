@@ -7,6 +7,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -29,7 +30,8 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json({ success: false, error: "Unauthorized" }, { status: 401 });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
   let products: unknown;
   try {
     products = JSON.parse(String(form.get("products") ?? "[]"));

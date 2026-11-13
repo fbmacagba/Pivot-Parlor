@@ -16,6 +16,7 @@ import { StatusBadge } from "~/components/dev-shops/StatusBadge";
 import { DeleteShopDialog, type DeleteShopResult } from "~/components/dev-shops/DeleteShopDialog";
 import { RatesDialog, type RatesActionResult } from "~/components/dev-shops/RatesDialog";
 import { OnboardShopDialog } from "~/components/dev-shops/OnboardShopDialog";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -47,7 +48,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
 
   const actionType = form.get("_action");
 

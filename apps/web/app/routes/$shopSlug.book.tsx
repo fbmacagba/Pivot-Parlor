@@ -29,6 +29,7 @@ import { demoSlots, openingWindow, weekdayName } from "~/lib/demoBooking";
 import { formatDay, formatTime } from "~/lib/dateFormat";
 import { restorableDay, restoredStep, skipRevalidationForWizardParams, wizardSearch } from "~/lib/bookingUrl";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 interface Staff { id: string; display_name: string; bio?: string; avatar_url?: string; speciality?: string }
 interface Slot { staff_id: string; start_time: string; end_time: string; is_available: boolean }
@@ -221,7 +222,8 @@ export async function action({ params, request, context }: ActionFunctionArgs) {
   if (isPortfolioDemoShop(slug)) return json({ success: false, error: PORTFOLIO_DEMO_ERROR }, { status: 403 });
   const env = context.env as { API_URL: string };
   const api = createApiClient(env.API_URL);
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
 
   let booking: { id: string; checkout_url?: string };
   try {

@@ -9,6 +9,7 @@ import { invitePageSendsE2eMock } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import { sessionCookieHeaders } from "~/lib/auth";
 import { formatDate } from "~/lib/dateFormat";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 interface InviteData {
   email: string;
@@ -63,7 +64,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
 
   if (!token) return json({ error: "Missing invite token" });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ error: UNREADABLE_FORM }, { status: 400 });
   const name = form.get("name")?.toString().trim() ?? "";
   const password = form.get("password")?.toString() ?? "";
   const confirm = form.get("confirm_password")?.toString() ?? "";

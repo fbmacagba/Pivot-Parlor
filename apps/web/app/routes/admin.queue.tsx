@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { pageShopId } from "~/lib/pageShop";
+import { readFormData } from "~/lib/formBody";
 
 interface QueueEntry {
   id: string;
@@ -43,7 +44,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ ok: false }, 400);
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "") || null);
   if (!shopId) return json({ ok: false }, 400);
   const intent = form.get("intent") as string;

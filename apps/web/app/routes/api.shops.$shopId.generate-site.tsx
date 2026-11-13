@@ -9,6 +9,7 @@ import {
   buildWorkerUpstreamHeaders,
   workerResponseLooksLikeJson,
 } from "~/lib/worker-upstream-headers";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 /**
  * POST from Remix (form or JSON):
@@ -24,7 +25,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data");
 
   if (isForm) {
-    const form = await request.formData();
+    const form = await readFormData(request);
+    if (!form) return json({ ok: false, error: UNREADABLE_FORM, shopId }, 400);
     if (form.get("_action") !== "regenerate-site") {
       return json({ ok: false, error: "Unknown action", shopId }, 400);
     }

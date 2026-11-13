@@ -18,6 +18,7 @@ import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/components/ui/Dialog";
 import { formatDate, formatDateTime } from "~/lib/dateFormat";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 // ─── Types (worker rows are snake_case) ───────────────────────────────────────
 
@@ -154,7 +155,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json<ActionData>({ error: "Unauthorized" }, { status: 401 });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json<ActionData>({ error: UNREADABLE_FORM }, { status: 400 });
   const intent = String(form.get("intent") ?? "").trim();
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   if (!shopId) {

@@ -5,6 +5,7 @@ import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { TURNSTILE_SCRIPT_SRC, TURNSTILE_SITE_KEY, TurnstileWidget } from "~/components/TurnstileWidget";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export const meta: MetaFunction = () => [
   { title: "Contact Us | Pivot Parlor" },
@@ -25,7 +26,8 @@ export const links: LinksFunction = () => [
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
     const env = context.env as { API_URL: string; TURNSTILE_SECRET_KEY?: string };
-    const form = await request.formData();
+    const form = await readFormData(request);
+    if (!form) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
 
     // ── Turnstile verification ──
     const turnstileToken = form.get("cf-turnstile-response");
