@@ -87,7 +87,15 @@ describe("a body that is not a JSON object", () => {
 
   it("the public routes answer it 400 'Invalid JSON'", async () => {
     const shopId = await seedShop("Malformed Body Review Shop");
-    const routes = ["/api/contact", "/contact", `/api/shops/${shopId}/reviews`, "/auth/login", "/auth/register"];
+    const routes = [
+      "/api/contact",
+      "/contact",
+      `/api/shops/${shopId}/reviews`,
+      "/auth/login",
+      "/auth/register",
+      "/api/waitlist",
+      "/auth/verify-email",
+    ];
     const seen: string[] = [];
     for (const path of routes) {
       for (const raw of MALFORMED) {
@@ -140,6 +148,35 @@ describe("a field of the wrong type", () => {
       rows: [],
       errors: 0,
     });
+  });
+
+  it.each([
+    ["shop_id", { shop_id: { id: "x" } }, "shop_id (or shop_slug), customer_name and customer_email are required"],
+    ["service_id", { service_id: { id: "x" } }, "service_id must be text"],
+    ["staff_id", { staff_id: ["x"] }, "staff_id must be text"],
+  ])("waitlist: %s answers 400 and adds nothing", async (_field, swap, error) => {
+    const shopId = await seedShop("Waitlist Wrong Type Shop");
+    const before = await env.DB.prepare("SELECT COUNT(*) AS n FROM waitlist").first<{ n: number }>();
+    const r = await sendJson("POST", "/api/waitlist", {
+      shop_id: shopId,
+      customer_name: "Casey",
+      customer_email: "casey@example.test",
+      ...swap,
+    });
+    expect(r).toMatchObject({ status: 400, body: { success: false, error }, rows: [], errors: 0 });
+    const after = await env.DB.prepare("SELECT COUNT(*) AS n FROM waitlist").first<{ n: number }>();
+    expect(after!.n).toBe(before!.n);
+  });
+
+  it("waitlist still takes a valid entry (control)", async () => {
+    const shopId = await seedShop("Waitlist Control Shop");
+    const r = await sendJson("POST", "/api/waitlist", {
+      shop_id: shopId,
+      customer_name: "Casey",
+      customer_email: "casey@example.test",
+      customer_phone: null,
+    });
+    expect(r).toMatchObject({ status: 201, errors: 0 });
   });
 
   it.each([
