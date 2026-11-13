@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAdminHref, pageShopId, withShopId } from "./pageShop";
+import { dashboardHref, isAdminHref, isStaffHref, pageShopId, pageStaffId, withShopId } from "./pageShop";
 
 const req = (query = "") => new Request(`https://pivotparlor.com/admin/settings${query}`);
 const admin = { role: "admin" as const, shop_id: "shop-own" };
@@ -73,5 +73,47 @@ describe("withShopId: links keep the developer's shop", () => {
     expect(withShopId("/admin/staff", null)).toBe("/admin/staff");
     expect(withShopId("/admin/staff", undefined)).toBe("/admin/staff");
     expect(withShopId("/admin/staff", "../x")).toBe("/admin/staff");
+  });
+});
+
+describe("pageStaffId: whose staff screens a developer is viewing", () => {
+  const staffReq = (query = "") => new Request(`https://pivotparlor.com/staff${query}`);
+
+  it("a developer gets the URL's staffId", () => {
+    expect(pageStaffId(staffReq("?shopId=shop-1&staffId=staff-9"), developer)).toBe("staff-9");
+  });
+
+  it("staff and admins never do: their screens are always their own", () => {
+    expect(pageStaffId(staffReq("?staffId=staff-9"), staff)).toBeNull();
+    expect(pageStaffId(staffReq("?staffId=staff-9"), admin)).toBeNull();
+  });
+
+  it("none chosen, or not a plain id, is none", () => {
+    expect(pageStaffId(staffReq(), developer)).toBeNull();
+    expect(pageStaffId(staffReq(`?staffId=${encodeURIComponent("../me")}`), developer)).toBeNull();
+  });
+});
+
+describe("dashboardHref: links keep what a developer is looking at", () => {
+  const view = { shopId: "shop-1", staffId: "staff-9" };
+
+  it("admin destinations keep the shop", () => {
+    expect(dashboardHref("/admin/bookings", view)).toBe("/admin/bookings?shopId=shop-1");
+  });
+
+  it("staff destinations keep the shop and the staff member", () => {
+    expect(dashboardHref("/staff/bookings", view)).toBe("/staff/bookings?shopId=shop-1&staffId=staff-9");
+    expect(dashboardHref("/staff", { shopId: "shop-1", staffId: null })).toBe("/staff?shopId=shop-1");
+  });
+
+  it("other destinations are left alone", () => {
+    expect(dashboardHref("/dev/shops", view)).toBe("/dev/shops");
+    expect(dashboardHref("/account", view)).toBe("/account");
+  });
+
+  it("knows a staff destination", () => {
+    expect(isStaffHref("/staff")).toBe(true);
+    expect(isStaffHref("/staff/pos")).toBe(true);
+    expect(isStaffHref("/staffroom")).toBe(false);
   });
 });

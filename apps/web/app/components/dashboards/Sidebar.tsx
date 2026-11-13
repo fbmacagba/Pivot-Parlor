@@ -156,16 +156,16 @@ export function Sidebar({
             <select
               id="pp-dev-switch-view"
               className="w-full rounded-lg border border-white/15 bg-white/5 px-2.5 py-2.5 text-sm text-white focus:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold/40 md:py-2"
-              value={developerViewSelectValue(pathname)}
+              value={shopHref(developerViewSelectValue(pathname))}
               onChange={(e) => navigate(e.target.value)}
             >
               <option className="bg-dark text-white" value="/dev/dashboard">
                 Developer Dashboard
               </option>
-              <option className="bg-dark text-white" value="/admin">
+              <option className="bg-dark text-white" value={shopHref("/admin")}>
                 Admin View
               </option>
-              <option className="bg-dark text-white" value="/staff">
+              <option className="bg-dark text-white" value={shopHref("/staff")}>
                 Staff View
               </option>
               <option className="bg-dark text-white" value="/account">

@@ -1,7 +1,7 @@
 // ─── Worker route: /api/dev/* and /api/me/* and /api/staff/me/* ──────────────
 // Adds the missing dashboard endpoints identified in DASHBOARD_SPEC.md
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
@@ -327,20 +327,43 @@ async function resolveMyStaffId(
 }
 
 /**
+ * The staff record a /me READ shows. Staff (and admins who are on the team)
+ * always get their own, whatever the query string says. A developer has no
+ * staff record: Staff View names the person with ?staffId= and shows exactly
+ * their screens, read-only (the writes below refuse a developer).
+ */
+async function resolveViewedStaff(
+  c: Context<{ Bindings: Bindings }>
+): Promise<{ staffId: string; shopId: string } | null> {
+  const user = getUser(c);
+  if (user.role === "developer") {
+    const requested = c.req.query("staffId")?.trim();
+    if (!requested) return null;
+    const row = await c.env.DB
+      .prepare("SELECT id, shop_id FROM staff WHERE id = ? AND is_active = 1 LIMIT 1")
+      .bind(requested)
+      .first<{ id: string; shop_id: string }>();
+    return row ? { staffId: row.id, shopId: row.shop_id } : null;
+  }
+  const staffId = await resolveMyStaffId(c.env.DB, user.sub, user.shop_id);
+  return staffId && user.shop_id ? { staffId, shopId: user.shop_id } : null;
+}
+
+const DEVELOPER_READ_ONLY = "Developers can view staff screens but not act for staff.";
+
+/**
  * GET /api/staff/me/today
  * Today's bookings for the authenticated staff member.
  * Returns bookings with customer name (NOT email/phone in list — detail view only).
  */
 staffMeRouter.get("/today", async (c) => {
-  const user = getUser(c);
-  const shopId = user.shop_id;
-  const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
-
-  if (!staffId) {
+  const viewed = await resolveViewedStaff(c);
+  if (!viewed) {
     return c.json({ success: true, data: [] });
   }
+  const { staffId, shopId } = viewed;
 
-  const today = shopToday(await getShopTimezone(c.env.DB, shopId!));
+  const today = shopToday(await getShopTimezone(c.env.DB, shopId));
 
   const { results } = await c.env.DB
     .prepare(
@@ -377,18 +400,16 @@ staffMeRouter.get("/today", async (c) => {
  * GDPR note: customer email/phone NOT returned in list — available only in detail endpoint.
  */
 staffMeRouter.get("/bookings", async (c) => {
-  const user = getUser(c);
-  const shopId = user.shop_id;
-  const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
-
-  if (!staffId) {
+  const viewed = await resolveViewedStaff(c);
+  if (!viewed) {
     return c.json({ success: true, data: [] });
   }
+  const { staffId, shopId } = viewed;
 
   const filter = c.req.query("filter") ?? "upcoming";
   const limit = Math.min(Number(c.req.query("limit") ?? 20), 100);
   const offset = Number(c.req.query("offset") ?? 0);
-  const today = shopToday(await getShopTimezone(c.env.DB, shopId!));
+  const today = shopToday(await getShopTimezone(c.env.DB, shopId));
 
   // The operator is fixed SQL; the date is bound below, never interpolated.
   const dateCond = filter === "past" ? "b.booking_date < ?" : "b.booking_date >= ?";
@@ -427,14 +448,13 @@ staffMeRouter.get("/bookings", async (c) => {
  * Only accessible if the booking belongs to this staff member.
  */
 staffMeRouter.get("/bookings/:bookingId", async (c) => {
-  const user = getUser(c);
-  const shopId = user.shop_id;
-  const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
+  const viewed = await resolveViewedStaff(c);
   const bookingId = c.req.param("bookingId");
 
-  if (!staffId) {
+  if (!viewed) {
     return c.json({ success: false, error: "Staff record not found" }, 404);
   }
+  const { staffId } = viewed;
 
   const booking = await c.env.DB
     .prepare(
@@ -475,6 +495,9 @@ staffMeRouter.get("/bookings/:bookingId", async (c) => {
  */
 staffMeRouter.put("/bookings/:bookingId/status", async (c) => {
   const user = getUser(c);
+  if (user.role === "developer") {
+    return c.json({ success: false, error: DEVELOPER_READ_ONLY }, 403);
+  }
   const shopId = user.shop_id;
   const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
   const bookingId = c.req.param("bookingId");
@@ -522,13 +545,11 @@ staffMeRouter.put("/bookings/:bookingId/status", async (c) => {
  * Staff member's own weekly schedule.
  */
 staffMeRouter.get("/schedule", async (c) => {
-  const user = getUser(c);
-  const shopId = user.shop_id;
-  const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
-
-  if (!staffId) {
+  const viewed = await resolveViewedStaff(c);
+  if (!viewed) {
     return c.json({ success: true, data: [] });
   }
+  const { staffId } = viewed;
 
   const { results } = await c.env.DB
     .prepare(
@@ -554,6 +575,9 @@ function calendarDateMs(date: string): number | null {
  */
 staffMeRouter.post("/time-off", async (c) => {
   const user = getUser(c);
+  if (user.role === "developer") {
+    return c.json({ success: false, error: DEVELOPER_READ_ONLY }, 403);
+  }
   const shopId = user.shop_id;
   const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
 
@@ -619,13 +643,11 @@ staffMeRouter.post("/time-off", async (c) => {
  * Staff views their own time-off requests.
  */
 staffMeRouter.get("/time-off", async (c) => {
-  const user = getUser(c);
-  const shopId = user.shop_id;
-  const staffId = await resolveMyStaffId(c.env.DB, user.sub, shopId);
-
-  if (!staffId) {
+  const viewed = await resolveViewedStaff(c);
+  if (!viewed) {
     return c.json({ success: true, data: [] });
   }
+  const { staffId } = viewed;
 
   const { results } = await c.env.DB
     .prepare(

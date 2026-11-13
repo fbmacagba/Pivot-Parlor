@@ -8,6 +8,7 @@ import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { formatDay, formatTime as formatUkTime } from "~/lib/dateFormat";
+import { pageStaffId, staffMePath } from "~/lib/pageShop";
 
 interface Booking {
   id: string;
@@ -52,27 +53,37 @@ function formatTime(iso: string) {
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
-  await requireRole(request, "staff", env.API_URL);
+  const user = await requireRole(request, "staff", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
   const url = new URL(request.url);
   const filter = url.searchParams.get("filter") ?? "upcoming";
   const tab    = url.searchParams.get("tab")    ?? "bookings";
+  // A developer views the staff member they chose (staff.tsx), read-only.
+  const readOnly = user.role === "developer";
+  const staffId = pageStaffId(request, user);
+  const needsStaff = readOnly && !staffId;
 
   let bookings: Booking[] = [];
   let schedule: ScheduleRow[] = [];
   let timeOff: TimeOff[] = [];
 
-  try { bookings = await api.get<Booking[]>(`/api/staff/me/bookings?filter=${filter}`); } catch { /* empty */ }
-  try { schedule = await api.get<ScheduleRow[]>("/api/staff/me/schedule"); } catch { /* empty */ }
-  try { timeOff = await api.get<TimeOff[]>("/api/staff/me/time-off"); } catch { /* empty */ }
+  if (!needsStaff) {
+    const path = (p: string) => staffMePath(p, staffId);
+    try { bookings = await api.get<Booking[]>(path(`/api/staff/me/bookings?filter=${encodeURIComponent(filter)}`)); } catch { /* empty */ }
+    try { schedule = await api.get<ScheduleRow[]>(path("/api/staff/me/schedule")); } catch { /* empty */ }
+    try { timeOff = await api.get<TimeOff[]>(path("/api/staff/me/time-off")); } catch { /* empty */ }
+  }
 
-  return json({ bookings, schedule, timeOff, filter, tab });
+  return json({ bookings, schedule, timeOff, filter, tab, readOnly, needsStaff });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
-  await requireRole(request, "staff", env.API_URL);
+  const user = await requireRole(request, "staff", env.API_URL);
+  if (user.role === "developer") {
+    return json({ ok: false, error: "Developers can view staff screens but not act for staff." }, { status: 403 });
+  }
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
   const body = await request.json() as { from_date?: string; to_date?: string; reason?: string };
@@ -86,7 +97,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export default function StaffBookingsAvailability() {
-  const { bookings, schedule, timeOff, filter } = useLoaderData<typeof loader>();
+  const { bookings, schedule, timeOff, filter, readOnly, needsStaff } = useLoaderData<typeof loader>();
   const [params, setParams] = useSearchParams();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const [toast, setToast] = useState<{ type: "success"|"error"; text: string } | null>(null);
@@ -149,7 +160,7 @@ export default function StaffBookingsAvailability() {
 
           {bookings.length === 0 ? (
             <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50 text-sm">
-              No {filter} bookings.
+              {needsStaff ? "Choose a staff member above to see their bookings." : `No ${filter} bookings.`}
             </div>
           ) : (
             <div className="space-y-2">
@@ -197,7 +208,12 @@ export default function StaffBookingsAvailability() {
             </div>
           </div>
 
-          {/* Time off request form */}
+          {/* Time off request form: the staff member's own; a developer only views. */}
+          {readOnly ? (
+            <p className="rounded-xl border border-white/10 bg-dark-100 p-5 text-sm text-white/60">
+              Time off is requested by the staff member from their own screens.
+            </p>
+          ) : (
           <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
             <h2 className="font-heading text-base font-semibold text-white mb-4">Request time off</h2>
             <div className="space-y-4">
@@ -228,6 +244,7 @@ export default function StaffBookingsAvailability() {
               </Button>
             </div>
           </div>
+          )}
 
           {/* Pending requests */}
           {timeOff.length > 0 && (

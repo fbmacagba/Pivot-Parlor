@@ -30,7 +30,8 @@ import { expect, test } from "./fixtures";
  * sent.
  *
  * The admin screens run twice: as the shop's admin, and as the developer
- * managing that shop through ?shopId=.
+ * managing that shop through ?shopId=. The staff screens run twice too: as
+ * the staff member, and as the developer viewing them (?shopId=&staffId=).
  *
  * The screen list comes from apps/web/app/routes at run time: a new dashboard
  * route is swept automatically or fails "every dashboard route is covered".
@@ -340,6 +341,59 @@ test.describe.serial("dashboard sweep", () => {
       await page.goto(`/admin/payments${q}`);
       await expect(page.getByText("Only the shop's owner can connect its Stripe account.")).toBeVisible();
       await expect(page.getByRole("button", { name: /stripe/i })).toHaveCount(0);
+    });
+  });
+
+  test("staff screens, as the developer viewing that staff member", async ({ page }) => {
+    // Staff View is one person's own day, and a developer is nobody's staff:
+    // they pick the shop and the person (?shopId=&staffId=) and see that
+    // person's screens, read-only. Before, every staff screen was empty.
+    test.setTimeout(180_000);
+    expect(shopId, "the admin test created the shop").toBeTruthy();
+    await signIn(page, "dev@pivotparlor.com", devPassword!);
+    expect((await session(page)).role).toBe("developer");
+
+    const pick = await page.request.get(`/staff?shopId=${encodeURIComponent(shopId)}&_data=${encodeURIComponent("routes/staff")}`);
+    expect(pick.status()).toBe(200);
+    const picked = (await pick.json()) as { developerView?: { staff?: Array<{ id: string; display_name: string }> } };
+    const member = picked.developerView?.staff?.find((s) => s.display_name === "E2E Dashboard Staff");
+    expect(member, "the shop's staff are offered to view").toBeTruthy();
+    const q = `?shopId=${encodeURIComponent(shopId)}&staffId=${encodeURIComponent(member!.id)}`;
+
+    for (const mod of dashboardModules().filter((m) => roleFor(m) === "staff" && !(m in EXCLUDED))) {
+      const url = `${pathFor(mod, { shopId })}${q}`;
+      await test.step(`${mod} (${url})`, async () => {
+        expect.soft(await screenProblems(page, url), `${mod} at ${url}`).toEqual(EXPECTED_PROBLEMS[mod]?.problems ?? []);
+        if (REDIRECTS[new URL(url, "http://x").pathname]) {
+          expect.soft(new URL(page.url()).searchParams.get("staffId"), `${mod} kept ?staffId= through its redirect`).toBe(member!.id);
+        }
+      });
+    }
+
+    await test.step("the banner names the person and the shop", async () => {
+      await page.goto(`/staff${q}`);
+      await expect
+        .soft(page.locator("body"))
+        .toContainText(`you are viewing E2E Dashboard Staff's screens at E2E Dashboards ${uniqueId}, read-only`);
+    });
+
+    await test.step("their schedule arrived (saved by the developer's admin pass), read-only", async () => {
+      const res = await page.request.get(`/staff/bookings${q}&_data=${encodeURIComponent("routes/staff.bookings")}`);
+      expect(res.status()).toBe(200);
+      const data = (await res.json()) as { readOnly?: boolean; needsStaff?: boolean; schedule?: unknown[] };
+      expect.soft(data.readOnly).toBe(true);
+      expect.soft(data.needsStaff).toBe(false);
+      expect.soft(data.schedule?.length ?? 0, "the staff member's schedule rows").toBeGreaterThan(0);
+      await page.goto(`/staff/bookings${q}&tab=availability`);
+      await expect(page.getByText("Time off is requested by the staff member from their own screens.")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Submit request" })).toHaveCount(0);
+    });
+
+    await test.step("a sidebar link stays on the person", async () => {
+      await page.goto(`/staff${q}`);
+      await page.getByRole("navigation", { name: "Dashboard" }).getByRole("link", { name: "My Bookings", exact: true }).first().click();
+      await page.waitForURL((u) => u.pathname === "/staff/bookings");
+      expect.soft(new URL(page.url()).searchParams.get("staffId"), "the sidebar link kept ?staffId=").toBe(member!.id);
     });
   });
 
