@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { routePath } from "hono/route";
+import { matchedRoutes, routePath } from "hono/route";
 import type { Via } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { getShopIdByIdOrSlug } from "../db/queries.js";
@@ -21,18 +21,33 @@ function readRoutePath(c: Context, index?: number): string {
   }
 }
 
+/** Every matched route's path, last first. A thrown read means no route
+ *  matched; it never breaks the guard. */
+function matchedPathsLastFirst(c: Context): string[] {
+  try {
+    return matchedRoutes(c)
+      .map((r) => r.path)
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
 /**
  * The request's registry declaration. The responding route is tried first,
- * then the last matched route: when router-level middleware answers (a
- * `.use("*", requireShopRole(...))` refusal), the responding route is that
- * middleware's "/prefix/*", and only the last match is the handler that
- * carries the declaration. Each is tried as "METHOD route", then "ALL route".
+ * then every matched route from the last back: when router-level middleware
+ * answers (a `.use("*", requireShopRole(...))` refusal), the responding route
+ * is that middleware's "/prefix/*", and the declaration sits on the handler,
+ * which need not be the last match either (/api/ai registers a rate-limit
+ * `.use("*")` AFTER its handlers). Each is tried as "METHOD route", then
+ * "ALL route". Every candidate matched this same request, so any declaration
+ * found describes it.
  */
 function declarationFor(
   c: Context,
   registry: Record<string, AuditDeclaration>
 ): AuditDeclaration | undefined {
-  for (const candidate of [readRoutePath(c), readRoutePath(c, -1)]) {
+  for (const candidate of [readRoutePath(c), ...matchedPathsLastFirst(c)]) {
     if (!candidate || candidate === "*") continue;
     for (const key of [`${c.req.method} ${candidate}`, `ALL ${candidate}`]) {
       if (Object.hasOwn(registry, key)) return registry[key];
@@ -54,7 +69,12 @@ function declarationFor(
  * with a catalogue action and no entry of its own: a 4xx writes nothing
  * (nothing changed; refusals are stage 3), a 5xx writes the declared action
  * as failed, and a 2xx/3xx is still an audit.gap (a coverage bug). An exempt
- * route writes nothing. Pending and undeclared routes write an audit.gap.
+ * route writes nothing. An undeclared route writes an audit.gap for a 2xx,
+ * 3xx or 5xx, and nothing for a 4xx: a refusal changed nothing, and an
+ * anonymous caller can send any number of them (an unknown path under an
+ * auth-guarded router answers 401), so recording them would let anyone fill
+ * the append-only log (ledger 8927dfec). A pending route still writes an
+ * audit.gap for every status, 4xx included, so coverage work stays visible.
  */
 export function auditGapGuard(
   via: Via,
@@ -69,8 +89,8 @@ export function auditGapGuard(
 
     const declaration = declarationFor(c, registry);
     if (typeof declaration === "object") return;
+    if (declaration !== "pending" && status >= 400 && status < 500) return;
     const action = declaration !== undefined && declaration !== "pending" ? declaration : null;
-    if (action && status >= 400 && status < 500) return;
 
     // Never record the concrete path (Plan ruling 11): only the matched
     // ROUTE PATTERN, e.g. "/api/invites/:token/accept" — a raw path can

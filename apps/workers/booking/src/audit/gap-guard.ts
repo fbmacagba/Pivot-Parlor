@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { routePath } from "hono/route";
+import { matchedRoutes, routePath } from "hono/route";
 import type { Via } from "@repo/audit";
 import type { Env } from "../types.js";
 import { auditFor, resolveShopParam } from "./context.js";
@@ -19,14 +19,27 @@ function readRoutePath(c: Context, index?: number): string {
   }
 }
 
-/** The request's registry declaration: the responding route first, then the
- *  last matched route (router-level middleware may answer), each tried as
- *  "METHOD route" then "ALL route". */
+/** Every matched route's path, last first. A thrown read means no route
+ *  matched; it never breaks the guard. */
+function matchedPathsLastFirst(c: Context): string[] {
+  try {
+    return matchedRoutes(c)
+      .map((r) => r.path)
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+/** The request's registry declaration: the responding route first, then
+ *  every matched route from the last back (router-level middleware may
+ *  answer, and a middleware registered after the handler may also match),
+ *  each tried as "METHOD route" then "ALL route". */
 function declarationFor(
   c: Context,
   registry: Record<string, AuditDeclaration>
 ): AuditDeclaration | undefined {
-  for (const candidate of [readRoutePath(c), readRoutePath(c, -1)]) {
+  for (const candidate of [readRoutePath(c), ...matchedPathsLastFirst(c)]) {
     if (!candidate || candidate === "*") continue;
     for (const key of [`${c.req.method} ${candidate}`, `ALL ${candidate}`]) {
       if (Object.hasOwn(registry, key)) return registry[key];
@@ -40,8 +53,11 @@ function declarationFor(
  * its own audit entry. Same rules as the API worker's guard: a 4xx on a
  * declared route writes nothing, a 5xx writes the declared action as failed,
  * a 2xx/3xx on a declared route is still an audit.gap (a coverage bug), an
- * exempt route writes nothing, and pending or undeclared routes write an
- * audit.gap. `via` is "webhook" under /webhooks/ and "api" otherwise.
+ * exempt route writes nothing, an undeclared route writes an audit.gap for
+ * anything but a 4xx (a refusal changed nothing, and anonymous callers could
+ * otherwise fill the append-only log: ledger 8927dfec), and a pending route
+ * writes an audit.gap for every status. `via` is "webhook" under /webhooks/
+ * and "api" otherwise.
  */
 export function auditGapGuard(
   registry: Record<string, AuditDeclaration> = ROUTE_AUDIT
@@ -55,8 +71,8 @@ export function auditGapGuard(
 
     const declaration = declarationFor(c, registry);
     if (typeof declaration === "object") return;
+    if (declaration !== "pending" && status >= 400 && status < 500) return;
     const action = declaration !== undefined && declaration !== "pending" ? declaration : null;
-    if (action && status >= 400 && status < 500) return;
 
     // Only the matched ROUTE PATTERN is recorded, never the concrete path.
     let route = "unmatched";
