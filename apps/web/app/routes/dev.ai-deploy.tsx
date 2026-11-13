@@ -355,7 +355,7 @@ export default function DevAIDeploy() {
             />
           ) : (
             <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-white/20 text-sm text-white/50">
-              Generate a theme to see a preview here — nothing changes on the shop site until you apply one
+              Generate a theme to see a preview here. Nothing changes on the shop site until you apply one
             </div>
           )}
           {compareMode && resultB && (

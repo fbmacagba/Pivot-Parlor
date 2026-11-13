@@ -91,7 +91,7 @@ export default function SetupStripe() {
                 "AI-generated branded booking website",
                 "Online booking live 24/7",
                 "Staff scheduling & automated reminders",
-                "No monthly fees — 10% commission only",
+                "No monthly fees, 10% commission only",
               ].map((item) => (
                 <div key={item} className="flex items-center gap-2.5 text-sm text-white/70">
                   <svg className="w-4 h-4 text-gold shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

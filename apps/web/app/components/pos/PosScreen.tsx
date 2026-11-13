@@ -180,7 +180,7 @@ export function PosScreen({
                 <p className="text-sm text-white/60">No services yet.</p>
               )}
               {tab === "products" && products.length === 0 && (
-                <p className="text-sm text-white/60">No retail products yet — add them under Products.</p>
+                <p className="text-sm text-white/60">No retail products yet. Add them under Products.</p>
               )}
             </div>
           </div>

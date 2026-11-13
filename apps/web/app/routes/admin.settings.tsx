@@ -556,7 +556,7 @@ export default function AdminSettings() {
                 placeholder="5.00"
               />
               <p className="mt-1 text-xs text-white/60">
-                Never more than the service price — a high minimum becomes full prepayment.
+                Never more than the service price. A high minimum becomes full prepayment.
               </p>
             </div>
             <Button type="button" size="sm" onClick={saveDeposits} disabled={fetcher.state !== "idle"}>

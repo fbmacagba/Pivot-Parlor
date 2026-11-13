@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/Button";
 import { Calendar, Clock, Users, Zap } from "lucide-react";
 
 export const meta: MetaFunction = () => [
-  { title: "Pivot Parlor — Smart Booking for Beauty & Barber Shops" },
+  { title: "Pivot Parlor | Smart Booking for Beauty & Barber Shops" },
   {
     name: "description",
     content:

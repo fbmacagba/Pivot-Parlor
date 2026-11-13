@@ -430,7 +430,7 @@ function PurchaseOrdersSection({
               <label className="block text-sm text-white/70">
                 Supplier
                 <select name="supplier_id" className="mt-1 w-full rounded-lg border border-white/10 bg-dark-100 px-3 py-2 text-sm text-white" defaultValue="">
-                  <option value="">— none —</option>
+                  <option value="">None</option>
                   {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </label>
@@ -563,7 +563,7 @@ function ReceiveDialog({
     <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm font-semibold text-emerald-200">
-          Receive delivery — {po.supplier_name ?? "no supplier"}
+          Receive delivery: {po.supplier_name ?? "no supplier"}
         </p>
         <Link to={`/admin/inventory${shopQuery}`} className="text-xs text-white/60 hover:text-white">Close</Link>
       </div>
@@ -578,7 +578,7 @@ function ReceiveDialog({
             return (
               <div key={item.id} className="flex items-center gap-3 text-sm">
                 <span className="flex-1 truncate text-white/70">
-                  {item.product_name}{item.variant_name && ` — ${item.variant_name}`}
+                  {item.product_name}{item.variant_name && ` (${item.variant_name})`}
                   <span className="ml-2 text-xs text-white/50">
                     {item.received_qty}/{item.quantity} received · {formatPence(item.unit_cost_pence)} each
                   </span>
@@ -690,7 +690,7 @@ function StockTakeSection({
               <input type="hidden" name="stockTakeId" value={openStockTake.id} />
               {shopId && <input type="hidden" name="shopId" value={shopId} />}
               <Button type="submit" size="sm" disabled={isSubmitting || openStockTake.items.length === 0}>
-                Complete — apply adjustments
+                Complete and apply adjustments
               </Button>
             </Form>
             <Form method="post">
@@ -778,7 +778,7 @@ function BackBarSection({
         <FlaskConical className="h-4 w-4 text-gold" /> Back-bar recipes
       </h2>
       <p className="mb-3 text-sm text-white/60">
-        Products used each time a service is performed — deducted from stock automatically when the
+        Products used each time a service is performed, deducted from stock automatically when the
         service is sold at checkout or the till. Use whole units (e.g. track colour in 10ml tubes).
       </p>
 
@@ -790,7 +790,7 @@ function BackBarSection({
             onChange={(e) => selectService(e.target.value)}
             className="mt-1 w-full rounded-lg border border-white/10 bg-dark px-3 py-2 text-sm text-white"
           >
-            <option value="">— choose a service —</option>
+            <option value="">Choose a service</option>
             {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </label>

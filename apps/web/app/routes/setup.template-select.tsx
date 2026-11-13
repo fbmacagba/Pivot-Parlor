@@ -10,43 +10,43 @@ const TEMPLATES = [
   {
     id: "auto",
     name: "Let AI decide",
-    tagline: "Recommended — the AI picks the mood that best fits your brand and style notes",
+    tagline: "Recommended: the AI picks the mood that best fits your brand and style notes",
     primaryColor: "#C9A84C",
   },
   {
     id: "minimal",
     name: "Minimal",
-    tagline: "Clean & Modern — White space, serif headings",
+    tagline: "Clean & Modern: white space, serif headings",
     primaryColor: "#374151",
   },
   {
     id: "luxury",
     name: "Luxury",
-    tagline: "Dark Luxury — Black and gold, premium feel",
+    tagline: "Dark Luxury: black and gold, premium feel",
     primaryColor: "#C9A84C",
   },
   {
     id: "vibrant",
     name: "Vibrant",
-    tagline: "Bold & Vibrant — Strong colours, energetic layout",
+    tagline: "Bold & Vibrant: strong colours, energetic layout",
     primaryColor: "#E07C5C",
   },
   {
     id: "editorial",
     name: "Editorial",
-    tagline: "Warm Editorial — Soft tones, lifestyle feel",
+    tagline: "Warm Editorial: soft tones, lifestyle feel",
     primaryColor: "#c4a77d",
   },
   {
     id: "classic",
     name: "Classic",
-    tagline: "Classic Barber — Deep red, vintage typography",
+    tagline: "Classic Barber: deep red, vintage typography",
     primaryColor: "#8B0000",
   },
   {
     id: "fresh",
     name: "Fresh",
-    tagline: "Fresh & Bright — Pastel tones, rounded and friendly",
+    tagline: "Fresh & Bright: pastel tones, rounded and friendly",
     primaryColor: "#81c784",
   },
 ] as const;
@@ -374,7 +374,7 @@ export default function TemplateSelect() {
             </div>
             <div className="mt-4">
               <label className="block text-sm text-white/80">
-                Upload your logo (optional — skips AI logo generation)
+                Upload your logo (optional, skips AI logo generation)
               </label>
               <input
                 type="file"

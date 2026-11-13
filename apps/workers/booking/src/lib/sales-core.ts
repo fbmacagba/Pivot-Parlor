@@ -119,7 +119,7 @@ export async function resolveSaleLines(
           .first<{ id: string; name: string; retail_price_pence: number; cost_price_pence: number }>();
         if (!variant) throw new SaleInputError("Product variant not found");
         variantId = variant.id;
-        name = `${product.name} — ${variant.name}`;
+        name = `${product.name} (${variant.name})`;
         unit = variant.retail_price_pence;
         cost = variant.cost_price_pence;
       }

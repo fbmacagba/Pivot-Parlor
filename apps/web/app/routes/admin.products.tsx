@@ -314,7 +314,7 @@ export default function AdminProducts() {
             {lowStock.map((row) => (
               <li key={row.id}>
                 {row.product_name}
-                {row.variant_name && ` — ${row.variant_name}`}
+                {row.variant_name && ` (${row.variant_name})`}
                 {row.product_sku && <span className="text-amber-100/50"> ({row.product_sku})</span>}
                 : <span className="font-semibold">{row.quantity}</span> left
                 {row.reorder_point > 0 && ` (reorder at ${row.reorder_point})`}
@@ -355,7 +355,7 @@ export default function AdminProducts() {
       <Dialog open={!!stockProduct} onOpenChange={(open) => { if (!open) setStockProduct(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Stock — {stockProduct?.name}</DialogTitle>
+            <DialogTitle>Stock: {stockProduct?.name}</DialogTitle>
           </DialogHeader>
           {stockProduct && (
             <div className="space-y-6">

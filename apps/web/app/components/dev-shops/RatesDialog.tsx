@@ -34,7 +34,7 @@ export function RatesDialog({
     <Dialog open={shop !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Commission rates — {shop?.name}</DialogTitle>
+          <DialogTitle>Commission rates: {shop?.name}</DialogTitle>
         </DialogHeader>
         {shop && (
           <fetcher.Form method="post" className="space-y-4">

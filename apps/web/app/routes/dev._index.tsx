@@ -129,7 +129,7 @@ export default function DevOverview() {
                     <td className="px-4 py-3 text-white/70">{e.shop_name}</td>
                     <td className="px-4 py-3 text-white/60 capitalize">{e.shop_type.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3 text-white/60">{e.email}</td>
-                    <td className="px-4 py-3 text-white/50 text-xs">{e.phone || "—"}</td>
+                    <td className="px-4 py-3 text-white/50 text-xs">{e.phone || "Not given"}</td>
                     <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
                       {formatDateTime(e.created_at)}
                     </td>

@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/Button";
 
 export const meta: MetaFunction = () => [
   { title: "About Us | Pivot Parlor" },
-  { name: "description", content: "Built for the people behind the chair — the story behind Pivot Parlor." },
+  { name: "description", content: "Built for the people behind the chair: the story behind Pivot Parlor." },
 ];
 
 export default function About() {
@@ -52,7 +52,7 @@ export default function About() {
           <p className="mt-6 text-lg text-white/70 leading-relaxed">
             We exist to remove the friction between great craftspeople and the
             customers who need them. By combining AI-powered branding with smart
-            scheduling, we help shops of every size compete online — without the
+            scheduling, we help shops of every size compete online, without the
             tech headache.
           </p>
         </div>
@@ -64,7 +64,7 @@ export default function About() {
           <h2 className="text-center font-heading text-4xl font-bold text-white mb-16">How it works</h2>
           <div className="grid gap-8 md:grid-cols-3">
             {[
-              { title: "You focus on your craft", desc: "We handle the tech — setup, maintenance, and updates." },
+              { title: "You focus on your craft", desc: "We handle the tech: setup, maintenance, and updates." },
               { title: "Your shop gets an AI-branded page", desc: "Unique design, copy, and identity generated in minutes." },
               { title: "We only earn when you earn", desc: "£100 one-time setup, then 10% commission on completed bookings only." },
             ].map(({ title, desc }, i) => (

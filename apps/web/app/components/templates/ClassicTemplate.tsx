@@ -52,7 +52,7 @@ export function ClassicTemplate({ shop, site }: SiteTemplateProps) {
 
       {/* Ornamental horizontal divider */}
       <div className="flex justify-center py-6">
-        <span className="text-2xl text-white/60">✦ — ✦ — ✦</span>
+        <span className="text-2xl text-white/60">✦ · ✦ · ✦</span>
       </div>
 
       {/* Services — classic menu/price list with ruled lines */}
@@ -86,7 +86,7 @@ export function ClassicTemplate({ shop, site }: SiteTemplateProps) {
 
       {/* Ornamental horizontal divider */}
       <div className="flex justify-center py-6">
-        <span className="text-2xl text-white/60">✦ — ✦ — ✦</span>
+        <span className="text-2xl text-white/60">✦ · ✦ · ✦</span>
       </div>
 
       {/* About — left-aligned with decorative divider */}
@@ -102,7 +102,7 @@ export function ClassicTemplate({ shop, site }: SiteTemplateProps) {
 
       {/* Ornamental horizontal divider */}
       <div className="flex justify-center py-6">
-        <span className="text-2xl text-white/60">✦ — ✦ — ✦</span>
+        <span className="text-2xl text-white/60">✦ · ✦ · ✦</span>
       </div>
 
       {/* CTA — bordered button */}

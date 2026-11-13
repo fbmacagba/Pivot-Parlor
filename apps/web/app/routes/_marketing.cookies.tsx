@@ -75,12 +75,12 @@ export default function Cookies() {
             </p>
             <ul className="mt-3 list-disc space-y-2 pl-5 text-sm">
               <li>
-                <strong>pp_session</strong> — stores your authenticated session
+                <strong>pp_session</strong>: stores your authenticated session
                 token. Set when you log in. Expires after 7 days or on logout.
                 HttpOnly and Secure flags applied.
               </li>
               <li>
-                <strong>pp_platform_consent</strong> — records that you have
+                <strong>pp_platform_consent</strong>: records that you have
                 seen our cookie notice so it is not shown again. Stored in
                 localStorage until you clear your browser data.
               </li>
@@ -106,7 +106,7 @@ export default function Cookies() {
             </p>
             <ul className="mt-3 list-disc space-y-2 pl-5">
               <li>
-                <strong>Stripe, Inc.</strong> — used to process payments
+                <strong>Stripe, Inc.</strong>: used to process payments
                 securely. Stripe may set cookies related to fraud prevention and
                 payment authentication. See{" "}
                 <a
@@ -120,7 +120,7 @@ export default function Cookies() {
                 .
               </li>
               <li>
-                <strong>Social login providers</strong> (Google, LinkedIn) — if
+                <strong>Social login providers</strong> (Google, LinkedIn): if
                 you use social login, these providers may set their own cookies
                 in accordance with their respective privacy policies.
               </li>

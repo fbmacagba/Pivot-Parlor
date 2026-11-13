@@ -281,7 +281,7 @@ function ProfileCard({ me }: { me: Me }) {
         <dl className="space-y-2 text-sm">
           <div className="flex gap-3">
             <dt className="w-16 shrink-0 text-white/60">Name</dt>
-            <dd className="text-white">{me.name?.trim() || "—"}</dd>
+            <dd className="text-white">{me.name?.trim() || "Not set"}</dd>
           </div>
           <div className="flex gap-3">
             <dt className="w-16 shrink-0 text-white/60">Email</dt>

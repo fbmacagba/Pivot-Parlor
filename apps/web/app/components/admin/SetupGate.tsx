@@ -166,7 +166,7 @@ export function SetupGate({ status }: { status: SetupStatus }) {
         </div>
         <p className="text-xs text-white/50 mt-2">
           {completedCount === 4
-            ? "All steps complete — your shop is ready to go live."
+            ? "All steps complete. Your shop is ready to go live."
             : `${4 - completedCount} step${4 - completedCount !== 1 ? "s" : ""} remaining`}
         </p>
       </div>

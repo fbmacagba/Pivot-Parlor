@@ -210,7 +210,7 @@ export default function AdminSchedule() {
                             >
                               {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
                             </select>
-                            <span className="text-white/50 text-xs">–</span>
+                            <span className="text-white/50 text-xs">to</span>
                             <select
                               value={cell.end}
                               onChange={e => setCell(member.id, d, { end: e.target.value })}

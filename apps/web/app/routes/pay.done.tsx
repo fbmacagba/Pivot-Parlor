@@ -13,7 +13,7 @@ export default function PayDone() {
         </div>
         <h1 className="font-heading text-2xl font-bold text-white">Payment received</h1>
         <p className="mt-2 text-sm text-white/60">
-          Thank you. You can show this screen to the staff — their till updates automatically.
+          Thank you. You can show this screen to the staff. Their till updates automatically.
         </p>
       </div>
     </main>

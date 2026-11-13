@@ -188,7 +188,7 @@ export default function StaffBookingsAvailability() {
                   <div key={d} className="flex items-center gap-4 text-sm">
                     <span className="w-24 font-medium text-white/80">{label}</span>
                     {isOn && row
-                      ? <span className="text-white/70">{row.start_time} – {row.end_time}</span>
+                      ? <span className="text-white/70">{row.start_time} to {row.end_time}</span>
                       : <span className="text-white/50">Off</span>
                     }
                   </div>
@@ -248,7 +248,7 @@ export default function StaffBookingsAvailability() {
                     <tr key={r.id} className="hover:bg-white/[0.02]">
                       <td className="px-4 py-3 text-white/80">{formatDate(r.from_date)}</td>
                       <td className="px-4 py-3 text-white/80">{formatDate(r.to_date)}</td>
-                      <td className="px-4 py-3 text-white/50">{r.reason ?? "—"}</td>
+                      <td className="px-4 py-3 text-white/50">{r.reason ?? "No reason given"}</td>
                       <td className="px-4 py-3">
                         <Badge variant={r.status === "approved" ? "success" : r.status === "denied" ? "error" : "warning"}>
                           {r.status}

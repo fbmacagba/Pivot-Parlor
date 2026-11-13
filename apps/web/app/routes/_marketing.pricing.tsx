@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/Button";
 import { Check } from "lucide-react";
 
 export const meta: MetaFunction = () => [
-  { title: "Pricing — £100 Setup, No Monthly Fees | Pivot Parlor" },
+  { title: "Pricing: £100 Setup, No Monthly Fees | Pivot Parlor" },
 ];
 
 export default function Pricing() {
