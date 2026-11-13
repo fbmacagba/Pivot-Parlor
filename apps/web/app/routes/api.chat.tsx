@@ -4,6 +4,7 @@
 // Fallback model: google/gemini-2.5-flash-lite
 
 import type { ActionFunctionArgs } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 
 const SYSTEM_PROMPT = `You are Pip, a warm and friendly chat assistant for Pivot Parlor, a booking platform for UK beauty and barber shops. You are polite, conversational, and genuinely helpful to everyone you meet.
 
@@ -125,14 +126,18 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
   }
 
-  let body: { messages?: Array<{ role: string; content: string }> };
-  try {
-    body = await request.json();
-  } catch {
+  // A body that is not a JSON object, or messages that is not a list, is the
+  // caller's mistake: a 400, never a thrown error (a 500 and an alert).
+  const body = await readJsonObject(request);
+  if (!body) {
+    return Response.json({ error: "Invalid request." }, { status: 400 });
+  }
+  const rawMessages = body.messages ?? [];
+  if (!Array.isArray(rawMessages)) {
     return Response.json({ error: "Invalid request." }, { status: 400 });
   }
 
-  const messages = body.messages ?? [];
+  const messages = rawMessages as Array<{ role?: unknown; content?: unknown } | null>;
   if (!messages.length) {
     return Response.json({ error: "No messages provided." }, { status: 400 });
   }
