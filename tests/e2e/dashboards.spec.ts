@@ -25,9 +25,10 @@ import { expect, test } from "./fixtures";
  *
  * A fresh shop has empty lists, so this proves each screen renders cleanly,
  * not that populated tables do. Load only, with one exception: the
- * developer pass saves the throwaway shop's schedule once, to prove a page
- * action reaches the shop it is viewing. Nothing is generated, paid for or
- * sent.
+ * developer pass opens one working day for the throwaway shop's staff member
+ * and saves the schedule, to prove a page action reaches the shop it is
+ * viewing (and to give the developer's view of that person hours to show).
+ * Nothing is generated, paid for or sent.
  *
  * The admin screens run twice: as the shop's admin, and as the developer
  * managing that shop through ?shopId=. The staff screens run twice too: as
@@ -317,9 +318,18 @@ test.describe.serial("dashboard sweep", () => {
     });
 
     await test.step("a page action reaches the shop (saving the schedule)", async () => {
-      // The one write in this sweep, on the throwaway e2e- shop: the staff
-      // member's default hours. A form post with no action keeps ?shopId=.
+      // The one write in this sweep, on the throwaway e2e- shop: one working
+      // day for the staff member. A new person's grid is every day off, and
+      // saving that stores nothing, so a day is opened first. A form post with
+      // no action keeps ?shopId=.
       await page.goto(`/admin/schedule${q}`, { waitUntil: "networkidle" });
+      const firstDay = page.locator("tr", { hasText: "E2E Dashboard Staff" }).locator("label").first();
+      // Until the page has hydrated a tick does not reach React; the label
+      // reads "Open" only once it has, so tick until it does.
+      await expect(async () => {
+        if ((await firstDay.innerText()).trim() !== "Open") await firstDay.locator("input[type=checkbox]").click();
+        await expect(firstDay).toHaveText("Open", { timeout: 2_000 });
+      }).toPass({ timeout: 30_000 });
       const button = page.getByRole("button", { name: "Save schedule" });
       // Until the page has hydrated a press does nothing, so press until it posts.
       let posted = "";
@@ -335,6 +345,10 @@ test.describe.serial("dashboard sweep", () => {
       await expect(page.getByRole("status").filter({ hasText: /schedule saved|failed|unauthorized/i })).toHaveText(
         "Schedule saved.",
       );
+      // "Schedule saved." also shows when nothing was stored: read it back.
+      const stored = await page.request.get(`/admin/schedule${q}&_data=${encodeURIComponent("routes/admin.schedule")}`);
+      const { schedules } = (await stored.json()) as { schedules?: Array<{ is_active: number }> };
+      expect(schedules?.filter((s) => s.is_active === 1).length ?? 0, "the opened day was stored").toBe(1);
     });
 
     await test.step("payments: the developer sees the status, the owner connects Stripe", async () => {
@@ -377,13 +391,13 @@ test.describe.serial("dashboard sweep", () => {
         .toContainText(`you are viewing E2E Dashboard Staff's screens at E2E Dashboards ${uniqueId}, read-only`);
     });
 
-    await test.step("their schedule arrived (saved by the developer's admin pass), read-only", async () => {
+    await test.step("their schedule arrived (the day the developer's admin pass opened), read-only", async () => {
       const res = await page.request.get(`/staff/bookings${q}&_data=${encodeURIComponent("routes/staff.bookings")}`);
       expect(res.status()).toBe(200);
-      const data = (await res.json()) as { readOnly?: boolean; needsStaff?: boolean; schedule?: unknown[] };
+      const data = (await res.json()) as { readOnly?: boolean; needsStaff?: boolean; schedule?: Array<{ is_active: number }> };
       expect.soft(data.readOnly).toBe(true);
       expect.soft(data.needsStaff).toBe(false);
-      expect.soft(data.schedule?.length ?? 0, "the staff member's schedule rows").toBeGreaterThan(0);
+      expect.soft(data.schedule?.filter((s) => s.is_active === 1).length ?? 0, "the staff member's working days").toBe(1);
       await page.goto(`/staff/bookings${q}&tab=availability`);
       await expect(page.getByText("Time off is requested by the staff member from their own screens.")).toBeVisible();
       await expect(page.getByRole("button", { name: "Submit request" })).toHaveCount(0);
