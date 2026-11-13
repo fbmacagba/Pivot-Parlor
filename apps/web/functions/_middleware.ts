@@ -6,7 +6,7 @@ import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "
 import { CLIENT_ERRORS_PATH } from "../app/lib/browserErrors";
 import { handleClientErrors, pageRouteIds, type BrowserErrorsBinding } from "../app/lib/clientErrorsEndpoint";
 import { hasUnsafePathSegment } from "../app/lib/pathSafety";
-import { withSecurityHeaders } from "../app/lib/securityHeaders";
+import { newCspNonce, withSecurityHeaders } from "../app/lib/securityHeaders";
 import { reportServerError, type WebErrorsBinding } from "../app/lib/serverErrors";
 
 interface Env {
@@ -35,10 +35,16 @@ const handleRequest = createPagesFunctionHandler({
   /**
    * Expose Cloudflare environment bindings to Remix loaders/actions as
    * `context.env` so code like `context.env.API_URL` works, and waitUntil so
-   * an error report outlives the response (app/lib/serverErrors.ts).
+   * an error report outlives the response (app/lib/serverErrors.ts), and the
+   * request's CSP nonce, which the render puts on its inline scripts
+   * (entry.server.tsx).
    */
   getLoadContext(context) {
-    return { env: context.env, waitUntil: (promise: Promise<unknown>) => context.waitUntil(promise) };
+    return {
+      env: context.env,
+      waitUntil: (promise: Promise<unknown>) => context.waitUntil(promise),
+      cspNonce: context.data.cspNonce as string | undefined,
+    };
   },
 });
 
@@ -62,6 +68,10 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       })
     );
   }
+  // One nonce per request, for this response's header and its inline scripts
+  // (app/lib/securityHeaders.ts). The render reads it through getLoadContext.
+  const nonce = newCspNonce();
+  context.data.cspNonce = nonce;
   // Route errors reach Remix's handleError (entry.server.tsx). This catch is
   // for this file's own code; whatever fails inside Remix's Pages adapter
   // itself comes back as its bare "Internal Error" 500, not as a throw.
@@ -75,7 +85,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
         },
         () => handleRequest(context)
       ),
-      { apiOrigin: originOf(context.env.API_URL) }
+      { apiOrigin: originOf(context.env.API_URL), nonce }
     );
   } catch (error) {
     reportServerError(error, {

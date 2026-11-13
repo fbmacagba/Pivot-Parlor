@@ -23,11 +23,27 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
  * and a production sweep showed no violations. Rollback: set this back to
  * "Content-Security-Policy-Report-Only".
  *
- * script-src keeps 'unsafe-inline' (Remix's inline scripts), so this does not
- * stop an injected inline script; it blocks off-list script, connect, frame
- * and font origins, off-site form targets, <base> hijacking and plugins.
+ * Inline scripts run only with the response's nonce (newCspNonce): Remix's
+ * own carry it (entry.server.tsx, root.tsx), so an injected one is blocked.
+ * The policy also blocks off-list script, connect, frame and font origins,
+ * off-site form targets, <base> hijacking and plugins. Inline styles are
+ * still allowed (style-src 'unsafe-inline').
  */
 export const CSP_HEADER = "Content-Security-Policy";
+
+/**
+ * A fresh nonce for one response: 16 random bytes, base64. Made per request in
+ * functions/_middleware.ts, never at module scope (an isolate serves many
+ * requests). Cloudflare's own injected script on the production zone reads it
+ * from the header and carries it too.
+ */
+export function newCspNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/** Base64 of at least 16 bytes: nothing that could end the directive or add a source. */
+const NONCE_SHAPE = /^[A-Za-z0-9+/]{22,}={0,2}$/;
 
 const CONNECT_SRC = [
   "'self'",
@@ -53,14 +69,25 @@ const CSP_REPORT_GROUP = "csp-endpoint";
  * connect-src. `reportUri` adds report-uri and report-to (the matching
  * Reporting-Endpoints header is set by withSecurityHeaders); without it the
  * policy asks for no reports, which is the static copy in public/_headers.
+ * `nonce` lets the inline scripts that carry it run; without one no inline
+ * script runs (the static copy: assets have none).
  */
-export function contentSecurityPolicy(extraConnect: readonly string[] = [], opts: { reportUri?: string } = {}): string {
+export function contentSecurityPolicy(
+  extraConnect: readonly string[] = [],
+  opts: { reportUri?: string; nonce?: string } = {},
+): string {
+  if (opts.nonce !== undefined && !NONCE_SHAPE.test(opts.nonce)) {
+    throw new Error("A CSP nonce must be base64 of at least 16 bytes.");
+  }
   const connect = [...CONNECT_SRC];
   for (const origin of extraConnect) if (origin && !connect.includes(origin)) connect.push(origin);
   const reporting = opts.reportUri ? [`report-uri ${opts.reportUri}`, `report-to ${CSP_REPORT_GROUP}`] : [];
+  const nonce = opts.nonce ? [`'nonce-${opts.nonce}'`] : [];
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://js.stripe.com https://challenges.cloudflare.com",
+    // No 'strict-dynamic': it would switch off 'self' and the host list, which
+    // the module scripts, Turnstile and Stripe.js load through.
+    ["script-src 'self'", ...nonce, "https://js.stripe.com https://challenges.cloudflare.com"].join(" "),
     "style-src 'self' 'unsafe-inline'",
     // blob: for the staff photo preview (URL.createObjectURL).
     "img-src 'self' data: blob: https:",
@@ -92,15 +119,21 @@ export function contentSecurityPolicy(extraConnect: readonly string[] = [], opts
  * With `apiOrigin` (this deployment's API_URL) the policy also sends its
  * violation reports to that API. Each deployment reports to its own API:
  * staging pages to the staging API, whose Workers Issues is off.
+ *
+ * With `nonce` (this request's, from newCspNonce) the page's inline scripts
+ * that carry it may run.
  */
-export function withSecurityHeaders(res: Response, opts: { apiOrigin?: string } = {}): Response {
+export function withSecurityHeaders(res: Response, opts: { apiOrigin?: string; nonce?: string } = {}): Response {
   const out = new Response(res.body, res);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     if (!out.headers.has(name)) out.headers.set(name, value);
   }
   if (!out.headers.has("Content-Security-Policy") && !out.headers.has("Content-Security-Policy-Report-Only")) {
     const reportUri = opts.apiOrigin ? `${opts.apiOrigin}${CSP_REPORT_PATH}` : undefined;
-    out.headers.set(CSP_HEADER, contentSecurityPolicy(opts.apiOrigin ? [opts.apiOrigin] : [], { reportUri }));
+    out.headers.set(
+      CSP_HEADER,
+      contentSecurityPolicy(opts.apiOrigin ? [opts.apiOrigin] : [], { reportUri, nonce: opts.nonce }),
+    );
     if (reportUri && !out.headers.has("Reporting-Endpoints")) {
       out.headers.set("Reporting-Endpoints", `${CSP_REPORT_GROUP}="${reportUri}"`);
     }

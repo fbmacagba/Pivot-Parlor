@@ -59,6 +59,72 @@ test.describe("CSP collector control", () => {
   });
 });
 
+// Inline scripts run only when they carry the nonce the response header names
+// (apps/web/app/lib/securityHeaders.ts, made per request in
+// functions/_middleware.ts). Remix's own three (scroll restoration, the
+// context and the module loader) carry it; an injected one does not.
+const nonceIn = (csp: string | undefined): string | null => csp?.match(/'nonce-([A-Za-z0-9+/]+={0,2})'/)?.[1] ?? null;
+const scriptSrcOf = (csp: string | undefined): string =>
+  (csp ?? "").split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src ")) ?? "";
+
+test.describe("Inline scripts need the page's nonce", () => {
+  test.describe("control", () => {
+    test.use({ cspExpectViolations: true });
+
+    test("an injected inline script is blocked and reported", async ({ page, baseURL, cspReports }) => {
+      await page.goto("/");
+      const ran = await page.evaluate(async () => {
+        const s = document.createElement("script");
+        s.textContent = "window.__ppInjectedRan = true;";
+        document.head.appendChild(s);
+        await new Promise((r) => setTimeout(r, 100));
+        return (window as unknown as { __ppInjectedRan?: boolean }).__ppInjectedRan === true;
+      });
+      expect(ran, "an injected inline script must not run").toBe(false);
+
+      const siteOrigin = baseURL ? new URL(baseURL).origin : null;
+      const inlineReports = () => oursOnly(cspReports, siteOrigin).filter((r) => r.blockedURI === "inline");
+      await expect.poll(() => inlineReports().length).toBeGreaterThan(0);
+      expect(inlineReports()[0].effectiveDirective).toBe("script-src-elem");
+      expect(inlineReports()[0].disposition).toBe("enforce");
+    });
+  });
+
+  const PAGES: Array<[string, number]> = [["/", 200], ["/login", 200], ["/pricing", 200], ["/no-such-page-e2e-csp", 404]];
+  for (const [p, status] of PAGES) {
+    test(`every inline script on ${p} carries the header's nonce`, async ({ page }) => {
+      const browserErrors: string[] = [];
+      page.on("request", (req) => {
+        if (req.method() === "POST" && new URL(req.url()).pathname === "/client-errors") browserErrors.push(req.postData() ?? "");
+      });
+
+      const res = await page.goto(p, { waitUntil: "load" });
+      expect(res?.status()).toBe(status);
+      const csp = res?.headers()["content-security-policy"];
+      expect(scriptSrcOf(csp)).not.toContain("'unsafe-inline'");
+      const nonce = nonceIn(csp);
+      expect(nonce, "script-src names a nonce").toBeTruthy();
+
+      // The nonce property, not the attribute: browsers blank the attribute.
+      const nonces = await page.$$eval("script:not([src])", (els) => els.map((e) => (e as HTMLScriptElement).nonce));
+      expect(nonces.length, "Remix's inline scripts").toBeGreaterThanOrEqual(3);
+      expect(nonces.filter((n) => n !== nonce), "inline scripts without the page's nonce").toEqual([]);
+
+      // Hydration ran with the nonce in place: no browser error was reported.
+      await page.waitForTimeout(1500);
+      expect(browserErrors, "browser error reports (hydration included)").toEqual([]);
+    });
+  }
+
+  test("each response gets a new nonce", async ({ request }) => {
+    const first = nonceIn((await request.get("/login")).headers()["content-security-policy"]);
+    const second = nonceIn((await request.get("/login")).headers()["content-security-policy"]);
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(first).not.toBe(second);
+  });
+});
+
 // Public pages that no other spec opens. Load and scroll only: the contact
 // form is never filled or submitted and the bot check is never touched.
 const PUBLIC_PAGES = ["/", "/pricing", "/about", "/contact", "/privacy", "/terms", "/cookies", "/dpa", "/login"];

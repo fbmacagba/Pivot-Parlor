@@ -6,6 +6,7 @@ import {
   CSP_REPORT_PATH,
   SECURITY_HEADERS,
   contentSecurityPolicy,
+  newCspNonce,
   withSecurityHeaders,
 } from "./securityHeaders";
 
@@ -146,6 +147,68 @@ describe("the content security policy", () => {
   });
 });
 
+describe("inline scripts", () => {
+  // 'unsafe-inline' let any inline script run, an injected one included. Each
+  // page now gets a fresh nonce: the header names it, and Remix's own inline
+  // scripts carry it (functions/_middleware.ts, entry.server.tsx, root.tsx).
+  const NONCE = "q1w2e3r4t5y6u7i8o9p0Aa==";
+
+  it("run only when they carry the page's nonce", () => {
+    expect(directive(contentSecurityPolicy([], { nonce: NONCE }), "script-src")).toEqual([
+      "'self'",
+      `'nonce-${NONCE}'`,
+      "https://js.stripe.com",
+      "https://challenges.cloudflare.com",
+    ]);
+  });
+
+  it("never run without one: no policy allows 'unsafe-inline' scripts", () => {
+    expect(directive(contentSecurityPolicy(), "script-src")).not.toContain("'unsafe-inline'");
+    expect(directive(contentSecurityPolicy([], { nonce: NONCE }), "script-src")).not.toContain("'unsafe-inline'");
+    // The static copy for assets has no inline scripts to allow.
+    expect(directive(contentSecurityPolicy(), "script-src")).toEqual([
+      "'self'",
+      "https://js.stripe.com",
+      "https://challenges.cloudflare.com",
+    ]);
+  });
+
+  it("keeps our policy's first directive, which the E2E collector keys on", () => {
+    expect(contentSecurityPolicy([], { nonce: NONCE }).startsWith("default-src 'self';")).toBe(true);
+  });
+
+  it("names the request's nonce in the response header", () => {
+    const res = withSecurityHeaders(new Response("x"), { apiOrigin: "https://api.pivotparlor.com", nonce: NONCE });
+    const csp = res.headers.get(CSP_HEADER)!;
+    expect(directive(csp, "script-src")).toContain(`'nonce-${NONCE}'`);
+    expect(directive(csp, "report-uri")).toEqual(["https://api.pivotparlor.com/csp-report"]);
+  });
+
+  it("refuses a nonce that could change the policy", () => {
+    for (const bad of ["abc; script-src *", "abc 'unsafe-inline'", "abc'", "", "short"]) {
+      expect(() => contentSecurityPolicy([], { nonce: bad }), JSON.stringify(bad)).toThrow();
+    }
+  });
+});
+
+describe("newCspNonce", () => {
+  it("is 16 random bytes, base64", () => {
+    const nonce = newCspNonce();
+    expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/);
+    expect(atob(nonce)).toHaveLength(16);
+  });
+
+  it("is new every time", () => {
+    const seen = new Set(Array.from({ length: 200 }, () => newCspNonce()));
+    expect(seen.size).toBe(200);
+  });
+
+  it("is accepted by the policy", () => {
+    const nonce = newCspNonce();
+    expect(directive(contentSecurityPolicy([], { nonce }), "script-src")).toContain(`'nonce-${nonce}'`);
+  });
+});
+
 describe("public/_headers stays in step with the helper", () => {
   // vitest runs with cwd at apps/web.
   const file = readFileSync(path.resolve(process.cwd(), "public/_headers"), "utf8");
@@ -171,9 +234,21 @@ describe("public/_headers stays in step with the helper", () => {
 });
 
 describe("functions/_middleware.ts", () => {
+  const src = readFileSync(path.resolve(process.cwd(), "functions/_middleware.ts"), "utf8");
+
   it("sends every response through withSecurityHeaders", () => {
-    const src = readFileSync(path.resolve(process.cwd(), "functions/_middleware.ts"), "utf8");
     expect(src).toMatch(/import\s*\{[^}]*\bwithSecurityHeaders\b[^}]*\}\s*from\s*["']\.\.\/app\/lib\/securityHeaders["']/);
     expect(src).toMatch(/withSecurityHeaders\(\s*await\s+apiRoute\.run\(/);
+  });
+
+  // The header and the page must name the same nonce, made once per request.
+  // The E2E (tests/e2e/csp-guard.spec.ts) proves it on a served page; this
+  // keeps the wiring visible here.
+  it("makes one nonce per request and gives the same one to the header and the render", () => {
+    expect(src).not.toMatch(/^(const|let|var)\s+\w+\s*=\s*newCspNonce\(/m); // never module scope
+    expect(src).toMatch(/const\s+nonce\s*=\s*newCspNonce\(\)/);
+    expect(src).toMatch(/cspNonce:\s*context\.data\.cspNonce/);
+    expect(src).toMatch(/context\.data\.cspNonce\s*=\s*nonce/);
+    expect(src).toMatch(/\{\s*apiOrigin:\s*originOf\(context\.env\.API_URL\),\s*nonce\s*\}/);
   });
 });

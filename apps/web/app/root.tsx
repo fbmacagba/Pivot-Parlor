@@ -13,6 +13,7 @@ import { PlatformCookieBanner } from "~/components/PlatformCookieBanner";
 import { InstallAppPrompt } from "~/components/InstallAppPrompt";
 import { ErrorScreen } from "~/components/ErrorScreen";
 import { useShopMatch } from "~/lib/shop-match";
+import { useCspNonce } from "~/lib/cspNonce";
 
 export const links = () => [
   { rel: "stylesheet", href: tailwindStylesheet },
@@ -26,6 +27,8 @@ export const links = () => [
 export function Layout({ children }: { children: React.ReactNode }) {
   // On /:shopSlug routes the installed app is the shop, not the platform.
   const shopMatch = useShopMatch();
+  // Inline scripts run only with the response's nonce (app/lib/securityHeaders.ts).
+  const nonce = useCspNonce();
   return (
     <html lang="en" suppressHydrationWarning>
       <head suppressHydrationWarning>
@@ -63,8 +66,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         suppressHydrationWarning
       >
         {children}
-        <ScrollRestoration />
-        <Scripts />
+        <ScrollRestoration nonce={nonce} />
+        <Scripts nonce={nonce} />
         <PlatformCookieBanner />
         <InstallAppPrompt />
       </body>
