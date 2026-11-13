@@ -173,21 +173,50 @@ describe("booking audit gap guard", () => {
 
 describe("the real booking app mounts the gap guard", () => {
   it("a declared route that answers 5xx before its own entry gets the declared action as failed", async () => {
-    // POST /public/bookings reads its body with an unguarded c.req.json(), so
-    // a body that is not JSON throws before run() and the app answers 500
-    // (pre-existing, unchanged). Only the guard can write a row for it.
+    // POST /public/bookings looks its shop up before run(). Here that lookup
+    // fails, as in a D1 outage, so the app answers 500 before any entry of its
+    // own. Only the guard can write a row for it. Only that one statement is
+    // refused: the once-per-isolate schema check and the guard's own write go
+    // through, whichever order the tests run in.
     expect(ROUTE_AUDIT["POST /public/bookings"]).toBe("booking.create");
+    const SHOP_LOOKUP = "SELECT * FROM shops WHERE id = ? LIMIT 1";
+    let shopLookupRefused = false;
+    const db = new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "prepare") {
+          return (sql: string) => {
+            if (!shopLookupRefused && sql === SHOP_LOOKUP) {
+              shopLookupRefused = true;
+              throw new Error("D1 unavailable (test)");
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const ctx = createExecutionContext();
     const res = (await worker.fetch(
       new Request("https://booking.test/public/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.91" },
-        body: "this is not json {",
+        body: JSON.stringify({
+          shop_id: "gap-outage-shop",
+          staff_id: "any",
+          service_id: "gap-outage-service",
+          customer_name: "Casey",
+          customer_email: "casey@test.local",
+          start_time: "2099-06-15T10:00:00.000Z",
+        }),
       }) as never,
-      env as never,
+      { ...env, DB: db } as never,
       ctx as never
     )) as unknown as Response;
     await waitOnExecutionContext(ctx);
+    errorSpy.mockRestore();
+    expect(shopLookupRefused, "the handler's shop lookup was refused").toBe(true);
     expect(res.status).toBe(500);
     const rid = res.headers.get("X-Request-Id");
     expect(rid, "the 500 carries no X-Request-Id").toMatch(/.+/);
@@ -266,9 +295,8 @@ describe("anonymous refusals write nothing to the booking audit log", () => {
     expect(seen).toEqual(paths.map((p) => `${p} -> 401 []`));
   });
 
-  // Scope: a JSON body missing every field. A body that is not JSON still
-  // makes POST /public/bookings (rate-limited) answer 500 and record
-  // booking.create as failed (input validation, a separate item).
+  // Scope: a JSON body missing every field. A body that is not a JSON object,
+  // and fields of the wrong type, are covered in malformed-body.test.ts.
   it("every declared mutating route, sent an anonymous JSON body missing its fields, writes nothing", async () => {
     const shopId = await seedShop("Booking Gap Declared Route Shop");
     const keys = Object.keys(ROUTE_AUDIT).sort();
