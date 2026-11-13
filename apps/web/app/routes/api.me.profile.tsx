@@ -3,6 +3,7 @@
 
 import type { ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 import { getSessionToken } from "~/lib/auth";
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -10,7 +11,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (!token) return json({ success: false, error: "Unauthorized" }, 401);
 
   const env = context.env as { API_URL: string };
-  const body = await request.json();
+  const body = await readJsonObject(request);
+  if (!body) return json({ success: false, error: "Invalid JSON" }, 400);
 
   const res = await fetch(`${env.API_URL}/api/me/profile`, {
     method: "PATCH",

@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 import { getSessionToken } from "~/lib/auth";
 
 /** GET /api/me/bookings — proxy to worker (session cookie → Bearer). */
@@ -26,10 +27,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json({ success: false, error: "Unauthorized" }, 401);
 
-  const body = (await request.json().catch(() => ({}))) as {
-    intent?: string;
-    bookingId?: string;
-  };
+  const body: { intent?: string; bookingId?: string } = (await readJsonObject(request)) ?? {};
   if (body.intent !== "cancel" || typeof body.bookingId !== "string" || !body.bookingId.trim()) {
     return json({ success: false, error: "Invalid request" }, 400);
   }

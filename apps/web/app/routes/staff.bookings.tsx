@@ -1,6 +1,7 @@
 import { useFetcher, useLoaderData, useSearchParams } from "@remix-run/react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
+import { readJsonObject } from "@repo/utils";
 import { useEffect, useState } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
@@ -84,9 +85,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (user.role === "developer") {
     return json({ ok: false, error: DEVELOPER_STAFF_READ_ONLY }, { status: 403 });
   }
+  const body = await readJsonObject<{ from_date?: string; to_date?: string; reason?: string }>(request);
+  if (!body) return json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
-  const body = await request.json() as { from_date?: string; to_date?: string; reason?: string };
 
   try {
     await api.post("/api/staff/me/time-off", body);
