@@ -5,13 +5,14 @@
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
 import { rangesOverlap } from "@repo/utils";
 import {
+  BOOKING_CLASH_SQL,
   CLOCK_START_SQL,
   INSTANT_START_SQL,
+  bookingClashBinds,
   bookingInterval,
   shiftDate,
   type BookingTimes,
 } from "../lib/bookingTimes.js";
-import { zonedWallClock } from "../lib/timezone.js";
 
 export interface ShopRow {
   id: string;
@@ -106,11 +107,6 @@ export function createBooking(db: D1Database, b: {
 /** A booking row to insert; `status` left out keeps the column's default. */
 export type NewBooking = Parameters<typeof createBooking>[1] & { status?: string };
 
-/** SQL: a clock-reading row's start and end on the shop's wall clock ("YYYY-MM-DD HH:MM"). */
-const CLOCK_LOCAL_START_SQL = "booking_date || ' ' || start_time";
-const CLOCK_LOCAL_END_SQL =
-  "(CASE WHEN end_time <= start_time THEN date(booking_date, '+1 day') ELSE booking_date END) || ' ' || end_time";
-
 /**
  * Insert the booking only if no active booking holds any of its time for the
  * same staff member, as ONE statement (INSERT ... SELECT ... WHERE NOT
@@ -121,13 +117,8 @@ const CLOCK_LOCAL_END_SQL =
  *
  * "taken" on a clash (an identical start included), "created" otherwise. A
  * booking whose own times cannot be read is "taken", as slotTaken treats it.
- *
- * The clash test mirrors checkSlotConflict: an instant row compares as
- * instants (text, as toISOString writes them); a clock row ("HH:MM" on
- * booking_date) compares on the shop's wall clock, its end rolling to the
- * next day when at or before its start. A clock row whose times are not
- * "HH:MM" is ignored, as bookingInterval ignores it. On the night the clocks
- * go back, the repeated hour (01:00 to 02:00) reads as one hour.
+ * The clash rule is @repo/utils BOOKING_CLASH_SQL, shared with the API's
+ * status changes.
  */
 export async function createBookingIfFree(
   db: D1Database,
@@ -136,8 +127,6 @@ export async function createBookingIfFree(
 ): Promise<"created" | "taken"> {
   const interval = bookingInterval(b, timeZone);
   if (!interval) return "taken";
-  const startLocal = zonedWallClock(interval.start, timeZone);
-  const endLocal = zonedWallClock(interval.end, timeZone);
 
   const row: Array<[string, unknown]> = [
     ["id", b.id],
@@ -161,29 +150,9 @@ export async function createBookingIfFree(
       .prepare(
         `INSERT INTO bookings (${row.map(([column]) => column).join(", ")})
          SELECT ${row.map(() => "?").join(", ")}
-         WHERE NOT EXISTS (
-           SELECT 1 FROM bookings
-           WHERE staff_id = ?
-             AND status NOT IN ('cancelled', 'no_show')
-             AND ((${INSTANT_START_SQL} AND start_time < ? AND end_time > ?)
-               OR (${CLOCK_START_SQL}
-                   AND start_time GLOB '[0-2][0-9]:[0-5][0-9]'
-                   AND end_time GLOB '[0-2][0-9]:[0-5][0-9]'
-                   AND booking_date BETWEEN ? AND ?
-                   AND ${CLOCK_LOCAL_START_SQL} < ?
-                   AND ${CLOCK_LOCAL_END_SQL} > ?))
-         )`
+         WHERE NOT ${BOOKING_CLASH_SQL}`
       )
-      .bind(
-        ...row.map(([, value]) => value),
-        b.staff_id,
-        interval.end.toISOString(),
-        interval.start.toISOString(),
-        shiftDate(startLocal.slice(0, 10), -1),
-        endLocal.slice(0, 10),
-        endLocal,
-        startLocal,
-      )
+      .bind(...row.map(([, value]) => value), ...bookingClashBinds(b.staff_id, b.id, interval, timeZone))
       .run();
     return (result.meta?.changes ?? 0) === 1 ? "created" : "taken";
   } catch (err) {

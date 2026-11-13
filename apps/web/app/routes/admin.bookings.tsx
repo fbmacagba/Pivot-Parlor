@@ -6,6 +6,7 @@ import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { BookingsCalendar } from "~/components/admin/BookingsCalendar";
+import { BookingStatusSelect } from "~/components/admin/BookingStatusSelect";
 import { useModalA11y } from "~/lib/useModalA11y";
 import { clockOf, formatDate as formatUkDate, formatDay, ukToday } from "~/lib/dateFormat";
 import { pageShopId } from "~/lib/pageShop";
@@ -146,30 +147,21 @@ function StatusSelect({
   booking: Booking;
   onRequestCancelWithDeposit: () => void;
 }) {
-  const fetcher = useFetcher();
-  const optimistic = fetcher.formData?.get("status") as BookingStatus | undefined;
   return (
-    <fetcher.Form method="post">
-      <input type="hidden" name="bookingId" value={booking.id} />
-      <select
-        name="status"
-        value={optimistic ?? booking.status}
-        onChange={(e) => {
-          // A captured deposit makes cancellation a money decision: hand off
-          // to the refund-or-keep dialog instead of submitting. The select is
-          // controlled, so it snaps back to the current status meanwhile.
-          if (e.currentTarget.value === "cancelled" && hasCapturedDeposit(booking)) {
-            onRequestCancelWithDeposit();
-            return;
-          }
-          fetcher.submit(e.currentTarget.form);
-        }}
-        className="text-xs border border-white/20 rounded-lg px-2 py-1.5 bg-white/5 text-white/80 focus:outline-none focus:ring-2 focus:ring-gold cursor-pointer">
-        {(Object.keys(STATUS_META) as BookingStatus[]).map((s) => (
-          <option key={s} value={s} className="bg-dark">{STATUS_META[s].label}</option>
-        ))}
-      </select>
-    </fetcher.Form>
+    <BookingStatusSelect
+      bookingId={booking.id}
+      status={booking.status}
+      options={(Object.keys(STATUS_META) as BookingStatus[]).map((s) => ({ value: s, label: STATUS_META[s].label }))}
+      onBeforeChange={(next) => {
+        // A captured deposit makes cancellation a money decision: hand off
+        // to the refund-or-keep dialog instead of submitting.
+        if (next === "cancelled" && hasCapturedDeposit(booking)) {
+          onRequestCancelWithDeposit();
+          return true;
+        }
+        return false;
+      }}
+    />
   );
 }
 

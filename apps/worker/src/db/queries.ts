@@ -1,4 +1,11 @@
 import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
+import {
+  BOOKING_CLASH_SQL,
+  INACTIVE_BOOKING_STATUSES,
+  bookingClashBinds,
+  bookingInterval,
+  type BookingTimes,
+} from "@repo/utils";
 import { CANDIDATE_COLUMNS } from "../lib/siteCandidate.js";
 
 const CANDIDATE_COLUMN_SET = new Set<string>(CANDIDATE_COLUMNS);
@@ -1477,14 +1484,55 @@ export function getBookingById(db: D1Database, id: string) {
 // createBooking moved to apps/workers/booking/src/db/queries.ts (WS-1) — the
 // booking worker is the sole writer of public booking creation.
 
-export function updateBookingStatusStmt(
+/** The refusal when a status change would revive a booking over a time now held. */
+export const BOOKING_TIME_TAKEN = "Another booking now holds this time, so this booking cannot be reinstated.";
+
+/** A booking as the status writes need it: whose time it holds, and when. */
+export type StatusBooking = BookingTimes & { id: string; staff_id: string };
+
+/** Whether moving a booking from `from` to `to` makes a booking that holds no time (cancelled, no-show) hold its time again. */
+export function revivesBooking(from: string, to: string): boolean {
+  const inactive = (s: string) => (INACTIVE_BOOKING_STATUSES as readonly string[]).includes(s);
+  return inactive(from) && !inactive(to);
+}
+
+/** Whether another active booking of the same staff member holds part of this booking's time. */
+export async function bookingTimeTaken(db: D1Database, booking: StatusBooking, timeZone: string): Promise<boolean> {
+  const interval = bookingInterval(booking, timeZone);
+  if (!interval) return false;
+  const row = await db
+    .prepare(`SELECT ${BOOKING_CLASH_SQL} AS taken`)
+    .bind(...bookingClashBinds(booking.staff_id, booking.id, interval, timeZone))
+    .first<{ taken: number }>();
+  return row?.taken === 1;
+}
+
+/**
+ * Set a booking's status. When that revives a cancelled or no-show booking
+ * while another active booking holds part of its time, the write sets NULL
+ * into the NOT NULL bookings.status instead, so D1 rolls back the WHOLE batch
+ * (the audit entry batched with it included). The check reads the row's
+ * status as the UPDATE finds it, in the same statement: nothing can take the
+ * time in between. Callers check bookingTimeTaken first for a clean 409 and,
+ * on a thrown batch, again to tell this refusal from a real failure.
+ */
+export function setBookingStatusStmt(
   db: D1Database,
-  id: string,
+  booking: StatusBooking,
   status: string,
+  timeZone: string,
 ): D1PreparedStatement {
+  const interval = bookingInterval(booking, timeZone);
+  if (!interval || (INACTIVE_BOOKING_STATUSES as readonly string[]).includes(status)) {
+    return db.prepare("UPDATE bookings SET status = ? WHERE id = ?").bind(status, booking.id);
+  }
   return db
-    .prepare("UPDATE bookings SET status = ? WHERE id = ?")
-    .bind(status, id);
+    .prepare(
+      `UPDATE bookings
+       SET status = CASE WHEN status IN ('cancelled', 'no_show') AND ${BOOKING_CLASH_SQL} THEN NULL ELSE ? END
+       WHERE id = ?`
+    )
+    .bind(...bookingClashBinds(booking.staff_id, booking.id, interval, timeZone), status, booking.id);
 }
 
 /** A booking's current status, or null when there is no such booking. */

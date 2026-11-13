@@ -1,51 +1,8 @@
 /**
  * Timezone conversion for schedule math. Schedule times ("HH:MM") are
  * shop-local wall-clock times; bookings/slots are stored as UTC instants.
- * Workers ship full ICU, so Intl handles DST tables.
  *
- * Moved from apps/worker/src/lib/timezone.ts in WS-1 — the booking worker is
- * the canonical owner of slot computation.
+ * Lives in @repo/utils (bookingTimes.ts) so the API worker reads booking
+ * times the same way; re-exported here for this worker's existing imports.
  */
-
-/** Offset of `tz` from UTC (ms) at the given instant. Positive = ahead of UTC. */
-function tzOffsetMs(tz: string, instant: Date): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-  const parts: Record<string, string> = {};
-  for (const p of dtf.formatToParts(instant)) parts[p.type] = p.value;
-  const asUtc = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour === "24" ? "0" : parts.hour),
-    Number(parts.minute),
-    Number(parts.second)
-  );
-  return asUtc - instant.getTime();
-}
-
-/** The shop's wall clock at `instant` in `tz`, as "YYYY-MM-DD HH:MM". */
-export function zonedWallClock(instant: Date, tz: string): string {
-  const local = new Date(instant.getTime() + tzOffsetMs(tz, instant)).toISOString();
-  return `${local.slice(0, 10)} ${local.slice(11, 16)}`;
-}
-
-/**
- * UTC instant for wall-clock `time` ("HH:MM") on calendar `date` ("YYYY-MM-DD")
- * in `tz`. Two-pass so dates around a DST transition resolve with the offset
- * that is actually in force at the resulting instant.
- */
-export function zonedTimeToUtc(date: string, time: string, tz: string): Date {
-  const guess = new Date(`${date}T${time}:00Z`);
-  const first = new Date(guess.getTime() - tzOffsetMs(tz, guess));
-  const offset = tzOffsetMs(tz, first);
-  return new Date(guess.getTime() - offset);
-}
+export { zonedTimeToUtc, zonedWallClock } from "@repo/utils";
