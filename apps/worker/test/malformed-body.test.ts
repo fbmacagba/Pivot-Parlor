@@ -112,6 +112,71 @@ describe("a body that is not a JSON object", () => {
   });
 });
 
+describe("walk-in join, reached with a real shop", () => {
+  // The sweep above sends slug "x", which this route answers 404 before it
+  // reads the body, so the sweep never reaches its parse. A real shop does.
+  async function realSlug(): Promise<string> {
+    const shopId = await seedShop("Walk-in Malformed Shop");
+    const row = await env.DB.prepare("SELECT slug FROM shops WHERE id = ?").bind(shopId).first<{ slug: string }>();
+    return row!.slug;
+  }
+  const queued = async () =>
+    (await env.DB.prepare("SELECT COUNT(*) AS n FROM walkin_queue").first<{ n: number }>())!.n;
+
+  it.each(MALFORMED)("answers %j with 400 'Name is required' and adds nobody to the queue", async (raw) => {
+    const slug = await realSlug();
+    const before = await queued();
+    const r = await send("POST", `/api/walkin/${slug}/join`, raw);
+    expect(r).toMatchObject({ status: 400, body: { success: false, error: "Name is required" }, rows: [], errors: 0 });
+    expect(await queued()).toBe(before);
+  });
+
+  it("still adds a real walk-in to the queue (control)", async () => {
+    const slug = await realSlug();
+    const before = await queued();
+    const r = await sendJson("POST", `/api/walkin/${slug}/join`, { name: "Casey" });
+    expect(r).toMatchObject({ status: 201, errors: 0 });
+    expect(await queued()).toBe(before + 1);
+  });
+});
+
+describe("invite accept, reached with a real invite", () => {
+  // Like walk-in join, the sweep's placeholder token is answered 404 before
+  // the body is read. A real, active invite reaches the parse.
+  async function realInvite(): Promise<{ token: string; email: string }> {
+    const shopId = await seedShop("Invite Malformed Shop");
+    const email = `invitee-${crypto.randomUUID()}@example.test`;
+    const token = `tok${crypto.randomUUID().replace(/-/g, "")}`;
+    await env.DB.prepare(
+      `INSERT INTO invites (id, email, shop_id, role, token, expires_at, active)
+       VALUES (?, ?, ?, 'staff', ?, '2999-12-31T23:59:59Z', 1)`,
+    )
+      .bind(`invite-${crypto.randomUUID()}`, email, shopId, token)
+      .run();
+    return { token, email };
+  }
+  const accountFor = (email: string) =>
+    env.DB.prepare("SELECT id FROM platform_users WHERE email = ?").bind(email).first();
+
+  it.each(MALFORMED)("answers %j with 400 'Invalid JSON' and creates no account", async (raw) => {
+    const { token, email } = await realInvite();
+    const r = await send("POST", `/api/invites/${token}/accept`, raw);
+    expect(r).toMatchObject({ status: 400, body: { success: false, error: "Invalid JSON" }, rows: [], errors: 0 });
+    expect(await accountFor(email)).toBeNull();
+  });
+
+  it("still creates the account for a real acceptance (control)", async () => {
+    const { token, email } = await realInvite();
+    const r = await sendJson("POST", `/api/invites/${token}/accept`, {
+      name: "Casey Example",
+      password: "correct-horse-staple",
+      accept_terms: true,
+    });
+    expect(r).toMatchObject({ status: 201, errors: 0 });
+    expect(await accountFor(email)).not.toBeNull();
+  });
+});
+
 describe("a field of the wrong type", () => {
   const enquiry = {
     full_name: "Casey Example",
