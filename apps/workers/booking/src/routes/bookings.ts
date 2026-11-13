@@ -19,8 +19,38 @@ import { reportError } from "../services/report-error.js";
 import { calculateCommissionPence } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
+import { checkSlotConflict } from "../db/queries.js";
+import { bookingInterval } from "../lib/bookingTimes.js";
 
 const r = new Hono<{ Bindings: Env }>();
+
+async function shopTimeZone(db: Env["DB"], shopId: string): Promise<string> {
+  const row = await db.prepare("SELECT timezone FROM shops WHERE id = ?").bind(shopId).first<{ timezone: string | null }>();
+  return row?.timezone || "Europe/London";
+}
+
+/**
+ * Whether any booking already holds part of [slotTime, slotTime + minutes) on
+ * slotDate for this staff member: an online booking (an instant, perhaps made
+ * after the day opened) or a walk-in or deposit booking whose service runs on
+ * into this slot. bw_availability marks only the one slot a booking claimed,
+ * and never an online booking. A time that cannot be read counts as taken.
+ */
+async function slotTaken(
+  db: Env["DB"],
+  staffId: string,
+  timeZone: string,
+  slotDate: string,
+  slotTime: string,
+  minutes: number
+): Promise<boolean> {
+  const interval = bookingInterval(
+    { booking_date: slotDate, start_time: slotTime, end_time: addMinutesToHm(slotTime, minutes) },
+    timeZone
+  );
+  if (!interval) return true;
+  return checkSlotConflict(db, staffId, interval.start.toISOString(), interval.end.toISOString(), timeZone);
+}
 
 r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
   const shopId = c.req.param("shopId");
@@ -447,6 +477,12 @@ r.post("/:shopId/bookings", async (c) => {
   if (!service) {
     return c.json({ success: false, error: "Service not found" }, 404);
   }
+  // Before any claim or payment: an online booking or a longer walk-in may
+  // already hold this time, which bw_availability does not show.
+  const timeZone = await shopTimeZone(db, shopId);
+  if (await slotTaken(db, body.staffId, timeZone, body.slotDate, body.slotTime, service.duration_min)) {
+    return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+  }
 
   const settings = await db
     .prepare(
@@ -682,22 +718,32 @@ r.post("/:shopId/walk-ins", async (c) => {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
 
-  const slot = await db
-    .prepare(
-      `SELECT id, slot_time FROM bw_availability WHERE shop_id = ? AND staff_id = ? AND slot_date = ? AND is_booked = 0 ORDER BY slot_time ASC LIMIT 1`
-    )
-    .bind(shopId, body.staffId, date)
-    .first<{ id: string; slot_time: string }>();
-  if (!slot?.id) {
-    return c.json({ success: false, error: "No availability for this staff today" }, 400);
-  }
-
   const service = await db
     .prepare("SELECT price_pence, duration_min, name FROM services WHERE id = ? AND shop_id = ?")
     .bind(body.serviceId, shopId)
     .first<{ price_pence: number; duration_min: number; name: string }>();
   if (!service) {
     return c.json({ success: false, error: "Service not found" }, 404);
+  }
+
+  // The earliest open time no booking already holds for the whole service:
+  // not an online booking, not a longer walk-in running on into it.
+  const { results: freeSlots } = await db
+    .prepare(
+      `SELECT id, slot_time FROM bw_availability WHERE shop_id = ? AND staff_id = ? AND slot_date = ? AND is_booked = 0 ORDER BY slot_time ASC`
+    )
+    .bind(shopId, body.staffId, date)
+    .all<{ id: string; slot_time: string }>();
+  const timeZone = await shopTimeZone(db, shopId);
+  let slot: { id: string; slot_time: string } | undefined;
+  for (const candidate of freeSlots) {
+    if (!(await slotTaken(db, body.staffId, timeZone, date, candidate.slot_time, service.duration_min))) {
+      slot = candidate;
+      break;
+    }
+  }
+  if (!slot?.id) {
+    return c.json({ success: false, error: "No availability for this staff today" }, 400);
   }
 
   const bookingId = crypto.randomUUID();
