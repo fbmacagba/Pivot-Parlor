@@ -86,16 +86,58 @@ describe("booking audit gap guard", () => {
   });
 
   it("a route under /webhooks/ records via webhook", async () => {
-    const a = fixtureApp((x) => x.post("/webhooks/fx", (c) => c.json({ success: false }, 400)));
+    const a = fixtureApp((x) => x.post("/webhooks/fx", (c) => c.json({ success: true }, 201)));
     const { rid } = await send(a, "POST", "/webhooks/fx");
     const rows = await rowsFor(rid);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ action: "audit.gap", via: "webhook", outcome: "refused" });
+    expect(rows[0]).toMatchObject({ action: "audit.gap", via: "webhook", outcome: "succeeded" });
+  });
+
+  it.each([400, 401, 403, 422])("a %i on an undeclared route writes nothing", async (status) => {
+    // A refusal changed nothing, and anyone can send one: recording it would
+    // let an anonymous caller fill the append-only log at will.
+    const a = fixtureApp((x) => x.post("/fx/undeclared-refusal", (c) => c.json({ success: false }, status as 400)));
+    const { res, rid } = await send(a, "POST", "/fx/undeclared-refusal");
+    expect(res.status).toBe(status);
+    expect(await rowsFor(rid)).toEqual([]);
+  });
+
+  it("a 4xx on a pending route is still a gap", async () => {
+    const a = fixtureApp((x) => x.post("/fx/pending", (c) => c.json({ success: false }, 400)), {
+      "POST /fx/pending": "pending",
+    });
+    const { rid } = await send(a, "POST", "/fx/pending");
+    const rows = await rowsFor(rid);
+    expect(rows.map((r) => `${String(r.action)}/${String(r.outcome)}`)).toEqual(["audit.gap/refused"]);
+  });
+
+  it("finds the declaration when a middleware registered after the handler also matches", async () => {
+    // Neither the responding route (the early middleware) nor the last matched
+    // route (the late one) is the declared handler.
+    const a = fixtureApp(
+      (x) => {
+        const r = new Hono<{ Bindings: Env }>();
+        r.use("*", async (c) => c.json({ success: false }, 500));
+        r.post("/thing", (c) => c.json({ success: true }, 201));
+        r.use("*", async (_c, next) => {
+          await next();
+        });
+        x.route("/fx/late", r);
+      },
+      { "POST /fx/late/thing": "booking.create" }
+    );
+    const { res, rid } = await send(a, "POST", "/fx/late/thing");
+    expect(res.status).toBe(500);
+    const rows = await rowsFor(rid);
+    expect(rows.map((r) => r.action), "exactly one entry, of the declared action").toEqual(["booking.create"]);
+    expect(rows[0]).toMatchObject({ outcome: "failed", reason: "HTTP 500" });
   });
 
   it("records a :shopId only once it resolves to a real shop id", async () => {
+    // The fixture answers 500: an undeclared 4xx writes nothing, so a 5xx is
+    // what still records a gap with the shop it names.
     const shopId = await seedShop("Booking Gap Shop");
-    const a = fixtureApp((x) => x.post("/fx/shops/:shopId/thing", (c) => c.json({ success: false }, 401)));
+    const a = fixtureApp((x) => x.post("/fx/shops/:shopId/thing", (c) => c.json({ success: false }, 500)));
     const known = await send(a, "POST", `/fx/shops/${shopId}/thing`);
     const knownRow = (await rowsFor(known.rid))[0]!;
     expect(knownRow.shop_id).toBe(shopId);
@@ -162,4 +204,48 @@ describe("the real booking app mounts the gap guard", () => {
     expect(JSON.parse(rows[0]!.details_json as string)).toEqual({ method: "POST", route: "/public/bookings", status: 500 });
     expect(await gapRowsFor(rid!)).toBe(0);
   });
+});
+
+/** One anonymous request through the real worker, and every audit row written
+ *  while it ran (found by rowid, so a response without an id still counts). */
+async function anonymous(method: string, path: string, body?: unknown): Promise<{ status: number; rows: string[] }> {
+  const last = await env.DB.prepare("SELECT COALESCE(MAX(rowid), 0) AS n FROM audit_log").first<{ n: number }>();
+  const res = await dispatch(method, path, {
+    headers: { "CF-Connecting-IP": "192.0.2.80" },
+    body: method === "GET" ? undefined : body,
+  });
+  const rows = await env.DB.prepare("SELECT action, outcome FROM audit_log WHERE rowid > ? ORDER BY rowid")
+    .bind(last!.n)
+    .all<{ action: string; outcome: string }>();
+  return { status: res.status, rows: (rows.results ?? []).map((r) => `${r.action}/${r.outcome}`) };
+}
+
+describe("anonymous callers cannot write to the booking audit log", () => {
+  it("an unknown path under the auth-guarded /booking router answers 401 and writes nothing", async () => {
+    const shopId = await seedShop("Booking Gap Unknown Path Shop");
+    const paths = ["/booking/no-such-route", `/booking/shops/${shopId}/no-such-route`, "/booking/platform/no-such-route"];
+    const seen: string[] = [];
+    for (const path of paths) {
+      const { status, rows } = await anonymous("POST", path, { junk: true });
+      // 401 proves the router's own auth middleware answered, so the path
+      // really reached a guarded router rather than falling through to a 404.
+      seen.push(`${path} -> ${status} [${rows.join(",")}]`);
+    }
+    expect(seen).toEqual(paths.map((p) => `${p} -> 401 []`));
+  });
+
+  it("every declared mutating route, called anonymously with a junk body, writes nothing", async () => {
+    const shopId = await seedShop("Booking Gap Declared Route Shop");
+    const keys = Object.keys(ROUTE_AUDIT).sort();
+    expect(keys.length).toBeGreaterThan(10);
+    const wrote: string[] = [];
+    for (const key of keys) {
+      const [m, p] = key.split(" ");
+      const method = m === "ALL" ? "POST" : m!;
+      const path = p!.replace(":shopId", shopId).replace(/:[A-Za-z]+/g, "x").replace("/*", "/x");
+      const { status, rows } = await anonymous(method, path, { junk: true });
+      if (rows.length > 0) wrote.push(`${key} -> ${status} [${rows.join(",")}]`);
+    }
+    expect(wrote).toEqual([]);
+  }, 120_000);
 });
