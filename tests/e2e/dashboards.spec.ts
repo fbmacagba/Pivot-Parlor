@@ -25,12 +25,14 @@ import { expect, test } from "./fixtures";
  *
  * A fresh shop has empty lists, so this proves each screen renders cleanly,
  * not that populated tables do. Load only, with one exception: the
- * developer pass saves the throwaway shop's schedule once, to prove a page
- * action reaches the shop it is viewing. Nothing is generated, paid for or
- * sent.
+ * developer pass opens one working day for the throwaway shop's staff member
+ * and saves the schedule, to prove a page action reaches the shop it is
+ * viewing (and to give the developer's view of that person hours to show).
+ * Nothing is generated, paid for or sent.
  *
  * The admin screens run twice: as the shop's admin, and as the developer
- * managing that shop through ?shopId=.
+ * managing that shop through ?shopId=. The staff screens run twice too: as
+ * the staff member, and as the developer viewing them (?shopId=&staffId=).
  *
  * The screen list comes from apps/web/app/routes at run time: a new dashboard
  * route is swept automatically or fails "every dashboard route is covered".
@@ -116,7 +118,7 @@ function pathFor(mod: string, params: { shopId: string }): string {
 }
 
 /** Problems on one screen; empty means it rendered cleanly. */
-async function screenProblems(page: Page, url: string): Promise<string[]> {
+async function screenProblems(page: Page, url: string, redirects: Record<string, string> = REDIRECTS): Promise<string[]> {
   const problems: string[] = [];
   const pageErrors: string[] = [];
   const browserErrors: string[] = [];
@@ -142,7 +144,7 @@ async function screenProblems(page: Page, url: string): Promise<string[]> {
     // Some screens poll (the queue), so network idle may never come; bounded.
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(400);
-    const want = REDIRECTS[new URL(url, "http://x").pathname] ?? new URL(url, "http://x").pathname;
+    const want = redirects[new URL(url, "http://x").pathname] ?? new URL(url, "http://x").pathname;
     const landed = new URL(page.url()).pathname;
     if (landed !== want) problems.push(`landed on ${landed}, not ${want}`);
     const fallback = page.getByTestId("error-screen");
@@ -316,9 +318,18 @@ test.describe.serial("dashboard sweep", () => {
     });
 
     await test.step("a page action reaches the shop (saving the schedule)", async () => {
-      // The one write in this sweep, on the throwaway e2e- shop: the staff
-      // member's default hours. A form post with no action keeps ?shopId=.
+      // The one write in this sweep, on the throwaway e2e- shop: one working
+      // day for the staff member. A new person's grid is every day off, and
+      // saving that stores nothing, so a day is opened first. A form post with
+      // no action keeps ?shopId=.
       await page.goto(`/admin/schedule${q}`, { waitUntil: "networkidle" });
+      const firstDay = page.locator("tr", { hasText: "E2E Dashboard Staff" }).locator("label").first();
+      // Until the page has hydrated a tick does not reach React; the label
+      // reads "Open" only once it has, so tick until it does.
+      await expect(async () => {
+        if ((await firstDay.innerText()).trim() !== "Open") await firstDay.locator("input[type=checkbox]").click();
+        await expect(firstDay).toHaveText("Open", { timeout: 2_000 });
+      }).toPass({ timeout: 30_000 });
       const button = page.getByRole("button", { name: "Save schedule" });
       // Until the page has hydrated a press does nothing, so press until it posts.
       let posted = "";
@@ -334,12 +345,76 @@ test.describe.serial("dashboard sweep", () => {
       await expect(page.getByRole("status").filter({ hasText: /schedule saved|failed|unauthorized/i })).toHaveText(
         "Schedule saved.",
       );
+      // "Schedule saved." also shows when nothing was stored: read it back.
+      const stored = await page.request.get(`/admin/schedule${q}&_data=${encodeURIComponent("routes/admin.schedule")}`);
+      const { schedules } = (await stored.json()) as { schedules?: Array<{ is_active: number }> };
+      expect(schedules?.filter((s) => s.is_active === 1).length ?? 0, "the opened day was stored").toBe(1);
     });
 
     await test.step("payments: the developer sees the status, the owner connects Stripe", async () => {
       await page.goto(`/admin/payments${q}`);
       await expect(page.getByText("Only the shop's owner can connect its Stripe account.")).toBeVisible();
       await expect(page.getByRole("button", { name: /stripe/i })).toHaveCount(0);
+    });
+  });
+
+  test("staff screens, as the developer viewing that staff member", async ({ page }) => {
+    // Staff View is one person's own day, and a developer is nobody's staff:
+    // they pick the shop and the person (?shopId=&staffId=) and see that
+    // person's screens, read-only. Before, every staff screen was empty.
+    test.setTimeout(180_000);
+    expect(shopId, "the admin test created the shop").toBeTruthy();
+    await signIn(page, "dev@pivotparlor.com", devPassword!);
+    expect((await session(page)).role).toBe("developer");
+
+    const pick = await page.request.get(`/staff?shopId=${encodeURIComponent(shopId)}&_data=${encodeURIComponent("routes/staff")}`);
+    expect(pick.status()).toBe(200);
+    const picked = (await pick.json()) as { developerView?: { staff?: Array<{ id: string; display_name: string }> } };
+    const member = picked.developerView?.staff?.find((s) => s.display_name === "E2E Dashboard Staff");
+    expect(member, "the shop's staff are offered to view").toBeTruthy();
+    const q = `?shopId=${encodeURIComponent(shopId)}&staffId=${encodeURIComponent(member!.id)}`;
+
+    // Read-only for a developer, so Staff View's till is Admin view's (lib/pos.ts).
+    const redirects: Record<string, string> = { ...REDIRECTS, "/staff/pos": "/admin/pos" };
+    for (const mod of dashboardModules().filter((m) => roleFor(m) === "staff" && !(m in EXCLUDED))) {
+      const url = `${pathFor(mod, { shopId })}${q}`;
+      await test.step(`${mod} (${url})`, async () => {
+        expect.soft(await screenProblems(page, url, redirects), `${mod} at ${url}`).toEqual(EXPECTED_PROBLEMS[mod]?.problems ?? []);
+        const target = redirects[new URL(url, "http://x").pathname];
+        if (target) {
+          const landed = new URL(page.url()).searchParams;
+          expect.soft(landed.get("shopId"), `${mod} kept ?shopId= through its redirect`).toBe(shopId);
+          if (target.startsWith("/staff")) {
+            expect.soft(landed.get("staffId"), `${mod} kept ?staffId= through its redirect`).toBe(member!.id);
+          }
+        }
+      });
+    }
+
+    await test.step("the banner names the person and the shop", async () => {
+      await page.goto(`/staff${q}`);
+      await expect
+        .soft(page.locator("body"))
+        .toContainText(`you are viewing E2E Dashboard Staff's screens at E2E Dashboards ${uniqueId}, read-only`);
+    });
+
+    await test.step("their schedule arrived (the day the developer's admin pass opened), read-only", async () => {
+      const res = await page.request.get(`/staff/bookings${q}&_data=${encodeURIComponent("routes/staff.bookings")}`);
+      expect(res.status()).toBe(200);
+      const data = (await res.json()) as { readOnly?: boolean; needsStaff?: boolean; schedule?: Array<{ is_active: number }> };
+      expect.soft(data.readOnly).toBe(true);
+      expect.soft(data.needsStaff).toBe(false);
+      expect.soft(data.schedule?.filter((s) => s.is_active === 1).length ?? 0, "the staff member's working days").toBe(1);
+      await page.goto(`/staff/bookings${q}&tab=availability`);
+      await expect(page.getByText("Time off is requested by the staff member from their own screens.")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Submit request" })).toHaveCount(0);
+    });
+
+    await test.step("a sidebar link stays on the person", async () => {
+      await page.goto(`/staff${q}`);
+      await page.getByRole("navigation", { name: "Dashboard" }).getByRole("link", { name: "My Bookings", exact: true }).first().click();
+      await page.waitForURL((u) => u.pathname === "/staff/bookings");
+      expect.soft(new URL(page.url()).searchParams.get("staffId"), "the sidebar link kept ?staffId=").toBe(member!.id);
     });
   });
 

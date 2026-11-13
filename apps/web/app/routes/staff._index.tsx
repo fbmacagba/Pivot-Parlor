@@ -7,6 +7,8 @@ import { createApiClient } from "~/lib/api";
 import { Badge } from "~/components/ui/Badge";
 import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
 import { formatDate, formatTime as formatUkTime, ukParts } from "~/lib/dateFormat";
+import { pageShopId, pageStaffId, staffMePath } from "~/lib/pageShop";
+import { useShopHref } from "~/lib/useShopHref";
 
 interface TodayBooking {
   id: string;
@@ -34,13 +36,20 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const user = await requireRole(request, "staff", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
+  // A developer views the staff member they chose (staff.tsx); until they
+  // choose one there is nobody's day to show.
+  const shopId = pageShopId(request, user);
+  const staffId = pageStaffId(request, user);
+  const needsStaff = user.role === "developer" && !staffId;
 
   let todayBookings: TodayBooking[] = [];
-  try {
-    todayBookings = await api.get<TodayBooking[]>("/api/staff/me/today");
-    if (!Array.isArray(todayBookings)) todayBookings = [];
-  } catch {
-    /* empty */
+  if (!needsStaff) {
+    try {
+      todayBookings = await api.get<TodayBooking[]>(staffMePath("/api/staff/me/today", staffId));
+      if (!Array.isArray(todayBookings)) todayBookings = [];
+    } catch {
+      /* empty */
+    }
   }
 
   const { hour } = ukParts();
@@ -51,10 +60,10 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   // Public shop-site URL for the share card. Built from the request origin so
   // staging previews link to themselves rather than production.
   let shopShare: { url: string; name: string } | null = null;
-  if (user.shop_id) {
+  if (shopId) {
     try {
       const shop = await api.get<{ slug: string; name: string }>(
-        `/api/shops/${user.shop_id}`,
+        `/api/shops/${shopId}`,
       );
       if (shop?.slug) {
         shopShare = {
@@ -67,11 +76,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     }
   }
 
-  return json({ todayBookings, greeting, displayName, shopShare });
+  return json({ todayBookings, greeting, displayName, shopShare, needsStaff });
 }
 
 export default function StaffToday() {
-  const { todayBookings, greeting, shopShare } = useLoaderData<typeof loader>();
+  const { todayBookings, greeting, shopShare, needsStaff } = useLoaderData<typeof loader>();
+  const shopHref = useShopHref();
 
   const upcoming = todayBookings.filter(
     (b) => b.status !== "completed" && b.status !== "cancelled",
@@ -98,7 +108,7 @@ export default function StaffToday() {
           </p>
         </div>
         <Link
-          to="/staff/bookings"
+          to={shopHref("/staff/bookings")}
           className="tap-target flex items-center gap-1.5 text-sm text-gold hover:text-gold/80"
         >
           All bookings <ArrowRight className="h-3.5 w-3.5" />
@@ -151,7 +161,9 @@ export default function StaffToday() {
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
-          <p className="text-white/50 text-sm">No more appointments today.</p>
+          <p className="text-white/50 text-sm">
+            {needsStaff ? "Choose a staff member above to see their day." : "No more appointments today."}
+          </p>
         </div>
       )}
 

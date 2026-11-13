@@ -116,6 +116,32 @@ describe("DashboardLayout: server markup", () => {
     }
   });
 
+  it("a developer viewing a staff member keeps ?shopId= and ?staffId= on every staff link", () => {
+    pathname = "/staff/bookings";
+    search = "?shopId=shop-1&staffId=staff-9";
+    try {
+      const html = ssr({ role: "staff", showDeveloperViewSwitcher: true, userName: "dev" });
+      const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]).filter((h) => h.startsWith("/staff"));
+      expect(hrefs.length).toBeGreaterThan(5);
+      for (const href of hrefs) expect(href).toContain("?shopId=shop-1&amp;staffId=staff-9");
+    } finally {
+      search = "";
+    }
+  });
+
+  it("Switch View keeps the shop a developer is looking at", () => {
+    pathname = "/admin/settings";
+    search = "?shopId=shop-1";
+    try {
+      const html = ssr({ role: "admin", showDeveloperViewSwitcher: true, userName: "dev" });
+      expect(html).toContain('value="/staff?shopId=shop-1"');
+      expect(html).toContain('value="/admin?shopId=shop-1"');
+      expect(html).toContain('value="/dev/dashboard"');
+    } finally {
+      search = "";
+    }
+  });
+
   // Ruling 50: the owner locked developer's phone tab bar to its original
   // five destinations on 2026-09-12, before Activity (Task 12) existed.
   // DEV_TAB_HREFS (MobileTabBar.tsx) pins that set regardless of how many

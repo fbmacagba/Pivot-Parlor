@@ -41,3 +41,48 @@ export function withShopId(href: string, shopId: string | null | undefined): str
 export function isAdminHref(href: string): boolean {
   return href === "/admin" || href.startsWith("/admin/") || href.startsWith("/admin?");
 }
+
+/** A staff dashboard destination, which takes a developer's ?shopId= and ?staffId=. */
+export function isStaffHref(href: string): boolean {
+  return href === "/staff" || href.startsWith("/staff/") || href.startsWith("/staff?");
+}
+
+/**
+ * Whose staff screens a developer is viewing: the URL's ?staffId=. Staff
+ * View is one person's own day, and a developer is nobody's staff, so they
+ * name the person. Staff and admins always see their own (null here).
+ */
+export function pageStaffId(request: Request, user: Pick<SessionPayload, "role">): string | null {
+  if (user.role !== "developer") return null;
+  return plainId(new URL(request.url).searchParams.get("staffId"));
+}
+
+/** Why a developer's write on a staff screen is refused: Staff View is read-only for them. */
+export const DEVELOPER_STAFF_READ_ONLY = "Developers can view staff screens but not act for staff.";
+
+/** A /api/staff/me/* path for the staff member a developer is viewing (unchanged when none). */
+export function staffMePath(path: string, staffId: string | null | undefined): string {
+  const id = plainId(staffId);
+  if (!id) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}staffId=${encodeURIComponent(id)}`;
+}
+
+/**
+ * A dashboard link that keeps what a developer is looking at: the shop on
+ * admin and staff destinations, and the staff member on staff ones. Other
+ * destinations are left alone. Carrying the values for anyone is harmless:
+ * the server applies them only for a developer.
+ */
+export function dashboardHref(
+  href: string,
+  view: { shopId?: string | null; staffId?: string | null },
+): string {
+  if (isAdminHref(href)) return withShopId(href, view.shopId);
+  if (!isStaffHref(href)) return href;
+  const withShop = withShopId(href, view.shopId);
+  const staffId = plainId(view.staffId);
+  if (!staffId) return withShop;
+  const url = new URL(withShop, "http://x");
+  url.searchParams.set("staffId", staffId);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
