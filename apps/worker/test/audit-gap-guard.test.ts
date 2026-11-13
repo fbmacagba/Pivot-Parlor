@@ -447,20 +447,41 @@ describe("the real app mounts the gap guard", () => {
   });
 
   it("a declared route that answers 5xx before its own entry gets the declared action as failed", async () => {
-    // POST /api/contact parses its body inside a try whose catch answers 500
-    // before its batchWithAudit, so a body that is not JSON takes exactly that
-    // path and the handler writes nothing. Only the guard can write this row.
+    // POST /api/contact writes the enquiry and its entry in one D1 batch, inside
+    // a try whose catch answers 500. Here the first batch fails, as in a D1
+    // outage, so the handler writes nothing and only the guard can write this
+    // row (its own write runs later and is let through).
     expect(ROUTE_AUDIT["POST /api/contact"]).toBe("enquiry.create");
+    let failNextBatch = true;
+    const db = new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "batch" && failNextBatch) {
+          return async () => {
+            failNextBatch = false;
+            throw new Error("D1 unavailable (test)");
+          };
+        }
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
     const ctx = createExecutionContext();
     const res = (await worker.fetch(
       new Request("https://worker.test/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.131" },
-        body: "this is not json {",
+        body: JSON.stringify({
+          full_name: "Casey Example",
+          shop_name: "Example Cuts",
+          shop_type: "barber_shop",
+          email: "casey@example.test",
+          message: "Hello",
+        }),
       }) as never,
-      env as never,
+      { ...env, DB: db } as never,
       ctx as never
     )) as unknown as Response;
+    expect(failNextBatch, "the handler's own batch was the one refused").toBe(false);
     await waitOnExecutionContext(ctx);
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ success: false, error: "Internal error" });
