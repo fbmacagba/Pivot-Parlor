@@ -9,11 +9,17 @@ import { requireRole } from "../middleware/rbac.js";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import {
+  BOOKING_TIME_TAKEN,
+  bookingTimeTaken,
   getBookingById,
+  getBookingStatus,
   getPlatformRevenueByMonth,
   getRevenueByShop,
   getShopById,
   getShopTimezone,
+  revivesBooking,
+  setBookingStatusStmt,
+  type StatusBooking,
 } from "../db/queries.js";
 import {
   PLATFORM_TIME_ZONE,
@@ -514,27 +520,44 @@ staffMeRouter.put("/bookings/:bookingId/status", async (c) => {
 
   // Verify booking belongs to this staff member
   const existing = await c.env.DB
-    .prepare("SELECT id, status FROM bookings WHERE id = ? AND staff_id = ? LIMIT 1")
+    .prepare(
+      "SELECT id, status, staff_id, booking_date, start_time, end_time FROM bookings WHERE id = ? AND staff_id = ? LIMIT 1"
+    )
     .bind(bookingId, staffId)
-    .first<{ id: string; status: string }>();
+    .first<StatusBooking & { status: string }>();
 
   if (!existing) {
     return c.json({ success: false, error: "Booking not found" }, 404);
   }
 
+  // Reviving a cancelled or no-show booking first checks its time is still
+  // free; the write repeats the check in the same statement (see
+  // setBookingStatusStmt), so a booking made in between rolls the batch back.
+  const status = body.status;
+  const timeZone = (shopId && (await getShopTimezone(c.env.DB, shopId))) || PLATFORM_TIME_ZONE;
+  const revivalRefused = async (from: string | undefined) =>
+    from !== undefined && revivesBooking(from, status) && (await bookingTimeTaken(c.env.DB, existing, timeZone));
+  if (await revivalRefused(existing.status)) {
+    return c.json({ success: false, error: BOOKING_TIME_TAKEN }, 409);
+  }
+
   // Unconditional UPDATE, so Pattern B: the entry joins the same batch.
-  const refused = await batchWithAudit(
-    c,
-    [c.env.DB.prepare("UPDATE bookings SET status = ? WHERE id = ?").bind(body.status, bookingId)],
-    {
+  let refused: Response | null;
+  try {
+    refused = await batchWithAudit(c, [setBookingStatusStmt(c.env.DB, existing, status, timeZone)], {
       action: "booking.status",
       outcome: "succeeded",
       shopId,
       entityType: "booking",
       entityId: bookingId,
-      changes: fieldChanges(existing, { status: body.status }).changes,
-    },
-  );
+      changes: fieldChanges({ id: existing.id, status: existing.status }, { status }).changes,
+    });
+  } catch (err) {
+    if (await revivalRefused((await getBookingStatus(c.env.DB, bookingId))?.status)) {
+      return c.json({ success: false, error: BOOKING_TIME_TAKEN }, 409);
+    }
+    throw err;
+  }
   if (refused) return refused;
 
   return c.json({ success: true });
