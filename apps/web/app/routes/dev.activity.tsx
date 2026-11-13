@@ -21,6 +21,7 @@ import {
   verifyMessage,
   type VerifyResult,
 } from "~/lib/audit";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 interface Entry {
   id: string;
@@ -70,7 +71,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   // error message. A POST runs only this action, never the layout's loader.
   await requireRole(request, "developer", env.API_URL);
   const api = createApiClient(env.API_URL, getSessionToken(request));
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ error: UNREADABLE_FORM }, { status: 400 });
   const intent = form.get("intent");
   try {
     if (intent === "verify") {

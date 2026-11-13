@@ -4,6 +4,7 @@
 import type { ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const { shopId, staffId } = params;
@@ -15,7 +16,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
 
   // Forward the multipart body as-is
-  const formData = await request.formData();
+  const formData = await readFormData(request);
+  if (!formData) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
   const res = await fetch(
     `${env.API_URL}/api/shops/${shopId}/staff/${staffId}/avatar`,
     {

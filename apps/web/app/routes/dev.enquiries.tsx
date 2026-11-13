@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/Dialog";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 interface Enquiry {
   id: string;
@@ -70,7 +71,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json<OnboardFail>({ success: false, error: "Not signed in" }, { status: 401 });
   }
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json<OnboardFail>({ success: false, error: UNREADABLE_FORM }, { status: 400 });
   if (form.get("intent") !== "onboard") {
     return json<OnboardFail>({ success: false, error: "Invalid action" }, { status: 400 });
   }

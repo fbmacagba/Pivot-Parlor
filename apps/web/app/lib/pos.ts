@@ -10,6 +10,7 @@ import { DEVELOPER_STAFF_READ_ONLY, pageShopId, withShopId } from "~/lib/pageSho
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { parsePoundsToPence } from "@repo/utils";
+import { readFormData, UNREADABLE_FORM } from "./formBody";
 
 export interface PosService {
   id: string;
@@ -94,7 +95,8 @@ export async function posAction({ request, context }: ActionFunctionArgs, role: 
   const token = getSessionToken(request);
   if (!token) return json<PosActionData>({ error: "Unauthorized" }, { status: 401 });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json<PosActionData>({ error: UNREADABLE_FORM }, { status: 400 });
   const intent = String(form.get("intent") ?? "").trim();
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   if (!shopId) {

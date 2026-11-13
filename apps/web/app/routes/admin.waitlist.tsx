@@ -6,6 +6,7 @@ import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatDay } from "~/lib/dateFormat";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +62,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json<ActionData>({ error: "Unauthorized" }, { status: 401 });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json<ActionData>({ error: UNREADABLE_FORM }, { status: 400 });
   const intent = String(form.get("intent") ?? "").trim();
   const entryId = String(form.get("entryId") ?? "").trim();
   const formShopId = String(form.get("shopId") ?? "").trim() || null;

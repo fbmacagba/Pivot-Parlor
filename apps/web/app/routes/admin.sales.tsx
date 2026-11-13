@@ -17,6 +17,7 @@ import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { formatDateTime, formatTime } from "~/lib/dateFormat";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 interface SaleRow {
   id: string;
@@ -90,7 +91,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json<ActionData>({ error: "Unauthorized" }, { status: 401 });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json<ActionData>({ error: UNREADABLE_FORM }, { status: 400 });
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   const saleId = String(form.get("saleId") ?? "").trim();
   if (!shopId || !saleId) return json<ActionData>({ error: "Missing shop or sale." }, { status: 400 });

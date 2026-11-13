@@ -8,6 +8,7 @@ import { Link, useActionData, useLoaderData, useNavigation } from "@remix-run/re
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, sessionCookieHeaders } from "~/lib/auth";
 import { safeRedirectPath } from "~/lib/safeRedirect";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 export const meta: MetaFunction = () => [{ title: "Sign in | Pivot Parlor" }];
 
@@ -53,7 +54,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
 export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string; APP_DOMAIN?: string };
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json({ error: UNREADABLE_FORM }, { status: 400 });
   const email = (form.get("email") as string | null) ?? "";
   const password = (form.get("password") as string | null) ?? "";
   const redirectRaw = form.get("redirect") as string | null;

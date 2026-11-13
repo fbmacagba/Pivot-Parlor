@@ -16,6 +16,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "~/components/ui/Dialog";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 // ─── Types (worker rows are snake_case) ───────────────────────────────────────
 
@@ -108,7 +109,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   if (!token) return json<ActionData>({ error: "Unauthorized" }, { status: 401 });
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return json<ActionData>({ error: UNREADABLE_FORM }, { status: 400 });
   const intent = String(form.get("intent") ?? "").trim();
   const formShopId = String(form.get("shopId") ?? "").trim() || null;
   const shopId = pageShopId(request, user, formShopId);

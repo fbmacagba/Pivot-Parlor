@@ -5,6 +5,7 @@ import { json, redirect } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { COLOR_PALETTES, DEFAULT_PALETTE } from "~/lib/color-palettes";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 const TEMPLATES = [
   {
@@ -81,7 +82,8 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const user = await api.get<{ id: string; role: string; shop_id: string | null }>("/auth/me");
   if (!user.shop_id) return json({ error: "Unauthorized", jobId: null }, 401);
 
-  const formData = await request.formData();
+  const formData = await readFormData(request);
+  if (!formData) return json({ error: UNREADABLE_FORM, jobId: null }, 400);
   const template = formData.get("template")?.toString();
   const colorPrimary = formData.get("color_primary")?.toString();
   const colorAccent = formData.get("color_accent")?.toString();

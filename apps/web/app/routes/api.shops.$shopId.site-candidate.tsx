@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { buildWorkerUpstreamHeaders, workerResponseLooksLikeJson } from "~/lib/worker-upstream-headers";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 /**
  * BFF for the owner-review card (SiteCandidateCard): the pending version of a
@@ -76,7 +77,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   if (!token) return failure("Unauthorized", 401);
   const env = context.env as { API_URL: string };
 
-  const form = await request.formData();
+  const form = await readFormData(request);
+  if (!form) return failure(UNREADABLE_FORM, 400);
   const intent = String(form.get("intent") ?? "");
   const jobId = String(form.get("job_id") ?? "").trim();
   if (intent !== "publish" && intent !== "discard") return failure("Unknown action", 400);

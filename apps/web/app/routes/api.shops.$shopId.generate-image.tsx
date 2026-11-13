@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
 import { getSessionToken } from "~/lib/auth";
 import { buildWorkerUpstreamHeaders, workerResponseLooksLikeJson } from "~/lib/worker-upstream-headers";
+import { readFormData } from "~/lib/formBody";
 
 export async function action({ request, params, context }: ActionFunctionArgs) {
   const shopId = params.shopId;
@@ -20,16 +21,14 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
     for (const [k, v] of sp) o[k] = v;
     forwardBody = JSON.stringify(o);
   } else {
-    try {
-      const fd = await request.formData();
-      const o: Record<string, string> = {};
-      for (const [k, v] of fd.entries()) {
-        if (typeof v === "string") o[k] = v;
-      }
-      forwardBody = JSON.stringify(o);
-    } catch {
-      forwardBody = "{}";
+    // Anything that is not a readable form goes on as {}: the API answers it
+    // with its own 400 ("Empty request body ...").
+    const fd = await readFormData(request);
+    const o: Record<string, string> = {};
+    for (const [k, v] of fd?.entries() ?? []) {
+      if (typeof v === "string") o[k] = v;
     }
+    forwardBody = JSON.stringify(o);
   }
 
   const res = await fetch(`${env.API_URL}/api/shops/${shopId}/generate-image`, {
