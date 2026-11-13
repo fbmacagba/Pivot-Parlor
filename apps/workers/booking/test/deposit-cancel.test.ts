@@ -5,11 +5,14 @@
  * recovery path refunds deposits stranded by the deposit-blind customer
  * self-cancel. charge.refunded completes the refund tx.
  */
-import { env } from "cloudflare:test";
+import { env, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import worker from "../src/index";
 import { dispatch } from "./request";
+import { entriesFor } from "./audit-helpers";
 import { seedShop, seedStaff, seedScheduleDay, seedService, slugFor, tokenFor } from "./helpers";
 import { getAvailableSlots } from "../src/services/slots";
+import { reinstateCancelledIfFree } from "../src/db/queries";
 
 const SECRET = "whsec_test";
 const encoder = new TextEncoder();
@@ -110,6 +113,12 @@ async function stateRow(id: string) {
     .bind(id)
     .first<{ deposit_amount_pence: number; deposit_application_fee_pence: number }>();
 }
+
+const NOT_CANCELLED = "Deposit refund failed. The booking was not cancelled. Try again.";
+const KEPT_TIME_TAKEN =
+  "Deposit refund failed. Another booking took this time while the refund was tried, so this booking stays cancelled and its deposit is still held. Use Refund deposit to try again.";
+const KEPT_ALREADY_CANCELLED =
+  "Deposit refund failed. The booking stays cancelled and its deposit is still held. Try again.";
 
 function cancel(shop: string, bookingId: string, token: string, body: Record<string, unknown> = {}) {
   return dispatch("POST", `/booking/shops/${shop}/bookings/${bookingId}/cancel`, {
@@ -243,6 +252,7 @@ describe("deposit-aware cancellation", () => {
 
     const res = await cancel(shop, bookingId, token, { refundDeposit: true });
     expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe(NOT_CANCELLED);
     expect(await bookingStatus(bookingId)).toBe("confirmed"); // reverted
     expect(await refundTx(bookingId)).toBeNull();
     expect((await depositTx(bookingId))?.status).toBe("captured");
@@ -431,5 +441,240 @@ describe("deposit-aware cancellation", () => {
       .bind(body.saleId)
       .first<{ status: string }>();
     expect(ledger?.status).not.toBe("refunded");
+  });
+});
+
+/**
+ * A cancel frees the booking's time before Stripe is called, so the time can
+ * be booked while the refund is tried. When the refund then fails, the cancel
+ * puts the booking back to confirmed; it must not do that over a booking made
+ * meanwhile, or two bookings hold one barber. It keeps the booking cancelled
+ * with its deposit still held instead, and says so.
+ *
+ * The race is simulated deterministically: a wrapped DB inserts the competing
+ * booking when the refund-failure path restores the claimed deposit, which is
+ * after Stripe answered and before the booking is reinstated.
+ */
+describe("a failed refund never reinstates over a booking made meanwhile", () => {
+  type Times = { booking_date: string; start_time: string; end_time: string; staff_id: string; service_id: string };
+
+  async function timesOf(bookingId: string): Promise<Times> {
+    const row = await env.DB
+      .prepare("SELECT booking_date, start_time, end_time, staff_id, service_id FROM bookings WHERE id = ?")
+      .bind(bookingId)
+      .first<Times>();
+    return row!;
+  }
+
+  /** Move an "HH:MM" or an ISO instant by `minutes`. */
+  function shifted(time: string, minutes: number): string {
+    if (/^\d{4}-/.test(time)) return new Date(new Date(time).getTime() + minutes * 60_000).toISOString();
+    const [h, m] = time.split(":").map(Number);
+    const total = h! * 60 + m! + minutes;
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  }
+
+  async function insertBooking(shop: string, t: Times, status = "confirmed"): Promise<string> {
+    const id = crypto.randomUUID();
+    await env.DB
+      .prepare(
+        `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
+           booking_date, start_time, end_time, status, amount_pence, commission_pence)
+         VALUES (?, ?, ?, ?, 'Other', 'other@test.local', ?, ?, ?, ?, 2500, 250)`
+      )
+      .bind(id, shop, t.staff_id, t.service_id, t.booking_date, t.start_time, t.end_time, status)
+      .run();
+    return id;
+  }
+
+  /** env whose DB runs `competitor` just before the refund-failure path restores the claimed deposit. */
+  function racing(competitor: () => Promise<unknown>) {
+    const RESTORE = "SET deposit_amount_pence = ?, deposit_application_fee_pence = ?";
+    const real = env.DB;
+    let fired = 0;
+    const db = new Proxy(real, {
+      get(target, prop) {
+        if (prop === "prepare") {
+          return (sql: string) => {
+            const stmt = target.prepare(sql);
+            if (!sql.includes(RESTORE)) return stmt;
+            return {
+              bind: (...args: unknown[]) => {
+                const bound = stmt.bind(...args);
+                return {
+                  run: async () => {
+                    if (fired++ === 0) await competitor();
+                    return bound.run();
+                  },
+                };
+              },
+            };
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    return { env: { ...env, DB: db }, fired: () => fired };
+  }
+
+  async function cancelWith(raceEnv: unknown, shop: string, bookingId: string, token: string) {
+    const ctx = createExecutionContext();
+    const res = await worker.fetch(
+      new Request(`https://booking.test/booking/shops/${shop}/bookings/${bookingId}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ refundDeposit: true }),
+      }) as never,
+      raceEnv as never,
+      ctx as never,
+    );
+    await waitOnExecutionContext(ctx);
+    return res as unknown as Response;
+  }
+
+  async function activeFor(staffId: string, date: string): Promise<number> {
+    const row = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM bookings WHERE staff_id = ? AND booking_date = ? AND status NOT IN ('cancelled', 'no_show')")
+      .bind(staffId, date)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  /** A confirmed booking with a captured deposit whose refund will fail at Stripe. */
+  async function failingRefundBooking() {
+    const s = await setupDepositShop();
+    const bookingId = await bookDeposit(s.shop, s.staff, s.service);
+    await settleDeposit(bookingId, s.shop, `pi_fail_${bookingId.slice(0, 8)}`);
+    expect(await bookingStatus(bookingId)).toBe("confirmed");
+    return { ...s, bookingId, token: await tokenFor("admin", s.shop), times: await timesOf(bookingId) };
+  }
+
+  it("keeps the booking cancelled when an overlapping booking took its time during the refund", async () => {
+    const b = await failingRefundBooking();
+    let competitor = "";
+    const race = racing(async () => {
+      competitor = await insertBooking(b.shop, {
+        ...b.times,
+        start_time: shifted(b.times.start_time, 15),
+        end_time: shifted(b.times.end_time, 15),
+      });
+    });
+
+    const res = await cancelWith(race.env, b.shop, b.bookingId, b.token);
+    expect(race.fired()).toBeGreaterThanOrEqual(1);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ success: false, error: KEPT_TIME_TAKEN });
+
+    // One booking holds the barber: the competitor. The original stays cancelled.
+    expect(await bookingStatus(competitor)).toBe("confirmed");
+    expect(await bookingStatus(b.bookingId)).toBe("cancelled");
+    expect(await activeFor(b.staff, b.times.booking_date)).toBe(1);
+
+    // The deposit is still held and refundable from the booking.
+    expect(await refundTx(b.bookingId)).toBeNull();
+    expect((await depositTx(b.bookingId))?.status).toBe("captured");
+    expect(await stateRow(b.bookingId)).toEqual({ deposit_amount_pence: 1250, deposit_application_fee_pence: 125 });
+
+    // The audit entry says the refund failed AND the booking was cancelled.
+    const rows = await entriesFor({ action: "booking.cancel", shopId: b.shop, entityId: b.bookingId });
+    const outcome = rows.find((r) => r.phase === "outcome")!;
+    expect(outcome.outcome).toBe("failed");
+    expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "none" });
+  });
+
+  it("does the same when the booking made meanwhile starts at the identical time", async () => {
+    // idx_bookings_active_slot turned this into a 500 from the reinstating UPDATE.
+    const b = await failingRefundBooking();
+    let competitor = "";
+    const race = racing(async () => {
+      competitor = await insertBooking(b.shop, b.times);
+    });
+
+    const res = await cancelWith(race.env, b.shop, b.bookingId, b.token);
+    expect(race.fired()).toBeGreaterThanOrEqual(1);
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe(KEPT_TIME_TAKEN);
+    expect(await bookingStatus(competitor)).toBe("confirmed");
+    expect(await bookingStatus(b.bookingId)).toBe("cancelled");
+  });
+
+  it("still reinstates when the booking made meanwhile is another barber's", async () => {
+    const b = await failingRefundBooking();
+    const otherStaff = await seedStaff(b.shop);
+    const race = racing(() => insertBooking(b.shop, { ...b.times, staff_id: otherStaff }));
+
+    const res = await cancelWith(race.env, b.shop, b.bookingId, b.token);
+    expect(race.fired()).toBeGreaterThanOrEqual(1);
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe(NOT_CANCELLED);
+    expect(await bookingStatus(b.bookingId)).toBe("confirmed");
+  });
+
+  it("says a booking that was already cancelled stays cancelled when its refund fails", async () => {
+    // The recovery path (Refund deposit on a cancelled booking) never flipped
+    // the booking, so "the booking was not cancelled" would be untrue.
+    const s = await setupDepositShop();
+    const bookingId = await bookDeposit(s.shop, s.staff, s.service);
+    await settleDeposit(bookingId, s.shop, `pi_fail_${bookingId.slice(0, 8)}`);
+    await env.DB.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(bookingId).run();
+    const token = await tokenFor("admin", s.shop);
+
+    const res = await cancel(s.shop, bookingId, token, { refundDeposit: true });
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toBe(KEPT_ALREADY_CANCELLED);
+    expect(await bookingStatus(bookingId)).toBe("cancelled");
+    expect(await stateRow(bookingId)).toEqual({ deposit_amount_pence: 1250, deposit_application_fee_pence: 125 });
+  });
+});
+
+describe("reinstateCancelledIfFree", () => {
+  const DAY = "2099-01-15"; // London = UTC
+  const LONDON = "Europe/London";
+
+  async function seed(shop: string, staff: string, service: string, status: string, start: string, end: string) {
+    const id = crypto.randomUUID();
+    await env.DB
+      .prepare(
+        `INSERT INTO bookings (id, shop_id, staff_id, service_id, customer_name, customer_email,
+           booking_date, start_time, end_time, status, amount_pence, commission_pence)
+         VALUES (?, ?, ?, ?, 'Cust', 'cust@test.local', ?, ?, ?, ?, 2500, 250)`
+      )
+      .bind(id, shop, staff, service, DAY, start, end, status)
+      .run();
+    return { id, shop_id: shop, staff_id: staff, booking_date: DAY, start_time: start, end_time: end };
+  }
+
+  async function world() {
+    const shop = await seedShop("Reinstate Shop");
+    return { shop, staff: await seedStaff(shop), service: await seedService(shop, 30) };
+  }
+
+  const at = (hhmm: string) => `${DAY}T${hhmm}:00.000Z`;
+  const statusOf = async (id: string) =>
+    (await env.DB.prepare("SELECT status FROM bookings WHERE id = ?").bind(id).first<{ status: string }>())?.status;
+
+  it("reinstates a cancelled booking whose time is free", async () => {
+    const w = await world();
+    const b = await seed(w.shop, w.staff, w.service, "cancelled", at("10:00"), at("10:30"));
+    await seed(w.shop, w.staff, w.service, "confirmed", at("10:30"), at("11:00")); // back to back
+    expect(await reinstateCancelledIfFree(env.DB, b, LONDON)).toBe("reinstated");
+    expect(await statusOf(b.id)).toBe("confirmed");
+  });
+
+  it("refuses when an active booking holds part of its time, across the two time shapes", async () => {
+    const w = await world();
+    const b = await seed(w.shop, w.staff, w.service, "cancelled", "10:00", "10:30"); // the shop's clock
+    await seed(w.shop, w.staff, w.service, "confirmed", at("10:15"), at("10:45")); // an instant
+    expect(await reinstateCancelledIfFree(env.DB, b, LONDON)).toBe("taken");
+    expect(await statusOf(b.id)).toBe("cancelled");
+  });
+
+  it("leaves a booking that is no longer cancelled alone", async () => {
+    const w = await world();
+    const b = await seed(w.shop, w.staff, w.service, "completed", at("10:00"), at("10:30"));
+    expect(await reinstateCancelledIfFree(env.DB, b, LONDON)).toBe("unchanged");
+    expect(await statusOf(b.id)).toBe("completed");
   });
 });

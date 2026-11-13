@@ -19,7 +19,7 @@ import { reportError } from "../services/report-error.js";
 import { calculateCommissionPence } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
-import { checkSlotConflict, createBookingIfFree } from "../db/queries.js";
+import { checkSlotConflict, createBookingIfFree, reinstateCancelledIfFree } from "../db/queries.js";
 import { bookingInterval } from "../lib/bookingTimes.js";
 
 const r = new Hono<{ Bindings: Env }>();
@@ -28,6 +28,19 @@ async function shopTimeZone(db: Env["DB"], shopId: string): Promise<string> {
   const row = await db.prepare("SELECT timezone FROM shops WHERE id = ?").bind(shopId).first<{ timezone: string | null }>();
   return row?.timezone || "Europe/London";
 }
+
+/** A deposit cancel whose Stripe refund failed, by what became of the booking. */
+const REFUND_FAILED_MESSAGE: Record<"reinstated" | "taken" | "unchanged" | "none", string> = {
+  reinstated: "Deposit refund failed. The booking was not cancelled. Try again.",
+  // The cancel freed the time and another booking took it while Stripe was
+  // called. The admin bookings page offers Refund deposit on such a booking.
+  taken:
+    "Deposit refund failed. Another booking took this time while the refund was tried, so this booking stays cancelled and its deposit is still held. Use Refund deposit to try again.",
+  // Someone else changed the booking's status after this cancel flipped it.
+  unchanged: "Deposit refund failed. The booking was not cancelled. Try again.",
+  // The booking was already cancelled (the Refund deposit recovery path).
+  none: "Deposit refund failed. The booking stays cancelled and its deposit is still held. Try again.",
+};
 
 /**
  * Whether any booking already holds part of [slotTime, slotTime + minutes) on
@@ -1020,6 +1033,9 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   // the original, not re-indented. `changes` is set only when a flip happened.
   const priorStatus = String(booking.status);
   let flipped = false;
+  // Set when a refund failed but the booking had to stay cancelled (its time
+  // was taken meanwhile): the outcome still records the status change.
+  let keptCancelled = false;
   let auditBeforeStatus = priorStatus;
   let auditDeposit: "refunded" | "voided" | "kept" | "none" = "none";
   try {
@@ -1050,16 +1066,24 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   }
   // On a refund failure the correct open status is 'confirmed': a captured
   // deposit means the settle webhook ran, even if the pre-claim read caught
-  // the booking mid-flip as 'pending'.
-  const revertClaim = () =>
+  // the booking mid-flip as 'pending'. The flip freed the booking's time
+  // before Stripe was called, so it is reinstated only if no booking took
+  // that time meanwhile ("taken": it stays cancelled, deposit still held).
+  const revertClaim = async (): Promise<"reinstated" | "taken" | "unchanged" | "none"> =>
     flipped
-      ? db
-          .prepare(
-            "UPDATE bookings SET status = 'confirmed' WHERE id = ? AND shop_id = ? AND status = 'cancelled'"
-          )
-          .bind(bookingId, shopId)
-          .run()
-      : Promise.resolve(null);
+      ? reinstateCancelledIfFree(
+          db,
+          {
+            id: bookingId,
+            shop_id: shopId,
+            staff_id: String(booking.staff_id),
+            booking_date: String(booking.booking_date),
+            start_time: String(booking.start_time),
+            end_time: String(booking.end_time),
+          },
+          await shopTimeZone(db, shopId)
+        )
+      : "none";
 
   let depositAction: "refunded" | "kept" | "hold_voided" | "none" = "none";
   let refundPence = 0;
@@ -1102,11 +1126,9 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
           )
           .bind(depositPence, depositFeePence, nowIso, bookingId, shopId)
           .run();
-        await revertClaim();
-        return c.json(
-          { success: false, error: "Deposit refund failed. The booking was not cancelled. Try again." },
-          502
-        );
+        const reverted = await revertClaim();
+        if (reverted === "taken") keptCancelled = true;
+        return c.json({ success: false, error: REFUND_FAILED_MESSAGE[reverted] }, 502);
       }
       // Record the refund. The tx carries the REFUND id — charge.refunded
       // flips the original deposit tx (keyed by PI id) and completes this
@@ -1193,7 +1215,13 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
               // deposit-cancel hop entry uses `deposit` as a boolean.
               details: { deposit_action: auditDeposit },
             }
-          : {}
+          : keptCancelled
+            ? {
+                // The refund failed (outcome failed) but the cancellation stands.
+                changes: { status: [auditBeforeStatus, "cancelled"] as [unknown, unknown] },
+                details: { deposit_action: auditDeposit },
+              }
+            : {}
       )
     );
   } catch (e) {

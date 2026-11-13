@@ -2,7 +2,7 @@
 // apps/worker/src/db/queries.ts in WS-1 — the booking worker is now the sole
 // writer of public booking creation. Row types carry only the fields this
 // worker reads.
-import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
 import { rangesOverlap } from "@repo/utils";
 import {
   BOOKING_CLASH_SQL,
@@ -159,6 +159,45 @@ export async function createBookingIfFree(
     if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) return "taken";
     throw err;
   }
+}
+
+/**
+ * Put a cancelled booking back to confirmed, only if no active booking holds
+ * any of its time for the same staff member. The clash check is part of the
+ * UPDATE (one statement, which D1 runs atomically), and the status it left is
+ * read in the same batch, so nothing can book the time in between:
+ * - "reinstated": confirmed again;
+ * - "taken": still cancelled, because another booking now holds its time;
+ * - "unchanged": it was no longer cancelled, so nothing was written.
+ * A booking whose own times cannot be read is reinstated unchecked, as the
+ * API's status changes treat it (bookingTimeTaken). The clash rule is
+ * @repo/utils BOOKING_CLASH_SQL, as for createBookingIfFree.
+ */
+export async function reinstateCancelledIfFree(
+  db: D1Database,
+  b: { id: string; shop_id: string; staff_id: string } & BookingTimes,
+  timeZone: string,
+): Promise<"reinstated" | "taken" | "unchanged"> {
+  const interval = bookingInterval(b, timeZone);
+  const guard = interval ? ` AND NOT ${BOOKING_CLASH_SQL}` : "";
+  const clashBinds = interval ? bookingClashBinds(b.staff_id, b.id, interval, timeZone) : [];
+  let update: D1Result | undefined;
+  let read: D1Result | undefined;
+  try {
+    [update, read] = await db.batch([
+      db
+        .prepare(`UPDATE bookings SET status = 'confirmed' WHERE id = ? AND shop_id = ? AND status = 'cancelled'${guard}`)
+        .bind(b.id, b.shop_id, ...clashBinds),
+      db.prepare("SELECT status FROM bookings WHERE id = ? AND shop_id = ?").bind(b.id, b.shop_id),
+    ]);
+  } catch (err) {
+    // Only reachable unchecked: an identical start already active.
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) return "taken";
+    throw err;
+  }
+  if ((update?.meta?.changes ?? 0) === 1) return "reinstated";
+  const status = (read?.results?.[0] as { status?: string } | undefined)?.status;
+  return status === "cancelled" ? "taken" : "unchanged";
 }
 
 export async function checkSlotConflict(
