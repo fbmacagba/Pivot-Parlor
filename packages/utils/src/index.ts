@@ -7,6 +7,7 @@ export * from "./portfolioDemo";
 export * from "./errorText";
 export * from "./bookingTimes";
 export * from "./jsonBody";
+export * from "./contactLimits";
 
 /** Generate a URL-friendly slug from a string */
 export function slugify(text: string): string {
