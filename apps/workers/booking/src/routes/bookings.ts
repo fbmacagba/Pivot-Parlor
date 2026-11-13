@@ -19,7 +19,7 @@ import { reportError } from "../services/report-error.js";
 import { calculateCommissionPence } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
-import { checkSlotConflict } from "../db/queries.js";
+import { checkSlotConflict, createBookingIfFree } from "../db/queries.js";
 import { bookingInterval } from "../lib/bookingTimes.js";
 
 const r = new Hono<{ Bindings: Env }>();
@@ -593,45 +593,38 @@ r.post("/:shopId/bookings", async (c) => {
 
   // bookings keeps only canonical columns; deposit/PI/promo/QR state is
   // written to bw_booking_state below.
-  try {
-    await db
-      .prepare(
-        `INSERT INTO bookings (
-           id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
-           booking_date, start_time, end_time, status, notes, amount_pence, commission_pence
-         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?)`
-      )
-      .bind(
-        bookingId,
-        shopId,
-        body.staffId,
-        body.serviceId,
-        body.customerName,
-        body.customerEmail,
-        body.customerPhone ?? "",
-        body.slotDate,
-        body.slotTime,
-        endTime,
-        pricePence,
-        commissionPence
-      )
-      .run();
-  } catch (err) {
-    // idx_bookings_active_slot (migration 018): a booking from another path
-    // (e.g. the public dynamic-slots flow) won this staff/time first. Unwind:
-    // release the availability claim and void the uncaptured hold.
-    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
-      await releaseClaim();
-      try {
-        await cancelPaymentIntent(c.env.STRIPE_SECRET_KEY, paymentIntentId, `cancel:${paymentIntentId}`);
-      } catch (cancelErr) {
-        // The hold auto-expires in ~7 days; report so it is not invisible.
-        reportError("booking.deposit_pi_cancel", cancelErr, { shopId, paymentIntentId });
-      }
-      return c.json({ success: false, error: "This time slot is no longer available" }, 409);
+  const inserted = await createBookingIfFree(
+    db,
+    {
+      id: bookingId,
+      shop_id: shopId,
+      staff_id: body.staffId,
+      service_id: body.serviceId,
+      customer_name: body.customerName,
+      customer_email: body.customerEmail,
+      customer_phone: body.customerPhone ?? "",
+      booking_date: body.slotDate,
+      start_time: body.slotTime,
+      end_time: endTime,
+      status: "confirmed",
+      notes: null,
+      amount_pence: pricePence,
+      commission_pence: commissionPence,
+    },
+    timeZone
+  );
+  if (inserted === "taken") {
+    // A booking from another path (e.g. the public dynamic-slots flow) won an
+    // overlapping time after the check above, while Stripe was creating the
+    // hold. Unwind: release the availability claim and void the uncaptured hold.
+    await releaseClaim();
+    try {
+      await cancelPaymentIntent(c.env.STRIPE_SECRET_KEY, paymentIntentId, `cancel:${paymentIntentId}`);
+    } catch (cancelErr) {
+      // The hold auto-expires in ~7 days; report so it is not invisible.
+      reportError("booking.deposit_pi_cancel", cancelErr, { shopId, paymentIntentId });
     }
-    throw err;
+    return c.json({ success: false, error: "This time slot is no longer available" }, 409);
   }
 
   // No pre-checkout line items any more (WS-3): the checkout derives the base
@@ -785,41 +778,34 @@ r.post("/:shopId/walk-ins", async (c) => {
 
   // bookings keeps only canonical columns; walk-in state is written to
   // bw_booking_state below.
-  try {
+  const inserted = await createBookingIfFree(
+    db,
+    {
+      id: bookingId,
+      shop_id: shopId,
+      staff_id: body.staffId,
+      service_id: body.serviceId,
+      customer_name: body.customerName,
+      customer_email: email,
+      customer_phone: body.customerPhone ?? "",
+      booking_date: date,
+      start_time: slot.slot_time,
+      end_time: endTime,
+      status: "confirmed",
+      notes: null,
+      amount_pence: pricePence,
+      commission_pence: commissionPence,
+    },
+    timeZone
+  );
+  if (inserted === "taken") {
+    // Another walk-in or an online booking won an overlapping time after the
+    // check above. Release the claim taken above.
     await db
-      .prepare(
-        `INSERT INTO bookings (
-           id, shop_id, staff_id, service_id, customer_name, customer_email, customer_phone,
-           booking_date, start_time, end_time, status, notes, amount_pence, commission_pence
-         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', NULL, ?, ?)`
-      )
-      .bind(
-        bookingId,
-        shopId,
-        body.staffId,
-        body.serviceId,
-        body.customerName,
-        email,
-        body.customerPhone ?? "",
-        date,
-        slot.slot_time,
-        endTime,
-        pricePence,
-        commissionPence
-      )
+      .prepare("UPDATE bw_availability SET is_booked = 0, booking_id = NULL WHERE id = ? AND booking_id = ?")
+      .bind(slot.id, bookingId)
       .run();
-  } catch (err) {
-    // idx_bookings_active_slot (migration 018): another walk-in or online
-    // booking won this staff/time slot first. Release the claim taken above.
-    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) {
-      await db
-        .prepare("UPDATE bw_availability SET is_booked = 0, booking_id = NULL WHERE id = ? AND booking_id = ?")
-        .bind(slot.id, bookingId)
-        .run();
-      return c.json({ success: false, error: "This time slot is no longer available" }, 409);
-    }
-    throw err;
+    return c.json({ success: false, error: "This time slot is no longer available" }, 409);
   }
 
   // No pre-checkout line items any more (WS-3): the checkout derives the base

@@ -11,6 +11,7 @@ import {
   shiftDate,
   type BookingTimes,
 } from "../lib/bookingTimes.js";
+import { zonedWallClock } from "../lib/timezone.js";
 
 export interface ShopRow {
   id: string;
@@ -67,6 +68,8 @@ export function getStaffById(db: D1Database, id: string) {
     .first<StaffRow>();
 }
 
+/** A plain insert with no clash check, kept for seeding tests. Every route
+ *  books through createBookingIfFree, which refuses a time already held. */
 export function createBooking(db: D1Database, b: {
   id: string;
   shop_id: string;
@@ -98,6 +101,95 @@ export function createBooking(db: D1Database, b: {
       b.notes ?? null, b.amount_pence, b.commission_pence
     )
     .run();
+}
+
+/** A booking row to insert; `status` left out keeps the column's default. */
+export type NewBooking = Parameters<typeof createBooking>[1] & { status?: string };
+
+/** SQL: a clock-reading row's start and end on the shop's wall clock ("YYYY-MM-DD HH:MM"). */
+const CLOCK_LOCAL_START_SQL = "booking_date || ' ' || start_time";
+const CLOCK_LOCAL_END_SQL =
+  "(CASE WHEN end_time <= start_time THEN date(booking_date, '+1 day') ELSE booking_date END) || ' ' || end_time";
+
+/**
+ * Insert the booking only if no active booking holds any of its time for the
+ * same staff member, as ONE statement (INSERT ... SELECT ... WHERE NOT
+ * EXISTS), which D1 runs atomically. A request that wins an overlapping time
+ * between a caller's checkSlotConflict and this insert makes it a no-op, never
+ * a second booking. idx_bookings_active_slot alone stops only an identical
+ * start string.
+ *
+ * "taken" on a clash (an identical start included), "created" otherwise. A
+ * booking whose own times cannot be read is "taken", as slotTaken treats it.
+ *
+ * The clash test mirrors checkSlotConflict: an instant row compares as
+ * instants (text, as toISOString writes them); a clock row ("HH:MM" on
+ * booking_date) compares on the shop's wall clock, its end rolling to the
+ * next day when at or before its start. A clock row whose times are not
+ * "HH:MM" is ignored, as bookingInterval ignores it. On the night the clocks
+ * go back, the repeated hour (01:00 to 02:00) reads as one hour.
+ */
+export async function createBookingIfFree(
+  db: D1Database,
+  b: NewBooking,
+  timeZone: string,
+): Promise<"created" | "taken"> {
+  const interval = bookingInterval(b, timeZone);
+  if (!interval) return "taken";
+  const startLocal = zonedWallClock(interval.start, timeZone);
+  const endLocal = zonedWallClock(interval.end, timeZone);
+
+  const row: Array<[string, unknown]> = [
+    ["id", b.id],
+    ["shop_id", b.shop_id],
+    ["staff_id", b.staff_id],
+    ["service_id", b.service_id],
+    ["customer_name", b.customer_name],
+    ["customer_email", b.customer_email],
+    ["customer_phone", b.customer_phone ?? null],
+    ["booking_date", b.booking_date],
+    ["start_time", b.start_time],
+    ["end_time", b.end_time],
+    ["notes", b.notes ?? null],
+    ["amount_pence", b.amount_pence],
+    ["commission_pence", b.commission_pence],
+  ];
+  if (b.status !== undefined) row.push(["status", b.status]);
+
+  try {
+    const result = await db
+      .prepare(
+        `INSERT INTO bookings (${row.map(([column]) => column).join(", ")})
+         SELECT ${row.map(() => "?").join(", ")}
+         WHERE NOT EXISTS (
+           SELECT 1 FROM bookings
+           WHERE staff_id = ?
+             AND status NOT IN ('cancelled', 'no_show')
+             AND ((${INSTANT_START_SQL} AND start_time < ? AND end_time > ?)
+               OR (${CLOCK_START_SQL}
+                   AND start_time GLOB '[0-2][0-9]:[0-5][0-9]'
+                   AND end_time GLOB '[0-2][0-9]:[0-5][0-9]'
+                   AND booking_date BETWEEN ? AND ?
+                   AND ${CLOCK_LOCAL_START_SQL} < ?
+                   AND ${CLOCK_LOCAL_END_SQL} > ?))
+         )`
+      )
+      .bind(
+        ...row.map(([, value]) => value),
+        b.staff_id,
+        interval.end.toISOString(),
+        interval.start.toISOString(),
+        shiftDate(startLocal.slice(0, 10), -1),
+        endLocal.slice(0, 10),
+        endLocal,
+        startLocal,
+      )
+      .run();
+    return (result.meta?.changes ?? 0) === 1 ? "created" : "taken";
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("UNIQUE constraint failed")) return "taken";
+    throw err;
+  }
 }
 
 export async function checkSlotConflict(

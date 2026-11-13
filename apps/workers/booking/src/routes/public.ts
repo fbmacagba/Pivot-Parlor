@@ -15,7 +15,7 @@ import {
   getShopBySlug,
   getServiceById,
   getStaffById,
-  createBooking,
+  createBookingIfFree,
   checkSlotConflict,
   cancelPendingBookingStmts,
 } from "../db/queries.js";
@@ -213,8 +213,9 @@ publicRoutes.post(
     const bookingDate = toDateString(startISO);
     const endISO = endDate.toISOString();
 
-    // Defense-in-depth against the read->write race (the unique active-slot index
-    // from migration 018 is the real guard; see the createBooking catch below).
+    // The early answer, before any write. The real guard against the
+    // read->write race is createBookingIfFree below: the clash check and the
+    // insert are one statement.
     const conflict = await checkSlotConflict(
       c.env.DB,
       resolvedStaffId,
@@ -245,8 +246,9 @@ publicRoutes.post(
       return await auditFor(c).run(
         { action: "booking.create", shopId: shop.id, entityType: "booking", entityId: id },
         async (): Promise<Response> => {
-        try {
-          await createBooking(c.env.DB, {
+        const inserted = await createBookingIfFree(
+          c.env.DB,
+          {
             id,
             shop_id: shop.id,
             staff_id: resolvedStaffId,
@@ -260,20 +262,16 @@ publicRoutes.post(
             notes: body.notes ?? null,
             amount_pence: service.price_pence,
             commission_pence,
-          });
-        } catch (err) {
-          // idx_bookings_active_slot (migration 018): a concurrent request won the
-          // slot between checkSlotConflict and this INSERT.
-          if (
-            err instanceof Error &&
-            err.message.includes("UNIQUE constraint failed")
-          ) {
-            return c.json(
-              { success: false, error: "This time slot is no longer available" },
-              409,
-            );
-          }
-          throw err;
+          },
+          shop.timezone || "Europe/London",
+        );
+        if (inserted === "taken") {
+          // A concurrent request won an overlapping time between
+          // checkSlotConflict and this insert.
+          return c.json(
+            { success: false, error: "This time slot is no longer available" },
+            409,
+          );
         }
 
         // Customer-facing deposit (migration 041): when the shop has enabled
