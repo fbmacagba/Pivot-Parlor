@@ -118,7 +118,7 @@ function pathFor(mod: string, params: { shopId: string }): string {
 }
 
 /** Problems on one screen; empty means it rendered cleanly. */
-async function screenProblems(page: Page, url: string): Promise<string[]> {
+async function screenProblems(page: Page, url: string, redirects: Record<string, string> = REDIRECTS): Promise<string[]> {
   const problems: string[] = [];
   const pageErrors: string[] = [];
   const browserErrors: string[] = [];
@@ -144,7 +144,7 @@ async function screenProblems(page: Page, url: string): Promise<string[]> {
     // Some screens poll (the queue), so network idle may never come; bounded.
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(400);
-    const want = REDIRECTS[new URL(url, "http://x").pathname] ?? new URL(url, "http://x").pathname;
+    const want = redirects[new URL(url, "http://x").pathname] ?? new URL(url, "http://x").pathname;
     const landed = new URL(page.url()).pathname;
     if (landed !== want) problems.push(`landed on ${landed}, not ${want}`);
     const fallback = page.getByTestId("error-screen");
@@ -374,12 +374,19 @@ test.describe.serial("dashboard sweep", () => {
     expect(member, "the shop's staff are offered to view").toBeTruthy();
     const q = `?shopId=${encodeURIComponent(shopId)}&staffId=${encodeURIComponent(member!.id)}`;
 
+    // Read-only for a developer, so Staff View's till is Admin view's (lib/pos.ts).
+    const redirects: Record<string, string> = { ...REDIRECTS, "/staff/pos": "/admin/pos" };
     for (const mod of dashboardModules().filter((m) => roleFor(m) === "staff" && !(m in EXCLUDED))) {
       const url = `${pathFor(mod, { shopId })}${q}`;
       await test.step(`${mod} (${url})`, async () => {
-        expect.soft(await screenProblems(page, url), `${mod} at ${url}`).toEqual(EXPECTED_PROBLEMS[mod]?.problems ?? []);
-        if (REDIRECTS[new URL(url, "http://x").pathname]) {
-          expect.soft(new URL(page.url()).searchParams.get("staffId"), `${mod} kept ?staffId= through its redirect`).toBe(member!.id);
+        expect.soft(await screenProblems(page, url, redirects), `${mod} at ${url}`).toEqual(EXPECTED_PROBLEMS[mod]?.problems ?? []);
+        const target = redirects[new URL(url, "http://x").pathname];
+        if (target) {
+          const landed = new URL(page.url()).searchParams;
+          expect.soft(landed.get("shopId"), `${mod} kept ?shopId= through its redirect`).toBe(shopId);
+          if (target.startsWith("/staff")) {
+            expect.soft(landed.get("staffId"), `${mod} kept ?staffId= through its redirect`).toBe(member!.id);
+          }
         }
       });
     }

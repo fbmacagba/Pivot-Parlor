@@ -41,6 +41,7 @@ import * as layout from "~/routes/staff";
 import * as today from "~/routes/staff._index";
 import * as bookings from "~/routes/staff.bookings";
 import * as availability from "~/routes/staff.availability";
+import * as till from "~/routes/staff.pos";
 
 const API_URL = "https://api.test";
 const context = { env: { API_URL } };
@@ -194,5 +195,46 @@ describe("Bookings and availability, for a developer", () => {
     expect(res.headers.get("Location")).toBe("/staff/bookings?shopId=shop-1&staffId=staff-9&tab=availability");
     const bare = availability.loader({ request: get("/staff/availability"), context, params: {} } as never) as Response;
     expect(bare.headers.get("Location")).toBe("/staff/bookings?tab=availability");
+  });
+});
+
+/** A loader or action's Response, whether it is returned or thrown (a redirect). */
+async function settle(run: () => unknown): Promise<Response> {
+  try {
+    return (await run()) as Response;
+  } catch (e) {
+    if (e instanceof Response) return e;
+    throw e;
+  }
+}
+
+describe("the till, for a developer", () => {
+  it("is Admin view's till for that shop, since Staff View is read-only", async () => {
+    stubApi("developer");
+    const res = await settle(() => till.loader({ request: get("/staff/pos?shopId=shop-1&staffId=staff-9"), context, params: {} } as never));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("/admin/pos?shopId=shop-1");
+  });
+
+  it("will not take a sale for them", async () => {
+    stubApi("developer");
+    const body = new FormData();
+    body.set("intent", "sale");
+    body.set("shopId", "shop-1");
+    const request = new Request("https://pivotparlor.com/staff/pos?shopId=shop-1&staffId=staff-9", {
+      method: "POST",
+      headers: { Cookie: SESSION },
+      body,
+    });
+    const res = await settle(() => till.action({ request, context, params: {} } as never));
+    expect(res.status).toBe(403);
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("staff keep their own till", async () => {
+    stubApi("staff", "shop-own");
+    const res = await settle(() => till.loader({ request: get("/staff/pos?shopId=shop-1"), context, params: {} } as never));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { shopId: string | null }).shopId).toBe("shop-own");
   });
 });

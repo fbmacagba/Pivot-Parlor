@@ -8,7 +8,7 @@ import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { formatDay, formatTime as formatUkTime } from "~/lib/dateFormat";
-import { pageStaffId, staffMePath } from "~/lib/pageShop";
+import { DEVELOPER_STAFF_READ_ONLY, pageStaffId, staffMePath } from "~/lib/pageShop";
 
 interface Booking {
   id: string;
@@ -82,7 +82,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "staff", env.API_URL);
   if (user.role === "developer") {
-    return json({ ok: false, error: "Developers can view staff screens but not act for staff." }, { status: 403 });
+    return json({ ok: false, error: DEVELOPER_STAFF_READ_ONLY }, { status: 403 });
   }
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);

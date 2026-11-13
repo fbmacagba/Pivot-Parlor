@@ -5,8 +5,8 @@
  * main worker's /api/shops/:shopId/sales proxy.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
-import { pageShopId } from "~/lib/pageShop";
+import { json, redirect } from "@remix-run/cloudflare";
+import { DEVELOPER_STAFF_READ_ONLY, pageShopId, withShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { parsePoundsToPence } from "@repo/utils";
@@ -58,6 +58,9 @@ export async function posLoader({ request, context }: LoaderFunctionArgs, role: 
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
   const shopId = pageShopId(request, user, null);
+  // Staff View is read-only for a developer (staff.tsx): the shop's till for
+  // them is Admin view's, where they already manage the shop.
+  if (role === "staff" && user.role === "developer") throw redirect(withShopId("/admin/pos", shopId));
 
   let services: PosService[] = [];
   let products: PosProduct[] = [];
@@ -85,6 +88,9 @@ export async function posLoader({ request, context }: LoaderFunctionArgs, role: 
 export async function posAction({ request, context }: ActionFunctionArgs, role: "admin" | "staff") {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, role, env.API_URL);
+  if (role === "staff" && user.role === "developer") {
+    return json<PosActionData>({ error: DEVELOPER_STAFF_READ_ONLY }, { status: 403 });
+  }
   const token = getSessionToken(request);
   if (!token) return json<PosActionData>({ error: "Unauthorized" }, { status: 401 });
 

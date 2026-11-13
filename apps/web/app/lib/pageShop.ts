@@ -57,6 +57,9 @@ export function pageStaffId(request: Request, user: Pick<SessionPayload, "role">
   return plainId(new URL(request.url).searchParams.get("staffId"));
 }
 
+/** Why a developer's write on a staff screen is refused: Staff View is read-only for them. */
+export const DEVELOPER_STAFF_READ_ONLY = "Developers can view staff screens but not act for staff.";
+
 /** A /api/staff/me/* path for the staff member a developer is viewing (unchanged when none). */
 export function staffMePath(path: string, staffId: string | null | undefined): string {
   const id = plainId(staffId);
