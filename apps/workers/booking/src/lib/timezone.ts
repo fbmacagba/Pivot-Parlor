@@ -32,6 +32,12 @@ function tzOffsetMs(tz: string, instant: Date): number {
   return asUtc - instant.getTime();
 }
 
+/** The shop's wall clock at `instant` in `tz`, as "YYYY-MM-DD HH:MM". */
+export function zonedWallClock(instant: Date, tz: string): string {
+  const local = new Date(instant.getTime() + tzOffsetMs(tz, instant)).toISOString();
+  return `${local.slice(0, 10)} ${local.slice(11, 16)}`;
+}
+
 /**
  * UTC instant for wall-clock `time` ("HH:MM") on calendar `date` ("YYYY-MM-DD")
  * in `tz`. Two-pass so dates around a DST transition resolve with the offset
