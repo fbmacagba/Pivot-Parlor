@@ -11,6 +11,7 @@ import { e2eMockAllowed } from "../lib/e2e.js";
 import { hashPassword, verifyPassword, needsRehash } from "../lib/password.js";
 import { sendVerificationEmail } from "../services/email.js";
 import { reportError } from "../services/report-error.js";
+import { readJsonObject } from "@repo/utils";
 
 const auth = new Hono<{ Bindings: Bindings }>();
 
@@ -112,8 +113,10 @@ const loginRateLimit = rateLimit({
   limit: 5,
   windowS: 900,
   key: async (c) => {
-    const body = await c.req.json<{ email?: string }>().catch((): { email?: string } => ({}));
-    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "-";
+    // A body that is not a JSON object (null included) keys on the IP alone;
+    // the handler then answers it 400.
+    const body = await readJsonObject(c.req);
+    const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "-";
     return `${email}:${clientIp(c)}`;
   },
 });
@@ -127,21 +130,23 @@ const loginRateLimitUnlessE2E = (c: Parameters<typeof loginRateLimit>[0], next: 
   e2eMockAllowed(c.env, c.req.header("X-E2E-Test-Mock")) ? next() : loginRateLimit(c, next);
 
 auth.post("/login", loginRateLimitUnlessE2E, async (c) => {
-  const body = await c.req.json<{ email?: string; password?: string }>();
-  if (!body.email || !body.password) {
+  const body = await readJsonObject(c.req);
+  if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
+  const { email, password } = body;
+  if (typeof email !== "string" || !email || typeof password !== "string" || !password) {
     return c.json({ success: false, error: "email and password are required" }, 400);
   }
 
   // NOTE: no first-login bootstrap here. The developer account must be seeded
   // deliberately (scripts/reset-dev-password.mjs) — auto-creating it on first
   // login let whoever tried the well-known email first claim the platform.
-  const user = await getUserByEmail(c.env.DB, body.email);
+  const user = await getUserByEmail(c.env.DB, email);
   if (!user) {
     await recordLoginRefusal(c, null);
     return c.json({ success: false, error: "Invalid credentials" }, 401);
   }
 
-  const ok = await verifyPassword(body.password, user.password_hash);
+  const ok = await verifyPassword(password, user.password_hash);
   if (!ok) {
     await recordLoginRefusal(c, user.id);
     return c.json({ success: false, error: "Invalid credentials" }, 401);
@@ -149,7 +154,6 @@ auth.post("/login", loginRateLimitUnlessE2E, async (c) => {
 
   // Credentials checked: the session (KV) and the rehash are a two-step
   // action. The user is the actor; the token never reaches the entry.
-  const password = body.password;
   try {
     return await auditFor(c, "api", actorForUser(user, requestIp(c))).run(
       { action: "auth.login", entityType: "platform_user", entityId: user.id },
@@ -231,18 +235,14 @@ auth.post(
     }
   }
 
-  const body = await c.req.json<{
-    name?: string;
-    email?: string;
-    password?: string;
-    role?: string;
-    shop_id?: string;
-  }>();
-
-  if (!body.email || !body.password) {
+  const body = await readJsonObject(c.req);
+  if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
+  const { email, password } = body;
+  if (typeof email !== "string" || !email || typeof password !== "string" || !password) {
     return c.json({ success: false, error: "email and password are required" }, 400);
   }
-  if (!body.name?.trim()) {
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) {
     return c.json({ success: false, error: "name is required" }, 400);
   }
 
@@ -262,17 +262,20 @@ auth.post(
 
   const requestedRole = isDeveloper ? body.role ?? "customer" : "customer";
   const shopId = isDeveloper ? body.shop_id ?? null : null;
+  if (shopId !== null && typeof shopId !== "string") {
+    return c.json({ success: false, error: "shop_id must be text" }, 400);
+  }
 
   const allValidRoles = ["customer", "admin", "staff", "developer"];
-  if (!allValidRoles.includes(requestedRole)) {
+  if (typeof requestedRole !== "string" || !allValidRoles.includes(requestedRole)) {
     return c.json({ success: false, error: "Invalid role" }, 400);
   }
 
-  const existing = await getUserByEmail(c.env.DB, body.email);
+  const existing = await getUserByEmail(c.env.DB, email);
   if (existing) return c.json({ success: false, error: "Email already registered" }, 409);
 
   const id = crypto.randomUUID();
-  const password_hash = await hashPassword(body.password);
+  const password_hash = await hashPassword(password);
 
   // SEC-3: a self-registered account has proven nothing about address
   // ownership, so it starts unverified and the email-matched customer surface
@@ -293,8 +296,8 @@ auth.post(
     [
       createUserStmt(c.env.DB, {
         id,
-        name: body.name.trim(),
-        email: body.email,
+        name,
+        email,
         password_hash,
         role: requestedRole,
         shop_id: shopId,
@@ -314,8 +317,6 @@ auth.post(
 
   let verificationEmailSent = false;
   if (!isDeveloper) {
-    const email = body.email;
-    const name = body.name.trim();
     try {
       const sent = await auditFor(c, "api", actor).run(
         { action: "account.verification.send", entityType: "platform_user", entityId: id },
@@ -335,8 +336,8 @@ auth.post(
       success: true,
       data: {
         id,
-        name: body.name.trim(),
-        email: body.email,
+        name,
+        email,
         role: requestedRole,
         verification_email_sent: verificationEmailSent,
       },
@@ -355,7 +356,8 @@ auth.post(
   "/verify-email",
   rateLimit({ name: "verify-email", limit: 20, windowS: 3600, key: clientIp }),
   async (c) => {
-    const body = await c.req.json<{ token?: string }>().catch((): { token?: string } => ({}));
+    const body = await readJsonObject(c.req);
+    if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
     const token = typeof body.token === "string" ? body.token.trim() : "";
     if (!token || token.length > 100) {
       return c.json({ success: false, error: "token is required" }, 400);

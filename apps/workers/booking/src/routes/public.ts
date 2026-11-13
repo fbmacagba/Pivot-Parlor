@@ -27,7 +27,14 @@ import { createCheckoutSession } from "../lib/stripe.js";
 import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
-import { addMinutes, calculateCommissionPence, isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
+import {
+  addMinutes,
+  calculateCommissionPence,
+  isOptionalText,
+  isPortfolioDemoShopRecord,
+  PORTFOLIO_DEMO_ERROR,
+  readJsonObject,
+} from "@repo/utils";
 
 function toDateString(iso: string): string {
   return iso.slice(0, 10); // "YYYY-MM-DD"
@@ -84,28 +91,23 @@ publicRoutes.post(
     key: clientIp,
   }),
   async (c) => {
-    const body = await c.req.json<{
-      shop_id?: string;
-      shop_slug?: string;
-      staff_id?: string;
-      service_id?: string;
-      customer_name?: string;
-      customer_email?: string;
-      customer_phone?: string;
-      start_time?: string; // ISO string
-      date?: string; // shop-local YYYY-MM-DD the slot was offered for
-      notes?: string;
-    }>();
+    // A body that is not a JSON object, or a field that is not text, is the
+    // caller's mistake: a 400, never a 500 from D1 binding it.
+    const body = await readJsonObject(c.req);
+    if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
 
-    const {
-      shop_id,
-      shop_slug,
-      staff_id,
-      service_id,
-      customer_name,
-      customer_email,
-      start_time,
-    } = body;
+    // Required fields count only as text; anything else is "missing" below.
+    const text = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+    const shop_id = text(body.shop_id);
+    const shop_slug = text(body.shop_slug);
+    const staff_id = text(body.staff_id);
+    const service_id = text(body.service_id);
+    const customer_name = text(body.customer_name);
+    const customer_email = text(body.customer_email);
+    const start_time = text(body.start_time); // ISO string
+    // Optional, as the booking form sends them: absent, null or text. `date`
+    // is the shop-local YYYY-MM-DD the slot was offered for.
+    const { customer_phone, notes, date } = body;
     if (
       (!shop_id && !shop_slug) ||
       !staff_id ||
@@ -123,6 +125,11 @@ publicRoutes.post(
         400,
       );
     }
+    if (!isOptionalText(customer_phone)) {
+      return c.json({ success: false, error: "customer_phone must be text" }, 400);
+    }
+    if (!isOptionalText(notes)) return c.json({ success: false, error: "notes must be text" }, 400);
+    if (!isOptionalText(date)) return c.json({ success: false, error: "date must be text" }, 400);
 
     // Validate shop — accept either id or slug (the booking UI sends the slug)
     const shop = shop_id
@@ -176,8 +183,8 @@ publicRoutes.post(
     // while arbitrary / off-schedule / misaligned times are rejected. For an
     // "any available" request, adopt the staff_id of the matching free slot.
     const slotDate =
-      body.date && /^\d{4}-\d{2}-\d{2}$/.test(body.date)
-        ? body.date
+      date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+        ? date
         : toDateString(startISO);
     const requestedStaff = staff_id === "any" ? null : staff_id;
     const slotList = await getAvailableSlots(
@@ -255,11 +262,11 @@ publicRoutes.post(
             service_id,
             customer_name,
             customer_email,
-            customer_phone: body.customer_phone ?? null,
+            customer_phone: customer_phone ?? null,
             booking_date: bookingDate,
             start_time: startISO,
             end_time: endISO,
-            notes: body.notes ?? null,
+            notes: notes ?? null,
             amount_pence: service.price_pence,
             commission_pence,
           },

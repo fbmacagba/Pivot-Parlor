@@ -14,7 +14,7 @@ import { authMiddleware, getUser } from "../middleware/auth.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { reportError } from "../services/report-error.js";
 import { notifyWaitlistEntry, WaitlistSendError } from "../services/waitlist-claim.js";
-import { isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
+import { isOptionalText, isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR, readJsonObject } from "@repo/utils";
 
 const waitlist = new Hono<{ Bindings: Bindings }>();
 
@@ -26,31 +26,27 @@ waitlist.post(
   "/",
   rateLimit({ name: "waitlist", limit: 10, windowS: 3600, key: clientIp }),
   async (c) => {
-    const body = await c.req
-      .json<{
-        shop_id?: string;
-        shop_slug?: string;
-        service_id?: string;
-        staff_id?: string;
-        customer_name?: string;
-        customer_email?: string;
-        customer_phone?: string;
-        preferred_date?: string;
-      }>()
-      .catch(() => ({}) as Record<string, never>);
+    // A body that is not a JSON object, or an id that is not text, is the
+    // caller's mistake: a 400, never a 500 from D1 binding it.
+    const body = await readJsonObject(c.req);
+    if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
 
     const name = typeof body.customer_name === "string" ? body.customer_name.trim() : "";
     const email = typeof body.customer_email === "string" ? body.customer_email.trim() : "";
     const phone = typeof body.customer_phone === "string" ? body.customer_phone.trim() : "";
     const preferredDate = typeof body.preferred_date === "string" ? body.preferred_date.trim() : "";
 
-    const shopIdentifier = body.shop_id || body.shop_slug;
+    const asId = (value: unknown): string => (typeof value === "string" ? value : "");
+    const shopIdentifier = asId(body.shop_id) || asId(body.shop_slug);
     if (!shopIdentifier || !name || !email) {
       return c.json(
         { success: false, error: "shop_id (or shop_slug), customer_name and customer_email are required" },
         400
       );
     }
+    const { service_id: serviceId, staff_id: staffId } = body;
+    if (!isOptionalText(serviceId)) return c.json({ success: false, error: "service_id must be text" }, 400);
+    if (!isOptionalText(staffId)) return c.json({ success: false, error: "staff_id must be text" }, 400);
     if (name.length > 120) return c.json({ success: false, error: "Name is too long" }, 400);
     if (email.length > 254 || !EMAIL_RE.test(email)) {
       return c.json({ success: false, error: "Invalid email address" }, 400);
@@ -70,17 +66,17 @@ waitlist.post(
     if (isPortfolioDemoShopRecord(shop)) {
       return c.json({ success: false, error: PORTFOLIO_DEMO_ERROR }, 403);
     }
-    if (body.service_id) {
+    if (serviceId) {
       const svc = await c.env.DB
         .prepare("SELECT id FROM services WHERE id = ? AND shop_id = ? AND is_active = 1 LIMIT 1")
-        .bind(body.service_id, shop.id)
+        .bind(serviceId, shop.id)
         .first<{ id: string }>();
       if (!svc) return c.json({ success: false, error: "Invalid service" }, 400);
     }
-    if (body.staff_id) {
+    if (staffId) {
       const st = await c.env.DB
         .prepare("SELECT id FROM staff WHERE id = ? AND shop_id = ? AND is_active = 1 LIMIT 1")
-        .bind(body.staff_id, shop.id)
+        .bind(staffId, shop.id)
         .first<{ id: string }>();
       if (!st) return c.json({ success: false, error: "Invalid staff member" }, 400);
     }
@@ -94,8 +90,8 @@ waitlist.post(
         createWaitlistEntryStmt(c.env.DB, {
           id,
           shop_id: shop.id,
-          staff_id: body.staff_id ?? null,
-          service_id: body.service_id ?? null,
+          staff_id: staffId ?? null,
+          service_id: serviceId ?? null,
           customer_name: name,
           customer_email: email,
           customer_phone: phone || null,
