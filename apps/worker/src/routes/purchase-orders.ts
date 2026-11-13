@@ -15,6 +15,7 @@ import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { readJsonObject } from "@repo/utils";
 
 /**
  * WS-3 Phase 2: purchasing. Lifecycle draft → ordered → (partial) → received,
@@ -133,11 +134,14 @@ r.get("/:poId", authMiddleware, requireShopRole("admin", "staff"), async (c) => 
 
 r.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     supplier_id?: string | null;
     notes?: string | null;
     items?: PoItemInput[];
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (body.supplier_id) {
     const supplier = await c.env.DB
@@ -190,11 +194,14 @@ r.put("/:poId", authMiddleware, requireShopRole("admin"), async (c) => {
     return c.json({ success: false, error: NOT_EDITABLE }, 400);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     supplier_id?: string | null;
     notes?: string | null;
     items?: PoItemInput[];
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (body.supplier_id) {
     const supplier = await c.env.DB
@@ -332,7 +339,10 @@ r.post("/:poId/receive", authMiddleware, requireShopRole("admin"), async (c) => 
     return c.json({ success: false, error: NOT_RECEIVABLE }, 400);
   }
 
-  const body = await c.req.json<{ lines?: ReceiptLine[] }>();
+  const body = await readJsonObject<{ lines?: ReceiptLine[] }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   if (!Array.isArray(body.lines) || body.lines.length === 0) {
     return c.json({ success: false, error: "lines is required" }, 400);
   }

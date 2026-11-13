@@ -16,6 +16,7 @@ import { createConnectAccount, createAccountLink, getAccount } from "../lib/stri
 import { reportError } from "../services/report-error.js";
 import { AuditWriteError, type AuditRunResult } from "@repo/audit";
 import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
+import { readJsonObject } from "@repo/utils";
 
 const r = new Hono<{ Bindings: Env }>();
 
@@ -36,10 +37,8 @@ r.post("/:shopId/connect/onboard", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  let body: { return_url?: string; refresh_url?: string };
-  try {
-    body = (await c.req.json()) as typeof body;
-  } catch {
+  const body = await readJsonObject<{ return_url?: string; refresh_url?: string }>(c.req);
+  if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
   const returnUrl = body.return_url?.trim();

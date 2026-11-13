@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { safeJsonParse } from "@repo/utils";
+import { safeJsonParse, readJsonObject } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
@@ -69,7 +69,7 @@ ai.get("/chatbot-model", async (c) => {
 
 // POST /api/ai/chatbot-model — body { model_id }; must be a listed text model
 ai.post("/chatbot-model", async (c) => {
-  const body = await c.req.json<{ model_id?: unknown }>().catch(() => ({}) as { model_id?: unknown });
+  const body: { model_id?: unknown } = (await readJsonObject(c.req)) ?? {};
   const modelId = typeof body.model_id === "string" ? body.model_id.trim() : "";
   if (!modelId) return c.json({ success: false, error: "model_id is required" }, 400);
   const model = await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text");
@@ -111,7 +111,7 @@ ai.use(
 // the one it wants via /api/ai/apply-theme.
 
 ai.post("/generate-theme", async (c) => {
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     shop_id?: string;
     model_id?: string;
     style_keywords?: string;
@@ -120,7 +120,10 @@ ai.post("/generate-theme", async (c) => {
     color_primary?: string;
     color_accent?: string;
     preview?: boolean;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.shop_id) {
     return c.json({ success: false, error: "shop_id is required" }, 400);
@@ -176,7 +179,10 @@ ai.post("/generate-theme", async (c) => {
 // Body: { shop_id, theme, model_id? }
 
 ai.post("/apply-theme", async (c) => {
-  const body = await c.req.json<{ shop_id?: string; model_id?: string; theme?: unknown }>();
+  const body = await readJsonObject<{ shop_id?: string; model_id?: string; theme?: unknown }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   if (!body.shop_id) {
     return c.json({ success: false, error: "shop_id is required" }, 400);
   }
@@ -214,7 +220,7 @@ ai.post("/apply-theme", async (c) => {
 // Body: { shop_id, model_a_id, model_b_id, style_keywords? }
 
 ai.post("/compare", async (c) => {
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     shop_id?: string;
     model_a_id?: string;
     model_b_id?: string;
@@ -222,7 +228,10 @@ ai.post("/compare", async (c) => {
     effort?: string;
     color_primary?: string;
     color_accent?: string;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.shop_id || !body.model_a_id || !body.model_b_id) {
     return c.json(

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { AuditWriteError, userSubjectId, type AuditEntryInput, type Outcome } from "@repo/audit";
+import { readJsonObject } from "@repo/utils";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireRole } from "../middleware/rbac.js";
@@ -159,8 +160,8 @@ export const MANUAL_VERIFY_ARCHIVE_OBJECTS = 200;
 // that are sealed but not yet archived (normal archiving lag) — only the
 // 03:00 nightly check (Task 9) treats that lag itself as tampering.
 audit.post("/verify", async (c) => {
-  const raw = await c.req.json<{ from_seq?: number; to_seq?: number } | null>().catch(() => null);
-  const body = raw ?? {};
+  // Both bounds are optional and checked with Number.isInteger below.
+  const body: { from_seq?: number; to_seq?: number } = (await readJsonObject(c.req)) ?? {};
   const max = (await c.env.DB.prepare("SELECT MAX(seq) AS m FROM audit_log").first<{ m: number | null }>())?.m ?? 0;
   const floor = ((await c.env.DB.prepare("SELECT expired_through_seq AS e FROM audit_seal_state WHERE id = 1").first<{ e: number }>())?.e ?? 0) + 1;
   const to = Math.min(Number.isInteger(body.to_seq) ? body.to_seq! : max, max);

@@ -24,6 +24,7 @@ import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.j
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { readJsonObject } from "@repo/utils";
 
 /**
  * WS-3 Phase 0: product catalogue. Nothing here is public — the catalogue is
@@ -59,7 +60,10 @@ productsRouter.get("/categories", authMiddleware, requireShopRole("admin", "staf
 
 productsRouter.post("/categories", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{ name?: string; sort_order?: number }>();
+  const body = await readJsonObject<{ name?: string; sort_order?: number }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const name = optStr(body.name);
   if (!name) return c.json({ success: false, error: "name is required" }, 400);
 
@@ -92,7 +96,10 @@ productsRouter.put("/categories/:categoryId", authMiddleware, requireShopRole("a
   if (!cat || cat.shop_id !== shopId) {
     return c.json({ success: false, error: "Category not found" }, 404);
   }
-  const body = await c.req.json<{ name?: string; sort_order?: number; is_active?: number }>();
+  const body = await readJsonObject<{ name?: string; sort_order?: number; is_active?: number }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const fields = {
     ...(body.name !== undefined ? { name: optStr(body.name) ?? cat.name } : {}),
     ...(Number.isInteger(body.sort_order) ? { sort_order: body.sort_order } : {}),
@@ -127,7 +134,7 @@ productsRouter.post("/", authMiddleware, requireShopRole("admin"), async (c) => 
   const shop = await getShopById(c.env.DB, shopId);
   if (!shop) return c.json({ success: false, error: "Shop not found" }, 404);
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     category_id?: string | null;
     supplier_id?: string | null;
@@ -140,7 +147,10 @@ productsRouter.post("/", authMiddleware, requireShopRole("admin"), async (c) => 
     tax_rate_bps?: number;
     is_professional?: number;
     track_stock?: number;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   const name = optStr(body.name);
   if (!name) return c.json({ success: false, error: "name is required" }, 400);
@@ -228,7 +238,7 @@ productsRouter.put("/:productId", authMiddleware, requireShopRole("admin"), asyn
     return c.json({ success: false, error: "Product not found" }, 404);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     category_id?: string | null;
     supplier_id?: string | null;
@@ -242,7 +252,10 @@ productsRouter.put("/:productId", authMiddleware, requireShopRole("admin"), asyn
     is_professional?: number;
     track_stock?: number;
     is_active?: number;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   for (const key of ["cost_price_pence", "retail_price_pence"] as const) {
     if (body[key] !== undefined && !pence(body[key])) {
@@ -350,14 +363,17 @@ productsRouter.post("/:productId/variants", authMiddleware, requireShopRole("adm
     return c.json({ success: false, error: "Product not found" }, 404);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     sku?: string | null;
     barcode?: string | null;
     cost_price_pence?: number;
     retail_price_pence?: number;
     attributes_json?: string | null;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   const name = optStr(body.name);
   if (!name) return c.json({ success: false, error: "name is required" }, 400);
@@ -408,7 +424,7 @@ productsRouter.put("/:productId/variants/:variantId", authMiddleware, requireSho
     return c.json({ success: false, error: "Variant not found" }, 404);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     sku?: string | null;
     barcode?: string | null;
@@ -416,7 +432,10 @@ productsRouter.put("/:productId/variants/:variantId", authMiddleware, requireSho
     retail_price_pence?: number;
     attributes_json?: string | null;
     is_active?: number;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   for (const key of ["cost_price_pence", "retail_price_pence"] as const) {
     if (body[key] !== undefined && !pence(body[key])) {
@@ -490,7 +509,10 @@ suppliersRouter.get("/", authMiddleware, requireShopRole("admin", "staff"), asyn
 
 suppliersRouter.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{ name?: string; email?: string; phone?: string; notes?: string }>();
+  const body = await readJsonObject<{ name?: string; email?: string; phone?: string; notes?: string }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const name = optStr(body.name);
   if (!name) return c.json({ success: false, error: "name is required" }, 400);
 
@@ -523,13 +545,16 @@ suppliersRouter.put("/:supplierId", authMiddleware, requireShopRole("admin"), as
   if (!sup || sup.shop_id !== shopId) {
     return c.json({ success: false, error: "Supplier not found" }, 404);
   }
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     email?: string | null;
     phone?: string | null;
     notes?: string | null;
     is_active?: number;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const fields = {
     ...(body.name !== undefined ? { name: optStr(body.name) ?? sup.name } : {}),
     ...(body.email !== undefined ? { email: optStr(body.email) } : {}),

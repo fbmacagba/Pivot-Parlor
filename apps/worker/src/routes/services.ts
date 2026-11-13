@@ -19,6 +19,7 @@ import { normalizeServiceName, serviceDescriptionsByName } from "../lib/serviceC
 import { canReadUnpublishedSite, isLiveSite } from "../lib/siteVisibility.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { readJsonObject } from "@repo/utils";
 
 const services = new Hono<{ Bindings: Bindings }>();
 
@@ -96,12 +97,15 @@ services.get("/:serviceId", async (c) => {
 
 services.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     duration_min?: number;
     price_pence?: number;
     category?: string;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.name || body.duration_min == null || body.price_pence == null) {
     return c.json({ success: false, error: "name, duration_min and price_pence are required" }, 400);
@@ -163,12 +167,15 @@ services.put("/:serviceId", authMiddleware, requireShopRole("admin"), async (c) 
   const svc = await getServiceById(c.env.DB, serviceId);
   if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     name?: string;
     duration_min?: number;
     price_pence?: number;
     category?: string | null;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (body.price_pence !== undefined && (!Number.isInteger(body.price_pence) || body.price_pence < 0)) {
     return c.json({ success: false, error: "price_pence must be a non-negative integer (pence)" }, 400);
@@ -241,7 +248,10 @@ services.put("/:serviceId/products", authMiddleware, requireShopRole("admin"), a
   const svc = await getServiceById(c.env.DB, serviceId);
   if (!svc || svc.shop_id !== shopId) return c.json({ success: false, error: "Service not found" }, 404);
 
-  const body = await c.req.json<{ products?: Array<{ product_id?: string; quantity?: number }> }>();
+  const body = await readJsonObject<{ products?: Array<{ product_id?: string; quantity?: number }> }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   if (!Array.isArray(body.products)) {
     return c.json({ success: false, error: "products is required (empty array clears the list)" }, 400);
   }

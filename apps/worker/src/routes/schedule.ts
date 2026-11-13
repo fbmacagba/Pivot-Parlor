@@ -8,6 +8,7 @@ import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import { auditShopId, batchWithAudit, UNRESOLVED_SHOP } from "../audit/context.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { readJsonObject } from "@repo/utils";
 
 const schedule = new Hono<{ Bindings: Bindings }>();
 
@@ -48,7 +49,7 @@ schedule.get("/:staffId", requireShopRole("admin", "staff"), async (c) => {
 
 schedule.put("/", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     entries?: Array<{
       staff_id: string;
       day_of_week: number;
@@ -56,7 +57,10 @@ schedule.put("/", requireShopRole("admin"), async (c) => {
       end_time: string;
       off?: boolean;
     }>;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!Array.isArray(body.entries) || body.entries.length === 0) {
     return c.json({ success: false, error: "entries array is required" }, 400);

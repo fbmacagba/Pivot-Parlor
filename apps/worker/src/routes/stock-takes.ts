@@ -15,6 +15,7 @@ import { auditFor, auditRefused, auditShopId, batchWithAudit, statusOutcome, UNR
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { readJsonObject } from "@repo/utils";
 
 /**
  * WS-3 Phase 2: stock-take sessions. One open session per shop; staff enter
@@ -48,7 +49,7 @@ r.get("/:stockTakeId", authMiddleware, requireShopRole("admin", "staff"), async 
 r.post("/", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
   const user = getUser(c);
-  const body = await c.req.json<{ notes?: string }>().catch((): { notes?: string } => ({}));
+  const body: { notes?: string } = (await readJsonObject(c.req)) ?? {};
 
   const openTake = () =>
     c.env.DB
@@ -118,9 +119,12 @@ r.put("/:stockTakeId/items", authMiddleware, requireShopRole("admin", "staff"), 
   const notOpen = () => c.json({ success: false, error: "This stock take is no longer open" }, 400);
   if (st.status !== "open") return notOpen();
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     items?: Array<{ product_id?: string; variant_id?: string | null; counted_qty?: number }>;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   if (!Array.isArray(body.items) || body.items.length === 0) {
     return c.json({ success: false, error: "items is required" }, 400);
   }

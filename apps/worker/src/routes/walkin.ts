@@ -8,7 +8,7 @@ import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { getShopById, getShopBySlug } from "../db/queries.js";
-import { isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
+import { isPortfolioDemoShopRecord, PORTFOLIO_DEMO_ERROR, readJsonObject } from "@repo/utils";
 
 const walkin = new Hono<{ Bindings: Bindings }>();
 
@@ -48,9 +48,8 @@ walkin.post(
   if (!shop || !shop.is_active) return c.json({ success: false, error: "Shop not found" }, 404);
   if (isPortfolioDemoShopRecord(shop)) return c.json({ success: false, error: PORTFOLIO_DEMO_ERROR }, 403);
 
-  const body = await c.req
-    .json<{ name?: string; phone?: string; service?: string; notes?: string }>()
-    .catch((): { name?: string; phone?: string; service?: string; notes?: string } => ({}));
+  const body: { name?: string; phone?: string; service?: string; notes?: string } =
+    (await readJsonObject(c.req)) ?? {};
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
   const service = typeof body.service === "string" ? body.service.trim() : "";
@@ -181,7 +180,7 @@ adminWalkin.patch("/:entryId", async (c) => {
     .first<{ id: string; status: string }>();
   if (!entry) return c.json({ success: false, error: "Entry not found" }, 404);
 
-  const body = await c.req.json<{ status?: string }>().catch((): { status?: string } => ({}));
+  const body: { status?: string } = (await readJsonObject(c.req)) ?? {};
   const valid = ["waiting", "serving", "served", "skipped", "removed"];
   if (!body.status || !valid.includes(body.status)) {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);

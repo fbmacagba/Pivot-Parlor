@@ -10,6 +10,7 @@ import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { hashPassword } from "../lib/password.js";
+import { readJsonObject } from "@repo/utils";
 
 const staff = new Hono<{ Bindings: Bindings }>();
 
@@ -49,13 +50,16 @@ staff.get("/:staffId", requireShopRole("admin", "staff"), async (c) => {
 
 staff.post("/", requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     display_name?: string;
     email?: string;
     password?: string;
     bio?: string;
     service_ids?: string[];
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.display_name || !body.email) {
     return c.json({ success: false, error: "display_name and email are required" }, 400);
@@ -134,12 +138,15 @@ staff.put("/:staffId", requireShopRole("admin"), async (c) => {
     return c.json({ success: false, error: "Staff member not found" }, 404);
   }
 
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     display_name?: string;
     bio?: string | null;
     speciality?: string | null;
     service_ids?: string[];
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   // Specialism is a short public label ("Skin fades & beard work"); empty
   // clears it, anything else is trimmed and capped.

@@ -15,6 +15,7 @@ import { sendReviewRequest } from "../services/email.js";
 import { notifyWaitlistForOpenedSlot } from "../services/waitlist-notify.js";
 import { requireShopRole } from "../middleware/rbac.js";
 import { reportError } from "../services/report-error.js";
+import { readJsonObject } from "@repo/utils";
 
 // ─── Router: /api/shops/:shopId/bookings (authenticated, requireShop) ─────────
 
@@ -45,7 +46,10 @@ bookings.put("/:bookingId/status", async (c) => {
     return c.json({ success: false, error: "Booking not found" }, 404);
   }
 
-  const body = await c.req.json<{ status?: string; refund_deposit?: boolean }>();
+  const body = await readJsonObject<{ status?: string; refund_deposit?: boolean }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
   const valid = ["confirmed", "completed", "cancelled", "no_show"];
   if (!body.status || !valid.includes(body.status)) {
     return c.json({ success: false, error: `status must be one of: ${valid.join(", ")}` }, 400);

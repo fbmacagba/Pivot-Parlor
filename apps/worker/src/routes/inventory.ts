@@ -15,6 +15,7 @@ import { batchWithAudit } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
+import { readJsonObject } from "@repo/utils";
 
 /**
  * WS-3 Phase 0: stock. Quantities only ever change through movements
@@ -77,14 +78,17 @@ inventoryRouter.get("/movements", authMiddleware, requireShopRole("admin", "staf
 
 inventoryRouter.post("/movements", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     product_id?: string;
     variant_id?: string | null;
     type?: string;
     quantity_delta?: number;
     unit_cost_pence?: number | null;
     note?: string | null;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.product_id || !body.type || body.quantity_delta === undefined) {
     return c.json({ success: false, error: "product_id, type and quantity_delta are required" }, 400);
@@ -155,12 +159,15 @@ inventoryRouter.post("/movements", authMiddleware, requireShopRole("admin"), asy
 
 inventoryRouter.put("/reorder", authMiddleware, requireShopRole("admin"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const body = await c.req.json<{
+  const body = await readJsonObject<{
     product_id?: string;
     variant_id?: string | null;
     reorder_point?: number;
     reorder_qty?: number;
-  }>();
+  }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
 
   if (!body.product_id || body.reorder_point === undefined || body.reorder_qty === undefined) {
     return c.json(
