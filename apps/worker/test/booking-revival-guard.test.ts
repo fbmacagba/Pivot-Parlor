@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { authHeaders, seedShop, seedStaff, seedUser, tokenFor } from "./helpers";
 import { dispatch } from "./request";
-import { entriesFor } from "./audit-helpers";
+import { entriesFor, gapRowsFor } from "./audit-helpers";
 
 const DAY = "2099-01-15"; // London = UTC
 const REFUSED = "Another booking now holds this time, so this booking cannot be reinstated.";
@@ -59,11 +59,14 @@ async function shopWithStaff(name: string) {
   return { shop, staff, service, admin };
 }
 
+let lastRequestId = "";
+
 async function adminSets(s: { shop: string; admin: string }, bookingId: string, status: string) {
   const res = await dispatch("PUT", `/api/shops/${s.shop}/bookings/${bookingId}/status`, {
     headers: authHeaders(s.admin),
     body: { status },
   });
+  lastRequestId = res.headers.get("X-Request-Id") ?? "";
   return { status: res.status, body: (await res.json()) as { success: boolean; error?: string } };
 }
 
@@ -77,6 +80,7 @@ describe("an admin reinstating a booking", () => {
     expect(res).toEqual({ status: 409, body: { success: false, error: REFUSED } });
     expect(await statusOf(cancelled)).toBe("cancelled");
     expect(await entriesFor({ action: "booking.status", entityId: cancelled })).toEqual([]);
+    expect(await gapRowsFor(lastRequestId), "no audit.gap row for a refusal").toBe(0);
   });
 
   it("cannot, across the two time shapes: a cancelled walk-in at 10:00 vs an online booking at 10:00", async () => {
@@ -172,6 +176,7 @@ describe("a booking made between the check and the write", () => {
     expect(await res.json()).toEqual({ success: false, error: REFUSED });
     expect(await statusOf(cancelled)).toBe("cancelled");
     expect(await entriesFor({ action: "booking.status", entityId: cancelled })).toEqual([]);
+    expect(await gapRowsFor(res.headers.get("X-Request-Id") ?? ""), "no audit.gap row for a refusal").toBe(0);
   });
 });
 
