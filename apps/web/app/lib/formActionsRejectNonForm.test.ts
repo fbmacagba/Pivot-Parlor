@@ -231,10 +231,11 @@ describe("a form action sent a body that is not a form", () => {
 
 // ─── Source guard ─────────────────────────────────────────────────────────────
 // Every form body is read through readFormData (app/lib/formBody.ts), which
-// answers a non-form body with null instead of throwing. This covers every
-// route and lib, including ones added later.
+// answers a non-form body with null instead of throwing. This reads every
+// source file under app/ (root, routes, lib, components), including ones
+// added later.
 
-const sources = import.meta.glob(["../routes/**/*.{ts,tsx}", "./**/*.{ts,tsx}", "!./**/*.test.{ts,tsx}"], {
+const sources = import.meta.glob(["../**/*.{ts,tsx}", "!../**/*.test.{ts,tsx}"], {
   query: "?raw",
   import: "default",
   eager: true,
@@ -255,9 +256,12 @@ describe("form body source", () => {
     expect(rawReads("const form = await readFormData(request);")).toBe(0);
   });
 
-  it("no route or lib reads a request body with a raw request.formData(), except readFormData itself", () => {
+  it("no source file under app/ reads a request body with a raw request.formData(), except readFormData itself", () => {
     const files = Object.keys(sources);
-    expect(files.length).toBeGreaterThan(100);
+    expect(files.length).toBeGreaterThan(150);
+    // The glob reaches beyond routes and lib (control for its reach).
+    expect(files.some((f) => f.endsWith("/root.tsx"))).toBe(true);
+    expect(files.some((f) => f.includes("/components/"))).toBe(true);
     const found = files
       .filter((f) => !f.endsWith("/formBody.ts") && rawReads(sources[f]!) > 0)
       .map((f) => `${f} x${rawReads(sources[f]!)}`)
