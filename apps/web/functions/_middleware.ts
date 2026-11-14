@@ -5,6 +5,7 @@ import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
 import { CLIENT_ERRORS_PATH } from "../app/lib/browserErrors";
 import { handleClientErrors, pageRouteIds, type BrowserErrorsBinding } from "../app/lib/clientErrorsEndpoint";
+import { webLoadContext } from "../app/lib/loadContext";
 import { hasUnsafePathSegment } from "../app/lib/pathSafety";
 import { newCspNonce, withSecurityHeaders } from "../app/lib/securityHeaders";
 import { reportServerError, type WebErrorsBinding } from "../app/lib/serverErrors";
@@ -33,19 +34,14 @@ globalThis.fetch = createApiAwareFetch(globalThis.fetch.bind(globalThis), () => 
 const handleRequest = createPagesFunctionHandler({
   build: build as unknown as ServerBuild,
   /**
-   * Expose Cloudflare environment bindings to Remix loaders/actions as
-   * `context.env` so code like `context.env.API_URL` works, and waitUntil so
-   * an error report outlives the response (app/lib/serverErrors.ts), and the
-   * request's CSP nonce, which the render puts on its inline scripts
-   * (entry.server.tsx).
+   * Loaders and actions get the Cloudflare bindings as `context.env` (so
+   * `context.env.API_URL` works), waitUntil so an error report outlives the
+   * response (app/lib/serverErrors.ts), and the request's CSP nonce, which
+   * the render puts on its inline scripts (entry.server.tsx). All three come
+   * from `context.cloudflare`, never the top-level event fields: React Router 7
+   * no longer passes those (app/lib/loadContext.ts).
    */
-  getLoadContext(context) {
-    return {
-      env: context.env,
-      waitUntil: (promise: Promise<unknown>) => context.waitUntil(promise),
-      cspNonce: context.data.cspNonce as string | undefined,
-    };
-  },
+  getLoadContext: ({ context }) => webLoadContext(context.cloudflare),
 });
 
 // public/_headers covers static assets only; every response from here gets
