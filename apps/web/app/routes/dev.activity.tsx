@@ -63,7 +63,8 @@ interface Entry {
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
-  // The dev.tsx layout's check does not run for a ?_data= fetch of this route.
+  // The dev.tsx layout's check does not run for a data request that names only
+  // this route (/dev/activity.data?_routes=routes%2Fdev.activity).
   await requireRole(request, "developer", env.API_URL);
   const api = createApiClient(env.API_URL, getSessionToken(request));
   const qs = auditQuery(new URL(request.url).searchParams);

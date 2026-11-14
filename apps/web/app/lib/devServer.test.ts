@@ -122,6 +122,40 @@ describe("local dev server", () => {
     expect(title, `title was ${title}`).toMatch(/FerdyM/);
   }, 120_000);
 
+  it("a page's data request answers in React Router's format", async () => {
+    // Client navigation and fetchers ask for a page's data at `<path>.data`
+    // (Remix 2 used `?_data=`), answered as a turbo-stream.
+    const res = await fetch(`${base}/_root.data`);
+    await res.text();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type") ?? "").toMatch(/^text\/x-script/);
+  }, 120_000);
+
+  it("a plain fetch to a resource route still gets JSON", async () => {
+    // Pages poll this route with fetch(), not a fetcher, and read JSON. With no
+    // session it refuses before calling the API, so the answer does not depend
+    // on whether a local Worker is running.
+    const res = await fetch(`${base}/api/jobs/e2e-job/status`);
+    expect(res.status).toBe(401);
+    expect(res.headers.get("content-type") ?? "").toMatch(/^application\/json/);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ success: false, error: "Unauthorized" });
+  }, 120_000);
+
+  it("a form posted without JavaScript renders the page with the action's answer", async () => {
+    // A document POST (no `.data`): the page renders with the action's status
+    // and message, as Remix 2 did.
+    const res = await fetch(`${base}/login`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "",
+    });
+    const html = await res.text();
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type") ?? "").toMatch(/^text\/html/);
+    expect(html).toContain("Email and password are required.");
+  }, 120_000);
+
   it("no loader call left this machine", () => {
     const offMachine = apiCalls.filter((u) => !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(u));
     // Every off-machine call was answered by the stand-in above, never sent.

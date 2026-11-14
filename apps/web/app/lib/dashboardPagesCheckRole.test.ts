@@ -5,9 +5,10 @@ import { describe, expect, it } from "vitest";
 // Every dashboard page handler (admin, staff, account, dev) must check the
 // signed-in user's role itself, before it calls the API.
 //
-// A parent layout's gate does not protect its children. On a form POST Remix
-// runs only the target route's action, and a `?_data=` request runs only the
-// target route's loader. So `dev.tsx` gating on "developer" did nothing for
+// A parent layout's gate does not protect its children. On a form POST the
+// router runs only the target route's action, and a data request can name only
+// the target route (`<path>.data?_routes=<route id>`; Remix 2's `?_data=`) and
+// run only its loader. So `dev.tsx` gating on "developer" did nothing for
 // `dev.activity`'s action, which forwards the irreversible audit "erase" with
 // whatever session the request carries. The API refuses non-developers today;
 // this keeps the dashboard from depending on that alone.

@@ -1,14 +1,14 @@
 /** The developer Activity page's own loader and action must refuse anyone who
  *  is not a developer before they reach the API. The `dev.tsx` layout's check
- *  does not run for a form POST or a `?_data=` fetch to this route, and the
+ *  does not run for a form POST, or for a data request that names only this
+ *  route (`/dev/activity.data?_routes=routes%2Fdev.activity`), and the
  *  action forwards the irreversible audit "erase". Lives in lib/ rather than
  *  routes/ so Remix never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Only the server handlers are under test. The hoisted react-router and
-// lucide-react cannot resolve this app's React under vitest, so the page's
-// hooks and UI components are stubbed (as in portfolioDemo.test.ts).
-// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+// Only the server handlers are under test, so the page's hooks and UI
+// components are stubbed (as in portfolioDemo.test.ts): react-router's real
+// server helpers (data, redirect) with the screen parts stubbed on top.
 vi.mock("react-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-router")>()),
   Form: () => null,
@@ -61,7 +61,7 @@ function erasePost(cookie?: string): Request {
 function pageGet(cookie?: string): Request {
   const headers = new Headers();
   if (cookie) headers.set("Cookie", cookie);
-  return new Request("https://pivotparlor.com/dev/activity?_data=routes%2Fdev.activity", { headers });
+  return new Request("https://pivotparlor.com/dev/activity.data?_routes=routes%2Fdev.activity", { headers });
 }
 
 const run = {
