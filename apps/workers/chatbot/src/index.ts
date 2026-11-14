@@ -94,12 +94,22 @@ async function tryConsumePublicChatRate(kv: KVNamespace, shopId: string, ip: str
     return "limited";
   }
 
-  await Promise.all([
-    kv.put(hourKey, String(hourCount + 1), { expirationTtl: 3600 }),
-    kv.put(dayKey, String(dayCount + 1), { expirationTtl: 86400 }),
-    ...(ip !== "" ? [kv.put(ipKey, String(ipCount + 1), { expirationTtl: 3600 })] : []),
-    kv.put(platformKey, String(platformCount + 1), { expirationTtl: 86400 }),
-  ]);
+  // KV takes one write a second to the same key and throws (429) on a faster
+  // one. The platform's day is one key that every chat writes, so two chats in
+  // the same second are ordinary traffic. A refused increment loses one count,
+  // which a brake can afford; it must never fail the chat. (No key is logged:
+  // the visitor's key carries their IP.)
+  const written = await Promise.all(
+    [
+      kv.put(hourKey, String(hourCount + 1), { expirationTtl: 3600 }),
+      kv.put(dayKey, String(dayCount + 1), { expirationTtl: 86400 }),
+      ...(ip !== "" ? [kv.put(ipKey, String(ipCount + 1), { expirationTtl: 3600 })] : []),
+      kv.put(platformKey, String(platformCount + 1), { expirationTtl: 86400 }),
+    ].map((put) => put.then(() => true, () => false))
+  );
+  if (written.includes(false)) {
+    console.warn("[chatbot] a chat rate counter was not updated (KV refused the write); this chat was not counted there");
+  }
   return "allowed";
 }
 
@@ -111,10 +121,12 @@ async function tryConsumePublicChatRate(kv: KVNamespace, shopId: string, ip: str
 async function reportPlatformCapOnce(kv: KVNamespace): Promise<void> {
   const flagKey = `alert:chat:platform-cap:${publicChatRateKeySuffixes().daySuffix}`;
   if (await kv.get(flagKey)) return;
-  await kv.put(flagKey, "1", { expirationTtl: 86400 });
   console.error(
     `[chatbot] platform chat cap reached: ${PUBLIC_CHAT_MAX_PLATFORM_PER_DAY} replies today (UTC); visitors are refused until midnight UTC`
   );
+  // If the note cannot be written (KV's one write a second per key), the
+  // owner may hear more than once today; the visitor still gets the 429.
+  await kv.put(flagKey, "1", { expirationTtl: 86400 }).catch(() => undefined);
 }
 
 function isPlatformQuestion(msg: string): boolean {
@@ -225,9 +237,10 @@ chat.post("/", async (c) => {
     // The shop, and the status of its published site, in one read. The public
     // sees a shop's site, and so its chat, only when that site is live: the
     // site layout ($shopSlug.tsx) answers 404 for a draft, 503 for a paused
-    // site, and "Coming Soon" with no chat when nothing is published. Every
-    // other case is refused exactly like an unknown shop, before anything is
-    // spent or counted.
+    // site, and "Coming Soon" with no chat when nothing is published. "live"
+    // (case-insensitive) is the API's own rule for a public site (isLiveSite,
+    // apps/worker/src/lib/siteVisibility.ts). Every other case is refused
+    // exactly like an unknown shop, before anything is spent or counted.
     const shop = await c.env.DB.prepare(
       "SELECT id, name, type, slug, (SELECT website_status FROM shop_sites WHERE shop_sites.shop_id = shops.id AND shop_sites.status = 'active' LIMIT 1) AS website_status FROM shops WHERE id = ? LIMIT 1"
     )
