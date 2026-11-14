@@ -50,9 +50,15 @@ jobs:
       - name: Build Remix app
         run: npm run build --workspace=apps/web
 
-      # Static + Pages Functions (Remix SSR) — do not deploy ./build/client alone.
+      # Static + Pages Functions (server rendering) — do not deploy ./build/client alone.
       - name: Prepare Pages deploy bundle (.pages-dist)
         run: node scripts/prepare-pages-deploy.mjs
+        working-directory: apps/web
+
+      # The exact bundle the next step uploads, served under workerd. A build
+      # that cannot render (every page 500) stops here, before production.
+      - name: Smoke-test the deploy bundle under workerd
+        run: node scripts/smoke-build.mjs ./.pages-dist
         working-directory: apps/web
 
       - name: Deploy to Cloudflare Pages (production)

@@ -1,6 +1,6 @@
 import { reactRouter } from "@react-router/dev/vite";
 import { cloudflareDevProxy } from "@react-router/dev/vite/cloudflare";
-import { defineConfig } from "vite";
+import { defaultClientConditions, defineConfig, type Plugin } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { webLoadContext } from "./app/lib/loadContext";
 
@@ -25,6 +25,22 @@ function devEnv(env: Record<string, unknown>): Record<string, unknown> {
   return { ...env, API_URL: LOCAL_API };
 }
 
+// Build only. The server bundle runs in workerd, so it resolves dependencies
+// the way Vite does for `ssr.target: "webworker"`: the browser conditions, as
+// the Remix 2 build did. @react-router/dev sets Node's server conditions
+// instead, which pick React's Node renderer (no renderToReadableStream), and
+// every page answers 500. Vite appends config arrays, so this replaces the
+// list rather than adding to it. app/lib/serverBuildConditions.test.ts checks
+// the setting; scripts/smoke-build.mjs checks the built site under workerd.
+const workerConditions: Plugin = {
+  name: "pp-server-build-worker-conditions",
+  apply: "build",
+  configEnvironment(name, options) {
+    if (name !== "ssr") return;
+    options.resolve = { ...options.resolve, conditions: [...defaultClientConditions] };
+  },
+};
+
 export default defineConfig(({ command }) => ({
   plugins: [
     // Dev only, and it must come before reactRouter(). Loaders get the same
@@ -39,6 +55,8 @@ export default defineConfig(({ command }) => ({
     // fixed in react-router 7.14.0 and later; app/lib/routerPatchLevel.test.ts
     // holds the floor.
     reactRouter(),
+    // After reactRouter(), so it has the last word on the server conditions.
+    workerConditions,
     tsconfigPaths(),
   ],
   ssr: {

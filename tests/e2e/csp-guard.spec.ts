@@ -108,7 +108,9 @@ test.describe("Inline scripts need the page's nonce", () => {
 
       // The nonce property, not the attribute: browsers blank the attribute.
       const nonces = await page.$$eval("script:not([src])", (els) => els.map((e) => (e as HTMLScriptElement).nonce));
-      expect(nonces.length, "React Router's inline scripts").toBeGreaterThanOrEqual(3);
+      // React Router 7 writes 5 on each of these pages (measured under workerd on
+      // 2026-11-14; Remix 2 wrote 3). Fewer means the check below has less to check.
+      expect(nonces.length, "React Router's inline scripts").toBeGreaterThanOrEqual(5);
       expect(nonces.filter((n) => n !== nonce), "inline scripts without the page's nonce").toEqual([]);
 
       // Hydration ran with the nonce in place: no browser error was reported.
