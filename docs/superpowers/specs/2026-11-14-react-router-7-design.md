@@ -359,4 +359,17 @@ Each merge is its own decision. Approving this design approves the work and the 
 
 ## Step 0 results
 
-*(To be filled in by the spike.)*
+Measured 2026-11-14 on a throwaway branch; each ruling was applied in the plan (`docs/superpowers/plans/2026-11-14-react-router-7.md`, "Step 0 rulings").
+
+1. **Install.** A plain `npm install` of the swap succeeds, with no override and no flag. `react-router` lands nested in `apps/web/node_modules`; dropping that lockfile entry, deleting the directory and running `npm install` again hoists it. `npm ci` then reproduces the lockfile byte for byte, and `npm audit` reads 32 → 14. The `@cloudflare/workers-types` "invalid" in `npm ls` (wrangler's optional peer wants ^5) already exists on main and is out of scope. *Ruling:* that procedure, no workers-types resolution needed.
+2. **Resource routes.** `Response.json(x, init)` and `data(x, init)` answer identically: a plain `fetch` gets `application/json` with its status and headers; a fetcher gets the same `fetcher.data` through `/path.data?_routes=…` (GET) and `/path.data` (POST), as `text/x-script`. *Ruling:* every `json` import becomes `import { data as json } from "react-router"`, leaving the call sites untouched (26 of the 64 files already have a `data` variable). PR A item 4 was dropped as unnecessary.
+3. **Routes.** `flatRoutes()` gives the same 96 routes as Remix 2 (id, parent, path, index, file): 0 differences.
+4. **Config.** `routeDiscovery: { mode: "initial" }` and `ssr` exist in 7.18.5.
+5. **Load context.** `getLoadContext` receives `{ request, context: { cloudflare: { ...event, cf, ctx, caches } } }` (read from `node_modules`). Remix 2 already passed the same nested `context.cloudflare`. *Ruling:* PR A moved the middleware to it, so PR B changed only its import lines.
+
+Also seen: without a custom server entry, `react-router dev` edits `package.json` and runs `npm install` by itself, so the custom entries stay.
+
+Confirmed again in PR B: the same lockfile came out of the same procedure, and the route table is unchanged (96 routes, the same IDs and paths). Two things Step 0 did not show:
+
+- `@types/node` reached the website only through `eval`, a dependency of `@remix-run/dev`, so PR B declares it (22.19.15, the same version; owner's choice).
+- **The production build passed, but every page it served answered 500 under workerd.** The dev server, the type check and every unit test were green too. `@react-router/dev` sets Node's server resolve conditions for the server build. Remix 2 left Vite's defaults, and for `ssr.target: "webworker"` those are the browser ones. So `react-dom/server` resolved to React's Node renderer, which has no `renderToReadableStream`. A comparison of main's build and the branch's, each served by `wrangler pages dev`, caught it. *Ruling:* `vite.config.ts` puts Vite's webworker defaults (`module`, `browser`, `production`) back for the server build. It replaces the list, because Vite appends config arrays and an added `browser` would sit next to `node`. Measured after the fix: apart from the router's own packages, the server bundle contains exactly the dependency files main's does, and the comparison shows no page differences. Two checks now hold the line. `app/lib/serverBuildConditions.test.ts` checks the setting in the unit tests. `scripts/smoke-build.mjs` serves the build under workerd and GETs pages, in CI after the build and in `deploy-web.yml` before the production upload.

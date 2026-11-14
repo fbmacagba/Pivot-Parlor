@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Pivot Parlor is a barbershop and beauty salon SaaS platform. It is a Turborepo monorepo with two main applications:
 
-- **`apps/web`** — Remix frontend running on Cloudflare Pages
+- **`apps/web`** — React Router 7 frontend (framework mode, Vite) running on Cloudflare Pages
 - **`apps/worker`** — Hono API running on Cloudflare Workers
 
 Supporting packages live in `packages/`. Additional Cloudflare Workers for background jobs (AI site generation, image processing, etc.) live in `apps/workers/`.
@@ -19,7 +19,7 @@ Supporting packages live in `packages/`. Additional Cloudflare Workers for backg
 # Start both web and worker in dev mode (from repo root)
 npm run dev
 
-# Start only the Remix frontend
+# Start only the website (React Router dev server)
 cd apps/web && npm run dev
 
 # Start only the Worker API
@@ -118,12 +118,12 @@ When the named column is absent the whole file is recorded as applied without ex
 ### Request Flow
 
 ```
-Browser → Cloudflare Pages (Remix) → Cloudflare Workers (Hono API) → Cloudflare D1 (SQLite)
+Browser → Cloudflare Pages (React Router 7) → Cloudflare Workers (Hono API) → Cloudflare D1 (SQLite)
                                       ↓
                                Cloudflare KV / R2 / Queues
 ```
 
-The Remix frontend acts as a BFF (Backend-for-Frontend). It proxies authenticated requests to the Hono Worker using `createApiClient(env.API_URL, token)`. Some routes also proxy directly in loaders/actions using `fetch` with a Bearer token.
+The website acts as a BFF (Backend-for-Frontend). It proxies authenticated requests to the Hono Worker using `createApiClient(env.API_URL, token)`. Some routes also proxy directly in loaders/actions using `fetch` with a Bearer token.
 
 Those calls travel over the `API` service binding (`apps/web/wrangler.toml`), not the public internet. `functions/_middleware.ts` reroutes every server-side `fetch` to `env.API_URL`'s origin through it, carrying the visitor's `CF-Connecting-IP` (`app/lib/apiTransport.ts`). Sent over the internet, a Pages-to-Worker call is cross-zone, and Cloudflare stamps every such call with one fixed address (`2a06:98c0:3600::103`), so all visitors would share the API's per-IP rate limits. Keep new BFF calls on `env.API_URL`; don't hard-code an API host.
 
@@ -131,14 +131,14 @@ Those calls travel over the `API` service binding (`apps/web/wrangler.toml`), no
 
 - JWT signed with `JWT_SECRET` (shared between Pages and Worker).
 - Session stored in `pp_session` cookie (HttpOnly, Lax, 7-day expiry).
-- Remix side verifies by calling `GET /auth/me` on the Worker rather than verifying locally.
+- The website verifies by calling `GET /auth/me` on the Worker rather than verifying locally.
 - Worker middleware (`authMiddleware`) verifies the JWT from either `Authorization: Bearer` header or `pp_session` cookie.
 - Roles: `developer`, `admin`, `staff`, `customer`. Developers bypass shop-scoped permission checks.
 
 ### API Conventions
 
 - **Worker responses** always use `{ success: boolean, data?: T, error?: string }`.
-- **Remix loaders/actions** should return `json({ success, data?, error? })` to match.
+- **Website loaders/actions** should return `json({ success, data?, error? })` to match. `json` is React Router's `data()`, imported as `import { data as json } from "react-router"`: a plain value, not a `Response`, so a test that calls a loader or action directly reads it through `app/lib/testing/asResponse.ts`. A test that stubs `react-router` must keep the real module (`importOriginal`) and stub only the screen parts, or it hides `data` and `redirect`.
 - **Shop-scoped queries** in the Worker must include `WHERE shop_id = ?`.
 - **Money is INTEGER pence** (WS-4). DB money columns and API JSON money fields are named `*_pence`. Pounds exist only at two boundaries: form input (`parsePoundsToPence`) and display/AI presentation (`formatPence` / `price_gbp` in the site pipeline), all from `@repo/utils`. `calculateCommissionPence` is the single commission rounding path — never inline `* 0.1`. Never add `REAL` money columns.
 - **SQL** must use prepared statements; never interpolate user input.
@@ -168,7 +168,9 @@ Those calls travel over the `API` service binding (`apps/web/wrangler.toml`), no
 | `/api/ai` | AI theme/site generation |
 | `/api/webhooks/stripe` | Stripe webhooks (bypasses CORS/logger) |
 
-### Remix Route Conventions
+### Route Conventions
+
+Routes are files in `apps/web/app/routes/`, read by `flatRoutes()` (`app/routes.ts`, `@react-router/fs-routes`) with the same flat naming Remix 2 used. A page's data is requested at `<path>.data` (single fetch, a turbo-stream); a plain `fetch()` to an `api.*` resource route still gets JSON. Every page with an action and a loader exports `shouldRevalidate` (`app/lib/revalidation.ts`; the test there lists them).
 
 - Marketing pages: `_marketing._index.tsx`, `_marketing.about.tsx`, etc.
 - Admin dashboard: `admin.tsx` (layout), `admin.services.tsx`, etc.
@@ -179,13 +181,17 @@ Those calls travel over the `API` service binding (`apps/web/wrangler.toml`), no
 
 ## Critical Gotchas
 
-### Route File Shadowing (Remix)
+### Route File Shadowing (`.js` twins)
 
-Remix route discovery treats `.js` files as higher priority than `.tsx` files. There are compiled `.js` twins alongside `.tsx` route files in `apps/web/app/routes/`. **If you modify a `.tsx` route but the matching `.js` file is stale, the old `.js` will be served instead.** Always remove or regenerate the `.js` twin after editing `.tsx` routes.
+Route discovery reads `.js` files as well as `.tsx`. A compiled `.js` twin beside a `.tsx` route is the same route ID: `flatRoutes()` keeps whichever file it reads first and only logs a "Route ID Collision" error. **If you modify a `.tsx` route but a stale `.js` twin exists, the old `.js` can be served instead.** `scripts/clean-app-js.mjs` deletes them before `dev` and `build`; remove one by hand if you see it.
+
+### The Website's Server Build Runs in workerd
+
+`npm run build` can pass while its server bundle cannot render under workerd. `apps/web/vite.config.ts` sets the server build's resolve conditions to Vite's webworker defaults. React Router sets Node's, which bundle React's Node renderer, and then every page answers 500. To check a build the way Pages runs it, run `cd apps/web && node scripts/smoke-build.mjs`. It serves the build with `wrangler pages dev` and GETs pages. CI runs it after the build, and `deploy-web.yml` runs it before the production upload.
 
 ### Worker Dev Proxy Port
 
-The Worker dev server runs on port `8787` (configured in `wrangler.toml`). The Remix Vite dev proxy expects this. If the Worker dev server is not running, Remix routes that proxy to the Worker will fail.
+The Worker dev server runs on port `8787` (configured in `wrangler.toml`). The website's dev server expects this (`apps/web/vite.config.ts` points dev at `http://localhost:8787` instead of the production API). If the Worker dev server is not running, routes that proxy to the Worker will fail.
 
 ### Secrets
 

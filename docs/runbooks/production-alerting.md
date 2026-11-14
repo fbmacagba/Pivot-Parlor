@@ -292,7 +292,7 @@ reopens) the issue `[csp] blocked a script ...`. Mark it Resolved afterwards.
 ## Website server errors
 
 Pages Functions have no Workers Issues, so the website hands each server error
-to the API. Remix's `handleError` (`apps/web/app/entry.server.tsx`) catches
+to the API. React Router's `handleError` (`apps/web/app/entry.server.tsx`) catches
 errors in loaders, actions and the render. `functions/_middleware.ts` catches
 errors in its own code. Both call `reportServerError`
 (`apps/web/app/lib/serverErrors.ts`), which keeps the local log line and sends
@@ -314,7 +314,7 @@ was. Not reported at all:
 
 - a visitor who left before the page finished;
 - a deliberate response thrown by a route (a redirect, 404 or 403);
-- Remix's own not-found and method-not-allowed answers.
+- React Router's own not-found and method-not-allowed answers.
 
 The API logs at most 30 reports a minute for one route and kind (per
 Cloudflare location, the `WEB_ERROR_LIMITER` binding) and drops the rest.
@@ -350,7 +350,7 @@ staging API's Workers Logs as the same `[web] AlertTestError ...` event.
 catches uncaught errors and unhandled rejections; React's hydration failures
 and the error screen (`ErrorScreen`) hand theirs in. Each report is posted to
 the website's own `/client-errors`, which `functions/_middleware.ts` answers
-before Remix (`apps/web/app/lib/clientErrorsEndpoint.ts`). The website passes
+before React Router (`apps/web/app/lib/clientErrorsEndpoint.ts`). The website passes
 it over `WEB_ERRORS` to `WebErrors.reportBrowser` on the API, whose
 `console.error` is what Issues emails, through the same automations.
 
@@ -381,7 +381,7 @@ Not reported at all:
   script failed.`): neither is a bug, and both would alert on every flaky
   mobile connection;
 - an aborted request (`AbortError`);
-- a server error shown on the error screen: Remix hands it to the browser with
+- a server error shown on the error screen: React Router hands it to the browser with
   no stack, and the server already reported it (see Website server errors);
 - bots and crawlers (by user agent), reports from other sites, and reports
   that name a route the site does not have or one that renders no page (an
@@ -462,7 +462,7 @@ under one of the AI workers.
   visitor whose browser blocks the report are not reported (see Browser
   errors). An error before our scripts load (a page whose HTML itself is
   broken) is not either: the uptime checks see a page that does not answer.
-- A failure inside Remix's Pages adapter itself, outside any route, comes back
+- A failure inside the Pages adapter itself (`@react-router/cloudflare`), outside any route, comes back
   as a bare `Internal Error` 500 with no log line. Only the uptime checks see
   it.
 - `pivot-parlor-audit` was retired in 2026-11 (its code removed from

@@ -1,4 +1,4 @@
-# Cloudflare Pages (Remix)
+# Cloudflare Pages (React Router 7)
 
 ## Production vs preview
 
@@ -22,4 +22,4 @@ If you deploy from a non-`main` git branch without `--branch=main`, you will see
 
 ## Bundle contents
 
-Always deploy **`.pages-dist`** (static `build/client` + `functions/`), not `./build/client` alone, so Remix SSR and route actions stay in sync with assets.
+Always deploy **`.pages-dist`** (static `build/client` + `functions/`), not `./build/client` alone, so server rendering and route actions stay in sync with assets.
