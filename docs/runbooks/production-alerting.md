@@ -143,6 +143,14 @@ not necessarily to the owner, so they are not part of this alerting.
        provider's status and the model chosen on AI Deploy.
    - The chatbot (`[chatbot] public /chat error`): a shop's chat answered
      with an error. Read the occurrence for the shop and the cause.
+   - The chatbot's daily cap (`[chatbot] platform chat cap reached`): all
+     shops together have had 1,000 chat replies today (UTC), so every shop's
+     chat answers "Too many messages" until midnight UTC. It is sent at most
+     once a day. To see which shops the chats came from, query `ai_usage_log`
+     for today's rows with `usage_type = 'chatbot'`, grouped by `shop_id`. If
+     it is real demand, raise `PUBLIC_CHAT_MAX_PLATFORM_PER_DAY` in
+     `apps/workers/chatbot/src/index.ts` and deploy the chatbot by hand (see
+     below).
    - A CSP block on `pivot-parlor-api` (`[csp] blocked a script`, `a style`,
      `a connection`, `a frame`, `an image`, `a font`, `a form submission` or
      `something else`): a visitor's browser refused something the page asked
