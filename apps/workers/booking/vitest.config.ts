@@ -95,5 +95,11 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     setupFiles: ["./test/apply-schema.ts"],
+    // apply-schema.ts replays the whole migration chain, one statement at a
+    // time, before every test file. Under the pre-push gate (every workspace's
+    // suite at once) that took over vitest's default 10 s, so whole files
+    // failed before running a test. A replay that breaks still throws its own
+    // error; this only says how long a slow one may take.
+    hookTimeout: 60_000,
   },
 });
