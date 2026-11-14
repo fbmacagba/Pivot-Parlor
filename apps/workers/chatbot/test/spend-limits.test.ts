@@ -30,12 +30,14 @@ const PLATFORM_KEY = `rate:chat:platform:day:${DAY}`;
 const NOT_FOUND = { reply: FALLBACK_REPLY, error: "Shop not found" };
 const RATE_LIMITED = { error: "rate_limit", message: "Too many messages. Please try again later." };
 
-function memoryKv(seed: Record<string, string>) {
+/** `refuse` makes a write to a matching key throw, as KV does to a second write to one key within a second. */
+function memoryKv(seed: Record<string, string>, refuse: (key: string) => boolean = () => false) {
   const store = new Map(Object.entries(seed));
   return {
     store,
     get: async (k: string) => store.get(k) ?? null,
     put: async (k: string, v: string) => {
+      if (refuse(k)) throw new Error("KV PUT failed: 429 Too Many Requests");
       store.set(k, v);
     },
   };
@@ -57,14 +59,16 @@ function chatDb(fake: FakeAuditDb): FakeAuditDb {
 }
 
 /** `websiteStatus` is the shop's published site status; null means no published site. */
-function setup(opts: { websiteStatus?: string | null; kv?: Record<string, string> } = {}) {
+function setup(
+  opts: { websiteStatus?: string | null; kv?: Record<string, string>; refuseWrite?: (key: string) => boolean } = {},
+) {
   const websiteStatus = opts.websiteStatus === undefined ? "live" : opts.websiteStatus;
   const fake = chatDb(
     fakeAuditDb({
       answer: (sql) => (sql.startsWith("SELECT id, name, type, slug") ? { ...SHOP, website_status: websiteStatus } : null),
     }),
   );
-  const kv = memoryKv(opts.kv ?? {});
+  const kv = memoryKv(opts.kv ?? {}, opts.refuseWrite);
   const env = { DB: fake.db, KV: kv, OPENROUTER_API_KEY: "or-key", ENVIRONMENT: "test", PLATFORM_URL: "https://pivotparlor.com" };
   return { fake, kv, env };
 }
@@ -177,6 +181,31 @@ describe("POST /chat, telling the owner the cap was reached", () => {
   ])("a 429 for %s is not the platform cap and logs no error", async (_kind, key, count) => {
     const { env } = setup({ kv: { [key]: count } });
     expect(await chat(env)).toEqual({ status: 429, body: RATE_LIMITED });
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it("when the once-a-day note cannot be written, the visitor still gets the 429 and the owner still hears", async () => {
+    const { env } = setup({ kv: { [PLATFORM_KEY]: "1000" }, refuseWrite: (k) => k.startsWith("alert:") });
+    expect(await chat(env)).toEqual({ status: 429, body: RATE_LIMITED });
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy.mock.calls.flat().map(String).join(" ")).toMatch(/platform chat cap reached/);
+  });
+});
+
+/**
+ * KV takes one write a second to the same key and throws (429) on a faster
+ * one. The platform's day is one key that every chat on every shop writes, so
+ * two chats in the same second are ordinary traffic.
+ */
+describe("POST /chat when KV refuses a counter write", () => {
+  it.each([
+    ["the platform's day", "rate:chat:platform:"],
+    ["the shop's hour", `rate:chat:${SHOP.id}:hour:`],
+    ["the visitor's hour", "rate:chat:ip:"],
+  ])("a refused write of %s still answers the visitor and logs no error", async (_kind, prefix) => {
+    const { env } = setup({ refuseWrite: (k) => k.startsWith(prefix) });
+    expect(await chat(env)).toEqual({ status: 200, body: { reply: MODEL_REPLY } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });
