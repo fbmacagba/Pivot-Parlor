@@ -89,10 +89,21 @@ export function routePattern(pathname: string, params: Record<string, string | u
   return scrubErrorText(pattern, 200);
 }
 
-/** A page load, a Remix data request (?_data=) or a form post. */
+// React Router 7 fetches a page's data from the page's path plus ".data"
+// ("/" becomes "/_root.data"); Remix 2 used "?_data=<route id>".
+const DATA_SUFFIX = ".data";
+
+/** The page a data request belongs to: "/book/x.data" is "/book/x", "/_root.data" is "/". */
+export function dataRequestPath(pathname: string): string {
+  if (pathname === `/_root${DATA_SUFFIX}`) return "/";
+  return pathname.endsWith(DATA_SUFFIX) ? pathname.slice(0, -DATA_SUFFIX.length) : pathname;
+}
+
+/** A page load, a data request (Remix 2's ?_data= or React Router 7's .data) or a form post. */
 export function whereOf(request: Request): ErrorWhere {
   if (request.method !== "GET" && request.method !== "HEAD") return "action";
-  return new URL(request.url).searchParams.has("_data") ? "data" : "page";
+  const url = new URL(request.url);
+  return url.searchParams.has("_data") || url.pathname.endsWith(DATA_SUFFIX) ? "data" : "page";
 }
 
 // "at loader (file:///C:/build/server/index.js:12:5)" -> "at loader (index.js:12:5)"
@@ -119,7 +130,7 @@ export function describeServerError(
   return {
     where,
     method: request.method,
-    route: routePattern(new URL(request.url).pathname, params),
+    route: routePattern(dataRequestPath(new URL(request.url).pathname), params),
     name: isError ? error.name || "Error" : "NonError",
     message: scrubErrorText(text),
     frames: isError ? topFrames(error.stack) : [],
