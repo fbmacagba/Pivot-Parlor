@@ -4,7 +4,7 @@ Design, 2026-11-14. Status: **awaiting the owner's decision**. No code has been 
 
 ## For the owner: the short version
 
-**What it clears (measured, not estimated).** On a scratch copy of today's lockfile with the swap applied, `npm audit` goes from **32 findings to 14**:
+**What it clears.** This was measured on a lockfile-only scratch resolution of the swap. That run had to skip one peer check (`--legacy-peer-deps`), so Step 0 measures again on a real install. On it, `npm audit` goes from **32 findings to 14**:
 
 | | Today | After |
 |---|---|---|
@@ -53,7 +53,9 @@ Design, 2026-11-14. Status: **awaiting the owner's decision**. No code has been 
 - Remix 2 is in maintenance. Its router line (react-router 6.30.x) and its data encoder (turbo-stream 2.x) carry the only advisories left that reach visitors.
 - They are recorded today as accepted risk: six aramid override rows plus the wrjc and rxv8 rows. The fix for all of them is react-router 7.18.0 or later.
 - Today's `vite.config.ts` keeps single fetch OFF because of rxv8. React Router 7 has no way to turn single fetch off.
-- That is safe now only because the advisory lists react-router 7.14.0 as patched, and 7.18.5 does not depend on turbo-stream at all. **This reverses the "reassess before enabling this feature" comment in `vite.config.ts` deliberately.**
+- That is safe now only because the advisory lists react-router 7.14.0 as patched. react-router 7.18.5 carries its own copy of the encoder and no longer depends on the turbo-stream package; the advisory covers that copy through the react-router version.
+  - **The react-router version floor is what protects the site, not the absence of turbo-stream from the lockfile.**
+- **This reverses the "reassess before enabling this feature" comment in `vite.config.ts` deliberately.**
 
 ## Goals
 
@@ -120,6 +122,8 @@ The tag on each fact says how it was established.
 - `@react-router/cloudflare` 7.18.5 exports `createPagesFunctionHandler({ build, getLoadContext, mode })`.
   - It calls `getLoadContext({ request, context: { cloudflare: { ...event, cf, ctx: { waitUntil, passThroughOnException }, caches } } })`.
   - **It drops the top-level spread of the Pages event that Remix 2 kept ("Backcompat, remove in v3").** Today's middleware reads `context.env`, `context.waitUntil` and `context.data.cspNonce` from that spread.
+  - Remix 2's side was read from the installed source. The React Router side came from the unpkg dist file through a web summarizer that quoted the call; Step 0 confirms it from `node_modules`.
+  - The plan does not depend on which is true: reading from `context.cloudflare` works either way, and the `functions/` type check enforces it.
 - `@react-router/dev` 7.18.5 has `./vite`, `./config`, `./routes` and `./vite/cloudflare` (the dev proxy).
 - `HydratedRouter` sets `window.__reactRouterDataRouter` in every build. `__remixRouter` no longer exists.
 
@@ -178,6 +182,7 @@ This is done on a scratch branch to settle four facts before PR B is planned in 
    This decides the json() strategy for resource routes (see PR B, item 4).
 3. **Route ids are unchanged.** `flatRoutes()` from `@react-router/fs-routes` must produce exactly today's 96 route ids and paths. Compare the build manifests. A difference would change URLs and break `PAGE_ROUTES`.
 4. **Config keys exist in 7.18.5:** `routeDiscovery: { mode: "initial" }` and `ssr: true` in `react-router.config.ts`.
+5. **Confirm two facts on the real install:** the argument shape `getLoadContext` receives, read from the installed `@react-router/cloudflare` source, and the `npm audit` result.
 
 Output: a short note added to this design (the "Step 0 results" section), and a ruling for each.
 
@@ -317,6 +322,7 @@ React Router 8 needs React ≥19.2.7 and Vite 7 or 8. That brings React 19 (new 
 | Alerts misfile or lose their route | PR A's dual reads, then the post-deploy alert test |
 | Streamed data scripts without a nonce | `csp-guard.spec.ts`; the CSP report inbox |
 | Open tabs during the deploy | quiet-hour deploy; expected one-off browser-error burst |
+| A new aramid finding: `@react-router/fs-routes` → `minimatch` 9 (GHSA-g3hv, build-time only, the same advisory already accepted for the lint chain). The pre-push ratchet stops on new rows. | Recorded as an override, pre-approved with this design. This one row only: any other new row the real install adds goes back to the owner. |
 
 ## Order of work and approvals
 
