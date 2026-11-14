@@ -136,6 +136,40 @@ describe("installBrowserErrorReporter", () => {
   });
 });
 
+describe("default route lookup", () => {
+  // The route comes from the router's own global: React Router 7 sets
+  // __reactRouterDataRouter, Remix 2 set __remixRouter.
+  type RouterGlobals = { __reactRouterDataRouter?: unknown; __remixRouter?: unknown };
+  const globals = window as unknown as RouterGlobals;
+  const router = { state: { matches: [{ route: { id: "root" } }, { route: { id: "routes/contact" } }] } };
+  afterEach(() => {
+    delete globals.__reactRouterDataRouter;
+    delete globals.__remixRouter;
+  });
+
+  function reportOne() {
+    const target = new EventTarget();
+    const sent: BrowserErrorPayload[] = [];
+    uninstall = installBrowserErrorReporter({ target, origin: ORIGIN, send: (p) => sent.push(p) });
+    target.dispatchEvent(errorEvent(ownError("lookup")));
+    return sent[0]?.route;
+  }
+
+  it("reads React Router 7's router", () => {
+    globals.__reactRouterDataRouter = router;
+    expect(reportOne()).toBe("routes/contact");
+  });
+
+  it("still reads Remix 2's router", () => {
+    globals.__remixRouter = router;
+    expect(reportOne()).toBe("routes/contact");
+  });
+
+  it("says unknown when neither router is there", () => {
+    expect(reportOne()).toBe("unknown");
+  });
+});
+
 describe("reportBrowserError", () => {
   it("reports a hydration or render error handed in by the app", () => {
     const { sent } = install("routes/$shopSlug.book");

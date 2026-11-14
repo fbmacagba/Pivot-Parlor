@@ -29,12 +29,17 @@ export interface BrowserErrorReporterOptions {
   send?: (payload: BrowserErrorPayload) => void;
 }
 
-interface RemixRouterGlobal {
-  __remixRouter?: { state?: { matches?: Array<{ route?: { id?: string } }> } };
+type RouterState = { state?: { matches?: Array<{ route?: { id?: string } }> } };
+
+/** The router's global: React Router 7 sets __reactRouterDataRouter, Remix 2 set __remixRouter. */
+interface RouterGlobal {
+  __reactRouterDataRouter?: RouterState;
+  __remixRouter?: RouterState;
 }
 
 function currentRouteId(): string | undefined {
-  const matches = (window as unknown as RemixRouterGlobal).__remixRouter?.state?.matches;
+  const globals = window as unknown as RouterGlobal;
+  const matches = (globals.__reactRouterDataRouter ?? globals.__remixRouter)?.state?.matches;
   return matches?.[matches.length - 1]?.route?.id;
 }
 
