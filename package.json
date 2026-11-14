@@ -27,7 +27,10 @@
     "@types/react-dom": "18.3.7",
     "react-router": "6.30.6",
     "react-router-dom": "6.30.6",
-    "@remix-run/router": "1.23.4"
+    "@remix-run/router": "1.23.4",
+    "miniflare": {
+      "undici": "7.30.2"
+    }
   },
   "packageManager": "npm@11.10.1",
   "workspaces": [
