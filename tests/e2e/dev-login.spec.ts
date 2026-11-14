@@ -29,6 +29,32 @@ test.describe("Dev login", () => {
     await expect(page).toHaveURL(/\/dev\/dashboard/);
   });
 
+  test("Sign in and sign out through the forms: the session cookie comes and goes", async ({
+    page,
+    context,
+  }) => {
+    const password = process.env.DEV_PASSWORD;
+    if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
+    const sessionCookie = async () => (await context.cookies()).find((c) => c.name === "pp_session");
+
+    await page.goto("/login");
+    expect(await sessionCookie(), "no session before signing in").toBeUndefined();
+    await page.getByLabel("Email address").fill("dev@pivotparlor.com");
+    await page.getByLabel("Password").fill(password);
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await page.waitForURL(/\/dev\/dashboard/);
+    expect(await sessionCookie(), "signing in sets pp_session").toBeTruthy();
+
+    // The sidebar's "Log out" is a plain HTML form: a document POST to /logout.
+    await page.getByRole("button", { name: "Log out" }).filter({ visible: true }).first().click();
+    await page.waitForURL((u) => u.pathname === "/login");
+    expect(await sessionCookie(), "signing out clears pp_session").toBeUndefined();
+
+    // Signed out for real: the dashboard sends us back to sign in.
+    await page.goto("/dev/dashboard");
+    await expect(page).toHaveURL(/\/login/);
+  });
+
   test("Failed login — shows an error message", async ({ page }) => {
     await page.goto("/login");
 

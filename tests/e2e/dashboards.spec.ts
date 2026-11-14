@@ -175,6 +175,23 @@ async function session(page: Page): Promise<{ role?: string; shop_id?: string | 
   return { role: payload.role, shop_id: payload.shop_id, token: cookie.value };
 }
 
+type RouterWindow = Window & {
+  __reactRouterDataRouter?: { state: { initialized: boolean; loaderData: Record<string, unknown> } };
+};
+
+/**
+ * A route's loader data, as the page holds it once hydrated. React Router 7's
+ * data requests (`<path>.data`) answer in its own stream format, not JSON, so
+ * the tests read what the page received instead.
+ */
+async function loaderDataOf(page: Page, routeId: string): Promise<LoaderData> {
+  await page.waitForFunction(() => (window as RouterWindow).__reactRouterDataRouter?.state.initialized === true);
+  return page.evaluate(
+    (id) => ((window as RouterWindow).__reactRouterDataRouter?.state.loaderData[id] ?? {}) as LoaderData,
+    routeId,
+  );
+}
+
 async function sweep(page: Page, mods: string[], shopId: string) {
   for (const mod of mods) {
     const url = pathFor(mod, { shopId });
@@ -300,9 +317,9 @@ test.describe.serial("dashboard sweep", () => {
         const expected = EXPECTED_PROBLEMS[mod]?.problems ?? [];
         expect.soft(await screenProblems(page, url), `${mod} at ${url}`).toEqual(expected);
         // The loader worked on this shop, not on "no shop".
-        const res = await page.request.get(`${url}&_data=${encodeURIComponent(`routes/${mod}`)}`);
-        expect.soft(res.status(), `${mod} loader status`).toBe(200);
-        const data = (await res.json().catch(() => ({}))) as LoaderData;
+        const res = await page.goto(url);
+        expect.soft(res?.status(), `${mod} loader status`).toBe(200);
+        const data = await loaderDataOf(page, `routes/${mod}`);
         expect.soft(data.shopId, `${mod} loader shopId`).toBe(shopId);
         const arrived = ARRIVED[mod];
         if (arrived) expect.soft(arrived(data), `${mod} loaded the shop's data`).toBe(true);
@@ -346,8 +363,11 @@ test.describe.serial("dashboard sweep", () => {
         "Schedule saved.",
       );
       // "Schedule saved." also shows when nothing was stored: read it back.
-      const stored = await page.request.get(`/admin/schedule${q}&_data=${encodeURIComponent("routes/admin.schedule")}`);
-      const { schedules } = (await stored.json()) as { schedules?: Array<{ is_active: number }> };
+      const stored = await page.goto(`/admin/schedule${q}`);
+      expect(stored?.status()).toBe(200);
+      const { schedules } = (await loaderDataOf(page, "routes/admin.schedule")) as {
+        schedules?: Array<{ is_active: number }>;
+      };
       expect(schedules?.filter((s) => s.is_active === 1).length ?? 0, "the opened day was stored").toBe(1);
     });
 
@@ -367,9 +387,11 @@ test.describe.serial("dashboard sweep", () => {
     await signIn(page, "dev@pivotparlor.com", devPassword!);
     expect((await session(page)).role).toBe("developer");
 
-    const pick = await page.request.get(`/staff?shopId=${encodeURIComponent(shopId)}&_data=${encodeURIComponent("routes/staff")}`);
-    expect(pick.status()).toBe(200);
-    const picked = (await pick.json()) as { developerView?: { staff?: Array<{ id: string; display_name: string }> } };
+    const pick = await page.goto(`/staff?shopId=${encodeURIComponent(shopId)}`);
+    expect(pick?.status()).toBe(200);
+    const picked = (await loaderDataOf(page, "routes/staff")) as {
+      developerView?: { staff?: Array<{ id: string; display_name: string }> };
+    };
     const member = picked.developerView?.staff?.find((s) => s.display_name === "E2E Dashboard Staff");
     expect(member, "the shop's staff are offered to view").toBeTruthy();
     const q = `?shopId=${encodeURIComponent(shopId)}&staffId=${encodeURIComponent(member!.id)}`;
@@ -399,9 +421,13 @@ test.describe.serial("dashboard sweep", () => {
     });
 
     await test.step("their schedule arrived (the day the developer's admin pass opened), read-only", async () => {
-      const res = await page.request.get(`/staff/bookings${q}&_data=${encodeURIComponent("routes/staff.bookings")}`);
-      expect(res.status()).toBe(200);
-      const data = (await res.json()) as { readOnly?: boolean; needsStaff?: boolean; schedule?: Array<{ is_active: number }> };
+      const res = await page.goto(`/staff/bookings${q}`);
+      expect(res?.status()).toBe(200);
+      const data = (await loaderDataOf(page, "routes/staff.bookings")) as {
+        readOnly?: boolean;
+        needsStaff?: boolean;
+        schedule?: Array<{ is_active: number }>;
+      };
       expect.soft(data.readOnly).toBe(true);
       expect.soft(data.needsStaff).toBe(false);
       expect.soft(data.schedule?.filter((s) => s.is_active === 1).length ?? 0, "the staff member's working days").toBe(1);

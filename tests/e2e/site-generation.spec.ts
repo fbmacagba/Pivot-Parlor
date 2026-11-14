@@ -187,11 +187,17 @@ async function closeOnboardDialogIfOpen(page: import("@playwright/test").Page) {
 }
 
 /**
- * Submit create shop. Waits for the Remix action JSON, then asserts Stripe/payment (or invite) UI.
- * If the table updated but the dialog stayed on the form, Escape reveals the row for row-level checks.
+ * Submit create shop, then assert the payment link or the invite link.
+ * React Router 7 answers the form's fetcher in its own stream format, not JSON,
+ * so the outcome is read from the dialog: "Shop created!" with either link, or
+ * the action's error. If the table updated but the dialog stayed on the form,
+ * Escape reveals the row for row-level checks.
  */
 async function submitNewShopAndAwaitSuccess(page: import("@playwright/test").Page, shopName: string) {
   const row = page.locator("tr").filter({ hasText: shopName }).first();
+  const dialog = page.getByRole("dialog");
+  const created = dialog.getByText("Shop created!");
+  const refused = dialog.locator("div.border-red-500\\/40");
 
   const respPromise = page.waitForResponse(
     (r) =>
@@ -201,41 +207,21 @@ async function submitNewShopAndAwaitSuccess(page: import("@playwright/test").Pag
   );
   await submitCreateShopButton(page).click();
   const resp = await respPromise;
-  let body: { success?: boolean; error?: string | null; result?: { checkout_url?: string | null; invite_token?: string | null } | null };
-  try {
-    body = JSON.parse(await resp.text()) as typeof body;
-  } catch {
-    throw new Error(`Create shop: expected JSON from POST /dev/shops, got status ${resp.status()}`);
+  await expect(created.or(refused).first())
+    .toBeVisible({ timeout: 30_000 })
+    .catch(() => {
+      /* neither: checked below */
+    });
+  if (await refused.isVisible().catch(() => false)) {
+    throw new Error(`Shop creation failed (${resp.status()}): ${(await refused.innerText()).trim()}`);
   }
-  if (!body.success) {
-    throw new Error(body.error ?? "Shop creation failed");
-  }
+  if (resp.status() >= 400) throw new Error(`Create shop: POST /dev/shops answered ${resp.status()}`);
 
   await expect(row).toBeAttached({ timeout: 30_000 });
 
-  const checkoutUrl = body.result?.checkout_url ?? "";
-  const inviteToken = body.result?.invite_token ?? "";
-
-  if (/checkout\.stripe\.com/i.test(checkoutUrl)) {
-    const inDialog = page
-      .getByText(/checkout\.stripe\.com/)
-      .or(page.getByText(/\bPayment\b/))
-      .or(page.getByText(/\bAwaiting Payment\b/i))
-      .or(page.getByRole("button", { name: /copy payment link/i }));
-    if (await inDialog.isVisible().catch(() => false)) return;
-    await page.keyboard.press("Escape");
-    await expect(
-      row
-        .getByRole("button", { name: /copy payment link/i })
-        .or(row.getByText(/\bAwaiting Payment\b/i))
-        .or(row.getByText("Pending", { exact: true }))
-        .first()
-    ).toBeVisible({ timeout: 15_000 });
-    return;
-  }
-
-  if (inviteToken) {
-    await expect(page.locator("text=pivotparlor.com/invite/")).toBeVisible({ timeout: 15_000 });
+  // The dialog shows the payment link (Stripe checkout) or the invite link.
+  if (await created.isVisible().catch(() => false)) {
+    await expect(dialog.getByText(/Payment link|pivotparlor\.com\/invite\//).first()).toBeVisible({ timeout: 15_000 });
     return;
   }
 

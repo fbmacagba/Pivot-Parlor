@@ -61,8 +61,9 @@ test.describe("CSP collector control", () => {
 
 // Inline scripts run only when they carry the nonce the response header names
 // (apps/web/app/lib/securityHeaders.ts, made per request in
-// functions/_middleware.ts). Remix's own three (scroll restoration, the
-// context and the module loader) carry it; an injected one does not.
+// functions/_middleware.ts). React Router's own inline scripts (scroll
+// restoration, the hydration context and its data stream, and the module
+// loader) carry it; an injected one does not.
 const nonceIn = (csp: string | undefined): string | null => csp?.match(/'nonce-([A-Za-z0-9+/]+={0,2})'/)?.[1] ?? null;
 const scriptSrcOf = (csp: string | undefined): string =>
   (csp ?? "").split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src ")) ?? "";
@@ -107,7 +108,7 @@ test.describe("Inline scripts need the page's nonce", () => {
 
       // The nonce property, not the attribute: browsers blank the attribute.
       const nonces = await page.$$eval("script:not([src])", (els) => els.map((e) => (e as HTMLScriptElement).nonce));
-      expect(nonces.length, "Remix's inline scripts").toBeGreaterThanOrEqual(3);
+      expect(nonces.length, "React Router's inline scripts").toBeGreaterThanOrEqual(3);
       expect(nonces.filter((n) => n !== nonce), "inline scripts without the page's nonce").toEqual([]);
 
       // Hydration ran with the nonce in place: no browser error was reported.

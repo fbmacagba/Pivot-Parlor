@@ -102,7 +102,7 @@ test.describe("Browser alert check: staging", () => {
 
     const response = await posted;
     const report = response.request().postDataJSON() as Record<string, unknown>;
-    // Answered by the website's middleware, not Remix (which has no such route).
+    // Answered by the website's middleware, not the router (which has no such route).
     expect(response.status()).toBe(204);
     expect(report).toMatchObject({
       kind: "script",

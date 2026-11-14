@@ -1,7 +1,12 @@
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
-/** Stable token for mocked create-shop JSON (64 hex chars). */
-export const E2E_ONBOARD_INVITE_TOKEN = "a".repeat(64);
+// Rule for every stub in tests/e2e: never answer a React Router data request
+// (a path ending in `.data`). Fetchers, <Form> posts and client navigation
+// expect React Router's own stream format there, so they always get the real
+// network.
+function isDataRequest(route: Route): boolean {
+  return new URL(route.request().url()).pathname.endsWith(".data");
+}
 
 /** Mirrors apps/web/app/routes/invite.$token.tsx: name, password, confirm password and the
  *  required Terms/DPA consent checkbox (#78). The spec ticks getByRole("checkbox"). */
@@ -21,65 +26,6 @@ const INVITE_ACCEPT_HTML = `<!DOCTYPE html><html lang="en"><head><meta charset="
 </div>
 </body></html>`;
 
-/**
- * When the Worker still uses Stripe checkout, Remix POST /dev/shops won't show an invite.
- * Prefer the real network; fall back to JSON that Remix's useFetcher accepts.
- */
-export async function installDevShopsCreateMock(page: Page): Promise<void> {
-  await page.route(/\/dev\/shops/, async (route) => {
-    if (route.request().method() !== "POST") {
-      await route.continue();
-      return;
-    }
-    const raw = route.request().postData() ?? "";
-    if (raw.includes("_action=generate-site")) {
-      await route.continue();
-      return;
-    }
-    try {
-      const res = await route.fetch();
-      const text = await res.text();
-      if (res.ok() && text.includes("invite_token")) {
-        await route.fulfill({ response: res });
-        return;
-      }
-    } catch {
-      /* use mock */
-    }
-    let name = "E2E Shop";
-    if (raw.includes("form-data") && raw.includes('name="name"')) {
-      const m = raw.match(/name="name"[\s\S]*?\r?\n\r?\n([^\r\n]+)/);
-      if (m?.[1]) name = m[1].trim();
-    } else {
-      try {
-        const params = new URLSearchParams(raw);
-        name = params.get("name") ?? name;
-      } catch {
-        /* keep default */
-      }
-    }
-    const slugBase = name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\s-]/g, "")
-      .replace(/\s+/g, "-")
-      .replace(/-+/g, "-");
-    const slug = `${slugBase}-e2e001`;
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json; charset=utf-8",
-      body: JSON.stringify({
-        success: true,
-        result: {
-          shop: { id: "e2e-onboard-mock-shop", slug, name },
-          invite_token: E2E_ONBOARD_INVITE_TOKEN,
-        },
-        error: null,
-      }),
-    });
-  });
-}
-
 function baseOrigin(): string {
   try {
     return new URL(process.env.E2E_BASE_URL || "https://pivotparlor.com").origin;
@@ -91,6 +37,12 @@ function baseOrigin(): string {
 /** Invite GET/POST: prefer live app; fall back to static HTML + redirect (shop-onboarding / site-gen owner flow). */
 export async function installInviteRouteMocks(page: Page): Promise<void> {
   await page.route(/\/invite\/[a-f0-9]{64}/, async (route) => {
+    // The live page's <Form> posts to /invite/<token>.data: real network only.
+    // The static page below has no scripts, so its post is a document POST.
+    if (isDataRequest(route)) {
+      await route.continue();
+      return;
+    }
     const method = route.request().method();
 
     if (method === "GET") {
@@ -146,7 +98,7 @@ export async function installInviteRouteMocks(page: Page): Promise<void> {
 
 /**
  * Minimal template-select HTML for shop-onboarding URL assertion only (no client-side generation).
- * Do not use for site-generation tests that interact with the real Remix page.
+ * Do not use for site-generation tests that interact with the real page.
  */
 export async function installTemplateSelectFallbackMock(page: Page): Promise<void> {
   await page.route(/\/setup\/template-select(\?|$)/, async (route) => {
@@ -175,15 +127,14 @@ export async function installTemplateSelectFallbackMock(page: Page): Promise<voi
   });
 }
 
-/** Shop onboarding serial suite: create + invite + template fallback for stale deploys. */
+/** Shop onboarding serial suite: invite + template fallback for stale deploys. Creating
+ *  the shop always uses the real network (a fetcher post to /dev/shops.data). */
 export async function installShopOnboardingNetworkMocks(page: Page): Promise<void> {
-  await installDevShopsCreateMock(page);
   await installInviteRouteMocks(page);
   await installTemplateSelectFallbackMock(page);
 }
 
-/** Site generation owner tests: need real Remix template-select (do not stub it). */
+/** Site generation owner tests: need the real template-select page (do not stub it). */
 export async function installSiteGenerationOwnerFlowMocks(page: Page): Promise<void> {
-  await installDevShopsCreateMock(page);
   await installInviteRouteMocks(page);
 }
