@@ -154,6 +154,93 @@ describe("in British Summer Time, between midnight and 1am London", () => {
   });
 });
 
+describe("the sales list, asked for a date that is not on the calendar", () => {
+  // Each matches YYYY-MM-DD but names no real day (2026 is not a leap year).
+  // Reading the shop's day for one must not throw: that would be a 500 and an
+  // Issues email. It is the caller's mistake, a 400.
+  it.each(["2026-13-01", "2026-02-30", "2026-02-29", "2026-04-31", "2026-00-10"])(
+    "%s answers 400 'date must be YYYY-MM-DD' and logs no error",
+    async (date) => {
+      const s = await readyShop(`Bad Date ${date}`);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        const res = await dispatch("GET", `/booking/shops/${s.shop}/sales?date=${date}`, { headers: s.auth });
+        expect({ status: res.status, body: await res.json(), errors: errorSpy.mock.calls.length }).toEqual({
+          status: 400,
+          body: { success: false, error: "date must be YYYY-MM-DD" },
+          errors: 0,
+        });
+      } finally {
+        errorSpy.mockRestore();
+      }
+    },
+  );
+
+  // The public slots lookup and booking take a date too, from anyone.
+  it.each(["2026-13-01", "2026-02-30", "2026-00-10"])(
+    "public slots for %s answer 400 'date must be in YYYY-MM-DD format' and log no error",
+    async (date) => {
+      const s = await readyShop(`Bad Slots ${date}`);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        const res = await dispatch("GET", `/public/shops/${s.shop}/slots?date=${date}&service_id=${s.service}`);
+        const text = await res.text();
+        expect({ status: res.status, text, errors: errorSpy.mock.calls.length }).toEqual({
+          status: 400,
+          text: JSON.stringify({ success: false, error: "date must be in YYYY-MM-DD format" }),
+          errors: 0,
+        });
+      } finally {
+        errorSpy.mockRestore();
+      }
+    },
+  );
+
+  // The booking's date is only a hint for which day's slots to check: a hint
+  // that is not a real day is set aside, as one that is not YYYY-MM-DD always
+  // was ("not-a-date", the control), and the start is checked against its own
+  // day in the shop. Never a 500.
+  it.each(["2099-13-01", "2099-02-30", "not-a-date"])(
+    "a public booking sent the date hint %s books the start on its own day, and logs no error",
+    async (date) => {
+      const s = await readyShop(`Bad Booking ${date}`);
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        const res = await dispatch("POST", "/public/bookings", {
+          body: {
+            shop_slug: await slugFor(s.shop),
+            staff_id: s.staff,
+            service_id: s.service,
+            date,
+            start_time: "2099-07-02T09:00:00.000Z",
+            customer_name: "Casey",
+            customer_email: "casey@test.local",
+          },
+        });
+        const body = (await res.json()) as { data?: { id: string } };
+        const row = body.data
+          ? await env.DB.prepare("SELECT booking_date FROM bookings WHERE id = ?")
+              .bind(body.data.id)
+              .first<{ booking_date: string }>()
+          : null;
+        expect({ status: res.status, booking_date: row?.booking_date, errors: errorSpy.mock.calls.length }).toEqual({
+          status: 201,
+          booking_date: "2099-07-02",
+          errors: 0,
+        });
+      } finally {
+        errorSpy.mockRestore();
+      }
+    },
+  );
+
+  it("a real leap day is a real date (control)", async () => {
+    const s = await readyShop("Leap Day");
+    const res = await dispatch("GET", `/booking/shops/${s.shop}/sales?date=2028-02-29`, { headers: s.auth });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("an online booking that starts between midnight and 1am London in summer", () => {
   // 00:30 London on 2 July 2099 (BST), which is 23:30 UTC on 1 July.
   const START = "2099-07-01T23:30:00.000Z";
