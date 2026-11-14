@@ -189,6 +189,7 @@ Every change here works under today's Remix 2 and under React Router 7, so it sh
    - Add a `tsconfig.functions.json` (or a project reference) that type-checks `functions/_middleware.ts` against `@cloudflare/workers-types` and the Pages `EventContext`.
    - Run it in `npm run check-types`.
    - Prove it red first: change one property name on a scratch line and watch it fail.
+   - The middleware imports `../build/server/index.js`, which exists only after a build. Give the check a committed declaration for that module (typed as the router's `ServerBuild`) so it runs without a build and in CI. *My call:* the build's own output is not committed.
 2. **Server-error classification reads both protocols.** `serverErrors.ts` classifies a request as "data" when it has `?_data=` **or** its pathname ends in `.data`. Add tests for both forms.
 3. **The browser-error route lookup reads both globals:** `window.__reactRouterDataRouter`, falling back to `window.__remixRouter`. Add tests for both, and for neither (which gives `"unknown"`).
 4. **Resource routes stop using `json()` where the answer does not depend on Step 0.** A resource route whose only callers are raw `fetch` calls (job-status polling, external callers) moves to `Response.json(x, init)`, which behaves the same today. Routes called by fetchers wait for Step 0's answer.
@@ -233,6 +234,7 @@ Single fetch cannot ship on Remix 2 (rxv8), and React Router 7 cannot run withou
    - Resource routes: follow Step 0's ruling.
      - The default is `Response.json(x, init)`, because some callers are plain `fetch`.
      - A local `json()` shim is allowed only if Step 0 shows it gives the same bytes for every caller kind.
+     - If Step 0 shows a fetcher cannot read a `Response.json` answer into `fetcher.data`, routes called only by fetchers return `data(x, init)` instead. A route with both kinds of caller is split into two routes, or its raw `fetch` caller moves to a fetcher. *My call:* one encoding per route, never content sniffing.
    - `pos.ts` and `worker-proxy.ts` follow whichever kind of route calls them.
    - **Typing:** with single fetch, `useLoaderData<typeof loader>` stops "jsonifying" types, so a `Date` stays a `Date`. Fix each new `tsc` error at its source; do not cast it away. Each error is a real change in what the page receives.
    - Add the augmentation `declare module "react-router" { interface AppLoadContext ... }`, plus the temporary `LoaderFunctionArgs` / `ActionFunctionArgs` context augmentation from the official guide, built on `app/lib/loadContext.ts`.
@@ -315,6 +317,14 @@ React Router 8 needs React ≥19.2.7 and Vite 7 or 8. That brings React 19 (new 
 | Alerts misfile or lose their route | PR A's dual reads, then the post-deploy alert test |
 | Streamed data scripts without a nonce | `csp-guard.spec.ts`; the CSP report inbox |
 | Open tabs during the deploy | quiet-hour deploy; expected one-off browser-error burst |
+
+## Order of work and approvals
+
+1. Step 0 is a throwaway spike, so it needs no merge.
+2. PR A: the owner OKs the merge. Then deploy, and let it run for a day with no new alerts.
+3. PR B: the owner OKs the merge. I merge at a quiet UK hour, because the merge is what deploys.
+
+Each merge is its own decision. Approving this design approves the work and the dependency swap, not the merges.
 
 ## Rollback
 
