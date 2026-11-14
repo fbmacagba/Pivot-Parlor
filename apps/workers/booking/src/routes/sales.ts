@@ -17,7 +17,7 @@ import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
-import { shopDayBounds, shopDaySql, shopToday } from "../lib/time.js";
+import { isCalendarDate, shopDayBounds, shopDaySql, shopToday } from "../lib/time.js";
 import { getShopTimeZone } from "../db/queries.js";
 import { d1Rows } from "../lib/d1-helpers.js";
 import {
@@ -298,7 +298,7 @@ r.get("/:shopId/sales", async (c) => {
   }
   const timeZone = await getShopTimeZone(db, shopId);
   const date = c.req.query("date") || shopToday(timeZone);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!isCalendarDate(date)) {
     return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
   }
   const { from, to } = shopDayBounds(date, timeZone);

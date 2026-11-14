@@ -35,7 +35,7 @@ import {
   PORTFOLIO_DEMO_ERROR,
   readJsonObject,
 } from "@repo/utils";
-import { shopDateOf } from "../lib/time.js";
+import { isCalendarDate, shopDateOf } from "../lib/time.js";
 
 const publicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -53,7 +53,7 @@ publicRoutes.get("/shops/:shopId/slots", async (c) => {
     );
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!isCalendarDate(date)) {
     return c.json(
       { success: false, error: "date must be in YYYY-MM-DD format" },
       400,
@@ -182,7 +182,7 @@ publicRoutes.post(
     // The shop's date of the start: a 00:30 London start in summer is 23:30
     // UTC the evening before, and its slot is in the shop's next day.
     const slotDate =
-      date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      date && isCalendarDate(date)
         ? date
         : shopDateOf(new Date(startISO), shop.timezone);
     const requestedStaff = staff_id === "any" ? null : staff_id;

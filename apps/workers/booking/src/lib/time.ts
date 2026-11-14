@@ -9,6 +9,19 @@ import { shiftDate, zonedTimeToUtc, zonedWallClock } from "@repo/utils";
  */
 export const PLATFORM_TIME_ZONE = "Europe/London";
 
+/**
+ * A day on the calendar, "YYYY-MM-DD". The pattern alone lets through
+ * "2026-13-01", which makes an Invalid Date (and a RangeError further on), and
+ * "2026-02-30", which Date rolls over to 2 March. Both are the caller's mistake.
+ */
+export function isCalendarDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
 /** The shop's zone, or London when it is missing or unknown (a bad zone must not take the till down). */
 function knownZone(timeZone: string | null | undefined): string {
   const zone = timeZone || PLATFORM_TIME_ZONE;
