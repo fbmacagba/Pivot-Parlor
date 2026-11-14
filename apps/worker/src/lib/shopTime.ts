@@ -4,9 +4,11 @@
  * time: an hour before UTC's in British Summer Time.
  *
  * shops.timezone defaults to Europe/London and no route writes it yet, so in
- * practice every shop is on London time. booking_date is written as the UTC
- * date of the booking's start (booking worker), which is the London date for
- * every booking that starts at 01:00 London time or later.
+ * practice every shop is on London time. The booking worker writes
+ * booking_date as the shop's date of the booking's start, and takes its own
+ * "today" from the shop's calendar too (apps/workers/booking/src/lib/time.ts).
+ * Online bookings written before that change hold the UTC date of the start,
+ * which differs only for a start between 00:00 and 01:00 London in summer.
  */
 
 export const PLATFORM_TIME_ZONE = "Europe/London";

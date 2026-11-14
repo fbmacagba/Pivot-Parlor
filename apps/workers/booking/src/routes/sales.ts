@@ -17,7 +17,8 @@ import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { getUser } from "../middleware/auth.js";
 import { shopExists } from "../middleware/shop-access.js";
-import { todayUtcYmd } from "../lib/time.js";
+import { shopDayBounds, shopDaySql, shopToday } from "../lib/time.js";
+import { getShopTimeZone } from "../db/queries.js";
 import { d1Rows } from "../lib/d1-helpers.js";
 import {
   createCheckoutSession,
@@ -152,7 +153,7 @@ r.post("/:shopId/sales", async (c) => {
 
   const openDay = await db
     .prepare("SELECT id FROM bw_business_days WHERE shop_id = ? AND date = ? AND status = 'open' LIMIT 1")
-    .bind(shopId, todayUtcYmd())
+    .bind(shopId, shopToday(await getShopTimeZone(db, shopId)))
     .first<{ id: string }>();
 
   const saleId = crypto.randomUUID();
@@ -295,20 +296,22 @@ r.get("/:shopId/sales", async (c) => {
   if (!(await shopExists(c, shopId))) {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
-  const date = c.req.query("date") || todayUtcYmd();
+  const timeZone = await getShopTimeZone(db, shopId);
+  const date = c.req.query("date") || shopToday(timeZone);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return c.json({ success: false, error: "date must be YYYY-MM-DD" }, 400);
   }
+  const { from, to } = shopDayBounds(date, timeZone);
   const rows = await db
     .prepare(
       `SELECT id, booking_id, staff_id, customer_name, subtotal_pence, discount_pence, tip_pence,
               total_pence, tender_type, status, created_at, completed_at
        FROM sales
-       WHERE shop_id = ? AND substr(created_at, 1, 10) = ?
+       WHERE shop_id = ? AND ${shopDaySql("created_at")}
        ORDER BY created_at DESC
        LIMIT 100`
     )
-    .bind(shopId, date)
+    .bind(shopId, from, to)
     .all();
   return c.json({ success: true, data: d1Rows(rows) });
 });

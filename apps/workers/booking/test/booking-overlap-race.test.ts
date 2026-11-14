@@ -23,7 +23,7 @@ import { seedScheduleDay, seedService, seedShop, seedStaff, slugFor, tokenFor } 
 import { checkSlotConflict, createBookingIfFree } from "../src/db/queries";
 import { getAvailableSlots } from "../src/services/slots";
 import { zonedTimeToUtc, zonedWallClock } from "../src/lib/timezone";
-import { todayUtcYmd } from "../src/lib/time";
+import { shopToday } from "../src/lib/time";
 
 const LONDON = "Europe/London";
 
@@ -320,7 +320,7 @@ describe("walk-in and staff deposit bookings lose a race cleanly", () => {
     const auth = { Authorization: `Bearer ${await tokenFor("admin", shop)}` };
     const open = await dispatchWith(env, "POST", `/booking/shops/${shop}/open`, { headers: auth, body: {} });
     expect(open.status).toBe(200);
-    return { shop, staff, service, auth, today: todayUtcYmd() };
+    return { shop, staff, service, auth, today: shopToday(LONDON) };
   }
   async function claimed(shop: string, staff: string, date: string, time: string): Promise<number> {
     const row = await env.DB.prepare(
