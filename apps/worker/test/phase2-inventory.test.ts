@@ -7,6 +7,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { dispatch } from "./request";
 import { authHeaders, seedShop, seedStaff, seedUser, tokenFor } from "./helpers";
+import { shopToday } from "../src/lib/shopTime";
 
 type Body<T> = { success: boolean; data: T; error?: string };
 
@@ -307,7 +308,9 @@ describe("inventory report", () => {
       .bind(crypto.randomUUID(), shop, product)
       .run();
 
-    const today = new Date().toISOString().slice(0, 10);
+    // The shop's today: the sales above take D1's clock, and the report reads
+    // the shop's day (UTC's would miss them from 23:00 UTC in summer).
+    const today = shopToday();
     const res = await dispatch("GET", `/api/shops/${shop}/inventory/report?from=${today}&to=${today}`, { headers });
     expect(res.status).toBe(200);
     const report = ((await res.json()) as Body<{
