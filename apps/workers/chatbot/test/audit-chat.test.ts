@@ -39,7 +39,8 @@ function setup(opts: { auditFail?: "all" | "outcome"; models?: unknown[] } = {})
   const fake = chatDb(
     fakeAuditDb({
       failAuditWrites: opts.auditFail,
-      answer: (sql) => (sql.startsWith("SELECT id, name, type, slug FROM shops") ? SHOP : null),
+      // The shop lookup; its site is published ("live"), so the chat answers.
+      answer: (sql) => (sql.startsWith("SELECT id, name, type, slug") ? { ...SHOP, website_status: "live" } : null),
     })
   );
   const kv = memoryKv(opts.models ? { "ai:models:v3": JSON.stringify(opts.models) } : {});

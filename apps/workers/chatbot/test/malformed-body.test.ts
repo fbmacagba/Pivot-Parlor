@@ -54,7 +54,8 @@ let errorSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   fake = chatDb(
     fakeAuditDb({
-      answer: (sql) => (sql.startsWith("SELECT id, name, type, slug FROM shops") ? SHOP : null),
+      // The shop lookup; its site is published ("live"), so the chat answers.
+      answer: (sql) => (sql.startsWith("SELECT id, name, type, slug") ? { ...SHOP, website_status: "live" } : null),
     }),
   );
   env = {
