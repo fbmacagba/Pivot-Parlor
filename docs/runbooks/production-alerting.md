@@ -465,12 +465,10 @@ under one of the AI workers.
 - A failure inside Remix's Pages adapter itself, outside any route, comes back
   as a bare `Internal Error` 500 with no log line. Only the uptime checks see
   it.
-- `pivot-parlor-audit` has no Issues on purpose: nothing sends to its queue
-  (`site-audit-queue` had no producers, checked 2026-11-12), so there is
-  nothing to alert on. Retiring it is an open owner decision. If it is ever
-  brought back, its own `package-lock.json` pins Wrangler 4.76.0, which would
-  drop the Issues key: raise it first, then add the key and a pair of
-  automations.
+- `pivot-parlor-audit` was retired in 2026-11 (its code removed from
+  `apps/workers/audit`). Nothing sent to its queue: `site-audit-queue` had no
+  producers. It is not to be confused with the R2 bucket of the same name,
+  which holds the audit trail's archive and stays.
 - A whole-Cloudflare outage silences the monitor along with the site.
 - Staging has Issues off on purpose: E2E runs log errors deliberately, and the
   alert is account-wide.

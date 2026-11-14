@@ -9,5 +9,4 @@ export const PIPELINE_QUEUE_AUDIT: Record<string, AuditAction | { exempt: string
   "site-text-queue": "ai.call",
   "site-images-queue": "ai.call",
   "site-assemble-queue": "site.regenerate.complete",
-  "site-audit-queue": { exempt: "no producer; the audit worker is not deployed from this plan (Plan 4 Ruling 1)" },
 };
