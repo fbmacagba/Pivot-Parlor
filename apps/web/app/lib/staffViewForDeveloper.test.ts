@@ -8,9 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // Only the loaders and actions run here. The page modules' UI imports are
 // stubbed (as DashboardLayout.test.tsx does): those packages resolve react
 // from the root node_modules, where it is not installed.
-vi.mock("@remix-run/react", () => {
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => {
   const Stub = () => null;
   return {
+    ...(await importOriginal<typeof import("react-router")>()),
     Form: Stub,
     Link: Stub,
     Outlet: Stub,
@@ -42,6 +44,7 @@ import * as today from "~/routes/staff._index";
 import * as bookings from "~/routes/staff.bookings";
 import * as availability from "~/routes/staff.availability";
 import * as till from "~/routes/staff.pos";
+import { asResponse } from "~/lib/testing/asResponse";
 
 const API_URL = "https://api.test";
 const context = { env: { API_URL } };
@@ -82,7 +85,7 @@ function get(path: string): Request {
 }
 
 async function load<T>(mod: { loader: (args: never) => unknown }, path: string): Promise<T> {
-  const res = (await mod.loader({ request: get(path), context, params: {} } as never)) as Response;
+  const res = asResponse(await mod.loader({ request: get(path), context, params: {} } as never));
   return (await res.json()) as T;
 }
 
@@ -178,7 +181,7 @@ describe("Bookings and availability, for a developer", () => {
       headers: { Cookie: SESSION, "Content-Type": "application/json" },
       body: JSON.stringify({ from_date: "2026-09-01", to_date: "2026-09-02" }),
     });
-    const res = (await bookings.action({ request, context, params: {} } as never)) as Response;
+    const res = asResponse(await bookings.action({ request, context, params: {} } as never));
     expect(res.status).toBe(403);
     expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
@@ -198,10 +201,10 @@ describe("Bookings and availability, for a developer", () => {
   });
 });
 
-/** A loader or action's Response, whether it is returned or thrown (a redirect). */
+/** A loader or action's answer as a Response, whether it is returned or thrown (a redirect). */
 async function settle(run: () => unknown): Promise<Response> {
   try {
-    return (await run()) as Response;
+    return asResponse(await run());
   } catch (e) {
     if (e instanceof Response) return e;
     throw e;

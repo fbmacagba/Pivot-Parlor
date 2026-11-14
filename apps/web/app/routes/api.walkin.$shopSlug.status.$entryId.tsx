@@ -1,8 +1,8 @@
 // Proxies a customer's walk-in queue status poll (public, no auth), so the
 // walk-in page talks to its own site's API for every environment. See
 // api.walkin.$shopSlug.join.tsx.
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { workerResponseLooksLikeJson } from "~/lib/worker-upstream-headers";
 
 export async function loader({ params, context }: LoaderFunctionArgs) {

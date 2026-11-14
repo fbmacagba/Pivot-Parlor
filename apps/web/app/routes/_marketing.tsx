@@ -1,4 +1,4 @@
-import { Outlet } from "@remix-run/react";
+import { Outlet } from "react-router";
 import { AnnouncementBar } from "~/components/marketing/AnnouncementBar";
 import { ExitIntentModal } from "~/components/marketing/ExitIntentModal";
 import { FloatingCTA } from "~/components/marketing/FloatingCTA";

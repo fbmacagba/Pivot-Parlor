@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { getSessionToken } from "~/lib/auth";
 
 // A progress poll must never be cached: a stale "research"/"running" response

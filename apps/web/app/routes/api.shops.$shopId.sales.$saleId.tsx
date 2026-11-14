@@ -3,8 +3,8 @@
  * webhook settles it. Pure server-side proxy to the worker (which forwards
  * to the booking worker); auth enforced downstream via the session token.
  */
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 

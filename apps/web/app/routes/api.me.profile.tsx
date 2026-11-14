@@ -1,8 +1,8 @@
 // apps/web/app/routes/api.me.profile.tsx
 // Proxies PATCH /api/me/profile to the worker
 
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
 import { getSessionToken } from "~/lib/auth";
 

@@ -1,4 +1,4 @@
-import { redirect } from "@remix-run/cloudflare";
+import { redirect } from "react-router";
 import type { UserRole } from "@repo/types";
 import { createApiClient } from "~/lib/api";
 

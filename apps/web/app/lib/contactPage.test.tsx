@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CONTACT_FIELD_LIMITS } from "@repo/utils";
 
-vi.mock("@remix-run/react", async () => {
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => {
   const React = await import("react");
   return {
+    ...(await importOriginal<typeof import("react-router")>()),
     Form: ({ children, ...rest }: { children?: unknown } & Record<string, unknown>) =>
       React.createElement("form", rest, children as never),
     useActionData: () => undefined,
@@ -13,6 +15,7 @@ vi.mock("@remix-run/react", async () => {
 });
 
 import Contact, { action, links } from "~/routes/_marketing.contact";
+import { asResponse } from "~/lib/testing/asResponse";
 
 describe("/contact markup", () => {
   // The implicit-render hooks (a .cf-turnstile div and a plain api.js
@@ -92,15 +95,17 @@ describe("/contact action, when the API refuses the enquiry", () => {
       email: "casey@example.test",
       message: "Hello",
     });
-    const res = (await action({
-      request: new Request("https://pivotparlor.com/contact", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
-      }),
-      params: {},
-      context: { env: { API_URL: "https://api.test" } },
-    } as never)) as Response;
+    const res = asResponse(
+      await action({
+        request: new Request("https://pivotparlor.com/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form.toString(),
+        }),
+        params: {},
+        context: { env: { API_URL: "https://api.test" } },
+      } as never),
+    );
     return { status: res.status, body: await res.json(), sent };
   }
 

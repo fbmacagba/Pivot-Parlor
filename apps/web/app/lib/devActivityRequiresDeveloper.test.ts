@@ -5,10 +5,12 @@
  *  routes/ so Remix never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Only the server handlers are under test. The hoisted @remix-run/react and
+// Only the server handlers are under test. The hoisted react-router and
 // lucide-react cannot resolve this app's React under vitest, so the page's
 // hooks and UI components are stubbed (as in portfolioDemo.test.ts).
-vi.mock("@remix-run/react", () => ({
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
   Form: () => null,
   useActionData: () => undefined,
   useLoaderData: () => null,
@@ -21,6 +23,7 @@ vi.mock("~/components/ui/Input", () => ({ Input: () => null }));
 vi.mock("~/components/audit/ErasureRequestDialog", () => ({ ErasureRequestDialog: () => null }));
 
 import { action, loader } from "~/routes/dev.activity";
+import { asResponse } from "~/lib/testing/asResponse";
 
 const API_URL = "https://api.test";
 const context = { env: { API_URL } };
@@ -112,7 +115,7 @@ describe("dev.activity action (erase)", () => {
 
   it("lets a developer erase (control)", async () => {
     const urls = stubApi("developer");
-    const res = (await run.action(erasePost(SESSION))) as Response;
+    const res = asResponse(await run.action(erasePost(SESSION)));
     expect(res.status).toBe(200);
     expect(urls.filter((u) => u === ERASE_URL)).toHaveLength(1);
   });
@@ -128,7 +131,7 @@ describe("dev.activity loader", () => {
 
   it("lets a developer read the audit log (control)", async () => {
     const urls = stubApi("developer");
-    const res = (await run.loader(pageGet(SESSION))) as Response;
+    const res = asResponse(await run.loader(pageGet(SESSION)));
     expect(res.status).toBe(200);
     expect(urls.some((u) => u.startsWith(`${API_URL}/api/audit`))).toBe(true);
   });

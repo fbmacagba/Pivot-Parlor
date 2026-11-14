@@ -12,7 +12,7 @@
 // via CommercialShopChrome, so this notice must not render on those routes.
 
 import { useState, useEffect } from "react";
-import { useLocation, Link } from "@remix-run/react";
+import { useLocation, Link } from "react-router";
 
 const CONSENT_KEY = "pp_platform_consent";
 

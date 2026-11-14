@@ -1,6 +1,5 @@
-import { useFetcher, useLoaderData, useNavigate } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { useFetcher, useLoaderData, useNavigate, data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { Loader2, X } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "~/components/ui/Button";

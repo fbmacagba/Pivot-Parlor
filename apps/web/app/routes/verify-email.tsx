@@ -3,9 +3,8 @@
 // single-use token against the worker; opening the link is the proof of
 // inbox access, so no extra click is required.
 
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
-import { Link, useLoaderData } from "@remix-run/react";
+import { data as json, Link, useLoaderData } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 
 export const meta: MetaFunction = () => [{ title: "Verify email | Pivot Parlor" }];
 

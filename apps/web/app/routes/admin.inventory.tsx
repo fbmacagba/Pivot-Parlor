@@ -5,9 +5,16 @@
  *   · stock-take sessions (count → complete emits adjustments)
  *   · back-bar recipes (service_products BOM — consumed when a service sells)
  */
-import { Form, Link, useActionData, useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import {
+  Form,
+  Link,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+  useNavigation,
+  data as json,
+} from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { ClipboardList, FlaskConical, Package, Plus, Truck, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { pageShopId } from "~/lib/pageShop";

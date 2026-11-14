@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/cloudflare";
+import type { MetaFunction } from "react-router";
 import { PLATFORM_LEGAL_LAST_UPDATED } from "~/lib/legalDates";
 
 export const meta: MetaFunction = () => [

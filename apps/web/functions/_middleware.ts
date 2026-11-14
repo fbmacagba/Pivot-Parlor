@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createPagesFunctionHandler } from "@remix-run/cloudflare-pages";
-import type { ServerBuild } from "@remix-run/server-runtime";
+import { createPagesFunctionHandler } from "@react-router/cloudflare";
+import type { ServerBuild } from "react-router";
 import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
 import { CLIENT_ERRORS_PATH } from "../app/lib/browserErrors";

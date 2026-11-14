@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  useFetcher,
-  useLoaderData,
-} from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { useFetcher, useLoaderData, data as json } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
 import { clsx } from "clsx";
 import { Button } from "~/components/ui/Button";

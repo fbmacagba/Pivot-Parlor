@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import type { MetaFunction } from "@remix-run/cloudflare";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
+import type { MetaFunction } from "react-router";
 import { LEGAL_ENTITY, DPA_VERSION, DPA_EFFECTIVE } from "~/lib/legalEntity";
 
 export const meta: MetaFunction = () => [

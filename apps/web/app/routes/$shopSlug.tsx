@@ -1,6 +1,5 @@
-import { Outlet, useLoaderData } from "@remix-run/react";
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { Outlet, useLoaderData, data as json } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { createApiClient } from "~/lib/api";
 import { decodeToken, getSessionToken } from "~/lib/auth";
 import { requireShopSlug } from "~/lib/shopSlug";

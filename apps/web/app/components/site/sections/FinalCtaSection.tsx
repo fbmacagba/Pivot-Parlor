@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 
 export function FinalCtaSection({ ctx, glow }: { ctx: SiteRenderContext; glow: boolean }) {

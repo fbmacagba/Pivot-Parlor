@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate } from "@remix-run/react";
+import { Link, useLocation, useNavigate } from "react-router";
 import {
   BarChart2,
   BarChart3,

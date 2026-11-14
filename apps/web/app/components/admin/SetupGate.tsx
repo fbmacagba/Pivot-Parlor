@@ -1,5 +1,5 @@
 // apps/web/app/components/admin/SetupGate.tsx
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { useShopHref } from "~/lib/useShopHref";
 
 export interface SetupStatus {

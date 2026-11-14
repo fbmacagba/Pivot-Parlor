@@ -1,19 +1,18 @@
 // @vitest-environment node
-/** The local dev server (`remix vite:dev`) renders pages.
+/** The local dev server (`react-router dev`) renders pages.
  *
  *  CI deploys the production build and never starts the dev server, so on
  *  2026-11-14 `npm run dev` had been answering every page with 500 ("module is
  *  not defined") with nothing to say so. This starts the real dev server from
- *  vite.config.ts, the way `remix vite:dev` does, and GETs real pages.
+ *  vite.config.ts, the way `react-router dev` does, and GETs real pages.
  *
  *  Two things have to hold for it to pass:
- *  - `ssr.noExternal: true` applies to the build only. In dev, Remix's
- *    Cloudflare proxy plugin loads dependencies through Node with the
- *    `workerd` / `worker` conditions; inlining them instead makes Vite run
- *    React's CommonJS as ESM.
- *  - React is installed where the packages that use it can find it: hoisted
- *    to the root node_modules beside @remix-run/react and react-router-dom.
- *    The lockfile guard below checks that part directly. */
+ *  - `ssr.noExternal: true` applies to the build only. In dev, the Cloudflare
+ *    dev proxy loads dependencies through Node with the `workerd` / `worker`
+ *    conditions; inlining them instead makes Vite run React's CommonJS as ESM.
+ *  - React and the router are installed where the packages that use them can
+ *    find them: hoisted to the root node_modules. The lockfile guard below
+ *    checks that part directly. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -77,9 +76,9 @@ afterAll(async () => {
 });
 
 describe("local dev server", () => {
-  it("drives the Vite that `remix vite:dev` uses, not vitest's own copy", () => {
-    const fromRemix = createRequire(createRequire(resolve(WEB, "package.json")).resolve("@remix-run/dev/package.json"));
-    expect(viteVersion).toBe((fromRemix("vite/package.json") as { version: string }).version);
+  it("drives the Vite that `react-router dev` uses, not vitest's own copy", () => {
+    const fromDev = createRequire(createRequire(resolve(WEB, "package.json")).resolve("@react-router/dev/package.json"));
+    expect(viteVersion).toBe((fromDev("vite/package.json") as { version: string }).version);
   });
 
   it.each([
@@ -131,16 +130,16 @@ describe("local dev server", () => {
 });
 
 describe("React install layout", () => {
-  it("React is hoisted to the root node_modules, where @remix-run/react and react-router-dom can find it", () => {
+  it("React and the router are hoisted to the root node_modules, one copy each", () => {
     const packages = (JSON.parse(readFileSync(resolve(ROOT, "package-lock.json"), "utf8")) as {
       packages: Record<string, { version?: string }>;
     }).packages;
     const where = (name: string) =>
       Object.keys(packages).filter((p) => p === `node_modules/${name}` || p.endsWith(`/node_modules/${name}`));
-    expect({ react: where("react"), "react-dom": where("react-dom") }).toEqual({
-      react: ["node_modules/react"],
-      "react-dom": ["node_modules/react-dom"],
-    });
+    const names = ["react", "react-dom", "react-router", "@react-router/cloudflare", "@react-router/dev"];
+    expect(Object.fromEntries(names.map((n) => [n, where(n)]))).toEqual(
+      Object.fromEntries(names.map((n) => [n, [`node_modules/${n}`]]))
+    );
   });
 
   it("the lockfile has no workspace that no longer exists", () => {

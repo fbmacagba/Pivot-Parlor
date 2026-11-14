@@ -1,6 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
-import { Outlet } from "@remix-run/react";
+import { data as json, redirect, Outlet } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { requireRole } from "~/lib/auth";
 
 export async function loader({ request, context }: LoaderFunctionArgs) {

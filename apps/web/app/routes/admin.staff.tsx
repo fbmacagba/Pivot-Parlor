@@ -1,6 +1,11 @@
-import { useLoaderData, useActionData, useNavigation, useFetcher } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import {
+  useLoaderData,
+  useActionData,
+  useNavigation,
+  useFetcher,
+  data as json,
+} from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Plus, Mail, Pencil, UserX, Camera } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { pageShopId } from "~/lib/pageShop";

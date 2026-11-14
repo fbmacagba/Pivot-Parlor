@@ -1,21 +1,8 @@
-import { createRequire } from "module";
+import { reactRouter } from "@react-router/dev/vite";
+import { cloudflareDevProxy } from "@react-router/dev/vite/cloudflare";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { webLoadContext } from "./app/lib/loadContext";
-
-const require = createRequire(import.meta.url);
-
-// @remix-run/dev ships CJS — use require() for both sub-paths
-const { vitePlugin: remix } = require("@remix-run/dev/dist/vite") as {
-  vitePlugin: (opts?: Record<string, unknown>) => import("vite").Plugin;
-};
-
-type DevPlatform = {
-  cloudflare: {
-    env: Record<string, unknown>;
-    ctx: { waitUntil(promise: Promise<unknown>): void };
-  };
-};
 
 // wrangler.toml's API_URL is the production API. In dev, with no .dev.vars
 // override, that would sign people in, and change shops and bookings, on
@@ -38,40 +25,26 @@ function devEnv(env: Record<string, unknown>): Record<string, unknown> {
   return { ...env, API_URL: LOCAL_API };
 }
 
-const { cloudflareDevProxyVitePlugin } = require(
-  "@remix-run/dev/dist/vite/cloudflare-proxy-plugin"
-) as {
-  cloudflareDevProxyVitePlugin: (options?: {
-    getLoadContext?: (args: { request: Request; context: DevPlatform }) => unknown;
-  }) => import("vite").Plugin;
-};
-
 export default defineConfig(({ command }) => ({
   plugins: [
-    // Dev only. Loaders get the same load context as on Pages
-    // (functions/_middleware.ts): `context.env`, `waitUntil`, and a CSP nonce,
-    // which dev has none of. The plugin's default is `{ cloudflare }`, which
-    // left every loader that reads `context.env.API_URL` throwing in dev.
-    // `devEnv` keeps dev off the production API (above).
-    cloudflareDevProxyVitePlugin({
+    // Dev only, and it must come before reactRouter(). Loaders get the same
+    // load context as on Pages (functions/_middleware.ts): `context.env`,
+    // `waitUntil`, and a CSP nonce, which dev has none of. `devEnv` keeps dev
+    // off the production API (above).
+    // The plugin cannot infer the bindings' type; they are read as plain values.
+    cloudflareDevProxy<Record<string, unknown>, Record<string, unknown>>({
       getLoadContext: ({ context }) => webLoadContext({ ...context.cloudflare, env: devEnv(context.cloudflare.env) }),
     }),
-    remix({
-      future: {
-        // Stay on classic data requests: turbo-stream 2.x has an upstream
-        // single-fetch advisory. Reassess before enabling this feature.
-        v3_singleFetch: false,
-        v3_fetcherPersist: true,
-        v3_relativeSplatPath: true,
-        v3_throwAbortReason: true,
-      },
-    }),
+    // Single fetch is always on. Its stream advisory (rxv8, turbo-stream 2.x) is
+    // fixed in react-router 7.14.0 and later; app/lib/routerPatchLevel.test.ts
+    // holds the floor.
+    reactRouter(),
     tsconfigPaths(),
   ],
   ssr: {
     target: "webworker",
     // Build only: the Pages bundle inlines every dependency. In dev, the
-    // Cloudflare proxy plugin loads dependencies through Node with the
+    // Cloudflare dev proxy loads dependencies through Node with the
     // `workerd` / `worker` conditions; inlining them there makes Vite run
     // React's CommonJS as ESM and every page answers 500 ("module is not
     // defined"). app/lib/devServer.test.ts starts the dev server to prove it.

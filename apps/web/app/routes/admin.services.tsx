@@ -1,6 +1,5 @@
-import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { Form, useActionData, useLoaderData, useNavigation, data as json } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Plus, Pencil, ToggleLeft, ToggleRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import { pageShopId } from "~/lib/pageShop";

@@ -4,7 +4,7 @@ import { seedComposeDesignSpec } from "@repo/utils";
 import { makeTestCtx } from "~/components/site/testCtx";
 import type { SiteData } from "~/components/commercialSiteTypes";
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const React = await import("react");
   return {
     Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>

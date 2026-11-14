@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getPortfolioDemoData } from "./portfolioDemo";
 import { isPortfolioDemoShop, PORTFOLIO_DEMO_SLUG } from "@repo/utils";
-vi.mock("@remix-run/react", () => ({ Outlet: () => null, useLoaderData: () => null }));
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Outlet: () => null, useLoaderData: () => null,
+}));
 vi.mock("~/components/ErrorScreen", () => ({ ErrorScreen: () => null }));
 vi.mock("~/components/CommercialShopChrome", () => ({
   CommercialShopChrome: () => null,
@@ -19,6 +23,7 @@ import {
   loader as bookLoader,
 } from "~/routes/$shopSlug.book";
 import { action as waitlistAction } from "~/routes/$shopSlug.waitlist";
+import { asResponse } from "~/lib/testing/asResponse";
 
 const API = "https://api.test";
 const BACKING = "pp-demo-ferdyms-barber";
@@ -63,17 +68,30 @@ function expectReadOnly(calls: Array<{ method: string; url: string }>) {
   }
 }
 
+/** The shop page and booking page loaders' JSON, as these tests read it. */
+type ShopPage = { slug: string; shop: { id: string }; commercialServices: Array<{ name: string }>; reviews: unknown[] };
+type BookPage = {
+  services: Array<{ id: string }>;
+  deposit: unknown;
+  preselectServiceId: string;
+  preselectStaffId: string;
+  slots: Array<{ staff_id: string }>;
+  closedDay?: boolean;
+};
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("portfolio demonstration", () => {
   it("refuses booking and waitlist form actions before parsing details or calling APIs", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No live API allowed"));
     for (const action of [bookAction, waitlistAction]) {
-      const response = await action({
-        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-        context: ctx,
-        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book`, { method: "POST" }),
-      } as never);
+      const response = asResponse(
+        await action({
+          params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+          context: ctx,
+          request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book`, { method: "POST" }),
+        } as never),
+      );
       expect(response.status).toBe(403);
       expect(await response.json()).toMatchObject({
         success: false,
@@ -85,12 +103,14 @@ describe("portfolio demonstration", () => {
 
   it("renders the generated backing shop by id, read-only, without reviews", async () => {
     const { calls } = backingApi({ provisioned: true });
-    const response = await loader({
-      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-      context: ctx,
-      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}`),
-    } as never);
-    const data = await response.json();
+    const response = asResponse(
+      await loader({
+        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+        context: ctx,
+        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}`),
+      } as never),
+    );
+    const data = (await response.json()) as ShopPage;
     expect(data.slug).toBe(PORTFOLIO_DEMO_SLUG);
     expect(data.shop.id).toBe(BACKING);
     expect(data.commercialServices.map((s: { name: string }) => s.name)).toEqual(["Skin fade"]);
@@ -100,13 +120,15 @@ describe("portfolio demonstration", () => {
 
   it("lets a reviewer preview the demo's pending version, still read-only on the backing shop", async () => {
     const { calls } = backingApi({ provisioned: true });
-    const response = await loader({
-      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-      context: ctx,
-      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}?preview=candidate`, {
-        headers: { Cookie: "pp_session=a.eyJyb2xlIjoiZGV2ZWxvcGVyIn0.s" },
-      }),
-    } as never);
+    const response = asResponse(
+      await loader({
+        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+        context: ctx,
+        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}?preview=candidate`, {
+          headers: { Cookie: "pp_session=a.eyJyb2xlIjoiZGV2ZWxvcGVyIn0.s" },
+        }),
+      } as never),
+    );
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     const data = (await response.json()) as unknown as { site: { headline: string }; preview: unknown };
     expect(data.site.headline).toBe("Regenerated fades");
@@ -116,13 +138,15 @@ describe("portfolio demonstration", () => {
 
   it("keeps the published URL working with the static sample until the backing shop exists", async () => {
     const { calls } = backingApi({ provisioned: false });
-    const response = await loader({
-      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-      context: ctx,
-      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}`),
-    } as never);
+    const response = asResponse(
+      await loader({
+        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+        context: ctx,
+        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}`),
+      } as never),
+    );
     expect(response.status).toBe(200);
-    expect((await response.json()).shop.id).toBe(BACKING);
+    expect(((await response.json()) as ShopPage).shop.id).toBe(BACKING);
     expectReadOnly(calls);
   });
 
@@ -139,13 +163,15 @@ describe("portfolio demonstration", () => {
 
   it("demo booking shows the backing shop's real menu with synthetic times inside its hours", async () => {
     const { calls } = backingApi({ provisioned: true });
-    const res = await bookLoader({
-      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-      context: ctx,
-      // 2099-06-16 is a Tuesday (open 09:00-18:00).
-      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book?date=2099-06-16&service_id=svc-fade&serviceId=svc-fade&staffId=st-kofi`),
-    } as never);
-    const data = await res.json();
+    const res = asResponse(
+      await bookLoader({
+        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+        context: ctx,
+        // 2099-06-16 is a Tuesday (open 09:00-18:00).
+        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book?date=2099-06-16&service_id=svc-fade&serviceId=svc-fade&staffId=st-kofi`),
+      } as never),
+    );
+    const data = (await res.json()) as BookPage;
     expect(data.services.map((s: { id: string }) => s.id)).toEqual(["svc-fade"]);
     expect(data.deposit).toBeNull();
     expect(data.preselectServiceId).toBe("svc-fade");
@@ -157,25 +183,29 @@ describe("portfolio demonstration", () => {
 
   it("demo booking reports a closed day instead of offering times", async () => {
     backingApi({ provisioned: true });
-    const res = await bookLoader({
-      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-      context: ctx,
-      // 2099-06-15 is a Monday (closed).
-      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book?date=2099-06-15&service_id=svc-fade`),
-    } as never);
-    const data = await res.json();
+    const res = asResponse(
+      await bookLoader({
+        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+        context: ctx,
+        // 2099-06-15 is a Monday (closed).
+        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book?date=2099-06-15&service_id=svc-fade`),
+      } as never),
+    );
+    const data = (await res.json()) as BookPage;
     expect(data.slots).toEqual([]);
     expect(data.closedDay).toBe(true);
   });
 
   it("ignores preselect ids that are not on this shop's own lists", async () => {
     backingApi({ provisioned: true });
-    const res = await bookLoader({
-      params: { shopSlug: PORTFOLIO_DEMO_SLUG },
-      context: ctx,
-      request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book?serviceId=someone-elses&staffId=x`),
-    } as never);
-    const data = await res.json();
+    const res = asResponse(
+      await bookLoader({
+        params: { shopSlug: PORTFOLIO_DEMO_SLUG },
+        context: ctx,
+        request: new Request(`https://demo.test/${PORTFOLIO_DEMO_SLUG}/book?serviceId=someone-elses&staffId=x`),
+      } as never),
+    );
+    const data = (await res.json()) as BookPage;
     expect(data.preselectServiceId).toBe("");
     expect(data.preselectStaffId).toBe("");
   });

@@ -12,7 +12,7 @@ let pathname = "/staff";
 let search = "";
 const navigate = vi.fn();
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const React = await import("react");
   return {
     Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>

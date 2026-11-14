@@ -61,10 +61,12 @@ describe("user-facing copy", () => {
     expect(dashedCopy('const a = <p title="Type a message…">Hi - there</p>;')).toHaveLength(0);
   });
 
+  // Parsing every app file takes about 3 seconds alone, and more than the
+  // 5-second default when the whole suite runs in parallel.
   it("contains no em or en dashes", () => {
     const offenders = sourceFiles(appDir).flatMap((file) =>
       dashedCopy(readFileSync(file, "utf8"), file).map((hit) => `${path.relative(appDir, file)}:${hit}`),
     );
     expect(offenders).toEqual([]);
-  });
+  }, 30_000);
 });

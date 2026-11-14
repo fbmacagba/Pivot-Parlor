@@ -1,5 +1,5 @@
-import { useRouteLoaderData } from "@remix-run/react";
-import type { MetaFunction } from "@remix-run/cloudflare";
+import { useRouteLoaderData } from "react-router";
+import type { MetaFunction } from "react-router";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";
 import { ShopLegalDocument } from "~/components/ShopLegalDocument";
 import { SHOP_LEGAL_LAST_UPDATED } from "~/lib/legalDates";

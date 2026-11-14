@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { useFetcher } from "@remix-run/react";
+import type { useFetcher } from "react-router";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "~/components/ui/Dialog";

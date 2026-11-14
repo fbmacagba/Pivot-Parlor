@@ -1,6 +1,13 @@
-import { Form, useActionData, useNavigation, useParams, useRouteLoaderData } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
+import {
+  Form,
+  useActionData,
+  useNavigation,
+  useParams,
+  useRouteLoaderData,
+  data as json,
+  redirect,
+} from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
 import { requireShopSlug } from "~/lib/shopSlug";

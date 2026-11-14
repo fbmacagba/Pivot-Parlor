@@ -3,11 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { VisualManager, uploadVisual, type VisualsData } from "./VisualManager";
 
 // VisualManager calls useRevalidator(); provide it without a Router but keep
-// every other @remix-run/react export real so nothing transitive breaks.
+// every other react-router export real so nothing transitive breaks.
 // The component only uses useRevalidator, so the whole module is stubbed: loading
 // the real Remix runtime here would require React from the monorepo root, where
 // there is none (React 18 lives in this app's own node_modules).
-vi.mock("@remix-run/react", () => ({
+vi.mock("react-router", () => ({
   useRevalidator: () => ({ revalidate: () => {}, state: "idle" as const }),
 }));
 

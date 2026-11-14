@@ -9,7 +9,7 @@
  *
  * A resource route: no default export, or Remix would answer with a page.
  */
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
+import type { ActionFunctionArgs } from "react-router";
 import { requireRole } from "~/lib/auth";
 
 export class AlertTestError extends Error {

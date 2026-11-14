@@ -7,7 +7,7 @@ import { renderToString } from "react-dom/server";
 
 let fetcherData: { ok: boolean; error?: string } | undefined;
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const react = await import("react");
   return {
     useFetcher: () => ({

@@ -1,6 +1,5 @@
-import { useLoaderData, useNavigate } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { useLoaderData, useNavigate, data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { TrendingUp, PoundSterling, BarChart2, Users } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";

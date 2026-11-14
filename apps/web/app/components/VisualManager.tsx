@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useRevalidator } from "@remix-run/react";
+import { useRevalidator } from "react-router";
 import { Check, Loader2, Sparkles, Trash2, Upload } from "lucide-react";
 import { Button } from "~/components/ui/Button";
 import { resolvePublicAssetImageUrl, withImageCacheBust } from "~/components/dev-shops/helpers";

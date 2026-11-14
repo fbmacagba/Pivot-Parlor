@@ -2,8 +2,8 @@
  *
  *  - Vite: apps/web is on Vite 6.4.4 or later. Every Vite 5 release and 6.x up
  *    to 6.4.3 has dev-server advisories (path traversal and file reads,
- *    GHSA-4w7w-66w2-5vf9 and siblings). @remix-run/dev 2.17.5 accepts
- *    `vite: ^5.1.0 || ^6.0.0`.
+ *    GHSA-4w7w-66w2-5vf9 and siblings). @react-router/dev 7.18.5 accepts
+ *    Vite 5 to 8, so nothing upstream holds the floor for us.
  *  - undici: miniflare, which runs every worker test suite, gets undici
  *    7.30.1 or later through the root `overrides` (`miniflare > undici`).
  *    @cloudflare/vitest-pool-workers 0.16.20 pins miniflare 4.20260625.0
@@ -123,8 +123,8 @@ describe("dev-tool patch levels", () => {
     expect(atLeast(version, VITE_FLOOR), `${at}@${version}`).toBe(true);
   });
 
-  it("the Vite @remix-run/dev loads is 6.4.4 or later, in the lockfile", () => {
-    expect(belowFloor(lockPackages(), "@remix-run/dev", "vite", VITE_FLOOR)).toEqual([]);
+  it("the Vite @react-router/dev loads is 6.4.4 or later, in the lockfile", () => {
+    expect(belowFloor(lockPackages(), "@react-router/dev", "vite", VITE_FLOOR)).toEqual([]);
   });
 
   it("every miniflare in the lockfile loads undici 7.30.1 or later", () => {
@@ -135,7 +135,7 @@ describe("dev-tool patch levels", () => {
     const packages = lockPackages();
     const vite = installedVersion(join(ROOT, "apps/web"), "vite", ROOT);
     expect(vite !== null && atLeast(vite, VITE_FLOOR), `apps/web loads vite@${vite}`).toBe(true);
-    expect(installedBelowFloor(packages, ROOT, "@remix-run/dev", "vite", VITE_FLOOR)).toEqual([]);
+    expect(installedBelowFloor(packages, ROOT, "@react-router/dev", "vite", VITE_FLOOR)).toEqual([]);
     expect(installedBelowFloor(packages, ROOT, "miniflare", "undici", UNDICI_FLOOR)).toEqual([]);
   });
 
@@ -168,15 +168,15 @@ describe("dev-tool patch levels", () => {
     const before: LockPackages = {
       "apps/web": {},
       "node_modules/vite": { version: "5.4.21" },
-      "node_modules/@remix-run/dev": { version: "2.17.5" },
+      "node_modules/@react-router/dev": { version: "7.18.5" },
       "node_modules/miniflare": { version: "4.20260625.0" },
       "node_modules/miniflare/node_modules/undici": { version: "7.28.0" },
       "node_modules/wrangler/node_modules/miniflare": { version: "5.20261023.1-beta" },
       "node_modules/wrangler/node_modules/undici": { version: "7.30.1" },
     };
     expect(resolveInLock(before, "apps/web", "vite")).toBe("node_modules/vite");
-    expect(belowFloor(before, "@remix-run/dev", "vite", VITE_FLOOR)).toEqual([
-      "node_modules/@remix-run/dev -> node_modules/vite@5.4.21",
+    expect(belowFloor(before, "@react-router/dev", "vite", VITE_FLOOR)).toEqual([
+      "node_modules/@react-router/dev -> node_modules/vite@5.4.21",
     ]);
     expect(belowFloor(before, "miniflare", "undici", UNDICI_FLOOR)).toEqual([
       "node_modules/miniflare -> node_modules/miniflare/node_modules/undici@7.28.0",

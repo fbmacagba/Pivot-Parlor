@@ -1,6 +1,6 @@
 import "./dashboard-shell.css";
 import { useCallback, useEffect, useState } from "react";
-import { Outlet, useLocation } from "@remix-run/react";
+import { Outlet, useLocation } from "react-router";
 import { Menu } from "lucide-react";
 import type { UserRole } from "@repo/types";
 import { useModalA11y } from "~/lib/useModalA11y";

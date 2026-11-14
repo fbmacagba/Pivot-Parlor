@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { useActionData, useLoaderData } from "@remix-run/react";
+import { useActionData, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { PosScreen } from "~/components/pos/PosScreen";
 import { posAction, posLoader } from "~/lib/pos";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";

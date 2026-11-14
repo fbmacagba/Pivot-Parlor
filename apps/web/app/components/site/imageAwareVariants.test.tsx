@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { DesignSpec } from "@repo/utils";
 import type { SiteData } from "~/components/commercialSiteTypes";
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const React = await import("react");
   return {
     Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>

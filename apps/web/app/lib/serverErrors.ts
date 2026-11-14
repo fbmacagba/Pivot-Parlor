@@ -14,7 +14,7 @@
  * The API masks again and rate-limits; a visitor who left, a thrown Response
  * (a deliberate redirect, 404 or 403) and Remix's own not-found are skipped.
  */
-import type { HandleErrorFunction } from "@remix-run/cloudflare";
+import type { HandleErrorFunction } from "react-router";
 import { scrubErrorText } from "@repo/utils";
 
 export type ErrorWhere = "page" | "data" | "action" | "render" | "middleware";

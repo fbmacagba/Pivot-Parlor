@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
-import type { MetaFunction } from "@remix-run/cloudflare";
+import { Link } from "react-router";
+import type { MetaFunction } from "react-router";
 import { Button } from "~/components/ui/Button";
 
 export const meta: MetaFunction = () => [

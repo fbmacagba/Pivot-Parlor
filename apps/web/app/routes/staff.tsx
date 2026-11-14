@@ -1,7 +1,6 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import { data as json, Link, useLoaderData } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { ErrorScreen } from "~/components/ErrorScreen";
-import { json } from "@remix-run/cloudflare";
-import { Link, useLoaderData } from "@remix-run/react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { dashboardHref, pageShopId, pageStaffId } from "~/lib/pageShop";

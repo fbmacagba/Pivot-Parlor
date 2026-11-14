@@ -1,7 +1,7 @@
 // Delete-shop confirmation dialog for the developer "Shops" dashboard.
 // Extracted from dev.shops.tsx (T7.7 class-2) — behavior-identical; covered by
 // tests/e2e/dev-dashboard.spec.ts (delete lifecycle).
-import type { FetcherWithComponents } from "@remix-run/react";
+import type { FetcherWithComponents } from "react-router";
 import { Loader2, Trash2 } from "lucide-react";
 import { Button } from "~/components/ui/Button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "~/components/ui/Dialog";

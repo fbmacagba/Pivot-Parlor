@@ -5,6 +5,7 @@
  *  Remix never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { action } from "~/routes/api.shops.$shopId.reviews";
+import { asResponse } from "~/lib/testing/asResponse";
 
 const API_URL = "https://api.test";
 const context = { env: { API_URL } };
@@ -29,8 +30,8 @@ function post(body: string): Request {
   });
 }
 
-const run = (request: Request) =>
-  action({ request, params: { shopId: "shop-1" }, context } as unknown as Parameters<typeof action>[0]);
+const run = async (request: Request) =>
+  asResponse(await action({ request, params: { shopId: "shop-1" }, context } as unknown as Parameters<typeof action>[0]));
 
 afterEach(() => {
   vi.unstubAllGlobals();

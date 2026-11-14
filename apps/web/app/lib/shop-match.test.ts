@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // live on 2026-11-10, an iPhone's Add to Home Screen title and the install
 // invitation both said "ferdyms-barber-shop-014".
 const matches = vi.hoisted(() => ({ current: [] as unknown[] }));
-vi.mock("@remix-run/react", () => ({ useMatches: () => matches.current }));
+vi.mock("react-router", () => ({ useMatches: () => matches.current }));
 
 import { useShopMatch } from "./shop-match";
 

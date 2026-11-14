@@ -2,18 +2,15 @@
 // rendering on the server and refuses fetcher loads.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
 import { createMemoryRouter } from "react-router";
+import type { ShouldRevalidateFunction } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { skipRevalidationForWizardParams } from "./bookingUrl";
 import { revalidateAfterFailedSubmission } from "./revalidation";
 
-// The real router, with React Router 7's default switched on: after a
-// submission answered 4xx/5xx, loaders and fetchers do not reload unless the
-// route's shouldRevalidate says so. Under React Router 7 this is the default
-// and the flag no longer exists, so the swap deletes the `future` line.
-const RR7_DEFAULT = { v7_skipActionErrorRevalidation: true };
-
+// The real router, as React Router 7 ships it: after a submission answered
+// 4xx/5xx, loaders and fetchers do not reload unless the route's
+// shouldRevalidate says so.
 const passthrough: ShouldRevalidateFunction = ({ defaultShouldRevalidate }) => defaultShouldRevalidate;
 
 const answer = (status: number) =>
@@ -41,7 +38,7 @@ describe("the booking page after a refused booking", () => {
           shouldRevalidate,
         },
       ],
-      { initialEntries: ["/linden-demo/book"], future: RR7_DEFAULT }
+      { initialEntries: ["/linden-demo/book"] }
     );
     await vi.waitFor(() => expect(router.state.initialized).toBe(true));
     router.fetch("times", "book", "/linden-demo/book?date=2026-11-20&service_id=svc-1");
@@ -87,7 +84,7 @@ describe("a dashboard page after a failed submission", () => {
           shouldRevalidate,
         },
       ],
-      { initialEntries: ["/admin/services"], future: RR7_DEFAULT }
+      { initialEntries: ["/admin/services"] }
     );
     await vi.waitFor(() => expect(router.state.initialized).toBe(true));
     await post(router, "/admin/services");
