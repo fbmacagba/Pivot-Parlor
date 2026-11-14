@@ -16,7 +16,7 @@ import { formatPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
-import { formatDateTime, formatTime } from "~/lib/dateFormat";
+import { formatDateTime, formatTime, ukToday } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 interface SaleRow {
@@ -65,7 +65,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const api = createApiClient(env.API_URL, token);
   const shopId = pageShopId(request, user, null);
   const url = new URL(request.url);
-  const today = new Date().toISOString().slice(0, 10);
+  // The shop's day, as the booking worker's sales list reads it.
+  const today = ukToday();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(url.searchParams.get("date") ?? "") ? url.searchParams.get("date")! : today;
   const saleId = url.searchParams.get("sale");
 
