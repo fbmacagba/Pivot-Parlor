@@ -11,6 +11,8 @@
  * which differs only for a start between 00:00 and 01:00 London in summer.
  */
 
+import { shiftDate, zonedTimeToUtc } from "@repo/utils";
+
 export const PLATFORM_TIME_ZONE = "Europe/London";
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
@@ -53,15 +55,44 @@ export function shopToday(timeZone?: string | null, now: Date = new Date()): str
 }
 
 /**
+ * A real calendar day, "YYYY-MM-DD". Not month 00 or 13, and not 30 February,
+ * which Date would quietly roll over to 2 March.
+ */
+export function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const noon = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(noon.getTime()) && noon.toISOString().slice(0, 10) === value;
+}
+
+/**
  * The schedules.day_of_week for a calendar date: Monday-first (0=Mon..6=Sun),
  * as the admin schedule editor writes it. -1, which no row has, for anything
  * but a real "YYYY-MM-DD".
  */
 export function scheduleDayOf(date: string): number {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return -1;
-  const noon = new Date(`${date}T12:00:00Z`);
-  if (Number.isNaN(noon.getTime()) || noon.toISOString().slice(0, 10) !== date) return -1;
-  return (noon.getUTCDay() + 6) % 7;
+  if (!isCalendarDate(date)) return -1;
+  return (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7;
+}
+
+/** An instant as D1's datetime() writes it: "YYYY-MM-DD HH:MM:SS", UTC. */
+function asDbTimestamp(instant: Date): string {
+  return instant.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * The shop days `from` to `to` (inclusive calendar days, already checked with
+ * isCalendarDate) as UTC timestamps: `start` inclusive, `end` exclusive. A day
+ * is 23 or 25 hours long when the clocks change. Compare with
+ * `datetime(created_at)`, which reads D1's "YYYY-MM-DD HH:MM:SS" and an ISO
+ * timestamp alike (a plain text comparison would not: " " sorts before "T").
+ */
+export function shopDaysWindow(from: string, to: string, timeZone?: string | null): { start: string; end: string } {
+  // The zone formatterFor settled on: London for a missing or unknown one.
+  const zone = formatterFor(timeZone).resolvedOptions().timeZone;
+  return {
+    start: asDbTimestamp(zonedTimeToUtc(from, "00:00", zone)),
+    end: asDbTimestamp(zonedTimeToUtc(shiftDate(to, 1), "00:00", zone)),
+  };
 }
 
 /** The first day of the month `monthsBack` months before the shop's current month, "YYYY-MM-01". */

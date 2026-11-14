@@ -2696,14 +2696,16 @@ export async function getCurrentQuantity(
 /**
  * Retail/COGS report over the sale_items snapshots (WS-3 Phase 2). Voided
  * sales are excluded; refund adjustments arrive with the returns work.
- * Dates are inclusive YYYY-MM-DD, matched on substr(created_at, 1, 10).
+ * `window` is the shop's days as UTC timestamps (shopDaysWindow in
+ * src/lib/shopTime.ts), start inclusive and end exclusive, compared with
+ * datetime(created_at).
  */
 export async function getInventoryReport(
   db: D1Database,
   shopId: string,
-  from: string,
-  to: string,
+  window: { start: string; end: string },
 ) {
+  const { start, end } = window;
   const [summary, byProduct, byStaff, consumption] = await Promise.all([
     db
       .prepare(
@@ -2713,9 +2715,9 @@ export async function getInventoryReport(
          FROM sale_items si JOIN sales s ON s.id = si.sale_id
          WHERE si.shop_id = ? AND si.item_type = 'product'
            AND s.status != 'voided'
-           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?`,
+           AND datetime(s.created_at) >= ? AND datetime(s.created_at) < ?`,
       )
-      .bind(shopId, from, to)
+      .bind(shopId, start, end)
       .first<{
         retail_revenue_pence: number;
         cogs_pence: number;
@@ -2730,12 +2732,12 @@ export async function getInventoryReport(
          FROM sale_items si JOIN sales s ON s.id = si.sale_id
          WHERE si.shop_id = ? AND si.item_type = 'product'
            AND s.status != 'voided'
-           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?
+           AND datetime(s.created_at) >= ? AND datetime(s.created_at) < ?
          GROUP BY si.product_id, si.name
          ORDER BY revenue_pence DESC
          LIMIT 50`,
       )
-      .bind(shopId, from, to)
+      .bind(shopId, start, end)
       .all<{
         product_id: string | null;
         name: string;
@@ -2753,11 +2755,11 @@ export async function getInventoryReport(
          LEFT JOIN staff st ON st.id = si.staff_id
          WHERE si.shop_id = ? AND si.item_type = 'product'
            AND s.status != 'voided'
-           AND substr(s.created_at, 1, 10) BETWEEN ? AND ?
+           AND datetime(s.created_at) >= ? AND datetime(s.created_at) < ?
          GROUP BY si.staff_id
          ORDER BY revenue_pence DESC`,
       )
-      .bind(shopId, from, to)
+      .bind(shopId, start, end)
       .all<{
         staff_id: string | null;
         staff_name: string | null;
@@ -2770,9 +2772,9 @@ export async function getInventoryReport(
                 COALESCE(SUM(-m.quantity_delta * COALESCE(m.unit_cost_pence, 0)), 0) AS cost_pence
          FROM stock_movements m
          WHERE m.shop_id = ? AND m.type = 'consumption'
-           AND substr(m.created_at, 1, 10) BETWEEN ? AND ?`,
+           AND datetime(m.created_at) >= ? AND datetime(m.created_at) < ?`,
       )
-      .bind(shopId, from, to)
+      .bind(shopId, start, end)
       .first<{ units_consumed: number; cost_pence: number }>(),
   ]);
 

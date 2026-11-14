@@ -9,13 +9,15 @@ import {
   getLowStockByShop,
   getStockMovementsByShop,
   getInventoryReport,
+  getShopTimezone,
   type StockMovementType,
 } from "../db/queries.js";
 import { batchWithAudit } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware } from "../middleware/auth.js";
 import { requireShopRole } from "../middleware/rbac.js";
-import { readJsonObject } from "@repo/utils";
+import { isCalendarDate, shopDaysWindow, shopToday } from "../lib/shopTime.js";
+import { readJsonObject, shiftDate } from "@repo/utils";
 
 /**
  * WS-3 Phase 0: stock. Quantities only ever change through movements
@@ -45,19 +47,20 @@ inventoryRouter.get("/low-stock", authMiddleware, requireShopRole("admin", "staf
 
 // ─── GET /api/shops/:shopId/inventory/report?from=&to= ────────────────────────
 // Retail COGS/margin + per-product sell-through + per-staff retail +
-// consumption cost (WS-3 Phase 2). Defaults to the last 30 days.
+// consumption cost (WS-3 Phase 2). Defaults to the last 30 days. Every day
+// here is the shop's day (src/lib/shopTime.ts): the defaults, and which day a
+// sale or stock movement falls on.
 
 inventoryRouter.get("/report", authMiddleware, requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-  const to = c.req.query("to") ?? new Date().toISOString().slice(0, 10);
-  const from =
-    c.req.query("from") ??
-    new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  if (!dateRe.test(from) || !dateRe.test(to) || from > to) {
+  const timeZone = await getShopTimezone(c.env.DB, shopId);
+  const today = shopToday(timeZone);
+  const to = c.req.query("to") ?? today;
+  const from = c.req.query("from") ?? shiftDate(today, -30);
+  if (!isCalendarDate(from) || !isCalendarDate(to) || from > to) {
     return c.json({ success: false, error: "from/to must be YYYY-MM-DD with from <= to" }, 400);
   }
-  const report = await getInventoryReport(c.env.DB, shopId, from, to);
+  const report = await getInventoryReport(c.env.DB, shopId, shopDaysWindow(from, to, timeZone));
   return c.json({ success: true, data: { from, to, ...report } });
 });
 
