@@ -59,31 +59,74 @@ const MAX_HISTORY_MESSAGES = 10;
 // one visitor (or one token-replaying script) draining a shop's shared quota.
 const PUBLIC_CHAT_MAX_PER_IP_HOUR = 30;
 
-async function tryConsumePublicChatRate(kv: KVNamespace, shopId: string, ip: string): Promise<boolean> {
+// All shops together, per UTC day. The limits above each stop one source, but
+// without this the most a day of chat can cost grows with the number of shops.
+// KV is eventually consistent, so like the others this is a brake, not an
+// exact quota.
+const PUBLIC_CHAT_MAX_PLATFORM_PER_DAY = 1_000;
+
+type ChatRateVerdict = "allowed" | "limited" | "platform_cap";
+
+async function tryConsumePublicChatRate(kv: KVNamespace, shopId: string, ip: string): Promise<ChatRateVerdict> {
   const { hourSuffix, daySuffix } = publicChatRateKeySuffixes();
   const hourKey = `rate:chat:${shopId}:hour:${hourSuffix}`;
   const dayKey = `rate:chat:${shopId}:day:${daySuffix}`;
   const ipKey = `rate:chat:ip:${ip}:hour:${hourSuffix}`;
+  const platformKey = `rate:chat:platform:day:${daySuffix}`;
 
-  const [hourRaw, dayRaw, ipRaw] = await Promise.all([kv.get(hourKey), kv.get(dayKey), ip ? kv.get(ipKey) : Promise.resolve(null)]);
+  const [hourRaw, dayRaw, ipRaw, platformRaw] = await Promise.all([
+    kv.get(hourKey),
+    kv.get(dayKey),
+    ip ? kv.get(ipKey) : Promise.resolve(null),
+    kv.get(platformKey),
+  ]);
   const hourCount = Number(hourRaw ?? "0") || 0;
   const dayCount = Number(dayRaw ?? "0") || 0;
   const ipCount = Number(ipRaw ?? "0") || 0;
+  const platformCount = Number(platformRaw ?? "0") || 0;
 
+  if (platformCount >= PUBLIC_CHAT_MAX_PLATFORM_PER_DAY) return "platform_cap";
   if (
     hourCount >= PUBLIC_CHAT_MAX_PER_HOUR ||
     dayCount >= PUBLIC_CHAT_MAX_PER_DAY ||
     (ip !== "" && ipCount >= PUBLIC_CHAT_MAX_PER_IP_HOUR)
   ) {
-    return false;
+    return "limited";
   }
 
-  await Promise.all([
-    kv.put(hourKey, String(hourCount + 1), { expirationTtl: 3600 }),
-    kv.put(dayKey, String(dayCount + 1), { expirationTtl: 86400 }),
-    ...(ip !== "" ? [kv.put(ipKey, String(ipCount + 1), { expirationTtl: 3600 })] : []),
-  ]);
-  return true;
+  // KV takes one write a second to the same key and throws (429) on a faster
+  // one. The platform's day is one key that every chat writes, so two chats in
+  // the same second are ordinary traffic. A refused increment loses one count,
+  // which a brake can afford; it must never fail the chat. (No key is logged:
+  // the visitor's key carries their IP.)
+  const written = await Promise.all(
+    [
+      kv.put(hourKey, String(hourCount + 1), { expirationTtl: 3600 }),
+      kv.put(dayKey, String(dayCount + 1), { expirationTtl: 86400 }),
+      ...(ip !== "" ? [kv.put(ipKey, String(ipCount + 1), { expirationTtl: 3600 })] : []),
+      kv.put(platformKey, String(platformCount + 1), { expirationTtl: 86400 }),
+    ].map((put) => put.then(() => true, () => false))
+  );
+  if (written.includes(false)) {
+    console.warn("[chatbot] a chat rate counter was not updated (KV refused the write); this chat was not counted there");
+  }
+  return "allowed";
+}
+
+/**
+ * Tells the owner (Workers Issues emails on console.error) the first time each
+ * UTC day that the platform cap turns a visitor away. The message is constant
+ * and carries no visitor data, so every day's alert lands in one issue.
+ */
+async function reportPlatformCapOnce(kv: KVNamespace): Promise<void> {
+  const flagKey = `alert:chat:platform-cap:${publicChatRateKeySuffixes().daySuffix}`;
+  if (await kv.get(flagKey)) return;
+  console.error(
+    `[chatbot] platform chat cap reached: ${PUBLIC_CHAT_MAX_PLATFORM_PER_DAY} replies today (UTC); visitors are refused until midnight UTC`
+  );
+  // If the note cannot be written (KV's one write a second per key), the
+  // owner may hear more than once today; the visitor still gets the 429.
+  await kv.put(flagKey, "1", { expirationTtl: 86400 }).catch(() => undefined);
 }
 
 function isPlatformQuestion(msg: string): boolean {
@@ -191,17 +234,27 @@ chat.post("/", async (c) => {
       }
     }
 
-    const shop = await c.env.DB.prepare("SELECT id, name, type, slug FROM shops WHERE id = ? LIMIT 1")
+    // The shop, and the status of its published site, in one read. The public
+    // sees a shop's site, and so its chat, only when that site is live: the
+    // site layout ($shopSlug.tsx) answers 404 for a draft, 503 for a paused
+    // site, and "Coming Soon" with no chat when nothing is published. "live"
+    // (case-insensitive) is the API's own rule for a public site (isLiveSite,
+    // apps/worker/src/lib/siteVisibility.ts). Every other case is refused
+    // exactly like an unknown shop, before anything is spent or counted.
+    const shop = await c.env.DB.prepare(
+      "SELECT id, name, type, slug, (SELECT website_status FROM shop_sites WHERE shop_sites.shop_id = shops.id AND shop_sites.status = 'active' LIMIT 1) AS website_status FROM shops WHERE id = ? LIMIT 1"
+    )
       .bind(shopId)
-      .first<{ id: string; name: string; type: string; slug: string }>();
-    if (!shop) {
+      .first<{ id: string; name: string; type: string; slug: string; website_status: string | null }>();
+    if (!shop || (shop.website_status ?? "").toLowerCase() !== "live") {
       return c.json({ reply: FALLBACK_REPLY, error: "Shop not found" }, 404);
     }
 
     const shopSlug = shop.slug;
 
-    const allowed = await tryConsumePublicChatRate(c.env.KV, shop.id, ip);
-    if (!allowed) {
+    const verdict = await tryConsumePublicChatRate(c.env.KV, shop.id, ip);
+    if (verdict !== "allowed") {
+      if (verdict === "platform_cap") await reportPlatformCapOnce(c.env.KV);
       return c.json(
         { error: "rate_limit", message: "Too many messages. Please try again later." },
         429

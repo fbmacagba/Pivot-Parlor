@@ -16,6 +16,8 @@ const REQUIRED: ReadonlyArray<readonly [string, ReadonlyArray<string>]> = [
   ["chat_sessions", []],
   ["ai_usage_log", []],
   ["shop_settings", ["promo_active"]],
+  // The chat answers only for a shop whose published site is live.
+  ["shop_sites", ["status", "website_status"]],
 ];
 
 /** Throws (naming every missing table/column) when the database has not had
