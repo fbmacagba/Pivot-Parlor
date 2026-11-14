@@ -140,12 +140,20 @@ chat.post("/", async (c) => {
   const platformUrl = c.env.PLATFORM_URL || "https://pivotparlor.com";
 
   try {
-    let body: { shopId?: string; message?: string; history?: unknown };
+    // A body that is not a JSON object (not JSON, or null, an array, a number,
+    // a string) is the sender's mistake: a 400 before anything reads a field,
+    // never the catch's 500 below. (The same rule as readJsonObject in
+    // @repo/utils, written out here so this worker takes no new dependency.)
+    let parsed: unknown;
     try {
-      body = (await c.req.json()) as typeof body;
+      parsed = await c.req.json();
     } catch {
       return c.json({ reply: FALLBACK_REPLY, error: "Invalid JSON" }, 400);
     }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return c.json({ reply: FALLBACK_REPLY, error: "Invalid JSON" }, 400);
+    }
+    const body = parsed as { shopId?: unknown; message?: unknown; history?: unknown; turnstileToken?: unknown };
 
     const shopId = typeof body.shopId === "string" ? body.shopId.trim() : "";
     const visitorMessage = typeof body.message === "string" ? body.message.trim() : "";
@@ -160,9 +168,7 @@ chat.post("/", async (c) => {
 
     // Turnstile bot protection — only enforced when secret key is configured
     if (c.env.TURNSTILE_SECRET_KEY) {
-      const turnstileToken = typeof (body as { turnstileToken?: string }).turnstileToken === "string"
-        ? (body as { turnstileToken?: string }).turnstileToken!.trim()
-        : "";
+      const turnstileToken = typeof body.turnstileToken === "string" ? body.turnstileToken.trim() : "";
       if (!turnstileToken) {
         return c.json({ reply: FALLBACK_REPLY, error: "Security check required" }, 400);
       }
