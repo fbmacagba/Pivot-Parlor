@@ -14,9 +14,12 @@ export const revalidateAfterConflict: ShouldRevalidateFunction = ({ actionStatus
 /**
  * Reload the page's data after any failed submission, as Remix 2 always did.
  *
- * For dashboard pages whose actions turn an API conflict (a booking clash, a
- * refund or void race, a stock take in progress) into their own 400/502: the
- * status no longer says "conflict", but the data shown may have just changed.
+ * Every page with an action uses it, except the booking page (409 only, above).
+ * Those actions answer an API refusal with a status of their own (a row deleted
+ * elsewhere, a booking clash, a refund or void race all become 400 or 502), so
+ * the status cannot say whether the data shown just changed. The page reloads
+ * its own data, as under Remix 2; its layouts keep the router's default, and
+ * each page's own loader checks the session.
  */
 export const revalidateAfterFailedSubmission: ShouldRevalidateFunction = ({
   formMethod,

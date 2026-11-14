@@ -9,6 +9,10 @@ import { createApiClient } from "~/lib/api";
 import { getSessionToken, sessionCookieHeaders } from "~/lib/auth";
 import { safeRedirectPath } from "~/lib/safeRedirect";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 export const meta: MetaFunction = () => [{ title: "Sign in | Pivot Parlor" }];
 

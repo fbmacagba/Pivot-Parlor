@@ -12,9 +12,7 @@ import { formatDay, formatTime as formatUkTime } from "~/lib/dateFormat";
 import { DEVELOPER_STAFF_READ_ONLY, pageStaffId, staffMePath } from "~/lib/pageShop";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
-// A failed submission here can mean the data changed underneath the page (an API
-// conflict this action reports as 400/502), so reload it as Remix 2 always did.
-// app/lib/revalidation.ts
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface Booking {

@@ -4,9 +4,7 @@ import { PosScreen } from "~/components/pos/PosScreen";
 import { posAction, posLoader } from "~/lib/pos";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
-// A failed submission here can mean the data changed underneath the page (an API
-// conflict this action reports as 400/502), so reload it as Remix 2 always did.
-// app/lib/revalidation.ts
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 export function loader(args: LoaderFunctionArgs) {

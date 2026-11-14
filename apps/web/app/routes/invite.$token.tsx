@@ -10,6 +10,10 @@ import { createApiClient } from "~/lib/api";
 import { sessionCookieHeaders } from "~/lib/auth";
 import { formatDate } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface InviteData {
   email: string;

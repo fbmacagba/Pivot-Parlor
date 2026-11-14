@@ -13,9 +13,7 @@ import { pageShopId } from "~/lib/pageShop";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
-// A failed submission here can mean the data changed underneath the page (an API
-// conflict this action reports as 400/502), so reload it as Remix 2 always did.
-// app/lib/revalidation.ts
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
