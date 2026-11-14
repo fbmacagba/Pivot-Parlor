@@ -154,4 +154,9 @@ describe("inventory report, a date that is not on the calendar", () => {
     const { shop, headers } = await shopWith([]);
     expect((await report(shop, headers, "?from=2028-02-29&to=2028-02-29")).status).toBe(200);
   });
+
+  it("control: the last day of year 9999 is a date too, though the window ends past it", async () => {
+    const { shop, headers } = await shopWith([]);
+    expect((await report(shop, headers, "?from=2026-01-01&to=9999-12-31")).status).toBe(200);
+  });
 });
