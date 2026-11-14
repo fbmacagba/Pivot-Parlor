@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
-import { generateSlotTimes, todayUtcYmd } from "../lib/time.js";
+import { generateSlotTimes, shopDayBounds, shopDaySql, shopToday } from "../lib/time.js";
+import { getShopTimeZone } from "../db/queries.js";
 import { d1Rows } from "../lib/d1-helpers.js";
 import { capturePaymentIntent } from "../lib/stripe.js";
 import { reportError } from "../services/report-error.js";
@@ -25,7 +26,7 @@ r.post("/:shopId/open", async (c) => {
     return c.json({ success: false, error: "Setup not complete" }, 400);
   }
 
-  const date = todayUtcYmd();
+  const date = shopToday(await getShopTimeZone(db, shopId));
   const existing = await db
     .prepare("SELECT id FROM bw_business_days WHERE shop_id = ? AND date = ? AND status = 'open' LIMIT 1")
     .bind(shopId, date)
@@ -102,7 +103,11 @@ r.post("/:shopId/close", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  const date = todayUtcYmd();
+  // The shop's day. In summer that day ends at midnight London time, so a
+  // close after midnight finds no open day for the new date, as in winter.
+  const timeZone = await getShopTimeZone(db, shopId);
+  const date = shopToday(timeZone);
+  const { from: dayFrom, to: dayTo } = shopDayBounds(date, timeZone);
   const bd = await db
     .prepare("SELECT * FROM bw_business_days WHERE shop_id = ? AND date = ? AND status = 'open' LIMIT 1")
     .bind(shopId, date)
@@ -222,9 +227,9 @@ r.post("/:shopId/close", async (c) => {
              FROM sale_items si
              INNER JOIN sales sa ON sa.id = si.sale_id
              WHERE si.shop_id = ? AND si.item_type = 'service'
-               AND substr(sa.created_at, 1, 10) = ? AND sa.status != 'voided'`
+               AND ${shopDaySql("sa.created_at")} AND sa.status != 'voided'`
           )
-          .bind(shopId, date)
+          .bind(shopId, dayFrom, dayTo)
           .first<{ s: number }>();
 
         const revProd = await db
@@ -233,17 +238,17 @@ r.post("/:shopId/close", async (c) => {
              FROM sale_items si
              INNER JOIN sales sa ON sa.id = si.sale_id
              WHERE si.shop_id = ? AND si.item_type = 'product'
-               AND substr(sa.created_at, 1, 10) = ? AND sa.status != 'voided'`
+               AND ${shopDaySql("sa.created_at")} AND sa.status != 'voided'`
           )
-          .bind(shopId, date)
+          .bind(shopId, dayFrom, dayTo)
           .first<{ s: number }>();
 
         const revTips = await db
           .prepare(
             `SELECT COALESCE(SUM(tip_pence), 0) AS s FROM sales
-             WHERE shop_id = ? AND substr(created_at, 1, 10) = ? AND status != 'voided'`
+             WHERE shop_id = ? AND ${shopDaySql("created_at")} AND status != 'voided'`
           )
-          .bind(shopId, date)
+          .bind(shopId, dayFrom, dayTo)
           .first<{ s: number }>();
 
         const servicesRevenuePence = Number(revSvc?.s ?? 0);

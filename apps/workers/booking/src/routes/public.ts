@@ -35,10 +35,7 @@ import {
   PORTFOLIO_DEMO_ERROR,
   readJsonObject,
 } from "@repo/utils";
-
-function toDateString(iso: string): string {
-  return iso.slice(0, 10); // "YYYY-MM-DD"
-}
+import { isCalendarDate, shopDateOf } from "../lib/time.js";
 
 const publicRoutes = new Hono<{ Bindings: Env }>();
 
@@ -56,7 +53,7 @@ publicRoutes.get("/shops/:shopId/slots", async (c) => {
     );
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!isCalendarDate(date)) {
     return c.json(
       { success: false, error: "date must be in YYYY-MM-DD format" },
       400,
@@ -182,10 +179,12 @@ publicRoutes.post(
     // the same computation the booking UI reads, so any offered slot is accepted
     // while arbitrary / off-schedule / misaligned times are rejected. For an
     // "any available" request, adopt the staff_id of the matching free slot.
+    // The shop's date of the start: a 00:30 London start in summer is 23:30
+    // UTC the evening before, and its slot is in the shop's next day.
     const slotDate =
-      date && /^\d{4}-\d{2}-\d{2}$/.test(date)
+      date && isCalendarDate(date)
         ? date
-        : toDateString(startISO);
+        : shopDateOf(new Date(startISO), shop.timezone);
     const requestedStaff = staff_id === "any" ? null : staff_id;
     const slotList = await getAvailableSlots(
       shop.id,
@@ -217,7 +216,8 @@ publicRoutes.post(
     }
 
     const endDate = addMinutes(startDate, service.duration_min);
-    const bookingDate = toDateString(startISO);
+    // Filed under the shop's date of the start, the day the shop sees it on.
+    const bookingDate = shopDateOf(new Date(startISO), shop.timezone);
     const endISO = endDate.toISOString();
 
     // The early answer, before any write. The real guard against the

@@ -14,6 +14,15 @@ import {
   type BookingTimes,
 } from "../lib/bookingTimes.js";
 
+/** The shop's IANA zone (shops.timezone), Europe/London when unset. */
+export async function getShopTimeZone(db: D1Database, shopId: string): Promise<string> {
+  const row = await db
+    .prepare("SELECT timezone FROM shops WHERE id = ?")
+    .bind(shopId)
+    .first<{ timezone: string | null }>();
+  return row?.timezone || "Europe/London";
+}
+
 export interface ShopRow {
   id: string;
   slug: string;
@@ -207,9 +216,10 @@ export async function checkSlotConflict(
   endTime: string,
   timeZone: string = "Europe/London"
 ): Promise<boolean> {
-  // Overlap is a pure instant-range comparison — do NOT gate on booking_date.
-  // booking_date is the UTC calendar date, so an overlapping booking whose
-  // instant straddles UTC midnight onto an adjacent date would be missed by a
+  // Overlap is a pure instant-range comparison: do NOT gate on booking_date.
+  // booking_date is a calendar date (the shop's date of the start; the UTC
+  // date on rows written before that change), so an overlapping booking whose
+  // instant straddles midnight onto an adjacent date would be missed by a
   // single-date filter, letting two different-start bookings double-book.
   //
   // Walk-in and deposit bookings hold the shop's clock reading ("09:30") on

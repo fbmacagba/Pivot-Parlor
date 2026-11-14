@@ -100,11 +100,11 @@ export async function getAvailableSlots(
   }
 
   // 3. Query existing bookings overlapping this local day's UTC window.
-  //    booking_date is stored as the UTC calendar date of the instant, which
-  //    can differ from the shop-local date for non-UTC shops (a local evening
-  //    slot can land on the next UTC date). Filtering by the UTC instant window
-  //    avoids missing those bookings; the in-memory rangesOverlap below still
-  //    does the exact per-slot filtering.
+  //    An online booking's booking_date is the shop's date of its start, but
+  //    rows written before that change hold the UTC date, and a booking near
+  //    midnight belongs to two dates' windows. Filtering by the UTC instant
+  //    window reads them all; the in-memory rangesOverlap below still does the
+  //    exact per-slot filtering.
   //    Walk-in and deposit bookings hold the shop's clock reading on
   //    booking_date instead (lib/bookingTimes.ts): those are read by date,
   //    including the day before, whose last booking can run past midnight.

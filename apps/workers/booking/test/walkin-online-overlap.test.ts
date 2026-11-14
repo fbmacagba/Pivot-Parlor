@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { dispatch } from "./request";
 import { seedScheduleDay, seedShop, seedStaff, tokenFor } from "./helpers";
 import { zonedTimeToUtc } from "../src/lib/timezone";
-import { todayUtcYmd } from "../src/lib/time";
+import { shopToday } from "../src/lib/time";
 
 /**
  * The in-shop day: POST /open builds bw_availability from schedules, and a
@@ -28,7 +28,7 @@ async function openShop(name: string, serviceMinutes = 30) {
   const auth = { Authorization: `Bearer ${await tokenFor("admin", shop)}` };
   const open = await dispatch("POST", `/booking/shops/${shop}/open`, { headers: auth, body: {} });
   expect(open.status).toBe(200);
-  return { shop, staff, service, auth, today: todayUtcYmd() };
+  return { shop, staff, service, auth, today: shopToday(LONDON) };
 }
 
 /** An online booking as POST /public/bookings writes it: instants. */

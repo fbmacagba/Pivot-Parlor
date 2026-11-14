@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
-import { addMinutesToHm, todayUtcYmd } from "../lib/time.js";
+import { addMinutesToHm, shopToday } from "../lib/time.js";
 import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent, createRefund } from "../lib/stripe.js";
 import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
 import {
@@ -19,15 +19,15 @@ import { reportError } from "../services/report-error.js";
 import { calculateCommissionPence, readJsonObject } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, batchWithAudit, statusOutcome } from "../audit/context.js";
-import { checkSlotConflict, createBookingIfFree, reinstateCancelledIfFree } from "../db/queries.js";
+import {
+  checkSlotConflict,
+  createBookingIfFree,
+  getShopTimeZone as shopTimeZone,
+  reinstateCancelledIfFree,
+} from "../db/queries.js";
 import { bookingInterval } from "../lib/bookingTimes.js";
 
 const r = new Hono<{ Bindings: Env }>();
-
-async function shopTimeZone(db: Env["DB"], shopId: string): Promise<string> {
-  const row = await db.prepare("SELECT timezone FROM shops WHERE id = ?").bind(shopId).first<{ timezone: string | null }>();
-  return row?.timezone || "Europe/London";
-}
 
 /** A deposit cancel whose Stripe refund failed, by what became of the booking. */
 const REFUND_FAILED_MESSAGE: Record<"reinstated" | "taken" | "unchanged" | "none", string> = {
@@ -333,7 +333,7 @@ r.post("/:shopId/bookings/:bookingId/checkout", async (c) => {
     const fullySettled = remainderPence === 0;
     const bd = await db
       .prepare("SELECT id FROM bw_business_days WHERE shop_id = ? AND date = ? LIMIT 1")
-      .bind(shopId, todayUtcYmd())
+      .bind(shopId, shopToday(await shopTimeZone(db, shopId)))
       .first<{ id: string }>();
 
     // The whole checkout persists atomically on the sales spine (WS-3):
@@ -704,7 +704,8 @@ r.post("/:shopId/walk-ins", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  const date = todayUtcYmd();
+  const timeZone = await shopTimeZone(db, shopId);
+  const date = shopToday(timeZone);
   const open = await db
     .prepare("SELECT id FROM bw_business_days WHERE shop_id = ? AND date = ? AND status = 'open' LIMIT 1")
     .bind(shopId, date)
@@ -734,7 +735,6 @@ r.post("/:shopId/walk-ins", async (c) => {
     )
     .bind(shopId, body.staffId, date)
     .all<{ id: string; slot_time: string }>();
-  const timeZone = await shopTimeZone(db, shopId);
   let slot: { id: string; slot_time: string } | undefined;
   for (const candidate of freeSlots) {
     if (!(await slotTaken(db, body.staffId, timeZone, date, candidate.slot_time, service.duration_min))) {
