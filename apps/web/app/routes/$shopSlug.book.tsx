@@ -26,7 +26,7 @@ import type { Service } from "@repo/types";
 import { formatPence, isPortfolioDemoShop, PORTFOLIO_DEMO_ERROR, PORTFOLIO_DEMO_SLUG, portfolioDemoForSlug } from "@repo/utils";
 import { portfolioDemoServices, portfolioDemoStaff } from "~/lib/portfolioDemo";
 import { demoSlots, openingWindow, weekdayName } from "~/lib/demoBooking";
-import { formatDay, formatTime } from "~/lib/dateFormat";
+import { formatDay, formatTime, shopToday } from "~/lib/dateFormat";
 import { restorableDay, restoredStep, skipRevalidationForWizardParams, wizardSearch } from "~/lib/bookingUrl";
 import type { loader as shopLoader, ShopSiteData } from "./$shopSlug";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
@@ -44,18 +44,20 @@ export const meta: MetaFunction = ({ matches, params }) => {
 
 /** Only ids that exist in the lists this page loaded can be preselected. The
  *  wizard's own place (team "any", the day, the step) is restored from the
- *  URL it keeps; see lib/bookingUrl. */
-function preselect(url: URL, services: Array<{ id: string }>, staff: Array<{ id: string }>) {
+ *  URL it keeps; see lib/bookingUrl. `today` is the shop's (shopToday): from
+ *  midnight to 1am in British Summer Time, UTC's would still be yesterday. */
+function preselect(url: URL, services: Array<{ id: string }>, staff: Array<{ id: string }>, today: string) {
   const serviceId = url.searchParams.get("serviceId") ?? "";
   const staffId = url.searchParams.get("staffId") ?? "";
   const preselectServiceId = services.some((s) => s.id === serviceId) ? serviceId : "";
   const preselectStaffId =
     preselectServiceId && staffId === "any" ? "any" : staff.some((s) => s.id === staffId) ? staffId : "";
   const preselectDay =
-    preselectServiceId && preselectStaffId
-      ? restorableDay(url.searchParams.get("day"), new Date().toISOString().slice(0, 10))
-      : "";
+    preselectServiceId && preselectStaffId ? restorableDay(url.searchParams.get("day"), today) : "";
   return {
+    // The earliest day the date picker offers. Sent from here so the server's
+    // page and the browser's agree.
+    today,
     preselectServiceId,
     preselectStaffId,
     preselectDay,
@@ -126,7 +128,7 @@ async function demoBookingData(api: ApiClient, shopId: string, slug: string, url
     deposit: null,
     paymentCancelled: false,
     closedDay: date ? openingWindow(hoursJson, date) === null : false,
-    ...preselect(url, services, staff),
+    ...preselect(url, services, staff, shopToday(shopTimezone)),
   };
 }
 
@@ -210,7 +212,7 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
     // Staff schedules decide real availability; the shop's published hours
     // only explain an empty day ("closed on Mondays").
     closedDay: date ? openingWindow(hoursJson, date) === null : false,
-    ...preselect(url, services, staff),
+    ...preselect(url, services, staff, shopToday(shopTimezone)),
   });
 }
 
@@ -322,6 +324,7 @@ function BookingWizard({ shopName }: { shopName?: string }) {
     deposit,
     paymentCancelled,
     closedDay,
+    today,
     preselectServiceId,
     preselectStaffId,
     preselectDay,
@@ -529,7 +532,7 @@ function BookingWizard({ shopName }: { shopName?: string }) {
                 label="Date"
                 type="date"
                 value={selection.date}
-                min={new Date().toISOString().slice(0, 10)}
+                min={today}
                 onChange={(e) => {
                   const date = e.target.value;
                   setSelection((p) => ({ ...p, date, slot: "" }));

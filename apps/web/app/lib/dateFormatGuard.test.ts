@@ -23,6 +23,13 @@ const RULES: Array<{ pattern: RegExp; why: string }> = [
     pattern: /\.get(?:Hours|Minutes|TimezoneOffset)\(\)/g,
     why: "reads the machine's clock: use ukParts",
   },
+  {
+    // Today in UTC, which from midnight to 1am in British Summer Time is still
+    // yesterday. (A calendar day's own round trip, d.toISOString().slice(0, 10)
+    // === day, is not "today" and is not matched.)
+    pattern: /new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/g,
+    why: "is today in UTC: use shopToday or ukToday",
+  },
 ];
 
 // Intl.DateTimeFormat( ... ) whose arguments do not name a timeZone.
@@ -83,8 +90,10 @@ describe("date formatting stays in app/lib/dateFormat.ts", () => {
       "// d.toLocaleString() in a comment",
       "/* new Date().getMinutes() */",
       "const url = 'https://example.test'; const i = d.toLocaleTimeString();",
+      "const today = new Date().toISOString().slice(0, 10);",
+      "const sameDay = d.toISOString().slice(0, 10) === day;",
     ].join("\n");
-    expect(violations(sample).map((v) => v.line)).toEqual([1, 2, 3, 4, 5, 6, 10]);
+    expect(violations(sample).map((v) => v.line)).toEqual([1, 2, 3, 4, 5, 6, 10, 11]);
   });
 
   it("no file formats a date, a time or a count on its own", () => {

@@ -170,3 +170,20 @@ export function ukToday(now: Date = new Date()): string {
   const { year, month, day } = ukParts(now);
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
+
+/**
+ * Today's date on a shop's own calendar, as "YYYY-MM-DD". London when the
+ * shop names no zone, or one this machine does not know (as format() does).
+ */
+export function shopToday(timeZone: string | null | undefined, now: Date = new Date()): string {
+  if (!timeZone || timeZone === UK_TIME_ZONE) return ukToday(now);
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat(UK_LOCALE, { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  } catch (error) {
+    if (error instanceof RangeError) return ukToday(now);
+    throw error;
+  }
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}

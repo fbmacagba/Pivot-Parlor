@@ -8,7 +8,7 @@ afterAll(() => {
   vi.unstubAllEnvs();
 });
 
-const { clockOf, formatCount, formatDate, formatDateTime, formatDay, formatTime, toInstant, ukParts, ukToday } =
+const { clockOf, formatCount, formatDate, formatDateTime, formatDay, formatTime, shopToday, toInstant, ukParts, ukToday } =
   await import("./dateFormat");
 
 describe("control: this file runs in Tokyo time", () => {
@@ -92,6 +92,28 @@ describe("ukParts and ukToday", () => {
     expect(ukParts("2026-07-01T23:30:00Z")).toEqual({ year: 2026, month: 7, day: 2, hour: 0, minute: 30, weekday: 4 });
     expect(ukToday(new Date("2026-07-01T23:30:00Z"))).toBe("2026-07-02");
     expect(ukToday(new Date("2026-11-12T15:00:00Z"))).toBe("2026-11-12");
+  });
+});
+
+describe("shopToday", () => {
+  // 23:30 UTC on 1 July is 00:30 on 2 July in London (summer time), and 08:30 on 2 July in Tokyo.
+  const LATE = new Date("2026-07-01T23:30:00Z");
+
+  it("is today on the shop's own calendar, not the machine's or UTC's", () => {
+    expect(shopToday("Europe/London", LATE)).toBe("2026-07-02");
+    expect(shopToday("America/New_York", LATE)).toBe("2026-07-01");
+    expect(shopToday("UTC", LATE)).toBe("2026-07-01");
+  });
+
+  it("reads London when the shop names no zone, or one this machine does not know", () => {
+    expect(shopToday(undefined, LATE)).toBe("2026-07-02");
+    expect(shopToday(null, LATE)).toBe("2026-07-02");
+    expect(shopToday("", LATE)).toBe("2026-07-02");
+    expect(shopToday("Not/AZone", LATE)).toBe("2026-07-02");
+  });
+
+  it("control: in winter London's day is UTC's", () => {
+    expect(shopToday("Europe/London", new Date("2026-01-15T23:30:00Z"))).toBe("2026-01-15");
   });
 });
 
