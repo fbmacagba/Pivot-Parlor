@@ -18,6 +18,12 @@ import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { formatDateTime, formatTime, ukToday } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// A failed submission here can mean the data changed underneath the page (an API
+// conflict this action reports as 400/502), so reload it as Remix 2 always did.
+// app/lib/revalidation.ts
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface SaleRow {
   id: string;

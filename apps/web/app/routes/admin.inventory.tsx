@@ -19,6 +19,12 @@ import { Input } from "~/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/components/ui/Dialog";
 import { formatDate, formatDateTime } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// A failed submission here can mean the data changed underneath the page (an API
+// conflict this action reports as 400/502), so reload it as Remix 2 always did.
+// app/lib/revalidation.ts
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 // ─── Types (worker rows are snake_case) ───────────────────────────────────────
 

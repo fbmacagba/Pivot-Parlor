@@ -80,4 +80,12 @@ describe("skipRevalidationForWizardParams", () => {
     expect(run("/shop/book", "/shop")).toBe(true);
     expect(run("/shop/book?step=1", "/shop/book?step=2", { formMethod: "POST" })).toBe(true);
   });
+
+  it("reloads the times after a clash (409), when the router would not", () => {
+    // The booking action answers a taken slot with 409; the times come from slotsFetcher.
+    const after = (actionStatus: number) =>
+      run("/shop/book?step=3", "/shop/book?step=3", { formMethod: "POST", actionStatus, defaultShouldRevalidate: false });
+    expect(after(409)).toBe(true);
+    expect(after(400)).toBe(false);
+  });
 });
