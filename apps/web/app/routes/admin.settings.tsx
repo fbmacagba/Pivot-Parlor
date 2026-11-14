@@ -13,6 +13,10 @@ import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { pageShopId } from "~/lib/pageShop";
 import { parsePoundsToPence } from "@repo/utils";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type DayKey = (typeof DAY_KEYS)[number];

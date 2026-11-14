@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  dataRequestPath,
   describeServerError,
   handleError,
   reportServerError,
@@ -69,6 +70,21 @@ describe("whereOf", () => {
     expect(whereOf(req("https://pivotparlor.com/book/x?_data=routes%2F%24shopSlug.book"))).toBe("data");
     expect(whereOf(req("https://pivotparlor.com/book/x", { method: "POST" }))).toBe("action");
   });
+
+  it("tells React Router 7's data requests (/path.data) apart too", () => {
+    expect(whereOf(req("https://pivotparlor.com/book/x.data?_routes=routes%2F%24shopSlug.book"))).toBe("data");
+    expect(whereOf(req("https://pivotparlor.com/_root.data"))).toBe("data");
+    expect(whereOf(req("https://pivotparlor.com/book/x.data", { method: "POST" }))).toBe("action");
+    expect(whereOf(req("https://pivotparlor.com/a.data/b"))).toBe("page");
+  });
+});
+
+describe("dataRequestPath", () => {
+  it("is the page a data request belongs to", () => {
+    expect(dataRequestPath("/_root.data")).toBe("/");
+    expect(dataRequestPath("/book/x.data")).toBe("/book/x");
+    expect(dataRequestPath("/book/x")).toBe("/book/x");
+  });
 });
 
 describe("describeServerError", () => {
@@ -116,6 +132,20 @@ describe("reportServerError", () => {
     await Promise.all(waits);
     expect(reports).toEqual([expect.objectContaining({ name: "TypeError", route: "/book/:shopSlug", message: "boom" })]);
     expect(logged).toHaveBeenCalledWith(err);
+  });
+
+  it("a failing .data request reports the route pattern, never the value or the suffix", async () => {
+    const { reports, binding } = fakeBinding();
+    const waits: Promise<unknown>[] = [];
+    reportServerError(errorWithStack("from a data request"), {
+      request: req("https://pivotparlor.com/book/ferdym.data?_routes=routes%2F%24shopSlug.book"),
+      params: { shopSlug: "ferdym" },
+      env: { WEB_ERRORS: binding },
+      waitUntil: (p) => void waits.push(p),
+    });
+    await Promise.all(waits);
+    expect(reports).toEqual([expect.objectContaining({ where: "data", route: "/book/:shopSlug" })]);
+    expect(JSON.stringify(reports)).not.toMatch(/ferdym|\.data/);
   });
 
   it("reports the same error once, even if two hooks see it", async () => {

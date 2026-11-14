@@ -10,6 +10,7 @@
  * use; `day` is distinct from the `date` the loader reads for slot lookups.
  */
 import type { ShouldRevalidateFunction } from "@remix-run/react";
+import { revalidateAfterConflict } from "./revalidation";
 
 export const WIZARD_PARAMS = ["serviceId", "staffId", "day", "step"] as const;
 
@@ -51,15 +52,13 @@ export function wizardSearch(
 /**
  * Recording a choice in the URL must not reload the page's data (the shop
  * and the menu are already loaded, and a demo must make no extra request).
- * Anything else, including every form submission, revalidates as usual.
+ * Anything else revalidates as usual. A form submission also reloads after a
+ * clash (409), when the slot shown was just taken (app/lib/revalidation.ts).
  */
-export const skipRevalidationForWizardParams: ShouldRevalidateFunction = ({
-  currentUrl,
-  nextUrl,
-  formMethod,
-  defaultShouldRevalidate,
-}) => {
-  if (formMethod || currentUrl.pathname !== nextUrl.pathname) return defaultShouldRevalidate;
+export const skipRevalidationForWizardParams: ShouldRevalidateFunction = (args) => {
+  const { currentUrl, nextUrl, formMethod, defaultShouldRevalidate } = args;
+  if (formMethod) return revalidateAfterConflict(args);
+  if (currentUrl.pathname !== nextUrl.pathname) return defaultShouldRevalidate;
   const rest = (u: URL) => {
     const p = new URLSearchParams(u.search);
     for (const k of WIZARD_PARAMS) p.delete(k);

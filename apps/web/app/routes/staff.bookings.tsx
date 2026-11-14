@@ -10,6 +10,10 @@ import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { formatDay, formatTime as formatUkTime } from "~/lib/dateFormat";
 import { DEVELOPER_STAFF_READ_ONLY, pageStaffId, staffMePath } from "~/lib/pageShop";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface Booking {
   id: string;

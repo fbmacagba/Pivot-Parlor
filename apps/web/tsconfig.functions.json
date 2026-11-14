@@ -1,0 +1,10 @@
+{
+  // Type-checks the Pages Functions entry (functions/_middleware.ts), which
+  // tsconfig.json excludes. It imports ../build/server/index.js, so it runs
+  // after the build (package.json "postbuild"), in CI's Build step and in every
+  // deploy build.
+  "extends": "./tsconfig.json",
+  // types/ holds declarations: a file under functions/ would become a route.
+  "include": ["functions/**/*.ts", "types/**/*.d.ts"],
+  "exclude": ["node_modules"]
+}

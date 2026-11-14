@@ -2,6 +2,10 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudfla
 import { useActionData, useLoaderData } from "@remix-run/react";
 import { PosScreen } from "~/components/pos/PosScreen";
 import { posAction, posLoader } from "~/lib/pos";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 export function loader(args: LoaderFunctionArgs) {
   return posLoader(args, "staff");

@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { webLoadContext } from "./app/lib/loadContext";
 
 const require = createRequire(import.meta.url);
 
@@ -53,11 +54,7 @@ export default defineConfig(({ command }) => ({
     // left every loader that reads `context.env.API_URL` throwing in dev.
     // `devEnv` keeps dev off the production API (above).
     cloudflareDevProxyVitePlugin({
-      getLoadContext: ({ context }) => ({
-        env: devEnv(context.cloudflare.env),
-        waitUntil: (promise: Promise<unknown>) => context.cloudflare.ctx.waitUntil(promise),
-        cspNonce: undefined,
-      }),
+      getLoadContext: ({ context }) => webLoadContext({ ...context.cloudflare, env: devEnv(context.cloudflare.env) }),
     }),
     remix({
       future: {

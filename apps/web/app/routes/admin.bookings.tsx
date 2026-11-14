@@ -11,6 +11,10 @@ import { useModalA11y } from "~/lib/useModalA11y";
 import { clockOf, formatDate as formatUkDate, formatDay, ukToday } from "~/lib/dateFormat";
 import { pageShopId } from "~/lib/pageShop";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 export type BookingStatus = "pending" | "confirmed" | "completed" | "cancelled" | "no_show";
 

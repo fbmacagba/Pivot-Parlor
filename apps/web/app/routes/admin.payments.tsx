@@ -5,6 +5,10 @@ import { Button } from "~/components/ui/Button";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { pageShopId } from "~/lib/pageShop";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface ConnectStatus {
   account_id: string | null;

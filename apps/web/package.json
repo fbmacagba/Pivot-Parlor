@@ -10,7 +10,7 @@
     "clean:js": "node scripts/clean-app-js.mjs",
     "prebuild": "node scripts/clean-app-js.mjs",
     "build": "remix vite:build",
-    "postbuild": "node scripts/copy-public.mjs",
+    "postbuild": "node scripts/copy-public.mjs && tsc -p tsconfig.functions.json",
     "start": "wrangler pages dev ./build/client",
     "deploy": "npm run clean && npm run build && node scripts/prepare-pages-deploy.mjs && node scripts/pages-deploy.mjs",
     "deploy:pages-client": "npm run build && npx wrangler pages deploy ./build/client --project-name=pivot-parlor-web --commit-dirty=true",

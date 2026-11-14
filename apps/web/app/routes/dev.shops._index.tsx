@@ -17,6 +17,10 @@ import { DeleteShopDialog, type DeleteShopResult } from "~/components/dev-shops/
 import { RatesDialog, type RatesActionResult } from "~/components/dev-shops/RatesDialog";
 import { OnboardShopDialog } from "~/components/dev-shops/OnboardShopDialog";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };

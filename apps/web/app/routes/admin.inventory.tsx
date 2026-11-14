@@ -19,6 +19,10 @@ import { Input } from "~/components/ui/Input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/components/ui/Dialog";
 import { formatDate, formatDateTime } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 // ─── Types (worker rows are snake_case) ───────────────────────────────────────
 

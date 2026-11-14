@@ -247,7 +247,9 @@ describe("functions/_middleware.ts", () => {
   it("makes one nonce per request and gives the same one to the header and the render", () => {
     expect(src).not.toMatch(/^(const|let|var)\s+\w+\s*=\s*newCspNonce\(/m); // never module scope
     expect(src).toMatch(/const\s+nonce\s*=\s*newCspNonce\(\)/);
-    expect(src).toMatch(/cspNonce:\s*context\.data\.cspNonce/);
+    // The render reads the nonce from the request's data through webLoadContext
+    // (app/lib/loadContext.ts, which loadContext.test.ts pins).
+    expect(src).toMatch(/getLoadContext:\s*\(\{\s*context\s*\}\)\s*=>\s*webLoadContext\(context\.cloudflare\)/);
     expect(src).toMatch(/context\.data\.cspNonce\s*=\s*nonce/);
     expect(src).toMatch(/\{\s*apiOrigin:\s*originOf\(context\.env\.API_URL\),\s*nonce\s*\}/);
   });

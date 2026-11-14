@@ -3,6 +3,7 @@ import { RemixServer } from "@remix-run/react";
 import { isbot } from "isbot";
 import { renderToReadableStream } from "react-dom/server";
 import { CspNonceContext } from "./lib/cspNonce";
+import type { WebLoadContext } from "./lib/loadContext";
 import { reportServerError, type ReportingContext } from "./lib/serverErrors";
 
 // Loader, action and render errors reach the owner's alert email (app/lib/serverErrors.ts).
@@ -15,7 +16,8 @@ export default async function handleRequest(
   remixContext: EntryContext,
   loadContext: AppLoadContext
 ) {
-  const { env, waitUntil, cspNonce } = loadContext as ReportingContext & { cspNonce?: string };
+  // The router types the load context as an open record; app/lib/loadContext.ts builds it.
+  const { env, waitUntil, cspNonce } = loadContext as ReportingContext & Pick<WebLoadContext, "cspNonce">;
   // The request's nonce (functions/_middleware.ts) goes on every inline script
   // this render writes: Remix's (root.tsx reads the context) and React's own.
   const body = await renderToReadableStream(

@@ -16,6 +16,10 @@ import {
   DialogTitle,
 } from "~/components/ui/Dialog";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+// Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface Enquiry {
   id: string;
