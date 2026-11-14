@@ -16,6 +16,27 @@ type DevPlatform = {
   };
 };
 
+// wrangler.toml's API_URL is the production API. In dev, with no .dev.vars
+// override, that would sign people in, and change shops and bookings, on
+// production from localhost. Dev uses the Worker dev server instead
+// (`cd apps/worker && npm run dev`, port 8787). Any other API_URL, for example
+// one set in apps/web/.dev.vars, is used as given.
+const PRODUCTION_API = "https://api.pivotparlor.com";
+const LOCAL_API = "http://localhost:8787";
+let warnedLocalApi = false;
+function devEnv(env: Record<string, unknown>): Record<string, unknown> {
+  const apiUrl = typeof env.API_URL === "string" ? env.API_URL.replace(/\/+$/, "") : "";
+  if (apiUrl !== PRODUCTION_API) return env;
+  if (!warnedLocalApi) {
+    warnedLocalApi = true;
+    console.warn(
+      `[dev] API_URL in wrangler.toml is the production API; dev uses ${LOCAL_API} ` +
+        "(start it with: cd apps/worker && npm run dev). Set API_URL in apps/web/.dev.vars to use another API."
+    );
+  }
+  return { ...env, API_URL: LOCAL_API };
+}
+
 const { cloudflareDevProxyVitePlugin } = require(
   "@remix-run/dev/dist/vite/cloudflare-proxy-plugin"
 ) as {
@@ -30,9 +51,10 @@ export default defineConfig(({ command }) => ({
     // (functions/_middleware.ts): `context.env`, `waitUntil`, and a CSP nonce,
     // which dev has none of. The plugin's default is `{ cloudflare }`, which
     // left every loader that reads `context.env.API_URL` throwing in dev.
+    // `devEnv` keeps dev off the production API (above).
     cloudflareDevProxyVitePlugin({
       getLoadContext: ({ context }) => ({
-        env: context.cloudflare.env,
+        env: devEnv(context.cloudflare.env),
         waitUntil: (promise: Promise<unknown>) => context.cloudflare.ctx.waitUntil(promise),
         cspNonce: undefined,
       }),

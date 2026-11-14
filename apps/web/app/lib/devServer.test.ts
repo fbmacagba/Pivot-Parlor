@@ -16,13 +16,15 @@
  *    The lockfile guard below checks that part directly. */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
-import { createServer, type ViteDevServer } from "vite";
+import { createServer, version as viteVersion, type ViteDevServer } from "vite";
 import { PORTFOLIO_DEMO_SLUG } from "@repo/utils";
 
 // vitest runs from apps/web.
 const WEB = process.cwd();
 const ROOT = resolve(WEB, "../..");
+const PRODUCTION_API = "https://api.pivotparlor.com";
 
 let server: ViteDevServer | undefined;
 let base = "";
@@ -75,6 +77,11 @@ afterAll(async () => {
 });
 
 describe("local dev server", () => {
+  it("drives the Vite that `remix vite:dev` uses, not vitest's own copy", () => {
+    const fromRemix = createRequire(createRequire(resolve(WEB, "package.json")).resolve("@remix-run/dev/package.json"));
+    expect(viteVersion).toBe((fromRemix("vite/package.json") as { version: string }).version);
+  });
+
   it.each([
     ["/", "Pivot Parlor"],
     ["/pricing", "Pricing"],
@@ -98,6 +105,15 @@ describe("local dev server", () => {
     expect(res.status).toBe(404);
     expect(apiCalls.some((u) => u.endsWith("/api/shops/no-such-page-xyz")), JSON.stringify(apiCalls)).toBe(true);
   }, 120_000);
+
+  it("dev never talks to the production API: wrangler.toml's API_URL becomes the local Worker", () => {
+    // With no .dev.vars, API_URL is wrangler.toml's production value. A working
+    // dev server would then sign people in, and change shops and bookings, on
+    // production from localhost. Dev points it at the Worker dev server
+    // (`cd apps/worker && npm run dev`, port 8787) instead.
+    expect(apiCalls.filter((u) => u.startsWith(PRODUCTION_API)), JSON.stringify(apiCalls)).toEqual([]);
+    expect(apiCalls).toContain("http://localhost:8787/api/shops/no-such-page-xyz");
+  });
 
   it("the portfolio demo shop renders from its bundled data when the API has no such shop", async () => {
     const res = await fetch(`${base}/${PORTFOLIO_DEMO_SLUG}`);
