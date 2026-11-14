@@ -10,6 +10,7 @@ const pipeline = import.meta.glob("../../workers/*/wrangler.toml", { query: "?ra
 const configs: Record<string, string> = { ...own, ...pipeline };
 
 const CONSUMER_HEADER = /^\[\[(?:env\.[^.\]]+\.)?queues\.consumers\]\]$/;
+const PRODUCER_HEADER = /^\[\[(?:env\.[^.\]]+\.)?queues\.producers\]\]$/;
 
 /** Drop a trailing `#` comment, ignoring any `#` inside a quoted string. */
 function stripComment(line: string): string {
@@ -21,25 +22,36 @@ function stripComment(line: string): string {
   return line;
 }
 
-/** Every `queue = "..."` that sits under a consumer table header. */
-export function consumedQueues(toml: string): string[] {
+/** Every `queue = "..."` that sits under a table header matching `header`. */
+function queuesUnder(toml: string, header: RegExp): string[] {
   const out: string[] = [];
-  let inConsumer = false;
+  let inTable = false;
   for (const raw of toml.split(/\r?\n/)) {
     const line = stripComment(raw).trim();
     if (line.startsWith("[")) {
-      inConsumer = CONSUMER_HEADER.test(line);
+      inTable = header.test(line);
       continue;
     }
-    const m = inConsumer ? /^queue\s*=\s*"([^"]+)"/.exec(line) : null;
+    const m = inTable ? /^queue\s*=\s*"([^"]+)"/.exec(line) : null;
     if (m?.[1]) out.push(m[1]);
   }
   return out;
 }
 
+/** Every `queue = "..."` that sits under a consumer table header. */
+export function consumedQueues(toml: string): string[] {
+  return queuesUnder(toml, CONSUMER_HEADER);
+}
+
+/** Every `queue = "..."` that sits under a producer table header. */
+export function producedQueues(toml: string): string[] {
+  return queuesUnder(toml, PRODUCER_HEADER);
+}
+
 const declared = new Set([...Object.keys(QUEUE_AUDIT), ...Object.keys(PIPELINE_QUEUE_AUDIT)]);
 const perConfig = Object.entries(configs).map(([path, toml]) => ({ path, queues: consumedQueues(toml) }));
 const all = perConfig.flatMap((c) => c.queues);
+const produced = new Set(Object.values(configs).flatMap((toml) => producedQueues(toml)));
 
 describe("audit queue fleet coverage", () => {
   it("every queue a worker consumes is declared", () => {
@@ -70,6 +82,34 @@ describe("audit queue fleet coverage", () => {
     // each pipeline queue is consumed by exactly one config
     expect(all.filter((q) => q === "site-assemble-queue")).toHaveLength(1);
     expect(all.filter((q) => q === "site-research-queue")).toHaveLength(1);
+  });
+
+  // A consumer whose queue nothing sends to is dead code that still holds
+  // production bindings: if a message ever arrived (the queues REST API can
+  // send one), it would run unreviewed. pivot-parlor-audit was one: it marked
+  // shops and their sites active, and site-audit-queue had no producer.
+  it("every queue a worker consumes has a producer in some worker's config", () => {
+    const orphaned = perConfig.flatMap((c) => c.queues.filter((q) => !produced.has(q)).map((q) => `${c.path}: ${q}`));
+    expect(orphaned).toEqual([]);
+  });
+
+  it("every declared pipeline queue is consumed by some worker's config", () => {
+    expect(Object.keys(PIPELINE_QUEUE_AUDIT).filter((q) => !all.includes(q))).toEqual([]);
+  });
+
+  it("collects producer tables only, never consumer blocks", () => {
+    const toml = [
+      "[[queues.consumers]]",
+      'queue = "consumed"',
+      "[[queues.producers]]",
+      'binding = "Q"',
+      'queue = "produced" # comment',
+      "[[env.staging.queues.producers]]",
+      'queue = "produced-staging"',
+      "[vars]",
+      'queue = "not-a-queue"',
+    ].join("\n");
+    expect(producedQueues(toml)).toEqual(["produced", "produced-staging"]);
   });
 
   it("an exemption carries a reason", () => {
