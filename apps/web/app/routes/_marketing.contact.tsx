@@ -1,7 +1,8 @@
 import { Form, useActionData, useNavigation } from "@remix-run/react";
 import type { ActionFunctionArgs, LinksFunction, MetaFunction } from "@remix-run/cloudflare";
 import { json } from "@remix-run/cloudflare";
-import { createApiClient } from "~/lib/api";
+import { CONTACT_FIELD_LIMITS } from "@repo/utils";
+import { apiErrorStatus, createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
 import { TURNSTILE_SCRIPT_SRC, TURNSTILE_SITE_KEY, TurnstileWidget } from "~/components/TurnstileWidget";
@@ -69,7 +70,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ success: true });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Unexpected error submitting the form";
-    return json({ success: false, error: msg }, { status: 500 });
+    // The API's own 4xx (a field too long, too many tries) is the sender's to
+    // fix, so it keeps its status; anything else is a 500.
+    const status = apiErrorStatus(error);
+    return json(
+      { success: false, error: msg },
+      { status: status !== undefined && status >= 400 && status < 500 ? status : 500 },
+    );
   }
 }
 
@@ -122,8 +129,8 @@ export default function Contact() {
             )}
 
             <div className="grid gap-5 sm:grid-cols-2">
-              <Input label="Full name"  name="full_name"  required placeholder="Jane Smith" />
-              <Input label="Shop name"  name="shop_name"  required placeholder="The Barber Co." />
+              <Input label="Full name"  name="full_name"  required maxLength={CONTACT_FIELD_LIMITS.full_name} placeholder="Jane Smith" />
+              <Input label="Shop name"  name="shop_name"  required maxLength={CONTACT_FIELD_LIMITS.shop_name} placeholder="The Barber Co." />
             </div>
 
             <div>
@@ -142,8 +149,8 @@ export default function Contact() {
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
-              <Input label="Email address"    name="email" type="email" required placeholder="jane@yourshop.com" />
-              <Input label="Phone (optional)" name="phone" type="tel"            placeholder="+44 7700 900000" />
+              <Input label="Email address"    name="email" type="email" required maxLength={CONTACT_FIELD_LIMITS.email} placeholder="jane@yourshop.com" />
+              <Input label="Phone (optional)" name="phone" type="tel"            maxLength={CONTACT_FIELD_LIMITS.phone} placeholder="+44 7700 900000" />
             </div>
 
             <div>
@@ -153,6 +160,7 @@ export default function Contact() {
                 name="message"
                 rows={4}
                 required
+                maxLength={CONTACT_FIELD_LIMITS.message}
                 placeholder="Tell us about your shop and what you need…"
                 className="flex w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold resize-none"
               />

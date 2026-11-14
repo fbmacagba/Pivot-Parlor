@@ -15,6 +15,13 @@ export interface ApiClient {
   del<T>(path: string): Promise<T>;
 }
 
+/** The HTTP status of an API refusal thrown by createApiClient, or undefined for any other error. */
+export function apiErrorStatus(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const status = (error as Error & { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
 export function createApiClient(
   baseUrl: string,
   token?: string | null,
@@ -46,8 +53,11 @@ export function createApiClient(
     const json = (await res.json()) as { success?: boolean; data?: T; error?: string } & T;
 
     if (!res.ok) {
-      throw new Error(
-        (json as { error?: string }).error ?? `HTTP ${res.status}`
+      // A plain Error (website alerts group by its name) carrying the
+      // status, which apiErrorStatus reads back.
+      throw Object.assign(
+        new Error((json as { error?: string }).error ?? `HTTP ${res.status}`),
+        { status: res.status }
       );
     }
 

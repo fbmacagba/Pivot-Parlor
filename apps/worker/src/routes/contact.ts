@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { batchWithAudit } from "../audit/context.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
-import { isOptionalText, readJsonObject } from "@repo/utils";
+import {
+  CONTACT_FIELD_LIMITS,
+  type ContactLimitedField,
+  isOptionalText,
+  normalizeLineBreaks,
+  readJsonObject,
+} from "@repo/utils";
 
 const contact = new Hono<{ Bindings: Bindings }>();
 
@@ -24,17 +30,12 @@ contact.post(
     const shopName = text(body.shop_name);
     const shopType = text(body.shop_type);
     const email = text(body.email);
-    const message = text(body.message);
+    // A browser submits each textarea line break as CRLF; one "\n" each is
+    // what its maxlength counted.
+    const message = normalizeLineBreaks(text(body.message));
 
-    // Log structured fields, not the raw body (avoids dumping the free-text
-    // message / PII blob and any control chars into logs).
-    console.log("[worker contact] incoming", {
-      full_name: body.full_name,
-      email: body.email,
-      shop_name: body.shop_name,
-      has_message: !!body.message,
-    });
-
+    // No log line here carries what the enquirer typed: Workers Logs keeps
+    // every line, and a name or an email is personal data. Field names only.
     if (!fullName) {
       console.warn("[worker contact] missing full_name");
       return c.json({ success: false, error: "full_name is required" }, 400);
@@ -58,10 +59,29 @@ contact.post(
     if (!isOptionalText(body.phone)) {
       return c.json({ success: false, error: "phone must be text" }, 400);
     }
+    const phone = body.phone?.trim() ?? null;
+
+    // Each field is measured as it is stored (trimmed).
+    const measured: Array<[ContactLimitedField, string]> = [
+      ["full_name", fullName],
+      ["shop_name", shopName],
+      ["email", email],
+      ["phone", phone ?? ""],
+      ["message", message],
+    ];
+    const tooLong = measured.find(([field, value]) => value.length > CONTACT_FIELD_LIMITS[field]);
+    if (tooLong) {
+      const [field] = tooLong;
+      console.warn("[worker contact] field too long", { field });
+      return c.json(
+        { success: false, error: `${field} is too long (${CONTACT_FIELD_LIMITS[field]} characters at most)` },
+        400
+      );
+    }
 
     const validShopTypes = ["barber_shop", "beauty_parlor", "both"];
     if (!validShopTypes.includes(shopType)) {
-      console.warn("[worker contact] invalid shop_type", shopType);
+      console.warn("[worker contact] invalid shop_type");
       return c.json({ success: false, error: "Invalid shop_type" }, 400);
     }
 
@@ -81,7 +101,7 @@ contact.post(
           shopName,
           shopType,
           email.toLowerCase(),
-          body.phone?.trim() ?? null,
+          phone,
           message
         ),
       ],
