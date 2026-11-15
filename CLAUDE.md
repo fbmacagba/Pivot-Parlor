@@ -187,7 +187,7 @@ Route discovery reads `.js` files as well as `.tsx`. A compiled `.js` twin besid
 
 ### The Website's Server Build Runs in workerd
 
-`npm run build` can pass while its server bundle cannot render under workerd. `apps/web/vite.config.ts` sets the server build's resolve conditions to Vite's webworker defaults. React Router sets Node's, which bundle React's Node renderer, and then every page answers 500. To check a build the way Pages runs it, run `cd apps/web && node scripts/smoke-build.mjs`. It serves the build with `wrangler pages dev` and GETs pages. CI runs it after the build, and `deploy-web.yml` runs it before the production upload.
+`npm run build` can pass while its server bundle cannot render under workerd. `apps/web/vite.config.ts` sets the server build's resolve conditions to `workerd`, then Vite's webworker defaults. React Router sets Node's, which bundle React's Node renderer, and then every page answers 500. Without `workerd` first, React 19's browser renderer is bundled, which needs `MessageChannel` at load, and the worker never starts. To check a build the way Pages runs it, run `cd apps/web && node scripts/smoke-build.mjs`. It serves the build with `wrangler pages dev` and GETs pages. CI runs it after the build, and `deploy-web.yml` runs it before the production upload.
 
 ### Worker Dev Proxy Port
 

@@ -19,7 +19,7 @@ import { defaultClientConditions, defaultClientMainFields, resolveConfig } from 
 const WEB = process.cwd();
 
 describe("server build resolution", () => {
-  it("resolves dependencies with Vite's webworker conditions, as the Remix 2 build did: no `node`", async () => {
+  it("resolves dependencies for workerd first, then with Vite's webworker conditions: no `node`", async () => {
     const config = await resolveConfig(
       { configFile: resolve(WEB, "vite.config.ts"), root: WEB, mode: "production", logLevel: "silent", build: { ssr: true } },
       "build",
@@ -28,7 +28,10 @@ describe("server build resolution", () => {
     );
     const { conditions, mainFields } = config.environments.ssr.resolve;
     expect(conditions).not.toContain("node");
-    expect(conditions).toEqual(defaultClientConditions);
+    // React 19's react-dom/server: "workerd" is its edge build. Its "browser"
+    // build needs MessageChannel when it loads, which workerd does not have at
+    // this compatibility date, so the worker fails to start.
+    expect(conditions).toEqual(["workerd", ...defaultClientConditions]);
     expect(mainFields).toEqual(defaultClientMainFields);
   }, 120_000);
 });

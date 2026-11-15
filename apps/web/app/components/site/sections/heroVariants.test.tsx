@@ -30,6 +30,10 @@ import CommercialTemplate from "~/components/CommercialTemplate";
 
 const ctx = makeTestCtx();
 
+// React 19 writes a preload <link> for a hero's image ahead of the markup (in a
+// full page it goes into <head>). The section's own root element follows it.
+const rootMarkup = (markup: string) => markup.replace(/^(?:<link rel="preload" as="image"[^>]*\/>)+/, "");
+
 describe("hero variants", () => {
   it("split puts copy on the page surface beside the image", () => {
     const html = renderToStaticMarkup(
@@ -86,14 +90,14 @@ describe("hero variants", () => {
       renderToStaticMarkup(<HeroEditorialSection {...props} parallax={false} />),
       renderToStaticMarkup(<HeroMinimalSection {...props} />),
     ];
-    for (const markup of markups) {
+    for (const markup of markups.map(rootMarkup)) {
       expect(markup.startsWith("<section")).toBe(true);
       expect(markup.slice(0, markup.indexOf(">"))).toContain("data-pp-hero");
     }
   });
 
   it("the legacy full-bleed hero carries the marker too", () => {
-    const markup = renderToStaticMarkup(<HeroSection ctx={ctx} centered={false} minH="tall" />);
+    const markup = rootMarkup(renderToStaticMarkup(<HeroSection ctx={ctx} centered={false} minH="tall" />));
     expect(markup.slice(0, markup.indexOf(">"))).toContain("data-pp-hero");
   });
 

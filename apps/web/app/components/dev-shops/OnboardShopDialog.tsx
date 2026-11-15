@@ -45,7 +45,7 @@ export function OnboardShopDialog({
   slug: string;
   onSlugChange: (value: string) => void;
   onNameChange: (e: ChangeEvent<HTMLInputElement>) => void;
-  nameRef: RefObject<HTMLInputElement>;
+  nameRef: RefObject<HTMLInputElement | null>;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
