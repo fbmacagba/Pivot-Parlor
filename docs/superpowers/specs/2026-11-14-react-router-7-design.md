@@ -43,6 +43,8 @@ Design, 2026-11-14. Status: **awaiting the owner's decision**. No code has been 
 
 **Visible to visitors:** nothing, by design. One side effect: a visitor with a tab open during the deploy may see one error on their next click, until they reload. Every deploy that changes the data format does this. The plan deploys at a quiet hour.
 
+*Corrected in PR B's final review:* for a form submitted from such a tab, that was an understatement. React Router 7 reads Remix 2's `?_data=` request as an ordinary page post, so the action would run and the old tab would then show an error. On the till, that is a sale recorded, then a screen inviting a second one. *Ruling:* `functions/_middleware.ts` answers a Remix 2 page data request (`app/lib/remix2Reload.ts`) with Remix 2's own reload instruction, before anything runs. The tab reloads the page it is on, now on the new client. Measured in a browser, with a tab loaded from main's build and the server then swapped: without it, the old tab's post reached the action (400, HTML); with it, the answer is 204 and the tab reloads with no error. A link click in an old tab already reloads by itself, because the old route files are gone. Remove the shim a few weeks after the deploy.
+
 **Recommendation:** go ahead. PR A first, then PR B. React Router 8 and React 19 come later as their own project (Stage 2 below).
 
 ---
