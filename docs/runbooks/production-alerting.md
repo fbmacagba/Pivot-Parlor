@@ -326,6 +326,11 @@ was. Not reported at all:
   post (an embedded frame, a browser extension or a proxy that rewrites
   `Origin`). The workerd smoke check (`apps/web/scripts/smoke-build.mjs`) posts
   four of these, and fails if any is not refused, runs an action or is reported.
+  A refusal logs nothing and sends no report. To see them, watch the website's
+  requests live (`cd apps/web && npx wrangler pages deployment tail
+  --project-name pivot-parlor-web --method POST`, each request with its status)
+  or look for POST 403s on pivotparlor.com in the zone's HTTP traffic
+  analytics.
 
 The API logs at most 30 reports a minute for one route and kind (per
 Cloudflare location, the `WEB_ERROR_LIMITER` binding) and drops the rest.
