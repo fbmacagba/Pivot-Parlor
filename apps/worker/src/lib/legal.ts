@@ -5,7 +5,7 @@
 //
 // KEEP IN SYNC with DPA_VERSION in apps/web/app/lib/legalEntity.ts. The version
 // is recorded server-side, not taken from the client, so it cannot be spoofed.
-export const LEGAL_DOC_VERSION = "1.0";
+export const LEGAL_DOC_VERSION = "1.1";
 
 // Values stored in legal_acceptances.document:
 //   terms_dpa — a shop admin accepting the Terms + Data Processing Agreement.

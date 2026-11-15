@@ -86,6 +86,11 @@ export default function Privacy() {
                 contact or onboarding enquiry.
               </li>
               <li>
+                <strong>Chat messages:</strong> what you type into the chat
+                assistant on this website. We send it to an AI model to write
+                the reply and do not keep the conversation on our systems.
+              </li>
+              <li>
                 <strong>Account data:</strong> email address and hashed password
                 if you register as a shop admin or staff member, or your name
                 and email if you sign in via a social provider (Google or
@@ -132,6 +137,15 @@ export default function Privacy() {
               <li>
                 <strong>To respond to enquiries and onboard new shops</strong>;
                 lawful basis: legitimate interests / performance of a contract.
+              </li>
+              <li>
+                <strong>To answer questions you ask our chat assistant</strong>;
+                lawful basis: legitimate interests.
+              </li>
+              <li>
+                <strong>To build and update shop websites with AI tools</strong>{" "}
+                from the shop and business data a shop gives us; lawful basis:
+                performance of a contract.
               </li>
               <li>
                 <strong>To operate and deliver the platform</strong>, including
@@ -195,6 +209,14 @@ export default function Privacy() {
                 transactional emails such as booking confirmations and
                 reminders, acting as our processor. Resend processes email data
                 in the United States.
+              </li>
+              <li>
+                <strong>AI model providers</strong> - to write chat replies and
+                to build and update shop websites, acting as our processors.
+                Requests go through OpenRouter, Inc. (United States), which
+                passes each one to the provider of the model in use (for our
+                chat assistant, currently Google), or directly to OpenAI OpCo,
+                LLC (United States) or Anthropic Ireland, Limited.
               </li>
               <li>
                 <strong>Law enforcement or regulators</strong> - where required
