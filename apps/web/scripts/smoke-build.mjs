@@ -11,8 +11,8 @@
 //   node scripts/smoke-build.mjs [dir]
 // dir is what gets deployed: ./build/client (the default, wrangler.toml's
 // pages_build_output_dir) or ./.pages-dist (deploy-web.yml).
-// GET only. API calls go to the API service binding, which is not connected
-// locally, so nothing here reaches a real API.
+// GETs, plus one sign-out POST with no session. API calls go to the API service
+// binding, which is not connected locally, so nothing here reaches a real API.
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -113,6 +113,22 @@ try {
     await data.text();
     if (data.status !== 200) fail(`GET /_root.data: status ${data.status}, expected 200`);
     if (!/^text\/x-script/.test(data.headers.get("content-type") ?? "")) fail(`GET /_root.data: content-type ${data.headers.get("content-type")}`);
+
+    // Signing out the way <Form action="/logout"> does: the router's own data
+    // request. Its redirect must still carry the cookies that clear the session,
+    // through functions/_middleware.ts, which rebuilds every response. With no
+    // session the action calls no API. wrangler.toml's APP_DOMAIN makes it two
+    // cookies: the host-only one and the .pivotparlor.com one.
+    const logout = await fetch(`${BASE}/logout.data`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: BASE },
+      body: "",
+      redirect: "manual",
+    });
+    await logout.text();
+    const cleared = logout.headers.getSetCookie().filter((c) => /^pp_session=;/.test(c) && /Max-Age=0/i.test(c));
+    if (logout.status !== 202) fail(`POST /logout.data: status ${logout.status}, expected 202 (a data request's redirect)`);
+    if (cleared.length !== 2) fail(`POST /logout.data: ${cleared.length} cookies clear pp_session, expected 2`);
   }
 } catch (err) {
   fail(`request failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -130,5 +146,5 @@ if (failures.length) {
   console.error(`smoke-build: FAILED (${failures.length})\n${failures.map((f) => `  - ${f}`).join("\n")}`);
   process.exit(1);
 }
-console.log(`smoke-build: OK (${PAGES.length} pages and /_root.data under wrangler pages dev, ${DIR})`);
+console.log(`smoke-build: OK (${PAGES.length} pages, /_root.data and a sign-out under wrangler pages dev, ${DIR})`);
 process.exit(0);
