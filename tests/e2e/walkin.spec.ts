@@ -17,10 +17,11 @@ test.describe("public walk-in queue", () => {
   test.setTimeout(60_000);
 
   test.beforeEach(async ({ page }) => {
-    // Suppress the cookie-consent banner so it can't intercept clicks.
+    // Suppress the cookie-consent banner so it can't intercept clicks. A shop
+    // with an address asks about its Google map, so the record answers that too.
     await page.addInitScript(() => {
       try {
-        localStorage.setItem("pp_cookie_consent", JSON.stringify({ essential: true }));
+        localStorage.setItem("pp_cookie_consent", JSON.stringify({ essential: true, maps: "declined" }));
         localStorage.setItem("pp_platform_consent", JSON.stringify({ decided: true }));
       } catch {
         /* ignore */

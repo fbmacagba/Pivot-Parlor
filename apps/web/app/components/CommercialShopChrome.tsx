@@ -829,6 +829,8 @@ export function CommercialShopChrome({
 
       <ShopSiteCookieConsent
         forceOpen={cookieForce}
+        // The same rule as the site's map (canMap): a real, non-demo address.
+        asksAboutMap={Boolean(settings.address?.trim()) && !demo}
         onClose={() => setCookieForce(false)}
         onHeightChange={setCookieHeight}
         onOpenChange={setCookieOpen}

@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readMapConsent, recordShopConsent, SHOP_CONSENT_KEY, type MapConsent } from "~/lib/mapConsent";
 
 // Shop-site cookie notice (PECR / UK GDPR).
 //
-// Shops set ONLY strictly-necessary cookies (session + security), so under PECR
-// no consent is required — this is an INFORMATIONAL notice, not a consent
-// choice. If the visitor already acknowledged the notice on the main Pivot
-// Parlor platform (pp_platform_consent), we skip showing it again here to avoid
-// a double notice on shops served under pivotparlor.com/<slug>.
+// Shops set only strictly necessary cookies (session + security). The one
+// optional item is the Google map on a shop with a real address: its iframe
+// lets Google set cookies, so on those shops the notice is a choice ("Allow
+// map" or "Essential only") and the map loads only after "Allow map" (see
+// ConsentedMap). Elsewhere it stays an informational notice, and one already
+// acknowledged on the main platform (pp_platform_consent) is not shown again,
+// to avoid a double notice on shops served under pivotparlor.com/<slug>.
+// The footer's "Manage cookie preferences" reopens it, so a choice can be
+// changed or withdrawn.
 
-const SHOP_KEY = "pp_cookie_consent";
 const PLATFORM_KEY = "pp_platform_consent";
 
 function alreadyAcknowledgedOnPlatform(): boolean {
@@ -24,7 +28,7 @@ function alreadyAcknowledgedOnPlatform(): boolean {
 
 function alreadyAcknowledgedOnShop(): boolean {
   try {
-    return !!localStorage.getItem(SHOP_KEY);
+    return !!localStorage.getItem(SHOP_CONSENT_KEY);
   } catch {
     return false;
   }
@@ -32,11 +36,14 @@ function alreadyAcknowledgedOnShop(): boolean {
 
 export function ShopSiteCookieConsent({
   forceOpen,
+  asksAboutMap = false,
   onClose,
   onHeightChange,
   onOpenChange,
 }: {
   forceOpen: boolean;
+  /** This shop shows a Google map, so the notice asks whether to load it. */
+  asksAboutMap?: boolean;
   onClose: () => void;
   onHeightChange?: (height: number) => void;
   /** Whether the notice is on screen: the phone booking bar yields to it. */
@@ -67,10 +74,16 @@ export function ShopSiteCookieConsent({
       setVisible(true);
       return;
     }
+    if (asksAboutMap) {
+      // The platform notice never asked about the map: only a map choice
+      // made on a shop closes this one.
+      if (readMapConsent() === null) setVisible(true);
+      return;
+    }
     // Honour a decision already made on the main platform site.
     if (alreadyAcknowledgedOnPlatform()) return;
     if (!alreadyAcknowledgedOnShop()) setVisible(true);
-  }, [forceOpen]);
+  }, [forceOpen, asksAboutMap]);
 
   // When reopened from the footer link, move focus to the notice so keyboard
   // and screen-reader users land on what just appeared; restore it on close.
@@ -89,23 +102,24 @@ export function ShopSiteCookieConsent({
     };
   }, [forceOpen, visible]);
 
-  const dismiss = useCallback(() => {
-    try {
-      localStorage.setItem(
-        SHOP_KEY,
-        JSON.stringify({
-          essential: true,
-          timestamp: new Date().toISOString(),
-        }),
-      );
-    } catch {
-      /* ignore */
-    }
-    setVisible(false);
-    onClose();
-  }, [onClose]);
+  const decide = useCallback(
+    (maps: MapConsent | null) => {
+      recordShopConsent(maps);
+      setVisible(false);
+      onClose();
+    },
+    [onClose],
+  );
 
   if (!visible) return null;
+
+  // The label takes the theme's on-accent colour: fixed black text was 1.76:1
+  // on a dark accent (a deep green salon palette). Black stays the fallback
+  // for a scope without the site-theme tokens.
+  // The map choice's two buttons look the same: declining is as easy and as
+  // prominent as allowing (ICO cookie guidance).
+  const primary =
+    "min-h-11 shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--st-on-accent,#000)] md:min-h-12 md:min-w-[10rem]";
 
   return (
     <div
@@ -114,32 +128,49 @@ export function ShopSiteCookieConsent({
       role="region"
       aria-label="Cookie notice"
     >
-      {/* Phone: one compact row beside the button, so the notice does not
-          take the shop's first screen. Wider: heading and full sentence. */}
-      <div className="mx-auto flex max-w-4xl items-center gap-3 md:justify-between">
-        <div className="min-w-0 flex-1">
-          <p className="pp-heading hidden text-lg text-white md:block">Cookies &amp; privacy</p>
-          <p className="text-sm text-white/60 md:hidden">
-            Only strictly necessary cookies, for your session and security. No analytics or marketing.
-          </p>
-          <p className="mt-1 hidden max-w-2xl text-sm text-white/60 md:block">
-            We use only strictly necessary cookies to run this site, such as
-            your session and security checks. We don&rsquo;t use analytics or
-            marketing cookies. See the Privacy Policy in the footer for details.
-          </p>
+      {asksAboutMap ? (
+        <div className="mx-auto flex max-w-4xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="pp-heading hidden text-lg text-white md:block">Cookies &amp; privacy</p>
+            <p className="text-sm text-white/60 md:hidden">
+              Essential cookies only, unless you allow the Google map, which sets Google&rsquo;s cookies.
+            </p>
+            <p className="mt-1 hidden max-w-2xl text-sm text-white/60 md:block">
+              We use only strictly necessary cookies to run this site, such as
+              your session and security checks. The map on this site comes
+              from Google Maps, which sets its own cookies when it loads. See
+              the Cookie Policy in the footer for details.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button ref={dismissRef} type="button" className={`${primary} flex-1 md:flex-none`} onClick={() => decide("declined")}>
+              Essential only
+            </button>
+            <button type="button" className={`${primary} flex-1 md:flex-none`} onClick={() => decide("granted")}>
+              Allow map
+            </button>
+          </div>
         </div>
-        {/* The label takes the theme's on-accent colour: fixed black text was
-            1.76:1 on a dark accent (a deep green salon palette). Black stays
-            the fallback for a scope without the site-theme tokens. */}
-        <button
-          ref={dismissRef}
-          type="button"
-          className="min-h-11 shrink-0 rounded-lg bg-[color:var(--color-accent)] px-4 font-semibold text-[color:var(--st-on-accent,#000)] md:min-h-12 md:min-w-[10rem]"
-          onClick={dismiss}
-        >
-          Got it
-        </button>
-      </div>
+      ) : (
+        // Phone: one compact row beside the button, so the notice does not
+        // take the shop's first screen. Wider: heading and full sentence.
+        <div className="mx-auto flex max-w-4xl items-center gap-3 md:justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="pp-heading hidden text-lg text-white md:block">Cookies &amp; privacy</p>
+            <p className="text-sm text-white/60 md:hidden">
+              Only strictly necessary cookies, for your session and security. No analytics or marketing.
+            </p>
+            <p className="mt-1 hidden max-w-2xl text-sm text-white/60 md:block">
+              We use only strictly necessary cookies to run this site, such as
+              your session and security checks. We don&rsquo;t use analytics or
+              marketing cookies. See the Privacy Policy in the footer for details.
+            </p>
+          </div>
+          <button ref={dismissRef} type="button" className={primary} onClick={() => decide(null)}>
+            Got it
+          </button>
+        </div>
+      )}
     </div>
   );
 }

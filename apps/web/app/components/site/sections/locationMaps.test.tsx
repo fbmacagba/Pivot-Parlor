@@ -15,6 +15,7 @@ vi.mock("react-router", async () => {
 
 import { LocationSection } from "./LocationSection";
 import { LocationMapFirstSection } from "./LocationMapFirstSection";
+import { mapEmbedSrc } from "./VisitDetails";
 
 describe("googleMapsEmbedUrl", () => {
   it("builds the output=embed URL with the query encoded", () => {
@@ -35,18 +36,14 @@ const DIRECTIONS = "https://www.google.com/maps/search/?api=1&amp;query=1%20High
 const COORDS_EMBED = "https://www.google.com/maps?q=51.5%2C-0.1&amp;z=15&amp;output=embed";
 
 describe("LocationSection maps", () => {
-  it("embeds the address when no coordinates are set and links directions", () => {
+  it("offers the map behind the visitor's consent and links directions", () => {
     const html = renderToStaticMarkup(<LocationSection ctx={makeTestCtx()} />);
-    expect(html).toContain(ADDRESS_EMBED);
+    expect(html).not.toContain(ADDRESS_EMBED);
+    expect(html).not.toContain("<iframe");
+    expect(html).toContain("Show map");
     expect(html).toContain(DIRECTIONS);
     expect(html).toContain("Get directions");
     expect(html).toContain('target="_blank"');
-  });
-  it("prefers coordinates when both are set", () => {
-    const ctx = makeTestCtx({ settings: { address: "1 High St, London", lat: 51.5, lng: -0.1 } });
-    const html = renderToStaticMarkup(<LocationSection ctx={ctx} />);
-    expect(html).toContain(COORDS_EMBED);
-    expect(html).not.toContain(ADDRESS_EMBED);
   });
   it("renders nothing without an address, hours or phone", () => {
     expect(
@@ -72,15 +69,23 @@ describe("LocationSection maps", () => {
 });
 
 describe("LocationMapFirstSection maps", () => {
-  it("embeds the address when no coordinates are set and links directions", () => {
+  it("offers the map behind the visitor's consent and links directions", () => {
     const html = renderToStaticMarkup(<LocationMapFirstSection ctx={makeTestCtx()} density="airy" />);
-    expect(html).toContain(ADDRESS_EMBED);
+    expect(html).not.toContain(ADDRESS_EMBED);
+    expect(html).toContain("Show map");
     expect(html).toContain(DIRECTIONS);
     expect(html).toContain("Get directions");
   });
+});
+
+// The map is a Google iframe that loads only after consent (ConsentedMap), so
+// its address is read from the URL builder rather than the server HTML.
+describe("mapEmbedSrc", () => {
+  it("embeds the address when no coordinates are set", () => {
+    expect(mapEmbedSrc(makeTestCtx())).toBe(ADDRESS_EMBED.replace(/&amp;/g, "&"));
+  });
   it("prefers coordinates when both are set", () => {
     const ctx = makeTestCtx({ settings: { address: "1 High St, London", lat: 51.5, lng: -0.1 } });
-    const html = renderToStaticMarkup(<LocationMapFirstSection ctx={ctx} density="airy" />);
-    expect(html).toContain(COORDS_EMBED);
+    expect(mapEmbedSrc(ctx)).toBe(COORDS_EMBED.replace(/&amp;/g, "&"));
   });
 });

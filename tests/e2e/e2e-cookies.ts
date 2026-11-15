@@ -27,16 +27,20 @@ export async function setE2eCookiesOnPage(
 }
 
 /**
- * Pre-acknowledge the platform cookie notice (PlatformCookieBanner, localStorage key
- * pp_platform_consent) so its fixed bottom bar never covers buttons the test clicks.
+ * Pre-acknowledge the cookie notices so their fixed bottom bars never cover
+ * buttons the test clicks: the platform's (PlatformCookieBanner,
+ * pp_platform_consent) and a shop's (ShopSiteCookieConsent, pp_cookie_consent),
+ * which on a shop with an address asks about its Google map until answered.
  * Runs before every document in this page, including the first navigation.
  */
 export async function acknowledgePlatformCookieNotice(page: Page): Promise<void> {
   await page.addInitScript(() => {
     try {
+      const timestamp = new Date().toISOString();
+      localStorage.setItem("pp_platform_consent", JSON.stringify({ decided: true, timestamp }));
       localStorage.setItem(
-        "pp_platform_consent",
-        JSON.stringify({ decided: true, timestamp: new Date().toISOString() })
+        "pp_cookie_consent",
+        JSON.stringify({ essential: true, maps: "declined", timestamp })
       );
     } catch {
       /* private browsing: the banner shows and the test may need to dismiss it */

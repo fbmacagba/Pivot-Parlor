@@ -1,3 +1,4 @@
+import { ConsentedMap } from "~/components/ConsentedMap";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { ContactLines, DirectionsLink, VisitHours, canMap, mapEmbedSrc } from "~/components/site/sections/VisitDetails";
 
@@ -38,8 +39,7 @@ export function LocationSection({ ctx }: { ctx: SiteRenderContext }) {
         </div>
         <div className="flex flex-col">
           <div className="min-h-[280px] flex-1 overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card-5)]">
-            <iframe title={`Map showing ${ctx.site.shop_name}`} className="h-full min-h-[280px] w-full border-0" loading="lazy" referrerPolicy="no-referrer-when-downgrade"
-              src={mapEmbedSrc(ctx)} />
+            <ConsentedMap title={`Map showing ${ctx.site.shop_name}`} className="h-full min-h-[280px] w-full" src={mapEmbedSrc(ctx)} />
           </div>
           <DirectionsLink ctx={ctx} className="mt-4 self-start" />
         </div>

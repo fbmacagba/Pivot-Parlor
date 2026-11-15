@@ -62,8 +62,10 @@ export default function ShopCookiePolicy() {
         <p>
           Our use of cookies is governed by the UK Privacy and Electronic
           Communications Regulations (PECR) and the UK General Data Protection
-          Regulation (UK GDPR). We currently use only strictly necessary
-          cookies; we do not use analytics or marketing cookies.
+          Regulation (UK GDPR). We use only strictly necessary cookies of our
+          own; we do not use analytics or marketing cookies. The one optional
+          item is the Google map of our location, which loads only if you
+          allow it (section 2.3).
         </p>
 
         {/* 2. Cookies we use */}
@@ -90,8 +92,8 @@ export default function ShopCookiePolicy() {
           </li>
           <li>
             <strong>Cookie preference</strong>: records that you have seen our
-            cookie notice so it is not shown again. Stored in your
-            browser&rsquo;s local storage.
+            cookie notice, and your choice about the map, so the notice is not
+            shown again. Stored in your browser&rsquo;s local storage.
           </li>
         </ul>
 
@@ -103,6 +105,28 @@ export default function ShopCookiePolicy() {
           site. If this changes in the future, we will update this policy and,
           where the law requires it, ask for your consent before setting any
           such cookies.
+        </p>
+
+        <h3 className="font-semibold text-[color:var(--st-ink-80)]">
+          2.3 Google Maps (optional)
+        </h3>
+        <p>
+          Where this website shows a map of our location, the map comes from
+          Google Maps. When it loads, Google receives your IP address and may
+          set its own cookies on your device. The map loads only after you
+          choose Allow map or Show map; until then you see a placeholder
+          instead. Choosing Essential only keeps the map off, and the
+          &ldquo;Get directions&rdquo; link still opens Google Maps in a new
+          tab if you want it. See{" "}
+          <a
+            href="https://policies.google.com/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
+          >
+            Google&rsquo;s Privacy Policy
+          </a>
+          .
         </p>
 
         {/* 3. Third-party cookies */}
@@ -132,6 +156,10 @@ export default function ShopCookiePolicy() {
             .
           </li>
           <li>
+            <strong>Google Maps</strong>: only if you allow the map (section
+            2.3).
+          </li>
+          <li>
             <strong>Social login providers</strong> (Google, Facebook, LinkedIn):
             if you use social login, these providers may set their own
             cookies. Please refer to their respective privacy policies.
@@ -143,10 +171,11 @@ export default function ShopCookiePolicy() {
           4. How to Manage Your Cookie Preferences
         </h2>
         <p>
-          Because we use only strictly necessary cookies, there are no optional
-          cookies to accept or reject. You can re-open our cookie notice at any
-          time via the link in the footer, and you can control cookies through
-          your browser settings.
+          On a page with our map, the cookie notice asks whether to allow it:
+          choose Allow map or Essential only. To change your mind, use
+          &ldquo;Manage cookie preferences&rdquo; in the footer to reopen the
+          notice; choosing Essential only there stops the map loading from then
+          on.
         </p>
         <p>
           You can also control cookies through your browser settings. Most
@@ -192,10 +221,12 @@ export default function ShopCookiePolicy() {
         </h2>
         <p>
           Under PECR and UK GDPR, you have the right to withdraw consent to
-          non-essential cookies at any time; as this site does not currently use
-          any, you can control the strictly necessary cookies by clearing your
-          cookies in your browser settings (note this may sign you out and
-          affect functionality).
+          non-essential cookies at any time. For the map, reopen the cookie
+          notice from the footer and choose Essential only; cookies Google has
+          already set can be removed in your browser settings. You can control
+          the strictly necessary cookies by clearing your cookies in your
+          browser settings (note this may sign you out and affect
+          functionality).
         </p>
         <p>
           For more information about your data rights and how we use your

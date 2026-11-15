@@ -169,6 +169,11 @@ export default function ShopPrivacyPolicy() {
             Limited.
           </li>
           <li>
+            <strong>Google</strong> - only if you choose to show the map of our
+            location: Google Maps receives your IP address and may set its own
+            cookies (see our Cookie Policy).
+          </li>
+          <li>
             <strong>Law enforcement or regulators</strong> - where required to
             do so by law or to protect our rights, property, or safety.
           </li>
