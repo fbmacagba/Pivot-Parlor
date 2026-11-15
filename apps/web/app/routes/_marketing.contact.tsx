@@ -25,36 +25,15 @@ export const links: LinksFunction = () => [
 
 export async function action({ request, context }: ActionFunctionArgs) {
   try {
-    const env = context.env as { API_URL: string; TURNSTILE_SECRET_KEY?: string };
+    const env = context.env as { API_URL: string };
     const form = await readFormData(request);
     if (!form) return json({ success: false, error: UNREADABLE_FORM }, { status: 400 });
 
-    // ── Turnstile verification ──
-    const turnstileToken = form.get("cf-turnstile-response");
-    const secretKey = env.TURNSTILE_SECRET_KEY;
-
-    if (secretKey) {
-      if (!turnstileToken || typeof turnstileToken !== "string") {
-        return json({ success: false, error: "Please complete the security check." }, { status: 400 });
-      }
-
-      const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          secret: secretKey,
-          response: turnstileToken,
-          remoteip: request.headers.get("CF-Connecting-IP") ?? "",
-        }),
-      });
-
-      const verifyData = await verifyRes.json<{ success: boolean }>();
-      if (!verifyData.success) {
-        return json({ success: false, error: "Security check failed. Please try again." }, { status: 400 });
-      }
-    }
-
     // ── Submit to API ──
+    // The widget's token goes to the API, which checks it (once: a token works
+    // only once, so the website must not check it too). The API's refusal
+    // ("Please complete the security check.") comes back below as a 400.
+    const token = form.get("cf-turnstile-response");
     const api = createApiClient(env.API_URL);
     const payload = {
       full_name:  form.get("full_name"),
@@ -63,6 +42,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       email:      form.get("email"),
       phone:      form.get("phone") || null,
       message:    form.get("message") || null,
+      turnstile_token: typeof token === "string" ? token : null,
     };
 
     await api.post("/api/contact", payload);

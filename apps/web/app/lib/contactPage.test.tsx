@@ -109,10 +109,13 @@ describe("/contact action, when the API refuses the enquiry", () => {
     return { status: res.status, body: await res.json(), sent };
   }
 
-  // The API's 4xx is the sender's to fix (a field too long, too many tries),
-  // not a fault on the site, so it keeps its status rather than becoming 500.
+  // The API's 4xx is the sender's to fix (a field too long, too many tries,
+  // a failed security check), not a fault on the site, so it keeps its status
+  // rather than becoming 500.
   it.each([
     [400, "full_name is too long (120 characters at most)"],
+    [400, "Please complete the security check."],
+    [400, "Security check failed. Please try again."],
     [429, "Too many requests"],
   ])("passes the API's %i on with its message", async (status, error) => {
     const r = await submit(status, { success: false, error });
@@ -127,5 +130,74 @@ describe("/contact action, when the API refuses the enquiry", () => {
   it("answers success when the API stores the enquiry (control)", async () => {
     const r = await submit(201, { success: true, data: { id: "c-1" } });
     expect(r).toEqual({ status: 200, body: { success: true }, sent: ["POST /api/contact"] });
+  });
+});
+
+// The bot check runs once, on the API (apps/worker/src/routes/contact.ts), so
+// a bot posting straight to the API meets it too. A Turnstile token can be
+// redeemed only once: if the website checked it as well, the API's check of
+// the same token would fail and every real enquiry would be refused.
+describe("/contact action and the Turnstile token", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function submitWith(opts: { extra?: Record<string, string>; env?: Record<string, string> }) {
+    const sent: string[] = [];
+    const bodies: Array<Record<string, unknown> | null> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        sent.push(`${init?.method ?? "GET"} ${url.host}${url.pathname}`);
+        const raw = init?.body;
+        bodies.push(typeof raw === "string" && raw.startsWith("{") ? JSON.parse(raw) : null);
+        return url.host === "challenges.cloudflare.com"
+          ? Response.json({ success: true })
+          : Response.json({ success: true, data: { id: "c-1" } }, { status: 201 });
+      }),
+    );
+    const form = new URLSearchParams({
+      full_name: "Casey Example",
+      shop_name: "Example Cuts",
+      shop_type: "barber_shop",
+      email: "casey@example.test",
+      message: "Hello",
+      ...opts.extra,
+    });
+    const res = asResponse(
+      await action({
+        request: new Request("https://pivotparlor.com/contact", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "CF-Connecting-IP": "203.0.113.9" },
+          body: form.toString(),
+        }),
+        params: {},
+        context: { env: { API_URL: "https://api.test", ...opts.env } },
+      } as never),
+    );
+    return { status: res.status, sent, bodies };
+  }
+
+  it("forwards the widget's token to the API as turnstile_token", async () => {
+    const r = await submitWith({ extra: { "cf-turnstile-response": "tok-123" } });
+    expect(r.sent).toEqual(["POST api.test/api/contact"]);
+    expect(r.bodies[0]).toMatchObject({ turnstile_token: "tok-123" });
+  });
+
+  it("never checks the token itself, even with a Pages secret set", async () => {
+    const r = await submitWith({
+      extra: { "cf-turnstile-response": "tok-123" },
+      env: { TURNSTILE_SECRET_KEY: "pages-secret" },
+    });
+    expect(r.status).toBe(200);
+    expect(r.sent).toEqual(["POST api.test/api/contact"]);
+    expect(r.bodies[0]).toMatchObject({ turnstile_token: "tok-123" });
+  });
+
+  it("forwards no token when the form carries none, and lets the API decide", async () => {
+    const r = await submitWith({});
+    expect(r.sent).toEqual(["POST api.test/api/contact"]);
+    expect(r.bodies[0]).toMatchObject({ turnstile_token: null });
   });
 });

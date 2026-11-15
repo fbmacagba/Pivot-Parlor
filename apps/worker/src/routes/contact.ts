@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
 import { batchWithAudit } from "../audit/context.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
+import { readTurnstileToken, verifyTurnstileToken } from "../services/turnstile.js";
 import {
   CONTACT_FIELD_LIMITS,
   type ContactLimitedField,
@@ -83,6 +84,33 @@ contact.post(
     if (!validShopTypes.includes(shopType)) {
       console.warn("[worker contact] invalid shop_type");
       return c.json({ success: false, error: "Invalid shop_type" }, 400);
+    }
+
+    // The bot check runs here, once, and after the field checks so a field
+    // mistake never spends the visitor's token (a token works only once).
+    // The website forwards the widget's token and never checks it itself.
+    // Unset (staging, local), the form works without it.
+    const turnstileSecret = c.env.TURNSTILE_SECRET_KEY;
+    if (turnstileSecret) {
+      const token = readTurnstileToken(body.turnstile_token);
+      if (!token) {
+        console.warn("[worker contact] no security check token");
+        return c.json({ success: false, error: "Please complete the security check." }, 400);
+      }
+      // Error codes only: the token itself never goes in a log line.
+      const check = await verifyTurnstileToken(turnstileSecret, token, clientIp(c));
+      if (check.result === "misconfigured") {
+        console.error("[worker contact] Turnstile refused our secret", { codes: check.codes });
+        return c.json({ success: false, error: "We couldn't run the security check. Please try again later." }, 503);
+      }
+      if (check.result === "unavailable") {
+        console.warn("[worker contact] Turnstile siteverify unavailable", { codes: check.codes });
+        return c.json({ success: false, error: "We couldn't run the security check. Please try again later." }, 503);
+      }
+      if (check.result === "rejected") {
+        console.warn("[worker contact] security check failed", { codes: check.codes });
+        return c.json({ success: false, error: "Security check failed. Please try again." }, 400);
+      }
     }
 
     const id = crypto.randomUUID();
