@@ -218,6 +218,10 @@ const shopId = user.role === "developer"
   : user.shop_id;
 ```
 
+### The Website Refuses Posts From Other Sites
+
+`functions/_middleware.ts` answers 403 to any POST, PUT, PATCH or DELETE whose `Origin` names another site (`app/lib/crossSitePost.ts`), for every route, before the router. React Router 7 checks pages only, so before this a cross-site post to an action with no page (`/logout`) ran. A feature that needs a real cross-site post to the website (a sign-in provider's form_post callback, say) must be exempted there deliberately; webhooks and OAuth callbacks belong on the API worker.
+
 ### Stripe Webhook Isolation
 
 Stripe webhook routes are mounted on a separate `Hono` app (`stripeWebhookApp`) that bypasses global CORS and logger middleware. This avoids edge cases where Stripe's lack of an `Origin` header causes redirects or non-JSON responses.

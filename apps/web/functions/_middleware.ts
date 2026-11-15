@@ -5,6 +5,7 @@ import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
 import { CLIENT_ERRORS_PATH } from "../app/lib/browserErrors";
 import { handleClientErrors, pageRouteIds, type BrowserErrorsBinding } from "../app/lib/clientErrorsEndpoint";
+import { crossSitePostRefusal, isCrossSitePost } from "../app/lib/crossSitePost";
 import { webLoadContext } from "../app/lib/loadContext";
 import { hasUnsafePathSegment } from "../app/lib/pathSafety";
 import { remix2ReloadResponse } from "../app/lib/remix2Reload";
@@ -70,6 +71,9 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       })
     );
   }
+  // A post whose Origin names another website: refused for every route, before
+  // the router, which checks pages only (app/lib/crossSitePost.ts).
+  if (isCrossSitePost(context.request)) return withSecurityHeaders(crossSitePostRefusal());
   // One nonce per request, for this response's header and its inline scripts
   // (app/lib/securityHeaders.ts). The render reads it through getLoadContext.
   const nonce = newCspNonce();
