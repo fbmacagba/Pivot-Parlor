@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readMapConsent, recordShopConsent, SHOP_CONSENT_KEY, type MapConsent } from "~/lib/mapConsent";
+import { MAP_CONSENT_EVENT, readMapConsent, recordShopConsent, SHOP_CONSENT_KEY, type MapConsent } from "~/lib/mapConsent";
 
 // Shop-site cookie notice (PECR / UK GDPR).
 //
@@ -85,6 +85,18 @@ export function ShopSiteCookieConsent({
     if (!alreadyAcknowledgedOnShop()) setVisible(true);
   }, [forceOpen, asksAboutMap]);
 
+  // A choice made elsewhere while the notice is up (a map's "Show map", or
+  // another tab) answers it: close rather than keep asking.
+  useEffect(() => {
+    if (!visible) return;
+    const answered = () => {
+      setVisible(false);
+      onClose();
+    };
+    window.addEventListener(MAP_CONSENT_EVENT, answered);
+    return () => window.removeEventListener(MAP_CONSENT_EVENT, answered);
+  }, [visible, onClose]);
+
   // When reopened from the footer link, move focus to the notice so keyboard
   // and screen-reader users land on what just appeared; restore it on close.
   // Guarded on `visible` so the button exists before we focus it.
@@ -102,14 +114,9 @@ export function ShopSiteCookieConsent({
     };
   }, [forceOpen, visible]);
 
-  const decide = useCallback(
-    (maps: MapConsent | null) => {
-      recordShopConsent(maps);
-      setVisible(false);
-      onClose();
-    },
-    [onClose],
-  );
+  // Recording the choice fires MAP_CONSENT_EVENT, which closes the notice
+  // through the listener above.
+  const decide = useCallback((maps: MapConsent | null) => recordShopConsent(maps), []);
 
   if (!visible) return null;
 

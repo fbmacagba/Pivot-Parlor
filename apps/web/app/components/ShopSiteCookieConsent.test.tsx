@@ -6,6 +6,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ShopSiteCookieConsent } from "./ShopSiteCookieConsent";
+import { ConsentedMap } from "./ConsentedMap";
 import { readMapConsent, recordShopConsent } from "~/lib/mapConsent";
 
 describe("ShopSiteCookieConsent", () => {
@@ -71,6 +72,26 @@ describe("ShopSiteCookieConsent", () => {
       act(() => button("Essential only")!.click());
       expect(readMapConsent()).toBe("declined");
       expect(container!.querySelector('[aria-label="Cookie notice"]')).toBeNull();
+    });
+
+    it("closes when the visitor answers on the map itself (Show map)", () => {
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root!.render(
+          <>
+            <ConsentedMap title="Map" src="https://www.google.com/maps?q=1&output=embed" />
+            <ShopSiteCookieConsent forceOpen={false} asksAboutMap onClose={() => {}} />
+          </>,
+        ),
+      );
+      expect(container.querySelector('[aria-label="Cookie notice"]')).not.toBeNull();
+      const show = [...container.querySelectorAll("button")].find((b) => b.textContent === "Show map");
+      act(() => show!.click());
+      expect(readMapConsent()).toBe("granted");
+      expect(container.querySelector("iframe")).not.toBeNull();
+      expect(container.querySelector('[aria-label="Cookie notice"]')).toBeNull();
     });
 
     it("stays closed once the visitor chose", () => {
