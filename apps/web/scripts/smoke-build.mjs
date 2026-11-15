@@ -37,12 +37,14 @@ const PAGES = [
   { path: "/no-such-page-smoke", status: 404 },
 ];
 
-// [path, Origin]: a document post, a data post, and a data post from a context
-// browsers label "null" (a sandboxed frame, say).
+// [path, Origin]: a page's document post, a data post, a data post from a
+// context browsers label "null" (a sandboxed frame, say), and a document post
+// to an action with no page (React Router 7 checks pages only).
 const CROSS_SITE_POSTS = [
   ["/login", "https://elsewhere.example"],
   ["/login.data", "https://elsewhere.example"],
   ["/login.data", "null"],
+  ["/logout", "https://elsewhere.example"],
 ];
 const LOG_SETTLE_MS = 1500;
 
@@ -147,12 +149,13 @@ try {
     if (logout.status !== 202) fail(`POST /logout.data: status ${logout.status}, expected 202 (a data request's redirect)`);
     if (cleared.length !== 2) fail(`POST /logout.data: ${cleared.length} cookies clear pp_session, expected 2`);
 
-    // Posts whose Origin names another site, or "null". React Router 7 refuses
-    // them with a 400 before any action runs and hands the refusal to
-    // handleError. That is the site defending itself, not a bug, so it must not
-    // be reported: a report is logged first, and the error-line check below
-    // fails on it. /login is a page with an action; the sign-out above is the
-    // same-site control.
+    // Posts whose Origin names another site, or "null". functions/_middleware.ts
+    // refuses them with a 403 before any route runs: React Router 7 checks
+    // pages only, so a cross-site post to /logout used to sign the visitor out.
+    // No action may run (no cookie is cleared), and the refusal is the site
+    // defending itself, not a bug, so it must not be reported: a report is
+    // logged first, and the error-line check below fails on it. The sign-out
+    // above is the same-site control.
     for (const [path, origin] of CROSS_SITE_POSTS) {
       const res = await fetch(BASE + path, {
         method: "POST",
@@ -161,7 +164,9 @@ try {
         redirect: "manual",
       });
       await res.text();
-      if (res.status !== 400) fail(`POST ${path} with Origin ${origin}: status ${res.status}, expected 400 (refused as cross-site)`);
+      const where = `POST ${path} with Origin ${origin}`;
+      if (res.status !== 403) fail(`${where}: status ${res.status}, expected 403 (refused as cross-site)`);
+      if (res.headers.getSetCookie().some((c) => /^pp_session=/.test(c))) fail(`${where}: set pp_session, so an action ran`);
     }
     // The runtime writes its log after the response; read it only once it has.
     await sleep(LOG_SETTLE_MS);
