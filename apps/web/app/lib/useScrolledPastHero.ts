@@ -12,7 +12,7 @@ export const HERO_MARKER_ATTR = "data-pp-hero";
  * the header CTA only.
  */
 export function useScrolledPastHero(enabled: boolean): {
-  sentinelRef: RefObject<HTMLDivElement>;
+  sentinelRef: RefObject<HTMLDivElement | null>;
   pastHero: boolean;
 } {
   const sentinelRef = useRef<HTMLDivElement>(null);

@@ -26,18 +26,21 @@ function devEnv(env: Record<string, unknown>): Record<string, unknown> {
 }
 
 // Build only. The server bundle runs in workerd, so it resolves dependencies
-// the way Vite does for `ssr.target: "webworker"`: the browser conditions, as
-// the Remix 2 build did. @react-router/dev sets Node's server conditions
-// instead, which pick React's Node renderer (no renderToReadableStream), and
-// every page answers 500. Vite appends config arrays, so this replaces the
-// list rather than adding to it. app/lib/serverBuildConditions.test.ts checks
-// the setting; scripts/smoke-build.mjs checks the built site under workerd.
+// for workerd first, then the way Vite does for `ssr.target: "webworker"`: the
+// browser conditions, as the Remix 2 build did. @react-router/dev sets Node's
+// server conditions instead, which pick React's Node renderer (no
+// renderToReadableStream), and every page answers 500. React 19's
+// react-dom/server needs "workerd" (its edge build): its "browser" build uses
+// MessageChannel at load, which workerd lacks here, and the worker never
+// starts. Vite appends config arrays, so this replaces the list rather than
+// adding to it. app/lib/serverBuildConditions.test.ts checks the setting;
+// scripts/smoke-build.mjs checks the built site under workerd.
 const workerConditions: Plugin = {
   name: "pp-server-build-worker-conditions",
   apply: "build",
   configEnvironment(name, options) {
     if (name !== "ssr") return;
-    options.resolve = { ...options.resolve, conditions: [...defaultClientConditions] };
+    options.resolve = { ...options.resolve, conditions: ["workerd", ...defaultClientConditions] };
   },
 };
 
