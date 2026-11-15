@@ -6,7 +6,7 @@
  * offers, and whether a day kept in the page's address may be restored. So in
  * that hour a visitor could pick, or come back to, yesterday.
  *
- * Lives in lib/ rather than routes/ so Remix never mounts it as a route.
+ * Lives in lib/ rather than routes/ so the router never mounts it as a route.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The real module's server helpers (data, redirect) with the screen parts stubbed on top.

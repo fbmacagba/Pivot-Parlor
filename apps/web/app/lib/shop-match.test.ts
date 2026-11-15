@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// In Remix every match carries the URL's FULL params, the root included, but
+// In React Router every match carries the URL's FULL params, the root included, but
 // only routes/$shopSlug loads the shop. Taking the first match with a
 // shopSlug param read the root's data, so the name fell back to the slug:
 // live on 2026-11-10, an iPhone's Add to Home Screen title and the install

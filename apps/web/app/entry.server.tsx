@@ -25,30 +25,40 @@ export default async function handleRequest(
   const { env, waitUntil, cspNonce } = loadContext as ReportingContext & Pick<WebLoadContext, "cspNonce">;
 
   // Abort when the visitor goes away, or when the stream outlives streamTimeout.
+  // Both stop watching once the render is over, including one that fails
+  // before it streams anything.
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(new Error("render timed out")), streamTimeout + 1_000);
+  const onVisitorGone = () => abort.abort(request.signal.reason);
   if (request.signal.aborted) abort.abort(request.signal.reason);
-  else request.signal.addEventListener("abort", () => abort.abort(request.signal.reason), { once: true });
+  else request.signal.addEventListener("abort", onVisitorGone, { once: true });
+  const done = () => {
+    clearTimeout(timer);
+    request.signal.removeEventListener("abort", onVisitorGone);
+  };
 
   // The request's nonce (functions/_middleware.ts) goes on every inline script
   // this render writes: the router's (root.tsx reads the context) and React's own.
-  const body = await renderToReadableStream(
-    <CspNonceContext.Provider value={cspNonce}>
-      <ServerRouter context={routerContext} url={request.url} nonce={cspNonce} />
-    </CspNonceContext.Provider>,
-    {
-      nonce: cspNonce,
-      signal: abort.signal,
-      onError(error: unknown) {
-        reportServerError(error, { request, env, waitUntil, where: "render" });
-        responseStatusCode = 500;
-      },
-    }
-  );
-  body.allReady.then(
-    () => clearTimeout(timer),
-    () => clearTimeout(timer)
-  );
+  let body: Awaited<ReturnType<typeof renderToReadableStream>>;
+  try {
+    body = await renderToReadableStream(
+      <CspNonceContext.Provider value={cspNonce}>
+        <ServerRouter context={routerContext} url={request.url} nonce={cspNonce} />
+      </CspNonceContext.Provider>,
+      {
+        nonce: cspNonce,
+        signal: abort.signal,
+        onError(error: unknown) {
+          reportServerError(error, { request, env, waitUntil, where: "render" });
+          responseStatusCode = 500;
+        },
+      }
+    );
+  } catch (error) {
+    done();
+    throw error;
+  }
+  body.allReady.then(done, done);
 
   if (isbot(request.headers.get("user-agent") ?? "")) {
     await body.allReady;

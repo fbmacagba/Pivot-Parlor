@@ -12,7 +12,7 @@ import {
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 
 /**
- * POST from Remix (form or JSON):
+ * POST from the website (form or JSON):
  * - Form `_action=regenerate-site`: same session + API pattern as dev.shops.$shopId._index — loads prefs via Worker, then POSTs generate-site to Worker. Returns JSON `{ ok, jobId, shopId }` so `useFetcher` callers can `navigate` (fetcher actions do not perform a document redirect).
  * - `application/json`: proxy to Worker (for programmatic callers).
  */

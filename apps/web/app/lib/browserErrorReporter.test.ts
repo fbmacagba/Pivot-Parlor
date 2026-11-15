@@ -37,7 +37,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** null: Remix's router is not there yet. */
+/** null: the router is not there yet. */
 function install(route: string | null = "routes/contact") {
   const target = new EventTarget();
   const sent: BrowserErrorPayload[] = [];

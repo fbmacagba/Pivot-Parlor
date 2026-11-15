@@ -89,7 +89,7 @@ jobs:
       - name: Point web at staging (ephemeral)
         run: node scripts/ci-set-web-staging-vars.mjs
 
-      - name: Build Remix app
+      - name: Build the website
         run: npm run build --workspace=apps/web
 
       - name: Prepare Pages bundle (.pages-dist)

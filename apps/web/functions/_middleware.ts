@@ -78,8 +78,8 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   // (app/lib/securityHeaders.ts). The render reads it through getLoadContext.
   const nonce = newCspNonce();
   context.data.cspNonce = nonce;
-  // Route errors reach Remix's handleError (entry.server.tsx). This catch is
-  // for this file's own code; whatever fails inside Remix's Pages adapter
+  // Route errors reach React Router's handleError (entry.server.tsx). This catch is
+  // for this file's own code; whatever fails inside React Router's Pages adapter
   // itself comes back as its bare "Internal Error" 500, not as a throw.
   try {
     return withSecurityHeaders(

@@ -2,7 +2,7 @@
  *  midnight London time, which in British Summer Time is 23:00 UTC the
  *  evening before; the booking worker's sales list reads the shop's day too
  *  (apps/workers/booking/src/lib/time.ts). Lives in lib/ rather than routes/
- *  so Remix never mounts it as a route. */
+ *  so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the loader runs here; the page's UI imports are stubbed (as

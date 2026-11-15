@@ -5,7 +5,7 @@
  *  the wrong style onto the wrong service once images are service-specific). */
 import { describe, it, expect, vi } from "vitest";
 
-// The mappers live in a route module; stub the Remix router import so pulling
+// The mappers live in a route module; stub the router import so pulling
 // them in doesn't load the real router (the mappers themselves are pure).
 vi.mock("react-router", () => ({ Outlet: () => null }));
 

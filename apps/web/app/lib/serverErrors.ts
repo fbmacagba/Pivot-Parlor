@@ -12,7 +12,7 @@
  * ids, tokens and long numbers masked, and the top stack lines without file
  * paths. Never the query string, headers, cookies, form contents or the user.
  * The API masks again and rate-limits; a visitor who left, a thrown Response
- * (a deliberate redirect, 404 or 403) and Remix's own not-found are skipped.
+ * (a deliberate redirect, 404 or 403) and the router's own not-found are skipped.
  */
 import type { HandleErrorFunction } from "react-router";
 import { scrubErrorText } from "@repo/utils";
@@ -47,7 +47,7 @@ export interface ReportOptions {
 const MAX_FRAMES = 5;
 
 // Segments that carry a value rather than name a page, for routes with no
-// parameters to go by (the middleware runs before Remix matches a route).
+// parameters to go by (the middleware runs before the router matches a route).
 const ID_LIKE =
   /^(?:\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,}|(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{20,})$/i;
 
@@ -138,7 +138,7 @@ export function describeServerError(
   };
 }
 
-/** A deliberate response (redirect, 404, 403) or Remix's own 4xx, not a bug. */
+/** A deliberate response (redirect, 404, 403) or the router's own 4xx, not a bug. */
 function isExpected(error: unknown): boolean {
   if (error instanceof Response) return true;
   if (typeof error !== "object" || error === null) return false;
@@ -169,7 +169,7 @@ function isCrossSiteRefusal(error: unknown, request: Request): boolean {
   return error instanceof Error && CROSS_SITE_REFUSALS.has(error.message) && isCrossSitePost(request);
 }
 
-// Remix can hand one error to two hooks (handleError and the render's
+// React Router can hand one error to two hooks (handleError and the render's
 // onError); it is reported once.
 const seen = new WeakSet<object>();
 
@@ -192,13 +192,13 @@ export function reportServerError(error: unknown, options: ReportOptions): void 
   }
 }
 
-/** What functions/_middleware.ts puts in Remix's load context. */
+/** What functions/_middleware.ts puts in the router's load context. */
 export interface ReportingContext {
   env?: { WEB_ERRORS?: WebErrorsBinding };
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
-/** Remix calls this for every unexpected error in a loader, an action or the render. */
+/** React Router calls this for every unexpected error in a loader, an action or the render. */
 export const handleError: HandleErrorFunction = (error, { request, params, context }) => {
   const ctx = (context ?? {}) as ReportingContext;
   reportServerError(error, { request, params, env: ctx.env, waitUntil: ctx.waitUntil });

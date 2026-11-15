@@ -11,8 +11,9 @@
 //   node scripts/smoke-build.mjs [dir]
 // dir is what gets deployed: ./build/client (the default, wrangler.toml's
 // pages_build_output_dir) or ./.pages-dist (deploy-web.yml).
-// GETs, plus POSTs with no session: one sign-out, and cross-site posts the router
-// refuses before any action runs. API calls go to the API service binding, which
+// GETs, plus POSTs with no session: a sign-in form posted without JavaScript
+// (missing fields, so it never calls the API), one sign-out, and cross-site posts
+// refused before any action runs. API calls go to the API service binding, which
 // is not connected locally, so nothing here reaches a real API.
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -149,6 +150,34 @@ try {
     if (logout.status !== 202) fail(`POST /logout.data: status ${logout.status}, expected 202 (a data request's redirect)`);
     if (cleared.length !== 2) fail(`POST /logout.data: ${cleared.length} cookies clear pp_session, expected 2`);
 
+    // A plain fetch() to a resource route still gets JSON: pages poll this one
+    // and read JSON. With no session it refuses before calling the API.
+    const job = await fetch(`${BASE}/api/jobs/e2e-job/status`, { redirect: "manual" });
+    const jobBody = await job.text();
+    const jobWhere = "GET /api/jobs/e2e-job/status";
+    if (job.status !== 401) fail(`${jobWhere}: status ${job.status}, expected 401`);
+    if (!/^application\/json/.test(job.headers.get("content-type") ?? "")) fail(`${jobWhere}: content-type ${job.headers.get("content-type")}`);
+    if (job.headers.get("cache-control") !== "no-store") fail(`${jobWhere}: cache-control ${job.headers.get("cache-control")}, expected no-store`);
+    if (jobBody !== JSON.stringify({ success: false, error: "Unauthorized" })) fail(`${jobWhere}: body ${jobBody.slice(0, 120)}`);
+
+    // A form posted without JavaScript (a document post, no `.data`): the page
+    // renders with the action's status and message. The action's answer is
+    // also serialized into the hydration script, so only the rendered markup
+    // counts.
+    const noJs = await fetch(`${BASE}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: BASE },
+      body: "",
+      redirect: "manual",
+    });
+    const noJsHtml = await noJs.text();
+    const noJsWhere = "POST /login without JavaScript";
+    if (noJs.status !== 400) fail(`${noJsWhere}: status ${noJs.status}, expected 400`);
+    if (!/^text\/html/.test(noJs.headers.get("content-type") ?? "")) fail(`${noJsWhere}: content-type ${noJs.headers.get("content-type")}`);
+    if (!noJsHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "").includes("Email and password are required.")) {
+      fail(`${noJsWhere}: the page does not show the action's message`);
+    }
+
     // Posts whose Origin names another site, or "null". functions/_middleware.ts
     // refuses them with a 403 before any route runs: React Router 7 checks
     // pages only, so a cross-site post to /logout used to sign the visitor out.
@@ -188,6 +217,6 @@ if (failures.length) {
   process.exit(1);
 }
 console.log(
-  `smoke-build: OK (${PAGES.length} pages, /_root.data, a sign-out and ${CROSS_SITE_POSTS.length} cross-site posts under wrangler pages dev, ${DIR})`
+  `smoke-build: OK (${PAGES.length} pages, /_root.data, resource-route JSON, a no-JS form post, a sign-out and ${CROSS_SITE_POSTS.length} cross-site posts under wrangler pages dev, ${DIR})`
 );
 process.exit(0);

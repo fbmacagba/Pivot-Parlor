@@ -18,14 +18,27 @@ import { defaultClientConditions, defaultClientMainFields, resolveConfig } from 
 // vitest runs from apps/web.
 const WEB = process.cwd();
 
+const buildConfig = () =>
+  resolveConfig(
+    { configFile: resolve(WEB, "vite.config.ts"), root: WEB, mode: "production", logLevel: "silent", build: { ssr: true } },
+    "build",
+    "production",
+    "production"
+  );
+
 describe("server build resolution", () => {
+  it("the server build is the one environment named `ssr`, which the conditions plugin matches", async () => {
+    // vite.config.ts's plugin sets the conditions for the environment named
+    // "ssr". React Router's `serverBundles` would build under other names,
+    // which would then resolve React's Node renderer: this fails first.
+    const config = await buildConfig();
+    const server = Object.entries(config.environments).filter(([, env]) => env.consumer === "server");
+    expect(server.map(([name]) => name)).toEqual(["ssr"]);
+    for (const [name, env] of server) expect(env.resolve.conditions, name).toEqual(["workerd", ...defaultClientConditions]);
+  }, 120_000);
+
   it("resolves dependencies for workerd first, then with Vite's webworker conditions: no `node`", async () => {
-    const config = await resolveConfig(
-      { configFile: resolve(WEB, "vite.config.ts"), root: WEB, mode: "production", logLevel: "silent", build: { ssr: true } },
-      "build",
-      "production",
-      "production"
-    );
+    const config = await buildConfig();
     const { conditions, mainFields } = config.environments.ssr.resolve;
     expect(conditions).not.toContain("node");
     // React 19's react-dom/server: "workerd" is its edge build. Its "browser"

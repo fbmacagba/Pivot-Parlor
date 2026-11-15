@@ -8,7 +8,7 @@ function cookieDomain(): string {
   }
 }
 
-/** SSR-safe E2E: Remix forwards these to the Worker (see apps/web/app/lib/e2e-api-headers.ts). */
+/** SSR-safe E2E: the website forwards these to the Worker (see apps/web/app/lib/e2e-api-headers.ts). */
 export async function setE2eCookies(
   context: BrowserContext,
   entries: Array<{ name: string; value: string }>

@@ -1,4 +1,4 @@
-name: Deploy Remix Frontend to Cloudflare Pages
+name: Deploy Website to Cloudflare Pages
 
 on:
   push:
@@ -47,7 +47,7 @@ jobs:
       - name: Lint
         run: npm run lint --workspace=web
 
-      - name: Build Remix app
+      - name: Build the website
         run: npm run build --workspace=apps/web
 
       # Static + Pages Functions (server rendering) — do not deploy ./build/client alone.

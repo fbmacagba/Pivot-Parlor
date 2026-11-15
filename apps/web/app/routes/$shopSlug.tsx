@@ -336,7 +336,7 @@ export default function ShopLayout() {
 }
 
 // Branded fallback for a missing/unavailable shop or a failed load,
-// instead of Remix's default error page.
+// instead of the router's default error page.
 export function ErrorBoundary() {
   return <ErrorScreen fullscreen />;
 }

@@ -2,7 +2,7 @@
  *  day, and a developer is nobody's staff. They pick a shop (?shopId=) and a
  *  person (?staffId=) and see exactly that person's screens, read-only. Staff
  *  always see their own, whatever the URL says. Lives in lib/ rather than
- *  routes/ so Remix never mounts it as a route. */
+ *  routes/ so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the loaders and actions run here. The page modules' UI imports are

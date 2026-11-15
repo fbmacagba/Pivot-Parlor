@@ -25,6 +25,9 @@ const WEB = process.cwd();
 const ROOT = resolve(WEB, "../..");
 const PRODUCTION_API = "https://api.pivotparlor.com";
 
+/** The page's markup without its <script> elements (and their serialized data). */
+const withoutScripts = (html: string) => html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "");
+
 let server: ViteDevServer | undefined;
 let base = "";
 const logged: string[] = [];
@@ -153,7 +156,9 @@ describe("local dev server", () => {
     const html = await res.text();
     expect(res.status).toBe(400);
     expect(res.headers.get("content-type") ?? "").toMatch(/^text\/html/);
-    expect(html).toContain("Email and password are required.");
+    // The action's answer is also serialized into the hydration script, so
+    // match the rendered markup only: the page must show the message.
+    expect(withoutScripts(html)).toContain("Email and password are required.");
   }, 120_000);
 
   it("no loader call left this machine", () => {

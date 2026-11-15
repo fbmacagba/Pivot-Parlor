@@ -2,7 +2,7 @@ import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 
 /**
  * Headers for server-side fetch() to the Worker API: forwards browser Cookie (e.g. Cloudflare Access)
- * and Authorization when present, otherwise uses the Remix session JWT as Bearer.
+ * and Authorization when present, otherwise uses the website's session JWT as Bearer.
  */
 export function buildWorkerUpstreamHeaders(
   request: Request,
