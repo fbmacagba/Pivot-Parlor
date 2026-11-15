@@ -546,9 +546,20 @@ const E2E_BOOKABLE_SHOP_ID = "e2e00000-0000-4000-8000-0000000000b0";
 const E2E_BOOKABLE_USER_ID = "e2e00000-0000-4000-8000-0000000000b1";
 const E2E_BOOKABLE_STAFF_ID = "e2e00000-0000-4000-8000-0000000000b2";
 const E2E_BOOKABLE_SERVICE_ID = "e2e00000-0000-4000-8000-0000000000b3";
+/** Fictional. Gives the fixture's pages a Google map behind the visitor's
+ *  consent, which tests/e2e/map-consent.spec.ts exercises. */
+export const E2E_BOOKABLE_ADDRESS = "1 Fixture Lane, London";
 
 export async function ensureE2eBookableShop(db: D1Database): Promise<void> {
-  if (await getShopById(db, E2E_BOOKABLE_SHOP_ID)) return;
+  if (!(await getShopById(db, E2E_BOOKABLE_SHOP_ID))) await createE2eBookableShop(db);
+  // Outside the create path, so a fixture made before it had an address gains one.
+  await db
+    .prepare(`INSERT OR IGNORE INTO shop_settings (shop_id, address) VALUES (?, ?)`)
+    .bind(E2E_BOOKABLE_SHOP_ID, E2E_BOOKABLE_ADDRESS)
+    .run();
+}
+
+async function createE2eBookableShop(db: D1Database): Promise<void> {
 
   const shopNumber = await getNextShopNumber(db);
   await db
