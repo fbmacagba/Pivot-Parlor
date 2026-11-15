@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -169,6 +170,65 @@ describe("reportServerError", () => {
     const notFound = { status: 404, statusText: "Not Found", internal: true, data: "No route matches URL" };
     reportServerError(notFound, { request: req("https://pivotparlor.com/a"), env: { WEB_ERRORS: binding } });
     expect(binding.report).not.toHaveBeenCalled();
+  });
+
+  describe("React Router 7's refusal of a post from another site", () => {
+    const DOCUMENT_REFUSAL =
+      "The `request.url` origin does not match `origin` header from a forwarded action request. Aborting the action.";
+    const BAD_ORIGIN_REFUSAL = "`origin` header is not a valid URL. Aborting the action.";
+    const DATA_REFUSAL = "Bad Request";
+    const post = (url: string, origin?: string, method = "POST") =>
+      req(url, { method, headers: origin === undefined ? {} : { Origin: origin } });
+
+    it("is not reported: the post names another site, \"null\" or no valid URL", () => {
+      const { binding } = fakeBinding();
+      const cases: [string, Request][] = [
+        [DOCUMENT_REFUSAL, post("https://pivotparlor.com/login", "https://elsewhere.example")],
+        [DOCUMENT_REFUSAL, post("https://pivotparlor.com/login", "null")],
+        [DOCUMENT_REFUSAL, post("https://pivotparlor.com/login", "http://pivotparlor.com")],
+        [BAD_ORIGIN_REFUSAL, post("https://pivotparlor.com/login", "not a url")],
+        [DATA_REFUSAL, post("https://pivotparlor.com/login.data", "https://elsewhere.example")],
+        [DATA_REFUSAL, post("https://pivotparlor.com/admin/pos.data?shopId=s1", "null", "PUT")],
+      ];
+      for (const [message, request] of cases) {
+        reportServerError(new Error(message), { request, env: { WEB_ERRORS: binding } });
+      }
+      expect(binding.report).not.toHaveBeenCalled();
+      expect(logged).not.toHaveBeenCalled();
+    });
+
+    it("the same message is still reported from a same-site post, a post with no Origin, or a GET", () => {
+      const { reports, binding } = fakeBinding();
+      reportServerError(new Error(DATA_REFUSAL), { request: post("https://pivotparlor.com/login.data", "https://pivotparlor.com"), env: { WEB_ERRORS: binding } });
+      reportServerError(new Error(DATA_REFUSAL), { request: post("https://pivotparlor.com/login.data"), env: { WEB_ERRORS: binding } });
+      reportServerError(new Error(DOCUMENT_REFUSAL), { request: req("https://pivotparlor.com/login", { headers: { Origin: "https://elsewhere.example" } }), env: { WEB_ERRORS: binding } });
+      expect(reports.map((r) => r.message)).toEqual([DATA_REFUSAL, DATA_REFUSAL, DOCUMENT_REFUSAL]);
+    });
+
+    it("any other error on a post from another site is still reported", () => {
+      const { reports, binding } = fakeBinding();
+      reportServerError(errorWithStack("the action broke"), { request: post("https://pivotparlor.com/logout", "https://elsewhere.example"), env: { WEB_ERRORS: binding } });
+      reportServerError({ status: 400, message: DATA_REFUSAL }, { request: post("https://pivotparlor.com/x.data", "null"), env: { WEB_ERRORS: binding } });
+      expect(reports).toHaveLength(2);
+    });
+
+    it("the messages are the ones the installed React Router throws", () => {
+      // The ES module build, the one the server bundle takes: its entry only
+      // re-exports chunk files that sit beside it.
+      const dist = path.dirname(createRequire(path.resolve(process.cwd(), "package.json")).resolve("react-router"));
+      const source = readdirSync(dist)
+        .filter((f) => f.endsWith(".mjs"))
+        .map((f) => readFileSync(path.join(dist, f), "utf8"))
+        .join("\n")
+        // One message is a template literal there, so its backticks are escaped.
+        .replaceAll("\\`", "`");
+      expect(source).toContain(DOCUMENT_REFUSAL);
+      expect(source).toContain(BAD_ORIGIN_REFUSAL);
+      expect(source).toMatch(/handleQueryError\(new Error\("Bad Request"\), 400\)/);
+      // Its rule for "another site", which ours mirrors: no allowedActionOrigins.
+      expect(source).toContain("originUrl.origin === requestUrl.origin");
+      expect(readFileSync(path.resolve(process.cwd(), "react-router.config.ts"), "utf8")).not.toMatch(/allowedActionOrigins/);
+    });
   });
 
   it("never throws: no binding (local dev), or a binding that fails", async () => {
