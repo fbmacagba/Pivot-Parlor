@@ -10,11 +10,11 @@
  * Only errors that ran through our own scripts are reported: at least one of
  * the top frames must be /assets/ on our origin, and none may be an extension.
  * That leaves out extensions, Stripe, Turnstile, "Script error." (no stack)
- * and server errors (Remix hands them to the browser with no stack). A lost
+ * and server errors (React Router hands them to the browser with no stack). A lost
  * connection, a stale script after a deploy and an aborted request are not
  * bugs and are left out too.
  *
- * What is sent: the kind, the Remix route id, the error type, the message with
+ * What is sent: the kind, the route id, the error type, the message with
  * emails, ids, tokens and long numbers masked, and the top frames with our own
  * script paths kept and every other location replaced by "<other>". Never the
  * page URL, its query, page content, cookies, the user or browser details.
@@ -38,7 +38,7 @@ const MAX_MESSAGE = 300;
 /** What the browser posts to CLIENT_ERRORS_PATH. */
 export interface BrowserErrorPayload {
   kind: BrowserErrorKind;
-  /** The Remix route id of the page ("routes/contact"), or "unknown". */
+  /** The route id of the page ("routes/contact"), or "unknown". */
   route: string;
   name: string;
   message: string;

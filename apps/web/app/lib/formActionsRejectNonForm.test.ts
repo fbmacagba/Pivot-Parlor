@@ -3,7 +3,7 @@
  *  A thrown error is a 500 on the site and an error alert to the owner, and the
  *  public forms (login, contact, booking, waitlist, invite) can be sent one by
  *  anyone. Each action must answer such a request with a 400 and call no API.
- *  Lives in lib/ rather than routes/ so Remix never mounts it as a route. */
+ *  Lives in lib/ rather than routes/ so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the actions run here. The page modules' UI imports are stubbed (as

@@ -22,7 +22,7 @@ function hasControlChar(value: string): boolean {
 
 /**
  * True when a request path smuggles a separator, a control character or a
- * second encoding layer into one segment. Remix decodes each segment into a
+ * second encoding layer into one segment. React Router decodes each segment into a
  * route param, so this is exactly what a param could carry. The URL parser has
  * already resolved literal `\`, `..` and pure %2e dot segments, so only
  * segments with a `%` need decoding.

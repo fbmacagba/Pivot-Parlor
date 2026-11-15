@@ -3,7 +3,7 @@
  *  does not run for a form POST, or for a data request that names only this
  *  route (`/dev/activity.data?_routes=routes%2Fdev.activity`), and the
  *  action forwards the irreversible audit "erase". Lives in lib/ rather than
- *  routes/ so Remix never mounts it as a route. */
+ *  routes/ so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the server handlers are under test, so the page's hooks and UI

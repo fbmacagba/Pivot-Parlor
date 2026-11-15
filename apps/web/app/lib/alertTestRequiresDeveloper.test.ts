@@ -2,7 +2,7 @@
  *  error, which app/lib/serverErrors.ts reports to the alert email. Only a
  *  developer may raise it: anyone else is turned away before it throws, so
  *  nobody else can send the owner an alert. Lives in lib/ rather than routes/
- *  so Remix never mounts it as a route. */
+ *  so the router never mounts it as a route. */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -56,7 +56,7 @@ afterEach(() => {
 
 describe("api.dev.alert-test", () => {
   it("is a resource route: no page, no loader", () => {
-    // A default export would make Remix answer with an HTML page (PR #102).
+    // A default export would make React Router answer with an HTML page (PR #102).
     expect(Object.keys(route).sort()).toEqual(["AlertTestError", "action"]);
   });
 
@@ -99,8 +99,8 @@ describe("the dashboard button's outcome", () => {
     expect(new URL(URL_).pathname).toBe(ALERT_TEST_PATH);
   });
 
-  it("reads Remix's 500 as raised, anything else as not raised", () => {
-    // A developer's POST always throws, so Remix answers 500. A sign-in
+  it("reads the router's 500 as raised, anything else as not raised", () => {
+    // A developer's POST always throws, so React Router answers 500. A sign-in
     // redirect under redirect: "manual" reads as status 0.
     expect(alertTestOutcome(500)).toBe("raised");
     expect(alertTestOutcome(0)).toBe("refused");

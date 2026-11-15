@@ -2,10 +2,10 @@ import { expect, test } from "./fixtures";
 
 /**
  * Stripe payment gate E2E tests.
- * - Dev shops: prefers live `/dev/shops?e2e_stripe_shop_list=1` (Remix loader mock); if the
+ * - Dev shops: prefers live `/dev/shops?e2e_stripe_shop_list=1` (loader mock); if the
  *   deployed app is older, falls back to HTML fulfill so the suite stays green.
  * - Onboarding pages: if the host 404s, fulfill HTML matching app copy.
- * - Inactive invite: prefers `?e2e_invite_mock=1` + Remix loader; falls back to HTML if needed.
+ * - Inactive invite: prefers `?e2e_invite_mock=1` + the page's loader; falls back to HTML if needed.
  */
 
 const PAYMENT_SUCCESS_HTML = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Payment confirmed</title></head><body>
@@ -70,7 +70,7 @@ async function routeOnboardingPageIf404(
   });
 }
 
-/** Prefer live Remix mock; if HTML has no mock shop, serve static HTML (pre-deploy / stale host). */
+/** Prefer the live loader mock; if HTML has no mock shop, serve static HTML (pre-deploy / stale host). */
 async function routeDevShopsStripeMock(page: import("@playwright/test").Page) {
   await page.route(/\/dev\/shops/, async (route) => {
     if (route.request().method() !== "GET") {

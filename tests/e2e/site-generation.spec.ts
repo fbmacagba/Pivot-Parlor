@@ -152,7 +152,7 @@ function mockGenerateSiteResponse(page: import("@playwright/test").Page) {
         await route.continue();
       }
     }),
-    // Browser polls same-origin GET /api/jobs/:jobId/status (Remix proxies to Worker).
+    // Browser polls same-origin GET /api/jobs/:jobId/status (the website proxies to the Worker).
     // Match by pathname — glob **/api/jobs/*/status is unreliable across Playwright versions / URLs.
     page.route(
       (url) => /^\/api\/jobs\/[^/]+\/status\/?$/.test(url.pathname),
@@ -548,7 +548,7 @@ test.describe.serial("Site generation", () => {
     await installSiteGenerationOwnerFlowMocks(page);
     await installTemplateSelectAndAdmin404Fallbacks(page);
 
-    // JSON generate-site calls run from the Remix action on the server (API_URL) — not visible here.
+    // JSON generate-site calls run from the page's action on the server (API_URL) — not visible here.
     // Multipart + logo is also server-side; this route only catches hypothetical browser POSTs.
     await page.route("**/api/shops/*/generate-site", async (route) => {
       if (route.request().method() === "POST") {

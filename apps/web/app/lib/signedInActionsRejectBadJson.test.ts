@@ -2,7 +2,7 @@
  *  is the caller's mistake: it gets a 400 and never reaches the API, instead
  *  of throwing (a 500 on the site, and an error alert to the owner). Routes
  *  whose body is optional pass it on as an empty object. Lives in lib/ rather
- *  than routes/ so Remix never mounts it as a route. */
+ *  than routes/ so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the actions run here. The page modules' UI imports are stubbed (as

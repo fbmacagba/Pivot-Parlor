@@ -9,7 +9,7 @@ interface ErrorScreenProps {
 }
 
 /**
- * Branded error fallback for Remix ErrorBoundary exports. Renders a friendly
+ * Branded error fallback for route ErrorBoundary exports. Renders a friendly
  * message instead of the app white-screening when a loader/action throws or a
  * route responds with an error status.
  */

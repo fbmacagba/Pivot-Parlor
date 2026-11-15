@@ -7,7 +7,7 @@
  * Developers only: anyone else is turned away before it throws.
  * docs/runbooks/production-alerting.md uses it as the firing control.
  *
- * A resource route: no default export, or Remix would answer with a page.
+ * A resource route: no default export, or React Router would answer with a page.
  */
 import type { ActionFunctionArgs } from "react-router";
 import { requireRole } from "~/lib/auth";

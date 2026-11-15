@@ -11,7 +11,7 @@ vi.mock("react-router", async () => {
   const React = await import("react");
   return {
     useRouteError: () => routeError.current,
-    // Remix's own check: an ErrorResponse has status, statusText, internal and data.
+    // React Router's own check: an ErrorResponse has status, statusText, internal and data.
     isRouteErrorResponse: (e: unknown) =>
       typeof e === "object" && e !== null && "status" in e && "statusText" in e && "internal" in e && "data" in e,
     Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>

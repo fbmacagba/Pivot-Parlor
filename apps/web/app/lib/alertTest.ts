@@ -5,7 +5,7 @@ export const ALERT_TEST_PATH = "/api/dev/alert-test";
 export type AlertTestOutcome = "raised" | "refused" | "unreachable";
 
 /**
- * A developer's POST always throws, so Remix answers 500 and the error is on
+ * A developer's POST always throws, so React Router answers 500 and the error is on
  * its way to the alert email. Anything else (a sign-in redirect, read as 0
  * under redirect: "manual") means it was not raised. null: no response.
  */

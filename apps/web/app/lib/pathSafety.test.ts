@@ -89,7 +89,7 @@ describe("createApiClient refuses a traversal path", () => {
 });
 
 describe("functions/_middleware.ts", () => {
-  it("refuses an unsafe request path before Remix handles it", () => {
+  it("refuses an unsafe request path before React Router handles it", () => {
     const src = readFileSync(path.resolve(process.cwd(), "functions/_middleware.ts"), "utf8");
     expect(src).toMatch(/import \{[^}]*hasUnsafePathSegment[^}]*\} from "\.\.\/app\/lib\/pathSafety"/);
     const check = src.indexOf("hasUnsafePathSegment(new URL(context.request.url).pathname)");

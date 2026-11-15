@@ -2,9 +2,10 @@
 /**
  * Remove compiled .js / .js.map twins from app/.
  *
- * Remix route discovery prefers .js over .tsx, so a stale compiled twin
- * silently shadows its edited .tsx source and breaks `vite:build` with
- * route ID collisions. App source is .ts/.tsx only (enforced by .gitignore:
+ * Route discovery (flatRoutes) reads .js as well as .tsx, and a compiled
+ * twin is the same route ID: the router keeps whichever file it reads first
+ * and only logs a route ID collision, so a stale twin can be served instead
+ * of its edited .tsx source. App source is .ts/.tsx only (enforced by .gitignore:
  * apps/web/app/**\/*.js). Runs automatically before dev and build.
  */
 import { readdirSync, rmSync, existsSync } from "node:fs";

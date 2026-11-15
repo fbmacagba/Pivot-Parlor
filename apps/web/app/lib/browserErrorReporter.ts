@@ -23,7 +23,7 @@ export interface BrowserErrorReporterOptions {
   target?: { addEventListener(type: string, listener: Listener): void; removeEventListener(type: string, listener: Listener): void };
   /** Our own origin. Defaults to the page's. */
   origin?: string;
-  /** The current page's Remix route id. Defaults to the deepest match of Remix's router. */
+  /** The current page's route id. Defaults to the deepest match of the router. */
   routeId?: () => string | undefined;
   /** Sends one report. Defaults to a POST to our own website. */
   send?: (payload: BrowserErrorPayload) => void;

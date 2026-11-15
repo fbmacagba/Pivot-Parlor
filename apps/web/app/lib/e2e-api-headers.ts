@@ -1,5 +1,5 @@
 /**
- * E2E cookies → Worker API headers (Remix loaders/actions run on the server, so
+ * E2E cookies → Worker API headers (loaders and actions run on the server, so
  * Playwright page.route() cannot intercept fetches to API_URL).
  *
  * Set cookies from Playwright before navigation:

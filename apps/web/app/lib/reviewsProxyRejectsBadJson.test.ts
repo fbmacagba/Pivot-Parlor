@@ -2,7 +2,7 @@
  *  review to the API. A body that is not a JSON object is the caller's mistake:
  *  it gets a 400 and never reaches the API, instead of throwing (a 500 on the
  *  site, and an error alert to the owner). Lives in lib/ rather than routes/ so
- *  Remix never mounts it as a route. */
+ *  the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { action } from "~/routes/api.shops.$shopId.reviews";
 import { asResponse } from "~/lib/testing/asResponse";

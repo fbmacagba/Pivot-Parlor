@@ -11,7 +11,7 @@ import {
 } from "./securityHeaders";
 
 // Cloudflare Pages applies public/_headers to STATIC ASSET responses only.
-// Every Remix page is a Pages Functions response, so until this helper ran
+// Every page is a Pages Functions response, so until this helper ran
 // in functions/_middleware.ts, /login, the dashboards and every shop page
 // went out with no HSTS, no framing protection and no CSP (measured live on
 // 2026-11-10: /favicon.svg carried all six headers, every HTML page none).
@@ -149,7 +149,7 @@ describe("the content security policy", () => {
 
 describe("inline scripts", () => {
   // 'unsafe-inline' let any inline script run, an injected one included. Each
-  // page now gets a fresh nonce: the header names it, and Remix's own inline
+  // page now gets a fresh nonce: the header names it, and React Router's own inline
   // scripts carry it (functions/_middleware.ts, entry.server.tsx, root.tsx).
   const NONCE = "q1w2e3r4t5y6u7i8o9p0Aa==";
 

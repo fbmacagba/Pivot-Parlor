@@ -166,7 +166,7 @@ describe("reportServerError", () => {
     gone.abort();
     reportServerError(errorWithStack("aborted"), { request: req("https://pivotparlor.com/a", { signal: gone.signal }), env: { WEB_ERRORS: binding } });
     reportServerError(new Response("nope", { status: 404 }), { request: req("https://pivotparlor.com/a"), env: { WEB_ERRORS: binding } });
-    // What Remix throws for an unmatched route.
+    // What React Router throws for an unmatched route.
     const notFound = { status: 404, statusText: "Not Found", internal: true, data: "No route matches URL" };
     reportServerError(notFound, { request: req("https://pivotparlor.com/a"), env: { WEB_ERRORS: binding } });
     expect(binding.report).not.toHaveBeenCalled();
@@ -242,7 +242,7 @@ describe("reportServerError", () => {
   });
 });
 
-describe("handleError (Remix's server error hook)", () => {
+describe("handleError (React Router's server error hook)", () => {
   it("reports with the load context's env and waitUntil", async () => {
     const { reports, binding } = fakeBinding();
     const waits: Promise<unknown>[] = [];
@@ -265,7 +265,7 @@ describe("wiring", () => {
     expect(src).toMatch(/onError\([^)]*\)\s*\{[\s\S]*?reportServerError\(/);
   });
 
-  it("the Pages middleware passes waitUntil to Remix and reports what escapes it", () => {
+  it("the Pages middleware passes waitUntil to React Router and reports what escapes it", () => {
     const src = read("functions/_middleware.ts");
     expect(src).toMatch(/waitUntil:\s*\(?[^\n]*context\.waitUntil/);
     expect(src).toMatch(/catch\s*\(\s*\w+\s*\)\s*\{[\s\S]*?reportServerError\([\s\S]*?where:\s*"middleware"[\s\S]*?throw\s+\w+/);

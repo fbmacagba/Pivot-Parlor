@@ -2,7 +2,7 @@
  *  A body that is not a JSON object, or `messages` that is not a list, is the
  *  caller's mistake: it gets the widget's own 400 and never reaches OpenRouter,
  *  instead of throwing (a 500 on the site, and an error alert to the owner).
- *  Lives in lib/ rather than routes/ so Remix never mounts it as a route. */
+ *  Lives in lib/ rather than routes/ so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { action } from "~/routes/api.chat";
 

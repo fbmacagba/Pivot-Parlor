@@ -83,7 +83,7 @@ export default function DevAIDeploy() {
    * *.pivotparlor.com, pp_session is scoped to Domain=.pivotparlor.com so the
    * browser calls the Worker directly with credentials (no Pages wall-clock
    * limit); elsewhere (local dev, pages.dev previews) the relative path hits
-   * the api.ai.* Remix proxy routes. pp_session is HttpOnly, so cookie
+   * the api.ai.* proxy routes. pp_session is HttpOnly, so cookie
    * credentials are the ONLY way to authenticate from the browser.
    */
   function workerUrl(path: string): string {

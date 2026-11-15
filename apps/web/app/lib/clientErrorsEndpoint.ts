@@ -1,7 +1,7 @@
 /**
  * The website half of the browser-error alert (what is reported and why:
  * app/lib/browserErrors.ts). functions/_middleware.ts runs this for a POST to
- * CLIENT_ERRORS_PATH, before Remix.
+ * CLIENT_ERRORS_PATH, before React Router.
  *
  * Anyone can post here, so a report goes on to the API's WebErrors entrypoint
  * only when it came from one of our own pages (Origin), from a browser that

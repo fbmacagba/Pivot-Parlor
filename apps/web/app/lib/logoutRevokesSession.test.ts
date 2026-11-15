@@ -1,7 +1,7 @@
 /** /logout must end the server session, not only the browser's cookie: the
  *  API keeps `session:<token>` in KV until POST /auth/logout deletes it, so a
  *  copied token stayed valid for its full 7 days after the user signed out.
- *  Lives in lib/ rather than routes/ so Remix never mounts it as a route. */
+ *  Lives in lib/ rather than routes/ so the router never mounts it as a route. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { action, loader } from "~/routes/logout";
 

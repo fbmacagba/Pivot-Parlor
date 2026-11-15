@@ -2,7 +2,7 @@ import { googleMapsEmbedUrl, googleMapsUrl } from "@repo/utils";
 import { ThemedButton } from "~/components/ThemedBookingControls";
 
 /** Compact shop map + directions link for the booking confirmation screen.
- *  Kept out of the route file so it renders in jsdom without Remix mocks. */
+ *  Kept out of the route file so it renders in jsdom without router mocks. */
 export function BookingConfirmMap({ address }: { address: string }) {
   return (
     <div className="mt-8 flex flex-col gap-3">
