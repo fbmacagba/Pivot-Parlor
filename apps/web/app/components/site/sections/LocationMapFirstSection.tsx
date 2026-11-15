@@ -1,4 +1,5 @@
 import type { Density } from "@repo/utils";
+import { ConsentedMap } from "~/components/ConsentedMap";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { sectionPadY } from "~/components/site/sections/bits";
 import { ContactLines, DirectionsLink, VisitHours, canMap, mapEmbedSrc } from "~/components/site/sections/VisitDetails";
@@ -17,13 +18,7 @@ export function LocationMapFirstSection({ ctx, density }: { ctx: SiteRenderConte
         {mapped ? (
           <>
             <div className="mt-8 h-[320px] overflow-hidden rounded-[var(--st-r-lg)] border border-[color:var(--st-line-card)] bg-[color:var(--st-card-5)] md:h-[400px]">
-              <iframe
-                title={`Map showing ${ctx.site.shop_name}`}
-                className="h-full w-full border-0"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                src={mapEmbedSrc(ctx)}
-              />
+              <ConsentedMap title={`Map showing ${ctx.site.shop_name}`} src={mapEmbedSrc(ctx)} />
             </div>
             <DirectionsLink ctx={ctx} className="mt-4" />
           </>

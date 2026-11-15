@@ -6,7 +6,8 @@
 // analytics / marketing cookies to toggle. It is shown once per browser and
 // recorded in localStorage (pp_platform_consent) so it is not shown again;
 // ShopSiteCookieConsent honours the same record to avoid a double notice on
-// shops served under pivotparlor.com/<slug>.
+// shops served under pivotparlor.com/<slug>, except on a shop with a Google
+// map, whose notice asks a question this one never did (lib/mapConsent.ts).
 //
 // SUPPRESSION: shop pages (/:shopSlug/*) render their own ShopSiteCookieConsent
 // via CommercialShopChrome, so this notice must not render on those routes.
