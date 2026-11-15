@@ -9,8 +9,11 @@ export function FloatingCTA() {
   if (HIDDEN_PATHS.some((p) => pathname.startsWith(p))) return null;
 
   return (
+    // On a phone the words are display:none and name nothing, so the link
+    // carries its name itself.
     <Link
       to="/contact"
+      aria-label="Get your shop on Pivot"
       className="fixed bottom-6 left-6 z-40 flex items-center gap-2 rounded-full bg-gold px-5 py-3 text-sm font-semibold text-dark shadow-lg shadow-gold/25 transition-all hover:bg-gold-light hover:scale-105 active:scale-95 sm:px-6"
     >
       <span className="hidden sm:inline">Get your shop on Pivot</span>

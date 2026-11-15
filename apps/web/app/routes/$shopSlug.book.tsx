@@ -297,14 +297,16 @@ export default function BookingRoute() {
         services={demo ? layoutData.commercialServices : undefined}
         staff={demo ? layoutData.staff : undefined}
       >
-        <BookingWizard key={layoutData.slug} shopName={layoutData.shop.name} />
+        <main>
+          <BookingWizard key={layoutData.slug} shopName={layoutData.shop.name} />
+        </main>
       </CommercialShopChrome>
     );
   }
   return (
-    <div className="pp-commercial" style={platformFallbackVars}>
+    <main className="pp-commercial" style={platformFallbackVars}>
       <BookingWizard />
-    </div>
+    </main>
   );
 }
 
