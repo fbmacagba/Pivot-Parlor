@@ -46,7 +46,9 @@ crons = ["*/15 * * * *"]
 #   STRIPE_WEBHOOK_SECRET   ← signing secret of this worker's webhook endpoint
 #                             (Stripe dashboard → webhooks → .../webhooks/stripe;
 #                             events: account.updated, payment_intent.succeeded,
-#                             charge.refunded, charge.dispute.created) (WS-2)
+#                             charge.refunded, checkout.session.expired,
+#                             charge.dispute.created) (WS-2). Live-mode switch:
+#                             docs/runbooks/stripe-live-mode.md
 
 # ─── Staging ──────────────────────────────────────────────────────────────────
 # Deploy: npx wrangler deploy --env staging (CI deploys this BEFORE the main
