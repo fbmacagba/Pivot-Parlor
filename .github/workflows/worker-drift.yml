@@ -1,0 +1,66 @@
+name: Hand-deployed workers match main
+
+# Six background workers (every apps/workers folder except booking) deploy to
+# production by hand, so a merge can leave one running an older build with
+# nothing saying so. This builds each one from the checked-out commit with
+# `wrangler deploy --dry-run` (nothing is uploaded) and compares every module
+# with what Cloudflare runs. A red run names each worker to deploy by hand.
+#
+# - push to main: a merge that changes a hand-deployed worker goes red until
+#   that worker is deployed;
+# - daily: catches a deploy from a branch, or a rollback, that main never saw;
+# - pull_request (this check's own files only): proves the comparison on the
+#   CI runner before it guards main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/workers/**"
+      - "packages/**"
+      - "package-lock.json"
+      - "scripts/worker-drift.mjs"
+      - "scripts/worker-drift-core.mjs"
+      - ".github/workflows/worker-drift.yml"
+  pull_request:
+    paths:
+      - "scripts/worker-drift.mjs"
+      - "scripts/worker-drift-core.mjs"
+      - ".github/workflows/worker-drift.yml"
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Hand-deployed workers match main
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compare each hand-deployed worker with this commit's build
+        run: node scripts/worker-drift.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
