@@ -158,7 +158,7 @@ Rehearse on staging before ever needing it in anger (roughly quarterly):
 
 | Date (UTC) | Bookmarks | Checks | E2E |
 |---|---|---|---|
-| 2026-11-15 11:46 | A `00002d6f-00001d5e-…be3e`, B `00002d6f-00001d60-…1e82`, undo `00002d6f-ffffffff-…e1ff` | audit 8561 entries, max seq 8561, 0 unsealed, 0 unarchived before and after; marker gone after A, back after undo, then deleted; rewound window 16 s | see the PR that added this log |
+| 2026-11-15 11:46 | A `00002d6f-00001d5e-…be3e`, B `00002d6f-00001d60-…1e82`, undo `00002d6f-ffffffff-…e1ff` | audit 8561 entries, max seq 8561, 0 unsealed, 0 unarchived before and after; marker gone after A, back after undo, then deleted; rewound window 16 s | passed: Actions run 43711344217, 11:56 to 12:09 |
 
 ## 7. Scaling model decision (WS-8, decided 2026-07-12)
 
