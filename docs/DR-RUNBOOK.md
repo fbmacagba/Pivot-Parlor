@@ -131,11 +131,34 @@ When a remote run fails:
 
 Rehearse on staging before ever needing it in anger (roughly quarterly):
 
+0. **Quiet staging, and an audit trail with nothing pending.** No E2E or PR
+   run in progress (a push can start one), and on staging
+   `SELECT SUM(seq IS NULL), SUM(seq IS NOT NULL AND archived_at IS NULL) FROM audit_log`
+   returns 0 and 0. The every-minute sealer archives entries to a locked R2
+   bucket: an entry archived inside the rewound window would be dropped from
+   D1 while the bucket keeps it, and archiving would stall on the reused
+   sequence number (see section 8). If either sum is not 0, wait two minutes
+   and read again; if it stays above 0, do not start.
 1. `npx wrangler d1 time-travel info pivot-parlor-db-staging --json` — note bookmark A.
-2. Write a marker row; capture bookmark B.
-3. Restore to A; confirm the marker is gone.
-4. Restore to B; confirm the marker is back (undo works).
+2. Write a marker row in a table nothing audits and no cron writes (the drill
+   uses `processed_stripe_events`, id `evt_restore_drill_<date>`); capture
+   bookmark B.
+3. Restore to A; confirm the marker is gone. Note the undo bookmark the
+   restore prints ("To undo this operation, you can restore to the previous
+   bookmark").
+4. Restore straight away to that **undo bookmark**, not to B; confirm the
+   marker is back. This rehearses the exact undo a production restore relies
+   on, and the only rewound window is the seconds between the two restores.
+   Then confirm the audit trail's count and highest seq match step 0, and
+   delete the marker.
 5. Run the staging E2E suite.
+6. Add a line to the drill log below.
+
+### Drill log
+
+| Date (UTC) | Bookmarks | Checks | E2E |
+|---|---|---|---|
+| 2026-11-15 11:46 | A `00002d6f-00001d5e-…be3e`, B `00002d6f-00001d60-…1e82`, undo `00002d6f-ffffffff-…e1ff` | audit 8561 entries, max seq 8561, 0 unsealed, 0 unarchived before and after; marker gone after A, back after undo, then deleted; rewound window 16 s | passed: Actions run 43711344217, 11:56 to 12:09 |
 
 ## 7. Scaling model decision (WS-8, decided 2026-07-12)
 
