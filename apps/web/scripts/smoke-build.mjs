@@ -108,6 +108,13 @@ try {
         if (missing) fail(`${where}: ${missing} of ${scripts.length} <script> tags lack the header's nonce`);
       }
     }
+    // A static file in a dot folder, served before the router (RFC 9116).
+    const securityTxt = await fetch(`${BASE}/.well-known/security.txt`);
+    const securityBody = await securityTxt.text();
+    if (securityTxt.status !== 200) fail(`GET /.well-known/security.txt: status ${securityTxt.status}, expected 200`);
+    if (!/^text\/plain/.test(securityTxt.headers.get("content-type") ?? "")) fail(`GET /.well-known/security.txt: content-type ${securityTxt.headers.get("content-type")}`);
+    if (!/^Contact: https:\/\/pivotparlor\.com\/contact$/m.test(securityBody)) fail("GET /.well-known/security.txt: no Contact line for the contact page");
+
     // Single fetch: the router's data requests (`<path>.data`) answer as turbo-stream.
     const data = await fetch(`${BASE}/_root.data`);
     await data.text();
