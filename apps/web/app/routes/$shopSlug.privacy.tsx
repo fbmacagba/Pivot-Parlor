@@ -161,6 +161,14 @@ export default function ShopPrivacyPolicy() {
             confirmations and reminders to you.
           </li>{" "}
           <li>
+            <strong>AI model providers</strong> - when you use the chat
+            assistant on this website, Pivot Parlor sends your messages to an
+            AI model to write the reply: through OpenRouter, Inc. (United
+            States), which passes them to the provider of the model in use, or
+            directly to OpenAI OpCo, LLC (United States) or Anthropic Ireland,
+            Limited.
+          </li>
+          <li>
             <strong>Law enforcement or regulators</strong> - where required to
             do so by law or to protect our rights, property, or safety.
           </li>

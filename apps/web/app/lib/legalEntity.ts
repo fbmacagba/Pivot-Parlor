@@ -37,7 +37,7 @@ export const LEGAL_ENTITY: LegalEntity = {
 };
 
 /** DPA document version. Bump when the DPA text materially changes. */
-export const DPA_VERSION = "1.0";
+export const DPA_VERSION = "1.1";
 
 /**
  * DPA effective month (static string, never new Date()). Reviewed against UK

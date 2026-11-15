@@ -14,13 +14,13 @@
 // change histories, so each carries its own date even when the values match.
 
 export const PLATFORM_LEGAL_LAST_UPDATED = {
-  privacy: "March 2026",
+  privacy: "November 2026",
   terms: "March 2026",
   cookies: "March 2026",
 } as const;
 
 export const SHOP_LEGAL_LAST_UPDATED = {
-  privacy: "March 2026",
+  privacy: "November 2026",
   terms: "March 2026",
   cookies: "March 2026",
 } as const;

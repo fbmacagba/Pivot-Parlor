@@ -64,7 +64,7 @@ describe("invite acceptance records a legal acceptance (Article 28)", () => {
       .first<{ document: string; version: string; shop_id: string }>();
     expect(acc).toBeTruthy();
     expect(acc!.document).toBe("terms_dpa");
-    expect(acc!.version).toBe("1.0");
+    expect(acc!.version).toBe("1.1");
     expect(acc!.shop_id).toBe(shopId);
   });
 

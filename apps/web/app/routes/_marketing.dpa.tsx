@@ -414,7 +414,29 @@ export default function DataProcessingAgreement() {
                 location="United States. Email metadata and logs are stored in the United States regardless of the sending region selected."
                 transfer="UK Extension to the EU-U.S. Data Privacy Framework, with EU Standard Contractual Clauses and the UK Addendum as the fallback mechanism, per the Resend Data Processing Agreement."
               />
+              <SubprocessorCard
+                name="OpenRouter, Inc."
+                service="Routing of AI model requests: messages sent to a shop&rsquo;s chat assistant, and shop details used to build and update the shop&rsquo;s website. OpenRouter passes each request to the provider of the AI model in use (for example Google for Gemini models). Acts as the Processor&rsquo;s Sub-processor."
+                location="United States (Google Cloud US regions), and the location of the model provider each request is passed to."
+                transfer="EU Standard Contractual Clauses (Module 2) as amended by the UK International Data Transfer Addendum, per the OpenRouter Data Processing Agreement (updated 26 August 2026)."
+              />
+              <SubprocessorCard
+                name="OpenAI OpCo, LLC"
+                service="AI model requests sent directly to OpenAI: messages sent to a shop&rsquo;s chat assistant, and shop details used to build and update the shop&rsquo;s website. Acts as the Processor&rsquo;s Sub-processor."
+                location="United States."
+                transfer="EU Standard Contractual Clauses as amended by the UK International Data Transfer Addendum, per the OpenAI Data Processing Addendum (updated 1 December 2025)."
+              />
+              <SubprocessorCard
+                name="Anthropic Ireland, Limited"
+                service="AI model requests sent directly to Anthropic: messages sent to a shop&rsquo;s chat assistant, and shop details used to build and update the shop&rsquo;s website. Acts as the Processor&rsquo;s Sub-processor."
+                location="United States."
+                transfer="EU Standard Contractual Clauses (Modules 2 and 3) as amended by the UK International Data Transfer Addendum, per the Anthropic Data Processing Addendum (effective 24 February 2025)."
+              />
             </div>
+            <p className="mt-3 text-sm text-white/60">
+              Annex 2 last updated November 2026: OpenRouter, OpenAI and
+              Anthropic added.
+            </p>
           </section>
 
           <section>

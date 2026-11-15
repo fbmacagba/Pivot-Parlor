@@ -690,7 +690,7 @@ describe("invite accept", () => {
     const acc = await env.DB.prepare("SELECT document, version FROM legal_acceptances WHERE user_id = ?")
       .bind(user!.id)
       .first<{ document: string; version: string }>();
-    expect(acc).toEqual({ document: "terms_dpa", version: "1.0" });
+    expect(acc).toEqual({ document: "terms_dpa", version: "1.1" });
     expect(await shopState(shopId)).toEqual({ status: "active", is_active: 1 });
     const used = await env.DB.prepare("SELECT used_at FROM invites WHERE id = ?").bind(invite.id).first<{ used_at: string | null }>();
     expect(used?.used_at).not.toBeNull();
@@ -705,7 +705,7 @@ describe("invite accept", () => {
     expect(row.shop_id).toBe(shopId);
     expect(row.actor_type).toBe("admin");
     expect(row.actor_ref).toBe(`subj_user_${user!.id}`);
-    expect(JSON.parse(row.details_json as string)).toEqual({ user_id: user!.id, role: "admin", document: "terms_dpa", version: "1.0" });
+    expect(JSON.parse(row.details_json as string)).toEqual({ user_id: user!.id, role: "admin", document: "terms_dpa", version: "1.1" });
     const subject = await env.DB.prepare("SELECT kind, user_id FROM audit_subjects WHERE id = ?")
       .bind(`subj_user_${user!.id}`)
       .first<{ kind: string; user_id: string }>();
