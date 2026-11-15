@@ -147,6 +147,36 @@ function isExpected(error: unknown): boolean {
   return isErrorResponse && (e.status as number) < 500;
 }
 
+// React Router 7 refuses a post whose Origin header names another site (or is
+// "null", or not a URL) with a 400 before any action runs, and hands the
+// refusal to handleError. That is the site defending itself, not a bug, and any
+// bot can send one. A document post carries one of the first two messages; a
+// data post (`<path>.data`) carries a bare "Bad Request". serverErrors.test.ts
+// checks these against the installed React Router.
+const CROSS_SITE_REFUSALS = new Set([
+  "The `request.url` origin does not match `origin` header from a forwarded action request. Aborting the action.",
+  "`origin` header is not a valid URL. Aborting the action.",
+  "Bad Request",
+]);
+const MUTATIONS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * The router's refusal of a cross-site post, by its own rule: a mutation whose
+ * Origin is present and is not the request's own origin (no allowedActionOrigins
+ * is set). The same message on any other request is still a bug to report.
+ */
+function isCrossSiteRefusal(error: unknown, request: Request): boolean {
+  if (!(error instanceof Error) || !CROSS_SITE_REFUSALS.has(error.message)) return false;
+  if (!MUTATIONS.has(request.method)) return false;
+  const origin = request.headers.get("Origin");
+  if (origin === null) return false;
+  try {
+    return new URL(origin).origin !== new URL(request.url).origin;
+  } catch {
+    return true; // "null", or not a URL
+  }
+}
+
 // Remix can hand one error to two hooks (handleError and the render's
 // onError); it is reported once.
 const seen = new WeakSet<object>();
@@ -154,7 +184,7 @@ const seen = new WeakSet<object>();
 /** Logs the error and sends one report to the API. Never throws. */
 export function reportServerError(error: unknown, options: ReportOptions): void {
   try {
-    if (options.request.signal?.aborted || isExpected(error)) return;
+    if (options.request.signal?.aborted || isExpected(error) || isCrossSiteRefusal(error, options.request)) return;
     if (typeof error === "object" && error !== null) {
       if (seen.has(error)) return;
       seen.add(error);

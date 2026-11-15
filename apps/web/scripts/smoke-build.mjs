@@ -11,8 +11,9 @@
 //   node scripts/smoke-build.mjs [dir]
 // dir is what gets deployed: ./build/client (the default, wrangler.toml's
 // pages_build_output_dir) or ./.pages-dist (deploy-web.yml).
-// GETs, plus one sign-out POST with no session. API calls go to the API service
-// binding, which is not connected locally, so nothing here reaches a real API.
+// GETs, plus POSTs with no session: one sign-out, and cross-site posts the router
+// refuses before any action runs. API calls go to the API service binding, which
+// is not connected locally, so nothing here reaches a real API.
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -35,6 +36,15 @@ const PAGES = [
   { path: "/login", status: 200 },
   { path: "/no-such-page-smoke", status: 404 },
 ];
+
+// [path, Origin]: a document post, a data post, and a data post from a context
+// browsers label "null" (a sandboxed frame, say).
+const CROSS_SITE_POSTS = [
+  ["/login", "https://elsewhere.example"],
+  ["/login.data", "https://elsewhere.example"],
+  ["/login.data", "null"],
+];
+const LOG_SETTLE_MS = 1500;
 
 const require = createRequire(join(WEB, "package.json"));
 const wrangler = join(dirname(require.resolve("wrangler/package.json")), "bin", "wrangler.js");
@@ -129,6 +139,25 @@ try {
     const cleared = logout.headers.getSetCookie().filter((c) => /^pp_session=;/.test(c) && /Max-Age=0/i.test(c));
     if (logout.status !== 202) fail(`POST /logout.data: status ${logout.status}, expected 202 (a data request's redirect)`);
     if (cleared.length !== 2) fail(`POST /logout.data: ${cleared.length} cookies clear pp_session, expected 2`);
+
+    // Posts whose Origin names another site, or "null". React Router 7 refuses
+    // them with a 400 before any action runs and hands the refusal to
+    // handleError. That is the site defending itself, not a bug, so it must not
+    // be reported: a report is logged first, and the error-line check below
+    // fails on it. /login is a page with an action; the sign-out above is the
+    // same-site control.
+    for (const [path, origin] of CROSS_SITE_POSTS) {
+      const res = await fetch(BASE + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: origin },
+        body: "",
+        redirect: "manual",
+      });
+      await res.text();
+      if (res.status !== 400) fail(`POST ${path} with Origin ${origin}: status ${res.status}, expected 400 (refused as cross-site)`);
+    }
+    // The runtime writes its log after the response; read it only once it has.
+    await sleep(LOG_SETTLE_MS);
   }
 } catch (err) {
   fail(`request failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -146,5 +175,7 @@ if (failures.length) {
   console.error(`smoke-build: FAILED (${failures.length})\n${failures.map((f) => `  - ${f}`).join("\n")}`);
   process.exit(1);
 }
-console.log(`smoke-build: OK (${PAGES.length} pages, /_root.data and a sign-out under wrangler pages dev, ${DIR})`);
+console.log(
+  `smoke-build: OK (${PAGES.length} pages, /_root.data, a sign-out and ${CROSS_SITE_POSTS.length} cross-site posts under wrangler pages dev, ${DIR})`
+);
 process.exit(0);
