@@ -88,6 +88,9 @@ app.use("/staff/*", async (c, next) => {
 app.use("*", logger());
 
 // API security headers (NFR-S7). The web app's headers live in apps/web/public/_headers.
+// The API serves JSON and images, never a page, so its content policy allows
+// nothing: a response opened as a document runs no script and can't be framed.
+// The permissions line matches the website's.
 app.use(
   "*",
   secureHeaders({
@@ -95,6 +98,8 @@ app.use(
     xContentTypeOptions: "nosniff",
     strictTransportSecurity: "max-age=63072000; includeSubDomains",
     referrerPolicy: "no-referrer",
+    contentSecurityPolicy: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
+    permissionsPolicy: { camera: [], microphone: [], geolocation: [] },
   })
 );
 
