@@ -315,15 +315,22 @@ was. Not reported at all:
 - a visitor who left before the page finished;
 - a deliberate response thrown by a route (a redirect, 404 or 403);
 - React Router's own not-found and method-not-allowed answers;
-- React Router's refusal of a post from another site. A page's form post, or
-  any `.data` post, whose `Origin` header names another site, is `null` or is
-  not a URL, is answered 400 before any action runs. Bots send these. It is
-  skipped only when the request really is cross-site, so the same message from
-  a same-site post is still reported. If a real visitor says a form fails with
-  "Bad Request", ask what sent the post (an embedded frame, a browser extension
-  or a proxy that rewrites `Origin`). The workerd smoke check
-  (`apps/web/scripts/smoke-build.mjs`) posts three of these and fails if any is
-  reported.
+- a post from another site. Any POST, PUT, PATCH or DELETE whose `Origin`
+  header names another site, is `null` or is not a URL is answered 403
+  ("Forbidden: this request came from another website.") by
+  `functions/_middleware.ts` before any route runs (`app/lib/crossSitePost.ts`).
+  Bots send these. React Router 7 has its own check for pages (a 400 "Bad
+  Request"); its refusals are skipped too, but only when the request really is
+  cross-site, so the same message from a same-site post is still reported. If a
+  real visitor says a form fails with 403 or "Bad Request", ask what sent the
+  post (an embedded frame, a browser extension or a proxy that rewrites
+  `Origin`). The workerd smoke check (`apps/web/scripts/smoke-build.mjs`) posts
+  four of these, and fails if any is not refused, runs an action or is reported.
+  A refusal logs nothing and sends no report. To see them, watch the website's
+  requests live (`cd apps/web && npx wrangler pages deployment tail
+  --project-name pivot-parlor-web --method POST`, each request with its status)
+  or look for POST 403s on pivotparlor.com in the zone's HTTP traffic
+  analytics.
 
 The API logs at most 30 reports a minute for one route and kind (per
 Cloudflare location, the `WEB_ERROR_LIMITER` binding) and drops the rest.
