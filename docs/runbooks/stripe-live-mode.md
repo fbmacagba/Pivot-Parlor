@@ -42,6 +42,22 @@ Staging stays on the sandbox key for good. Never put a live key on
 3. **Turn on Connect in live mode** and finish the platform profile Stripe asks
    for (Express accounts, United Kingdom, the platform takes an application
    fee).
+4. **Match the Stripe API version.** Request and webhook shapes change between
+   API versions, and what was tested is the sandbox's version.
+   - The API worker uses the `stripe` package, which pins its own version
+     (`2026-02-25.clover` in stripe 20.4.1).
+   - The booking worker calls Stripe with plain `fetch` and sends no
+     `Stripe-Version` (`apps/workers/booking/src/lib/stripe.ts`), so it gets
+     the account's default version.
+   - A webhook endpoint's payloads use the version the endpoint was created
+     with.
+
+   Read the default API version of the sandbox and of the live account
+   (Workbench, Overview). If they match, go on. If they differ, do not change
+   the live account's default: other integrations use that account. Pin
+   `Stripe-Version` in the booking worker to the sandbox's version instead (a
+   code change, tested on staging) before the switch. In 2026-07, a stray
+   live-account endpoint carried version 2019-08-14, so expect a difference.
 
 ## The switch
 
@@ -61,7 +77,9 @@ Staging stays on the sandbox key for good. Never put a live key on
    activity first with the launch purge script (`docs/PURGE-daf88508.sql`,
    kept uncommitted), the way its header says.
 3. **Create the two endpoints in live mode**, with the URLs and events in the
-   table above. In 2026-07, an endpoint added through Workbench landed in a
+   table above, and with the API version of the matching sandbox endpoint
+   (its details page shows it). In 2026-07, an endpoint added through
+   Workbench landed in a
    different Stripe environment from the key's. Afterwards, check that the
    live key itself lists both:
    `curl -s https://api.stripe.com/v1/webhook_endpoints -u "$KEY:"`, run in
