@@ -3,7 +3,7 @@
 // Primary model: google/gemini-3.1-flash-lite-preview
 // Fallback model: google/gemini-2.5-flash-lite
 
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
+import type { ActionFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
 
 const SYSTEM_PROMPT = `You are Pip, a warm and friendly chat assistant for Pivot Parlor, a booking platform for UK beauty and barber shops. You are polite, conversational, and genuinely helpful to everyone you meet.

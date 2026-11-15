@@ -3,8 +3,8 @@
 // browser, so a staging or preview site joined the PRODUCTION queue. Going
 // through the site's own server uses env.API_URL for every environment, and the
 // API still sees the customer's IP (see app/lib/apiTransport.ts).
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { workerResponseLooksLikeJson } from "~/lib/worker-upstream-headers";
 
 export async function action({ request, params, context }: ActionFunctionArgs) {

@@ -1,5 +1,5 @@
-import type { MetaFunction } from "@remix-run/cloudflare";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
+import type { MetaFunction } from "react-router";
 
 export const meta: MetaFunction = () => [
   { title: "Payment cancelled | Pivot Parlor" },

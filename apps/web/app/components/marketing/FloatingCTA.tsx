@@ -1,4 +1,4 @@
-import { Link, useLocation } from "@remix-run/react";
+import { Link, useLocation } from "react-router";
 import { ArrowRight } from "lucide-react";
 
 const HIDDEN_PATHS = ["/contact", "/login"];

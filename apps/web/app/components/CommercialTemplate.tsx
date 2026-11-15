@@ -1,4 +1,4 @@
-import { useParams } from "@remix-run/react";
+import { useParams } from "react-router";
 import { Fragment, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { CommercialShopChrome } from "~/components/CommercialShopChrome";

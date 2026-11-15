@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { LoaderFunctionArgs } from "react-router";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { auditExportErrorHtml, auditQuery, dateOnlyQuery } from "~/lib/audit";
 

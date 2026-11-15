@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { StarRow } from "~/components/site/sections/bits";
 import { useParallax } from "~/components/site/motion/useParallax";

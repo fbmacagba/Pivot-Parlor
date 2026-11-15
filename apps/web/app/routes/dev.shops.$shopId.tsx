@@ -1,6 +1,5 @@
-import { Link, Outlet, useLoaderData } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { Link, Outlet, useLoaderData, data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";

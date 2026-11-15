@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { requireShopSlug } from "./shopSlug";
 
-// Route modules import UI hooks and components from @remix-run/react, which
-// does not resolve react in this test environment (the other route tests mock
-// it too). Loaders and actions never call them, so any name is a stub.
-// lucide-react has the same problem. ("then" stays undefined, or the mock
-// would look like a promise.)
-vi.mock("@remix-run/react", () =>
+// Route modules import UI hooks and components from react-router and
+// lucide-react. Loaders and actions never call them, so any name is a stub.
+// ("then" stays undefined, or the mock would look like a promise.)
+vi.mock("react-router", () =>
   new Proxy(
     { __esModule: true },
     { get: (target, key) => (key === "then" ? undefined : key in target ? target[key as "__esModule"] : () => null) },

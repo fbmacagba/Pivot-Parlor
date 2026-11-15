@@ -7,9 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the loader runs here; the page's UI imports are stubbed (as
 // formActionsRejectNonForm.test.ts does).
-vi.mock("@remix-run/react", () => {
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => {
   const Stub = () => null;
   return {
+    ...(await importOriginal<typeof import("react-router")>()),
     Form: Stub,
     Link: Stub,
     useActionData: () => undefined,
@@ -42,6 +44,7 @@ vi.mock(
 );
 
 import { loader } from "~/routes/admin.sales";
+import { asResponse } from "~/lib/testing/asResponse";
 
 let calls: string[] = [];
 
@@ -62,11 +65,13 @@ function stubApi(): void {
 
 async function openPage(path: string): Promise<{ date: string; calls: string[] }> {
   stubApi();
-  const res = (await loader({
-    request: new Request(`https://pivotparlor.com${path}`, { headers: { Cookie: "pp_session=tok.abc.123" } }),
-    params: {},
-    context: { env: { API_URL: "https://api.test" } },
-  } as never)) as Response;
+  const res = asResponse(
+    await loader({
+      request: new Request(`https://pivotparlor.com${path}`, { headers: { Cookie: "pp_session=tok.abc.123" } }),
+      params: {},
+      context: { env: { API_URL: "https://api.test" } },
+    } as never),
+  );
   const body = (await res.json()) as { date: string };
   return { date: body.date, calls };
 }

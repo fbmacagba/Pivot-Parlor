@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import type { SiteTemplateProps } from "./types";
 import { TemplateNavbar } from "./TemplateNavbar";
 

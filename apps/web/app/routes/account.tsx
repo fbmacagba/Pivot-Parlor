@@ -1,6 +1,13 @@
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
-import { Form, Link, Outlet, useLoaderData, useLocation, useNavigate } from "@remix-run/react";
+import {
+  data as json,
+  Form,
+  Link,
+  Outlet,
+  useLoaderData,
+  useLocation,
+  useNavigate,
+} from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
 

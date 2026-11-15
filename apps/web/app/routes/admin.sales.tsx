@@ -5,9 +5,16 @@
  * (the shop hands the money back); Stripe refunds go through the API and
  * complete when Stripe confirms (charge.refunded).
  */
-import { Form, Link, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import {
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useSearchParams,
+  data as json,
+} from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Receipt, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { pageShopId } from "~/lib/pageShop";

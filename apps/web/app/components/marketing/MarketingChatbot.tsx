@@ -2,7 +2,7 @@
 // Mobile: fullscreen overlay, keyboard only appears when input is focused (FB Messenger behaviour)
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { X, Send, ThumbsUp, Smile, Scissors, ChevronDown } from "lucide-react";
 import { useModalA11y } from "~/lib/useModalA11y";
 

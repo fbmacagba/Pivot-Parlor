@@ -9,7 +9,7 @@
  * `serviceId` and `staffId` are the deep-link names the shop pages already
  * use; `day` is distinct from the `date` the loader reads for slot lookups.
  */
-import type { ShouldRevalidateFunction } from "@remix-run/react";
+import type { ShouldRevalidateFunction } from "react-router";
 import { revalidateAfterConflict } from "./revalidation";
 
 export const WIZARD_PARAMS = ["serviceId", "staffId", "day", "step"] as const;

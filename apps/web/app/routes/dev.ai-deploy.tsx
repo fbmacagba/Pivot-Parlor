@@ -1,6 +1,5 @@
-import { useLoaderData, useRevalidator, useSearchParams } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { useLoaderData, useRevalidator, useSearchParams, data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";

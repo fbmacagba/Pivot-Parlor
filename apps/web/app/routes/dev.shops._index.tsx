@@ -1,6 +1,13 @@
-import { useFetcher, useLoaderData, Link, useNavigate, useRevalidator, useSearchParams } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import {
+  useFetcher,
+  useLoaderData,
+  Link,
+  useNavigate,
+  useRevalidator,
+  useSearchParams,
+  data as json,
+} from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Bot, Copy, ExternalLink, Loader2, Sparkles, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";

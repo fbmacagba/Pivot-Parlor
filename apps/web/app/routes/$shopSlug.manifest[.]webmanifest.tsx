@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
+import type { LoaderFunctionArgs } from "react-router";
 import { createApiClient } from "~/lib/api";
 import { requireShopSlug } from "~/lib/shopSlug";
 

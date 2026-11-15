@@ -1,9 +1,8 @@
 // apps/web/app/routes/setup.stripe.tsx
 // Step 4 of the setup gate: £100 Stripe payment to activate the shop
 
-import { useLoaderData } from "@remix-run/react";
-import type { LoaderFunctionArgs, MetaFunction } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
+import { useLoaderData, data as json, redirect } from "react-router";
+import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 

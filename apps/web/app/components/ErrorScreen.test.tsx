@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 const routeError = vi.hoisted(() => ({ current: undefined as unknown }));
 const reported = vi.hoisted(() => [] as Array<[unknown, string]>);
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const React = await import("react");
   return {
     useRouteError: () => routeError.current,

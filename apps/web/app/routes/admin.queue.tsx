@@ -1,7 +1,6 @@
 // apps/web/app/routes/admin.queue.tsx
-import { useLoaderData, useFetcher } from "@remix-run/react";
-import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { useLoaderData, useFetcher, data as json } from "react-router";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { useState, useEffect } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";

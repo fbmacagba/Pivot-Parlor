@@ -58,7 +58,7 @@ Money questions are answered from **real, shop-specific data — never invented*
 
 ```
 Browser
-  └─► Cloudflare Pages — Remix frontend (apps/web), acts as BFF
+  └─► Cloudflare Pages — React Router 7 frontend (apps/web), acts as BFF
         └─► Cloudflare Workers — Hono API (apps/worker)
               ├─► Cloudflare D1 (SQLite) — pivot-parlor-db
               ├─► Cloudflare KV — sessions, caches, rate data
@@ -67,7 +67,7 @@ Browser
                     └─► Background workers (apps/workers/*)
 ```
 
-- **Auth**: JWT (HS256, shared `JWT_SECRET`) in the `pp_session` HttpOnly cookie or `Authorization: Bearer` header. The Remix BFF verifies sessions by calling `GET /auth/me` on the Worker.
+- **Auth**: JWT (HS256, shared `JWT_SECRET`) in the `pp_session` HttpOnly cookie or `Authorization: Bearer` header. The website (BFF) verifies sessions by calling `GET /auth/me` on the Worker.
 - **API convention**: Worker responses are always `{ success: boolean, data?: T, error?: string }`.
 - **Tenanting**: every shop-scoped query must filter by `shop_id`; SQL is always parameterized via prepared statements.
 - **Money**: all monetary values are stored and transported as integer pence (`*_pence` columns and API fields); pounds appear only at the input (`parsePoundsToPence`) and display (`formatPence`) boundaries. No `REAL` money columns.
@@ -76,7 +76,7 @@ Browser
 
 ```
 apps/
-  web/        Remix frontend on Cloudflare Pages (BFF — proxies to the Worker API)
+  web/        React Router 7 frontend on Cloudflare Pages (BFF — proxies to the Worker API)
   worker/     Hono API on Cloudflare Workers (auth, shops, bookings, payments, AI)
   workers/    Standalone background Workers, deployed independently:
               builder (AI site gen), images, research, chatbot, audit, text, booking
@@ -103,15 +103,15 @@ docs/         Product & strategy documentation
 ```bash
 npm install
 
-# Start web (Remix) + worker (Hono) together
+# Start web (React Router) + worker (Hono) together
 npm run dev
 
 # Or individually
-cd apps/web && npm run dev      # Remix on Vite
+cd apps/web && npm run dev      # React Router on Vite
 cd apps/worker && npm run dev   # Worker API on port 8787
 ```
 
-> ⚠️ The Remix dev proxy expects the Worker API on port **8787**. Routes that proxy to the Worker fail if it isn't running.
+> ⚠️ The website's dev server expects the Worker API on port **8787**. Routes that proxy to the Worker fail if it isn't running.
 
 ### Environment
 
@@ -183,7 +183,7 @@ GitHub Actions workflows in [.github/workflows/](.github/workflows/) deploy `web
 
 ## Known footguns
 
-- **`.js` twins shadow `.tsx` routes.** Compiled `.js` files next to `.tsx` files in `apps/web/app/` take priority in Remix route discovery. After editing a `.tsx` route, remove its stale `.js` twin or your change won't be served. (They are gitignored, but exist locally.)
+- **`.js` twins shadow `.tsx` routes.** A compiled `.js` file next to a `.tsx` route in `apps/web/app/` is the same route to the router, which keeps whichever file it reads first. After editing a `.tsx` route, remove its stale `.js` twin or your change may not be served (`scripts/clean-app-js.mjs` deletes them before `dev` and `build`). (They are gitignored, but exist locally.)
 - **E2E tests default to production** unless `E2E_BASE_URL` is set. Always point them at a non-production target.
 - **Stripe webhooks** are mounted on an isolated Hono app that bypasses CORS/logger middleware — don't fold them into the main app.
 

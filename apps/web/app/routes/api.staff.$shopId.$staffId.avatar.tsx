@@ -1,8 +1,8 @@
 // apps/web/app/routes/api.staff.$shopId.$staffId.avatar.tsx
 // Proxies multipart avatar upload from browser → Hono worker
 
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { getSessionToken } from "~/lib/auth";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 

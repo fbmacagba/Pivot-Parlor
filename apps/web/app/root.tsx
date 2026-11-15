@@ -1,10 +1,4 @@
-import {
-  Links,
-  Meta,
-  Outlet,
-  Scripts,
-  ScrollRestoration,
-} from "@remix-run/react";
+import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import tailwindStylesheet from "~/tailwind.css?url";
 // Self-hosted fonts (WS-6 item 5 / LEG-5): the whole curated set registers its
 // @font-face rules here — no Google Fonts requests anywhere in the app.

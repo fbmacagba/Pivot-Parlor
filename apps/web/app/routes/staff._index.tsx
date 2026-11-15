@@ -1,6 +1,5 @@
-import { Link, useLoaderData } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { Link, useLoaderData, data as json } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { Clock, ArrowRight, CheckCircle } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";

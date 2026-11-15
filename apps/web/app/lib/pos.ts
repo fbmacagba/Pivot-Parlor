@@ -4,8 +4,8 @@
  * session token; the sale itself is created by the booking worker via the
  * main worker's /api/shops/:shopId/sales proxy.
  */
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
+import { data as json, redirect } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { DEVELOPER_STAFF_READ_ONLY, pageShopId, withShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";

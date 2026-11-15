@@ -3,8 +3,8 @@
  * GET  → the service's product list (proxied; auth enforced downstream).
  * POST → replaces the list (form field "products" = JSON [{product_id, quantity}]).
  */
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getSessionToken } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";

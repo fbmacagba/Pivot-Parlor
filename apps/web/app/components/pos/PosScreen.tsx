@@ -1,4 +1,4 @@
-import { Form, useFetcher, useNavigation } from "@remix-run/react";
+import { Form, useFetcher, useNavigation } from "react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import { Banknote, CreditCard, Minus, Plus, QrCode, Scissors, ShoppingBag, Trash2 } from "lucide-react";

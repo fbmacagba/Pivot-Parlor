@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { seedComposeDesignSpec, type MotionIntensity } from "@repo/utils";
 
-vi.mock("@remix-run/react", async () => {
+vi.mock("react-router", async () => {
   const React = await import("react");
   return {
     Link: ({ to, children, ...rest }: { to: string; children?: unknown } & Record<string, unknown>) =>

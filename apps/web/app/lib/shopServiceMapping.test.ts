@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from "vitest";
 
 // The mappers live in a route module; stub the Remix router import so pulling
 // them in doesn't load the real router (the mappers themselves are pure).
-vi.mock("@remix-run/react", () => ({ Outlet: () => null }));
+vi.mock("react-router", () => ({ Outlet: () => null }));
 
 import {
   normalizeCommercialServices,

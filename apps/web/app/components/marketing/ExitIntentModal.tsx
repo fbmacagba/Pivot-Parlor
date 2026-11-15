@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/Button";

@@ -2,9 +2,8 @@
 // Customer-facing walk-in queue page
 
 import { useState, useEffect } from "react";
-import { useParams } from "@remix-run/react";
-import type { MetaFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
+import { useParams, data as json, redirect } from "react-router";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import { isPortfolioDemoShop } from "@repo/utils";
 import { requireShopSlug } from "~/lib/shopSlug";
 

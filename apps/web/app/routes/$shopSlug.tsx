@@ -1,6 +1,5 @@
-import { Outlet, useLoaderData } from "@remix-run/react";
-import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { Outlet, useLoaderData, data as json } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { createApiClient } from "~/lib/api";
 import { decodeToken, getSessionToken } from "~/lib/auth";
 import { requireShopSlug } from "~/lib/shopSlug";
@@ -166,8 +165,8 @@ export const PREVIEW_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
 } as const;
 
-// Document responses take headers only from a route that exports `headers`;
-// the shop's child pages have none, so they inherit these.
+// Document and data (`.data`) responses take headers only from a route that
+// exports `headers`; the shop's child pages have none, so they inherit these.
 export const headers: HeadersFunction = ({ loaderHeaders, parentHeaders }) => {
   const out = new Headers(parentHeaders);
   for (const name of Object.keys(PREVIEW_HEADERS)) {

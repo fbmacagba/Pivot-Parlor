@@ -7,11 +7,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Only the actions run here. The page modules' UI imports are stubbed (as
-// staffViewForDeveloper.test.ts does): those packages resolve react from the
-// root node_modules, where it is not installed.
-vi.mock("@remix-run/react", () => {
+// staffViewForDeveloper.test.ts does); the actions never call them.
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => {
   const Stub = () => null;
   return {
+    ...(await importOriginal<typeof import("react-router")>()),
     Await: Stub,
     Form: Stub,
     Link: Stub,
@@ -93,6 +94,7 @@ import * as serviceProducts from "~/routes/api.shops.$shopId.services.$serviceId
 import * as generateSite from "~/routes/api.shops.$shopId.generate-site";
 import * as generateImage from "~/routes/api.shops.$shopId.generate-image";
 import * as staffAvatar from "~/routes/api.staff.$shopId.$staffId.avatar";
+import { asResponse } from "~/lib/testing/asResponse";
 
 type Role = "admin" | "staff" | "developer";
 type ActionModule = { action: (args: never) => Promise<unknown> };
@@ -162,7 +164,7 @@ async function run(mod: ActionModule, headers: Record<string, string>, body: str
     body,
   });
   try {
-    const res = (await mod.action({ request, params, context } as never)) as Response;
+    const res = asResponse(await mod.action({ request, params, context } as never));
     return `${res.status}`;
   } catch (thrown) {
     if (thrown instanceof Response) return `${thrown.status}`;
@@ -216,15 +218,17 @@ describe("a form action sent a body that is not a form", () => {
       form.toString(),
     );
     expect(answer).toBe("400");
-    const res = (await (login as ActionModule).action({
-      request: new Request("https://pivotparlor.com/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: form.toString(),
-      }),
-      params: {},
-      context,
-    } as never)) as Response;
+    const res = asResponse(
+      await (login as ActionModule).action({
+        request: new Request("https://pivotparlor.com/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form.toString(),
+        }),
+        params: {},
+        context,
+      } as never),
+    );
     expect(await res.json()).toEqual({ error: "Email and password are required." });
   });
 });

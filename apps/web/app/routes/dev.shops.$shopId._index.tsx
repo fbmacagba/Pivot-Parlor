@@ -1,4 +1,4 @@
-import { Link, useFetcher, useNavigate, useOutletContext, useRevalidator } from "@remix-run/react";
+import { Link, useFetcher, useNavigate, useOutletContext, useRevalidator } from "react-router";
 import { Check, Loader2, Sparkles, Trash2, UserCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/Button";

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 // Same test-boundary stubs as VisualManager.test.tsx: the panel under test
 // takes everything as props, so only module loading needs them.
-vi.mock("@remix-run/react", () => ({ useFetcher: () => ({ state: "idle", data: undefined, load() {}, submit() {} }) }));
+vi.mock("react-router", () => ({ useFetcher: () => ({ state: "idle", data: undefined, load() {}, submit() {} }) }));
 vi.mock("lucide-react", () => {
   const Icon = () => null;
   return { ExternalLink: Icon, Loader2: Icon };

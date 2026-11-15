@@ -1,5 +1,5 @@
-import { Link, useRouteLoaderData, useSearchParams } from "@remix-run/react";
-import type { MetaFunction } from "@remix-run/cloudflare";
+import { Link, useRouteLoaderData, useSearchParams } from "react-router";
+import type { MetaFunction } from "react-router";
 import { useState, useEffect } from "react";
 import CommercialTemplate, { type SiteData } from "~/components/CommercialTemplate";
 import { ReviewModal } from "~/components/ReviewModal";

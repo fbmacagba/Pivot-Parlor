@@ -7,11 +7,20 @@
  * ordinary visitors.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-vi.mock("@remix-run/react", () => ({ Outlet: () => null, useLoaderData: () => null }));
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Outlet: () => null, useLoaderData: () => null,
+}));
 vi.mock("~/components/ErrorScreen", () => ({ ErrorScreen: () => null }));
 import { headers as shopHeaders, loader, PREVIEW_HEADERS } from "~/routes/$shopSlug";
-import { action as candidateAction, loader as candidateLoader } from "~/routes/api.shops.$shopId.site-candidate";
+import * as candidateRoute from "~/routes/api.shops.$shopId.site-candidate";
 import { formatMadeAt } from "~/lib/siteCandidate";
+import { asResponse } from "~/lib/testing/asResponse";
+
+// The BFF route's handlers, read as Responses (they answer with data(...)).
+const candidateLoader = async (args: never) => asResponse(await candidateRoute.loader(args));
+const candidateAction = async (args: never) => asResponse(await candidateRoute.action(args));
 
 const API = "https://api.test";
 const SHOP = "shop-1";
@@ -60,11 +69,11 @@ function fakeApi(opts: { candidate: CandidateMode; websiteStatus?: string }) {
   return calls;
 }
 
-function shopRequest(opts: { preview?: boolean; role?: string } = {}) {
+async function shopRequest(opts: { preview?: boolean; role?: string } = {}) {
   const url = `https://web.test/${SLUG}${opts.preview ? "?preview=candidate" : ""}`;
   const headers: Record<string, string> = {};
   if (opts.role) headers.Cookie = `pp_session=${tokenFor(opts.role)}`;
-  return loader({ params: { shopSlug: SLUG }, context: ctx, request: new Request(url, { headers }) } as never);
+  return asResponse(await loader({ params: { shopSlug: SLUG }, context: ctx, request: new Request(url, { headers }) } as never));
 }
 
 /** The shop loader's JSON as these tests read it (the real type is a union with the demo fixture). */

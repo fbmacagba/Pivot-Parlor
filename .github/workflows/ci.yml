@@ -33,3 +33,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The build can pass while its bundle cannot render in workerd (2026-11-14:
+      # React's Node renderer got bundled and every page answered 500). This
+      # serves the web build the way Pages runs it and GETs pages.
+      - name: Smoke-test the web build under workerd
+        run: node scripts/smoke-build.mjs
+        working-directory: apps/web

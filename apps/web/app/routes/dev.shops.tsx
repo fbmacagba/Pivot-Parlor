@@ -1,4 +1,4 @@
-import { Outlet } from "@remix-run/react";
+import { Outlet } from "react-router";
 
 // Layout for /dev/shops and its nested routes. The shops list lives in
 // dev.shops._index.tsx; the child detail routes (dev.shops.$shopId.*) nest

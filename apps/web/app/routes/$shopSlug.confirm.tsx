@@ -1,6 +1,5 @@
-import { Link, useLoaderData, useRouteLoaderData } from "@remix-run/react";
-import type { LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
+import { Link, useLoaderData, useRouteLoaderData, data as json, redirect } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { isPortfolioDemoShop } from "@repo/utils";
 import { useEffect, useState } from "react";
 import { CheckCircle, Loader2, XCircle } from "lucide-react";

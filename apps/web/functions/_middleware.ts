@@ -1,12 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createPagesFunctionHandler } from "@remix-run/cloudflare-pages";
-import type { ServerBuild } from "@remix-run/server-runtime";
+import { createPagesFunctionHandler } from "@react-router/cloudflare";
+import type { ServerBuild } from "react-router";
 import * as build from "../build/server/index.js";
 import { CLIENT_IP_HEADER, createApiAwareFetch, originOf, type ApiRoute } from "../app/lib/apiTransport";
 import { CLIENT_ERRORS_PATH } from "../app/lib/browserErrors";
 import { handleClientErrors, pageRouteIds, type BrowserErrorsBinding } from "../app/lib/clientErrorsEndpoint";
 import { webLoadContext } from "../app/lib/loadContext";
 import { hasUnsafePathSegment } from "../app/lib/pathSafety";
+import { remix2ReloadResponse } from "../app/lib/remix2Reload";
 import { newCspNonce, withSecurityHeaders } from "../app/lib/securityHeaders";
 import { reportServerError, type WebErrorsBinding } from "../app/lib/serverErrors";
 
@@ -18,8 +19,9 @@ interface Env {
   WEB_ERRORS?: WebErrorsBinding & BrowserErrorsBinding;
 }
 
-// The routes a browser error can come from: the site's pages, never its
-// resource routes (app/lib/clientErrorsEndpoint.ts).
+// The site's pages, never its resource routes: the routes a browser error can
+// come from (app/lib/clientErrorsEndpoint.ts), and the ones whose Remix 2 data
+// requests reload the tab (app/lib/remix2Reload.ts).
 const PAGE_ROUTES = pageRouteIds((build as unknown as ServerBuild).routes);
 
 // The route of the request each fetch belongs to. Requests run concurrently in
@@ -53,8 +55,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   if (hasUnsafePathSegment(new URL(context.request.url).pathname)) {
     return withSecurityHeaders(new Response("Not found", { status: 404 }));
   }
+  // A tab still running the Remix 2 client: reload it into the new one before
+  // any loader or action runs (app/lib/remix2Reload.ts).
+  const oldClient = remix2ReloadResponse(context.request, PAGE_ROUTES);
+  if (oldClient) return withSecurityHeaders(oldClient);
   // A visitor's browser reporting a JavaScript error: checked and passed on
-  // here, before Remix (app/lib/clientErrorsEndpoint.ts). Always 204.
+  // here, before the router (app/lib/clientErrorsEndpoint.ts). Always 204.
   if (context.request.method === "POST" && new URL(context.request.url).pathname === CLIENT_ERRORS_PATH) {
     return withSecurityHeaders(
       await handleClientErrors(context.request, {

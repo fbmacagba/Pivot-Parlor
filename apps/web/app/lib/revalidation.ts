@@ -1,4 +1,4 @@
-import type { ShouldRevalidateFunction } from "@remix-run/react";
+import type { ShouldRevalidateFunction } from "react-router";
 
 /**
  * Reload the page's data after a submission answered 409 Conflict.

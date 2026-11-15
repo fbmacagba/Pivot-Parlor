@@ -1,4 +1,4 @@
-import { Link, useLocation } from "@remix-run/react";
+import { Link, useLocation } from "react-router";
 import { Menu } from "lucide-react";
 import { clsx } from "clsx";
 import type { UserRole } from "@repo/types";

@@ -1,6 +1,5 @@
-import { useFetcher, useLoaderData } from "@remix-run/react";
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { useFetcher, useLoaderData, data as json } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
 import { useEffect, useState } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";

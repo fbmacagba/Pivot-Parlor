@@ -1,8 +1,8 @@
 // apps/web/app/routes/api.me.resend-verification.tsx
 // Proxies the verify-email resend for the signed-in customer (session cookie → Bearer).
 
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { getSessionToken } from "~/lib/auth";
 
 export async function action({ request, context }: ActionFunctionArgs) {

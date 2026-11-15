@@ -2,7 +2,7 @@
 // Extracted from dev.shops.tsx (T7.7 class-2) — presentational; all state stays
 // in the route and is passed in. Behavior-identical. Covered by
 // shop-onboarding.spec.ts + dev-dashboard.spec.ts (create + invite link + copy).
-import type { FetcherWithComponents } from "@remix-run/react";
+import type { FetcherWithComponents } from "react-router";
 import type { ChangeEvent, RefObject } from "react";
 import { Copy, ExternalLink, Plus } from "lucide-react";
 import { Button } from "~/components/ui/Button";

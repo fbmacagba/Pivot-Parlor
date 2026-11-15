@@ -8,9 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // Only the actions run here. The page modules' UI imports are stubbed (as
 // staffViewForDeveloper.test.ts does): those packages resolve react from the
 // root node_modules, where it is not installed.
-vi.mock("@remix-run/react", () => {
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => {
   const Stub = () => null;
   return {
+    ...(await importOriginal<typeof import("react-router")>()),
     Form: Stub,
     Link: Stub,
     Outlet: Stub,
@@ -46,6 +48,7 @@ import * as staffBookings from "~/routes/staff.bookings";
 import * as meProfile from "~/routes/api.me.profile";
 import * as meBookings from "~/routes/api.me.bookings";
 import * as generateSite from "~/routes/api.shops.$shopId.generate-site";
+import { asResponse } from "~/lib/testing/asResponse";
 
 const API_URL = "https://api.test";
 const context = { env: { API_URL } };
@@ -85,7 +88,7 @@ type ActionModule = { action: (args: never) => Promise<unknown> };
 
 async function run(mod: ActionModule, request: Request): Promise<Response> {
   try {
-    return (await mod.action({ request, params: { shopId: "shop-1" }, context } as never)) as Response;
+    return asResponse(await mod.action({ request, params: { shopId: "shop-1" }, context } as never));
   } catch (thrown) {
     if (thrown instanceof Response) return thrown;
     throw thrown;

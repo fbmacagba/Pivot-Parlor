@@ -9,7 +9,11 @@
  * Lives in lib/ rather than routes/ so Remix never mounts it as a route.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-vi.mock("@remix-run/react", () => ({ Outlet: () => null, useLoaderData: () => null }));
+// The real module's server helpers (data, redirect) with the screen parts stubbed on top.
+vi.mock("react-router", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-router")>()),
+  Outlet: () => null, useLoaderData: () => null,
+}));
 vi.mock("~/components/ErrorScreen", () => ({ ErrorScreen: () => null }));
 vi.mock("~/components/CommercialShopChrome", () => ({ CommercialShopChrome: () => null }));
 vi.mock("~/components/ThemedBookingControls", () => ({
@@ -20,6 +24,7 @@ vi.mock("~/components/ThemedBookingControls", () => ({
   platformFallbackVars: {},
 }));
 import { loader } from "~/routes/$shopSlug.book";
+import { asResponse } from "~/lib/testing/asResponse";
 
 const API = "https://api.test";
 const SLUG = "linden-barbers";
@@ -42,11 +47,13 @@ function shopApi(timezone: string) {
 /** The page loaded with a service, a team member and `day` kept in its address. */
 async function load(day: string, timezone = "Europe/London") {
   shopApi(timezone);
-  const res = await loader({
-    params: { shopSlug: SLUG },
-    context: { env: { API_URL: API } },
-    request: new Request(`https://pivotparlor.test/${SLUG}/book?serviceId=svc-cut&staffId=st-ana&day=${day}&step=2`),
-  } as never);
+  const res = asResponse(
+    await loader({
+      params: { shopSlug: SLUG },
+      context: { env: { API_URL: API } },
+      request: new Request(`https://pivotparlor.test/${SLUG}/book?serviceId=svc-cut&staffId=st-ana&day=${day}&step=2`),
+    } as never),
+  );
   return (await res.json()) as { today?: string; preselectDay: string };
 }
 

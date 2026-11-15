@@ -1,5 +1,5 @@
-import type { ActionFunctionArgs } from "@remix-run/cloudflare";
-import { json } from "@remix-run/cloudflare";
+import { data as json } from "react-router";
+import type { ActionFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
 import { getSessionToken } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";

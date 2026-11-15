@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import type { Density } from "@repo/utils";
 import type { SiteRenderContext } from "~/components/site/sectionContext";
 import { formatPrice, isGenericCategory, sectionPadY } from "~/components/site/sections/bits";

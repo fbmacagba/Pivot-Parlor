@@ -30,6 +30,8 @@ out/
 build/
 dist
 .pages-dist/
+# React Router 7's generated route types (react-router typegen)
+.react-router/
 
 # Stray JS next to Remix/TS sources (should only be .ts / .tsx in app/)
 apps/web/app/**/*.js

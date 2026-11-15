@@ -38,7 +38,7 @@
 // tracks the in-flight submission's user_id and only applies an outcome
 // to a dialog whose open target still matches it, as defense in depth.
 import { Loader2 } from "lucide-react";
-import { Form } from "@remix-run/react";
+import { Form } from "react-router";
 import { Button } from "~/components/ui/Button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "~/components/ui/Dialog";
 

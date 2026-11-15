@@ -1,10 +1,5 @@
-import type {
-  ActionFunctionArgs,
-  LoaderFunctionArgs,
-  MetaFunction,
-} from "@remix-run/cloudflare";
-import { json, redirect } from "@remix-run/cloudflare";
-import { useActionData, useLoaderData } from "@remix-run/react";
+import { data as json, redirect, useActionData, useLoaderData } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { invitePageSendsE2eMock } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
 import { sessionCookieHeaders } from "~/lib/auth";

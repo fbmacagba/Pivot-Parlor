@@ -1,4 +1,4 @@
-import { Link } from "@remix-run/react";
+import { Link } from "react-router";
 import { DEFAULT_BOOK_LABEL, VIEW_SERVICES_LABEL } from "~/lib/shopLabels";
 
 /**
