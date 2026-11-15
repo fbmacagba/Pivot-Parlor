@@ -338,7 +338,8 @@ test.describe.serial("dashboard sweep", () => {
       // The one write in this sweep, on the throwaway e2e- shop: one working
       // day for the staff member. A new person's grid is every day off, and
       // saving that stores nothing, so a day is opened first. A form post with
-      // no action keeps ?shopId=.
+      // no action keeps ?shopId=. React Router posts it to the page's `.data`
+      // URL (/admin/schedule.data?shopId=...).
       await page.goto(`/admin/schedule${q}`, { waitUntil: "networkidle" });
       const firstDay = page.locator("tr", { hasText: "E2E Dashboard Staff" }).locator("label").first();
       // Until the page has hydrated a tick does not reach React; the label
@@ -352,7 +353,7 @@ test.describe.serial("dashboard sweep", () => {
       let posted = "";
       await expect(async () => {
         const request = page.waitForRequest(
-          (r) => new URL(r.url()).pathname === "/admin/schedule" && r.method() === "POST",
+          (r) => new URL(r.url()).pathname === "/admin/schedule.data" && r.method() === "POST",
           { timeout: 5_000 },
         );
         await button.click();

@@ -48,7 +48,26 @@ test.describe("Dev shops — delete shop (headed repro)", () => {
 
     const last = deleteResponses[deleteResponses.length - 1]!;
     expect(last.status, `delete must return 200 — got ${last.status}: ${last.body}`).toBe(200);
-    const json = JSON.parse(last.body) as { success?: boolean; error?: string };
-    expect(json.success, json.error ?? last.body).toBe(true);
+    // React Router 7: the page's fetcher posts to the route's `.data` URL and
+    // gets the router's own format (turbo-stream), not JSON. So read the outcome
+    // the way the page does: the dialog closes, and the reloaded list no longer
+    // has the shop.
+    const deletedId = new URL(last.url).pathname.split("/")[3];
+    await expect(confirmDelete).toBeHidden({ timeout: 20_000 });
+    type RouterWindow = Window & {
+      __reactRouterDataRouter?: { state: { loaderData: Record<string, unknown> } };
+    };
+    await expect
+      .poll(
+        () =>
+          page.evaluate((id) => {
+            const list = (window as RouterWindow).__reactRouterDataRouter?.state.loaderData["routes/dev.shops._index"] as
+              | { shops?: Array<{ id: string }> }
+              | undefined;
+            return list?.shops ? list.shops.some((s) => s.id === id) : null;
+          }, deletedId),
+        { timeout: 20_000, message: `shop ${deletedId} is still listed after its delete` }
+      )
+      .toBe(false);
   });
 });

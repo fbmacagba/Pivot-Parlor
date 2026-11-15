@@ -1,3 +1,4 @@
+import { acknowledgePlatformCookieNotice } from "./e2e-cookies";
 import { expect, test } from "./fixtures";
 
 test.describe("Dev login", () => {
@@ -36,6 +37,8 @@ test.describe("Dev login", () => {
     const password = process.env.DEV_PASSWORD;
     if (!password) throw new Error("Missing required env var: DEV_PASSWORD");
     const sessionCookie = async () => (await context.cookies()).find((c) => c.name === "pp_session");
+    // The cookie notice's fixed bottom bar covers the sidebar's "Log out".
+    await acknowledgePlatformCookieNotice(page);
     const signIn = async () => {
       await page.goto("/login");
       await page.getByLabel("Email address").fill("dev@pivotparlor.com");
