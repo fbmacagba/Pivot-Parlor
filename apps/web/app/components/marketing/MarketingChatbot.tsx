@@ -222,7 +222,7 @@ export function MarketingChatbot() {
           className={`
             fixed z-50 flex flex-col overflow-hidden
             inset-0 ${ABOVE_COOKIE_NOTICE.bottom0}
-            sm:inset-auto ${ABOVE_COOKIE_NOTICE.smBottom24} sm:right-6 sm:rounded-2xl
+            sm:inset-auto ${ABOVE_COOKIE_NOTICE.smBottom24} ${ABOVE_COOKIE_NOTICE.smFitAbove} sm:right-6 sm:rounded-2xl
           `}
           style={{
             background: DARK,
@@ -273,15 +273,19 @@ export function MarketingChatbot() {
           </div>
 
           {/* Messages
-              minHeight: 260px — locks the window open even with a single message,
-              replacing the visual height that was previously filled by the avatar block.
-              maxHeight: 360px — lets the area grow as conversation gets longer.
+              minHeight: 260px locks the window open even with a single message,
+              replacing the visual height that was previously filled by the avatar block,
+              unless the screen is too short for it: lifted above an open cookie notice
+              (the window's bottom is 6rem plus the notice, and its other rows take about
+              20rem), the area gives up height so the header and the message field both
+              stay on screen. Never below 6rem.
+              maxHeight: 360px lets the area grow as conversation gets longer.
           */}
           <div
             ref={messagesRef}
             onClick={handleMessagesAreaTap}
             className="flex flex-1 flex-col gap-1.5 overflow-y-auto px-4 py-3"
-            style={{ minHeight: 260, maxHeight: 360 }}
+            style={{ minHeight: "min(260px, max(6rem, 100dvh - 27rem - var(--pp-cookie-notice-h, 0px)))", maxHeight: 360 }}
             aria-live="polite"
             aria-relevant="additions"
           >

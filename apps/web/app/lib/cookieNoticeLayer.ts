@@ -1,13 +1,14 @@
 // One page-wide record of the cookie notice on screen.
 //
-// A cookie notice is a fixed bar along the bottom of the viewport, and other
-// fixed layers live there too: the marketing pages' floating sign-up button
-// and Pip, and the dashboards' phone tab bar. Left alone, the notice covers
-// them, so a keyboard user can focus a control they cannot see (WCAG 2.2
-// SC 2.4.11). The notice publishes its height here as a CSS variable on
-// <html>; those layers add it to their bottom offset (ABOVE_COOKIE_NOTICE)
-// and so stand clear of it while it shows. The install invitation reads the
-// same record and waits until no notice is open.
+// A cookie notice is fixed along the bottom of the viewport, and other fixed
+// layers live there too: the marketing pages' floating sign-up button and
+// Pip, and the dashboards' phone tab bar. Left alone, the notice covers them,
+// so a keyboard user can focus a control they cannot see (WCAG 2.2 SC
+// 2.4.11). The notice publishes the space it takes up from the bottom edge
+// (for a floating card, its margin included) as a CSS variable on <html>;
+// those layers add it to their bottom offset (ABOVE_COOKIE_NOTICE) and so
+// stand clear of it while it shows. The install invitation reads the same
+// record and waits until no notice is open.
 //
 // Two notices exist: the platform's (root layout) and a shop's (shop chrome).
 // Each publishes under its own name, so one unmounting during a client-side
@@ -34,6 +35,8 @@ export const ABOVE_COOKIE_NOTICE = {
   bottom6: "bottom-[calc(1.5rem+var(--pp-cookie-notice-h,0px))]",
   bottom24: "bottom-[calc(6rem+var(--pp-cookie-notice-h,0px))]",
   smBottom24: "sm:bottom-[calc(6rem+var(--pp-cookie-notice-h,0px))]",
+  /** A panel lifted by smBottom24 never grows past the top of the screen. */
+  smFitAbove: "sm:max-h-[calc(100dvh-7rem-var(--pp-cookie-notice-h,0px))]",
 } as const;
 
 const heights = new Map<CookieNoticeOwner, number>();

@@ -1,6 +1,6 @@
-/** PlatformCookieBanner: the platform's informational cookie notice. Real
- *  route matching (createRoutesStub), so which pages count as a shop's is
- *  decided exactly as in the app. */
+/** PlatformCookieBanner: the platform's cookie notice, a floating card with
+ *  two equal choices. Real route matching (createRoutesStub), so which pages
+ *  count as a shop's is decided exactly as in the app. */
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
@@ -48,10 +48,14 @@ function notice(): HTMLElement | null {
   return document.querySelector('[aria-label="Cookie notice"]');
 }
 
-function gotIt(): HTMLButtonElement {
-  const btn = Array.from(notice()?.querySelectorAll("button") ?? []).find((b) => b.textContent?.trim() === "Got it");
-  if (!btn) throw new Error("no Got it button");
+function choice(name: "Accept" | "Essential only"): HTMLButtonElement {
+  const btn = Array.from(notice()?.querySelectorAll("button") ?? []).find((b) => b.textContent?.trim() === name);
+  if (!btn) throw new Error(`no ${name} button`);
   return btn;
+}
+
+function stored(): { decided?: boolean; choice?: string } {
+  return JSON.parse(localStorage.getItem(KEY) ?? "{}");
 }
 
 function pressEscape(target: EventTarget = document.body) {
@@ -92,22 +96,50 @@ describe("PlatformCookieBanner", () => {
     expect(notice()).toBeNull();
   });
 
-  it("Got it records the acknowledgement, closes, and frees the space it held", async () => {
+  it("names itself with a heading, not only an accessible label", async () => {
     await mount("/");
-    act(() => gotIt().click());
+    expect(notice()?.querySelector("h2")?.textContent?.trim()).toBe("Cookies");
+  });
+
+  it("offers Essential only and Accept as equals: same look, neither gold-filled", async () => {
+    await mount("/");
+    const essential = choice("Essential only");
+    const accept = choice("Accept");
+    // Declining is as easy and as prominent as accepting (ICO cookie guidance).
+    expect(accept.className).toBe(essential.className);
+    // The page's one gold fill stays the page's own action.
+    expect(accept.className.split(/\s+/)).not.toContain("bg-gold");
+  });
+
+  it("links to the cookie policy as a control of its own, not a word in the sentence", async () => {
+    await mount("/");
+    const link = notice()?.querySelector('a[href="/cookies"]');
+    expect(link?.textContent?.trim()).toBe("Cookie policy");
+    expect(link?.closest("p")).toBeNull();
+  });
+
+  it.each([
+    ["Accept", "accept"],
+    ["Essential only", "essential"],
+  ] as const)("%s records the choice, closes, and frees the space it held", async (name, recorded) => {
+    await mount("/");
+    act(() => choice(name).click());
     expect(notice()).toBeNull();
-    // The shop notice and the E2E helper read this exact shape.
-    expect(JSON.parse(localStorage.getItem(KEY) ?? "{}").decided).toBe(true);
+    // The shop notice and the E2E helper read `decided`.
+    expect(stored()).toMatchObject({ decided: true, choice: recorded });
     expect(isCookieNoticeOpen()).toBe(false);
     expect(document.documentElement.style.getPropertyValue(COOKIE_NOTICE_HEIGHT_VAR)).toBe("");
   });
 
-  it("publishes its rendered height so the floating controls can stand clear", async () => {
+  it("publishes the space it takes from the bottom edge, margin included", async () => {
+    // A floating card ends above the screen's bottom edge: what the floating
+    // controls must clear is everything from its top down, not its height.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-      x: 0, y: 660, width: 390, height: 184, top: 660, right: 390, bottom: 844, left: 0, toJSON: () => ({}),
+      x: 12, y: 560, width: 366, height: 184, top: 560, right: 378, bottom: 744, left: 12, toJSON: () => ({}),
     } as DOMRect);
     await mount("/");
-    expect(document.documentElement.style.getPropertyValue(COOKIE_NOTICE_HEIGHT_VAR)).toBe("184px");
+    expect(window.innerHeight - 560).toBe(208);
+    expect(document.documentElement.style.getPropertyValue(COOKIE_NOTICE_HEIGHT_VAR)).toBe("208px");
   });
 
   it("closes when the visitor moves on to a shop's page", async () => {
@@ -128,11 +160,11 @@ describe("PlatformCookieBanner", () => {
     expect(isCookieNoticeOpen()).toBe(false);
   });
 
-  it("Escape closes it like Got it when nothing else is open", async () => {
+  it("Escape closes it as Essential only when nothing else is open, never as Accept", async () => {
     await mount("/");
     pressEscape();
     expect(notice()).toBeNull();
-    expect(JSON.parse(localStorage.getItem(KEY) ?? "{}").decided).toBe(true);
+    expect(stored()).toMatchObject({ decided: true, choice: "essential" });
   });
 
   it("leaves Escape to an open dialog, such as Pip or the install invitation", async () => {
@@ -172,10 +204,5 @@ describe("PlatformCookieBanner", () => {
     document.body.appendChild(field);
     pressEscape(field);
     expect(notice()).not.toBeNull();
-  });
-
-  it("does not take the page's gold primary style", async () => {
-    await mount("/");
-    expect(gotIt().className).not.toMatch(/\bbg-gold\b/);
   });
 });
