@@ -6,7 +6,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { createRoutesStub } from "react-router";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createRoutesStub, MemoryRouter } from "react-router";
 import { ABOVE_COOKIE_NOTICE } from "~/lib/cookieNoticeLayer";
 import { FloatingCTA } from "./marketing/FloatingCTA";
 import { MarketingChatbot } from "./marketing/MarketingChatbot";
@@ -37,6 +38,7 @@ afterEach(() => {
   container?.remove();
   container = null;
   vi.useRealTimers();
+  localStorage.clear();
   document.documentElement.style.removeProperty("--pp-cookie-notice-h");
   delete document.documentElement.dataset.cookieNotice;
 });
@@ -77,20 +79,40 @@ describe("Pip's teaser is one interruption at a time", () => {
   });
 });
 
-describe("fixed controls stand clear of the cookie notice", () => {
-  it("the floating sign-up button steps aside while a notice is open, and comes back after", async () => {
-    // Lifted above the floating cookie card it covered the hero's own
-    // sign-up button, which does the same job, so it waits instead.
+// Lifted above the floating cookie card, the floating sign-up button covered
+// the hero's own sign-up button, which does the same job; so it waits for the
+// notice to be answered. It must never show and then vanish on a first visit:
+// the notice only appears after hydration.
+describe("the floating sign-up button waits for the cookie notice", () => {
+  const CTA = 'a[aria-label="Get your shop on Pivot"]';
+
+  it("is not in the server's HTML", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FloatingCTA />
+      </MemoryRouter>,
+    );
+    expect(html).not.toContain("Get your shop on Pivot");
+  });
+
+  it("never shows on a first visit, not even before the notice has arrived", async () => {
+    const c = await mount(FloatingCTA);
+    expect(c.querySelector(CTA)).toBeNull();
+  });
+
+  it("shows once the notice is answered, and steps aside while one is open", async () => {
+    localStorage.setItem("pp_platform_consent", JSON.stringify({ decided: true }));
     const layer = await import("~/lib/cookieNoticeLayer");
     act(() => layer.publishCookieNotice("platform", 254));
     const c = await mount(FloatingCTA);
-    const link = () => c.querySelector('a[aria-label="Get your shop on Pivot"]');
-    expect(link()).toBeNull();
+    expect(c.querySelector(CTA)).toBeNull();
 
     act(() => layer.publishCookieNotice("platform", null));
-    expect(classesOf(link())).toContain("bottom-6");
+    expect(classesOf(c.querySelector(CTA))).toContain("bottom-6");
   });
+});
 
+describe("fixed controls stand clear of the cookie notice", () => {
   it("Pip's launcher, teaser and chat window", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const c = await mount(MarketingChatbot);

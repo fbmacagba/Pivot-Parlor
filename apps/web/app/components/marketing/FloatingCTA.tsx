@@ -1,17 +1,24 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { ArrowRight } from "lucide-react";
+import { platformNoticeAnswered } from "~/components/PlatformCookieBanner";
 import { useCookieNoticeOpen } from "~/lib/cookieNoticeLayer";
 
 const HIDDEN_PATHS = ["/contact", "/login"];
 
 export function FloatingCTA() {
   const { pathname } = useLocation();
-  // While a cookie notice is open it steps aside: lifted above the floating
-  // cookie card it covered the hero's own sign-up button, which does the same
-  // job (as does the navbar's). It comes back once the notice is answered.
+  // It waits for the cookie notice: lifted above the floating cookie card it
+  // covered the hero's own sign-up button, which does the same job (as does
+  // the navbar's). Not in the server's HTML, and shown only once the notice
+  // is known to be answered: the notice appears after hydration, so a button
+  // shown until then would flash and vanish on a first visit.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const cookieNoticeOpen = useCookieNoticeOpen();
 
-  if (cookieNoticeOpen || HIDDEN_PATHS.some((p) => pathname.startsWith(p))) return null;
+  if (!mounted || cookieNoticeOpen || !platformNoticeAnswered()) return null;
+  if (HIDDEN_PATHS.some((p) => pathname.startsWith(p))) return null;
 
   return (
     // On a phone the words are display:none and name nothing, so the link

@@ -47,6 +47,18 @@ function alreadyAcknowledged(): boolean {
   }
 }
 
+// Answered in this page's life, for a browser that refuses localStorage.
+let answeredThisPageLife = false;
+
+/**
+ * Whether this visitor has answered the notice, so it will not appear. The
+ * floating sign-up button waits for this: the notice only appears after
+ * hydration, and a button shown until then would vanish as it arrived.
+ */
+export function platformNoticeAnswered(): boolean {
+  return answeredThisPageLife || alreadyAcknowledged();
+}
+
 // Both answers share one look. `!` because the Button base sets a fixed
 // height and nowrap: at 200% text, or 320px wide, a label wraps rather than
 // spilling out of its button.
@@ -78,6 +90,7 @@ export function PlatformCookieBanner() {
     } catch {
       /* private browsing: it simply shows again on the next visit */
     }
+    answeredThisPageLife = true;
     setPending(false);
   }, []);
 

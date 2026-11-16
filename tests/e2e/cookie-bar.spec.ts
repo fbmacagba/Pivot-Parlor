@@ -77,6 +77,18 @@ test.describe("cookie bar on a first visit", () => {
   test.setTimeout(60_000);
 
   test("every control along the bottom stays reachable while it shows", async ({ page }) => {
+    // Watched from the first frame: the floating sign-up button must not show
+    // and then vanish as the notice arrives after hydration.
+    await page.addInitScript(() => {
+      const w = window as unknown as { __signUpShown?: boolean };
+      w.__signUpShown = false;
+      const look = () => {
+        const a = document.querySelector('a[aria-label="Get your shop on Pivot"]');
+        if (a && a.getBoundingClientRect().width > 0) w.__signUpShown = true;
+        requestAnimationFrame(look);
+      };
+      requestAnimationFrame(look);
+    });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(bar(page)).toBeVisible();
     // Past the moment Pip's teaser (4s) and the install invitation (1.5s)
@@ -86,6 +98,7 @@ test.describe("cookie bar on a first visit", () => {
 
     // Lifted above the card it would cover the hero's own sign-up button.
     await expect(floatingSignUp(page)).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __signUpShown?: boolean }).__signUpShown)).toBe(false);
     expect(await reachable(page, 'button[aria-label="Chat with Pip"]')).toBe(true);
 
     expect(await focusStopsHiddenUnderBar(page)).toEqual([]);
