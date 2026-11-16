@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { publishCookieNotice } from "~/lib/cookieNoticeLayer";
 import { MAP_CONSENT_EVENT, readMapConsent, recordShopConsent, SHOP_CONSENT_KEY, type MapConsent } from "~/lib/mapConsent";
 
 // Shop-site cookie notice (PECR / UK GDPR).
@@ -58,15 +59,26 @@ export function ShopSiteCookieConsent({
   }, [visible, onOpenChange]);
 
   // Include wrapping and safe-area padding in the lift for floating chat controls.
+  // The page-wide record (lib/cookieNoticeLayer) tells the install
+  // invitation to wait until this notice has closed.
   useEffect(() => {
     const notice = noticeRef.current;
-    if (!visible || !notice) { onHeightChange?.(0); return; }
-    const measure = () => onHeightChange?.(Math.ceil(notice.getBoundingClientRect().height));
+    if (!visible || !notice) { onHeightChange?.(0); publishCookieNotice("shop", null); return; }
+    const measure = () => {
+      const height = Math.ceil(notice.getBoundingClientRect().height);
+      onHeightChange?.(height);
+      publishCookieNotice("shop", height);
+    };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(notice);
     window.addEventListener("resize", measure);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); onHeightChange?.(0); };
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      onHeightChange?.(0);
+      publishCookieNotice("shop", null);
+    };
   }, [visible, onHeightChange]);
 
   useEffect(() => {

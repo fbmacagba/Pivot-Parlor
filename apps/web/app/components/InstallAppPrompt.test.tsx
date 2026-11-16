@@ -72,6 +72,61 @@ describe("InstallAppPrompt", () => {
     container?.remove();
     container = null;
     vi.useRealTimers();
+    document.documentElement.style.removeProperty("--pp-cookie-notice-h");
+    delete document.documentElement.dataset.cookieNotice;
+  });
+
+  it("waits while a cookie notice is on screen, then invites after the delay once it closes", async () => {
+    const m = await mount();
+    ({ root, container } = m);
+    const layer = await import("~/lib/cookieNoticeLayer");
+    act(() => {
+      layer.publishCookieNotice("platform", 120);
+      window.dispatchEvent(fakePromptEvent("accepted"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(container!.innerHTML).toBe("");
+
+    act(() => {
+      layer.publishCookieNotice("platform", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1499);
+    });
+    expect(container!.innerHTML).toBe("");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(container!.textContent).toContain("Get the Test Shop app");
+  });
+
+  it("a notice that opens before the delay ends also holds the invitation", async () => {
+    const m = await mount();
+    ({ root, container } = m);
+    const layer = await import("~/lib/cookieNoticeLayer");
+    act(() => {
+      window.dispatchEvent(fakePromptEvent("accepted"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    act(() => {
+      layer.publishCookieNotice("shop", 90);
+    });
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(container!.innerHTML).toBe("");
+
+    act(() => {
+      layer.publishCookieNotice("shop", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(container!.textContent).toContain("Get the Test Shop app");
   });
 
   it("renders nothing when the device cannot install", async () => {

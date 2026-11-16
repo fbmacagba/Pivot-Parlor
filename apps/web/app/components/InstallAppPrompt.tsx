@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Download, Share, SquarePlus, X } from "lucide-react";
+import { COOKIE_NOTICE_EVENT, isCookieNoticeOpen } from "~/lib/cookieNoticeLayer";
 import { useShopMatch } from "~/lib/shop-match";
 import { useModalA11y } from "~/lib/useModalA11y";
 import {
@@ -54,10 +55,28 @@ export function InstallAppPrompt() {
 
   const installable = mode === "native" || mode === "ios";
 
+  // One interruption at a time: while a cookie notice is on screen the
+  // invitation waits, and it comes the usual delay after the notice closes.
+  // Checked when the timer fires, so a notice that opens during the delay
+  // holds it too.
   useEffect(() => {
     if (!installable || readDismissed()) return;
-    const timer = setTimeout(() => setInvite(true), SHOW_DELAY_MS);
-    return () => clearTimeout(timer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!isCookieNoticeOpen()) setInvite(true);
+      }, SHOW_DELAY_MS);
+    };
+    const onNoticeChange = () => {
+      if (!isCookieNoticeOpen()) arm();
+    };
+    window.addEventListener(COOKIE_NOTICE_EVENT, onNoticeChange);
+    arm();
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener(COOKIE_NOTICE_EVENT, onNoticeChange);
+    };
   }, [installable]);
 
   const open = guideOpen || (invite && installable);

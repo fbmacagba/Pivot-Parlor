@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import type { UserRole } from "@repo/types";
 import { NAV_MAP, isNavActive, type NavItem } from "./Sidebar";
 import { useShopHref } from "~/lib/useShopHref";
+import { ABOVE_COOKIE_NOTICE } from "~/lib/cookieNoticeLayer";
 
 /** Admin destinations that earn a thumb-reach tab; the rest live behind More. */
 const ADMIN_TAB_HREFS = ["/admin", "/admin/bookings", "/admin/queue", "/admin/pos"];
@@ -66,7 +67,7 @@ export function MobileTabBar({
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-dark/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
+      className={`fixed inset-x-0 ${ABOVE_COOKIE_NOTICE.bottom0} z-30 border-t border-white/10 bg-dark/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden`}
     >
       <ul className="flex">
         {tabs.map(({ href, label, short, icon: Icon }) => {

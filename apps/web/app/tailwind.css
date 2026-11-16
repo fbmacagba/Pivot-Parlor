@@ -23,6 +23,10 @@
        Light-palette shop sites override this per-theme in
        CommercialShopChrome via style.colorScheme. */
     color-scheme: dark;
+    /* While a cookie notice is fixed along the bottom (lib/cookieNoticeLayer
+       publishes its height), moving focus or jumping to an anchor scrolls the
+       target clear of it rather than under it (WCAG 2.2 SC 2.4.11). */
+    scroll-padding-bottom: var(--pp-cookie-notice-h, 0px);
   }
 
   /* Installed (standalone) mode: paint edge to edge but keep content clear
