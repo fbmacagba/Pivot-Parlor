@@ -39,6 +39,10 @@ export type Bindings = {
    *  "alert email not configured" problem on the nightly audit.verify entry
    *  instead of silently sending nothing. */
   AUDIT_OPERATOR_EMAIL?: string;
+  /** Where a new contact-form enquiry is emailed (routes/contact.ts). Set in
+   *  production's [vars] only, never read from D1 (same reason as above).
+   *  Unset (staging, local), no alert is sent, so E2E never emails the inbox. */
+  ENQUIRY_ALERT_TO?: string;
   /** Per-IP limit on CSP violation reports (routes/csp-report.ts; [[ratelimits]]
    *  in wrangler.toml). Unset means no limit, so the alerting guard test checks
    *  that production and staging declare it. */

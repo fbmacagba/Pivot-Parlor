@@ -134,6 +134,7 @@ const LABELS: Record<string, string> = {
   "auth.logout": "Sign-out",
   "review.create": "Review submitted",
   "enquiry.create": "Enquiry submitted",
+  "enquiry.alert": "Enquiry emailed to the platform inbox",
   "customer.view": "Customer details viewed",
   "data.retention": "Old records cleared",
   "ai.call": "AI call",
