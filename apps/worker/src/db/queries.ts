@@ -1777,6 +1777,8 @@ export interface DueReminder {
   shop_slug: string;
   shop_timezone: string | null;
   shop_address: string | null;
+  /** shops.owner_email: the reminder's reply-to. */
+  shop_email: string;
 }
 
 export async function getBookingsDueForReminder(db: D1Database, limit: number) {
@@ -1787,6 +1789,7 @@ export async function getBookingsDueForReminder(db: D1Database, limit: number) {
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
               sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone,
+              sh.owner_email AS shop_email,
               ss.address AS shop_address
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id

@@ -38,6 +38,8 @@ export interface BookingEmailData {
   booking_id: string;
   /** Physical address (shop_settings.address); links to Google Maps when set. */
   shop_address?: string | null;
+  /** The shop's email (shops.owner_email): a customer's reply goes there. */
+  shop_email?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -55,11 +57,20 @@ function resendFailure(status: number, body: string): string {
   return typeof code === "string" && /^[a-z_]{1,64}$/i.test(code) ? `HTTP ${status} (${code})` : `HTTP ${status}`;
 }
 
+/** `value` when it is one plausible email address, else null (the twin of
+ *  apps/worker/src/services/email.ts). A reply-to that Resend might refuse
+ *  would cost the whole email, so anything doubtful is left out instead. */
+function plausibleReplyTo(value: string | null | undefined): string | null {
+  const v = (value ?? "").trim();
+  return v.length <= 254 && /^[^\s@,;<>"()]+@[^\s@,;<>"()]+\.[^\s@,;<>"()]+$/.test(v) ? v : null;
+}
+
 async function sendEmail(
   apiKey: string,
   to: string,
   subject: string,
   html: string,
+  replyTo?: string | null,
 ): Promise<void> {
   const res = await fetch(RESEND_API, {
     method: "POST",
@@ -67,7 +78,7 @@ async function sendEmail(
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ from: FROM, to, subject, html }),
+    body: JSON.stringify({ from: FROM, to, subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
   });
 
   if (!res.ok) {
@@ -134,5 +145,6 @@ export async function sendBookingConfirmation(
     data.customer_email,
     `Booking confirmed: ${data.service_name} at ${data.shop_name}`,
     confirmationHtml(data),
+    plausibleReplyTo(data.shop_email),
   );
 }

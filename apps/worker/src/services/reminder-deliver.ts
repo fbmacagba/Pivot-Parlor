@@ -53,6 +53,7 @@ export async function deliverReminder(
         start_time: booking.start_time,
         timezone: booking.shop_timezone ?? "Europe/London",
         shop_address: booking.shop_address,
+        shop_email: booking.shop_email,
         duration_min: booking.duration_min,
         amount_pence: booking.amount_pence,
         booking_id: booking.id,

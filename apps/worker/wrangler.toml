@@ -20,6 +20,11 @@ enabled = true
 ENVIRONMENT = "production"
 ASSET_BASE_URL = "https://pivot-parlor-api.bmorris0565.workers.dev"
 APP_URL = "https://pivotparlor.com"
+# Each new contact-form enquiry is emailed here (routes/contact.ts). Zone
+# Email Routing forwards dev@ to the platform inbox. Production only: staging
+# leaves it unset so its E2E runs never email the inbox
+# (test/contact-alert.test.ts checks both).
+ENQUIRY_ALERT_TO = "dev@pivotparlor.com"
 
 # D1 Database
 [[d1_databases]]

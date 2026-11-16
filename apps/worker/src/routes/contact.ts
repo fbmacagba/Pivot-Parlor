@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Bindings } from "../bindings.js";
-import { batchWithAudit } from "../audit/context.js";
+import { auditFor, batchWithAudit, SYSTEM_ACTOR } from "../audit/context.js";
+import { sendEnquiryAlert } from "../services/email.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { readTurnstileToken, verifyTurnstileToken } from "../services/turnstile.js";
 import {
@@ -144,6 +145,32 @@ contact.post(
     if (refused) return refused;
 
     console.log("[worker contact] stored enquiry", { id });
+
+    // The platform inbox hears of every stored enquiry, in the background so
+    // the visitor never waits on the email and its outcome never changes their
+    // answer. Unset in staging and local, so nothing is sent there.
+    const apiKey = c.env.RESEND_API_KEY;
+    const alertTo = c.env.ENQUIRY_ALERT_TO;
+    if (apiKey && alertTo) {
+      const alert = { full_name: fullName, shop_name: shopName, shop_type: shopType, email, phone, message };
+      c.executionCtx.waitUntil(
+        auditFor(c, "api", SYSTEM_ACTOR)
+          .run({ action: "enquiry.alert", entityType: "contact", entityId: id }, () =>
+            sendEnquiryAlert(apiKey, alertTo, alert),
+          )
+          .catch((err: unknown) => {
+            // An error line, so the Worker issue alert says a lead was not
+            // forwarded. The enquiry itself is stored. Never the error's
+            // message: it can carry what the enquirer typed.
+            const status = (err as { status?: unknown } | null)?.status;
+            console.error("[worker contact] enquiry alert not sent", {
+              id,
+              error: err instanceof Error ? err.name : "unknown",
+              ...(typeof status === "number" ? { status } : {}),
+            });
+          }),
+      );
+    }
 
     return c.json({ success: true, data: { id } }, 201);
   } catch (err) {

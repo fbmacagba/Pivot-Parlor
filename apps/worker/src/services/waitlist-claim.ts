@@ -43,7 +43,7 @@ export class WaitlistSendError extends Error {
 export async function notifyWaitlistEntry(
   db: D1Database,
   apiKey: string,
-  shop: { id: string; name: string; slug: string },
+  shop: { id: string; name: string; slug: string; owner_email: string },
   entry: WaitlistNotifyEntry,
   recorder: AuditRecorder,
   trigger: "manual" | "slot_opened",
@@ -67,6 +67,7 @@ export async function notifyWaitlistEntry(
           shop_slug: shop.slug,
           service_name: entry.service_name,
           preferred_date: entry.preferred_date,
+          shop_email: shop.owner_email,
         });
       } catch (err) {
         // Not stranded as notified with no email. A failed revert throws its

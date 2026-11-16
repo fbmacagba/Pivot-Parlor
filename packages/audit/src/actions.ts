@@ -24,7 +24,7 @@ export const AUDIT_ACTIONS = [
   "account.create", "account.update", "account.verify_email", "account.verification.send", "account.invite.accept",
   "auth.login", "auth.logout",
   "waitlist.join", "waitlist.update", "waitlist.notify",
-  "review.create", "enquiry.create", "staff.time_off.request",
+  "review.create", "enquiry.create", "enquiry.alert", "staff.time_off.request",
   "booking.reminder", "booking.eod_summary", "data.retention",
   // Plan 3: booking worker routes.
   "shop.setup.complete", "day.open", "day.close",
