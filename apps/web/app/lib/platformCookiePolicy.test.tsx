@@ -40,6 +40,15 @@ describe("platform Cookie Policy", () => {
     expect(body).toContain("react-router-scroll-positions");
   });
 
+  it("says what the notice's two choices do: today, the same thing", () => {
+    const body = text();
+    // The notice offers Accept and Essential only, but every cookie is
+    // strictly necessary, so neither changes what is set. The policy says so.
+    expect(body).toMatch(/Accept[^.]*Essential only[^.]*same effect/);
+    expect(body).toMatch(/pp_platform_consent[^.]*(Accept|choice)/);
+    expect(body).not.toMatch(/there are no optional cookies to accept or reject/);
+  });
+
   it("carries the new date", () => {
     expect(text()).toContain("Last updated: November 2026");
   });

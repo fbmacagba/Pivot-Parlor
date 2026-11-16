@@ -86,9 +86,9 @@ export default function Cookies() {
                 automated abuse and lasts up to one year.
               </li>
               <li>
-                <strong>pp_platform_consent</strong>: records that you have
-                seen our cookie notice so it is not shown again. Stored in
-                localStorage until you clear your browser data.
+                <strong>pp_platform_consent</strong>: records your answer to
+                our cookie notice (Accept or Essential only) so it is not shown
+                again. Stored in localStorage until you clear your browser data.
               </li>
               <li>
                 <strong>pp-install-dismissed</strong>: records that you chose
@@ -165,10 +165,11 @@ export default function Cookies() {
               4. How to Manage Your Preferences
             </h2>
             <p className="mt-2">
-              Because we use only strictly necessary cookies, there are no
-              optional cookies to accept or reject. If we introduce
-              non-essential cookies in the future, we will provide a preference
-              control here.
+              Our cookie notice offers Accept and Essential only, and because
+              we use only strictly necessary cookies, both have the same effect
+              today: no optional cookies are set either way. If we introduce
+              non-essential cookies in the future, we will ask for your consent
+              before setting any and provide a preference control here.
             </p>
             <p className="mt-3">
               You can also control cookies through your browser settings, which
