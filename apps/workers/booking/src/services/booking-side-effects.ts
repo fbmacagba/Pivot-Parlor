@@ -32,11 +32,16 @@ export async function runBookingSideEffects(
   args: BookingSideEffectArgs,
 ): Promise<void> {
   try {
+    // From shops, so a shop with no settings row still gets its email (the
+    // reply-to) and the confirmation goes out as before.
     const confirmPref = await env.DB.prepare(
-      "SELECT booking_confirmation_email, address FROM shop_settings WHERE shop_id = ? LIMIT 1",
+      `SELECT sh.owner_email, ss.booking_confirmation_email, ss.address
+       FROM shops sh LEFT JOIN shop_settings ss ON ss.shop_id = sh.id
+       WHERE sh.id = ? LIMIT 1`,
     )
       .bind(args.shopId)
       .first<{
+        owner_email: string | null;
         booking_confirmation_email: number | null;
         address: string | null;
       }>();
@@ -55,6 +60,7 @@ export async function runBookingSideEffects(
         amount_pence: args.amountPence,
         booking_id: args.bookingId,
         shop_address: confirmPref?.address ?? null,
+        shop_email: confirmPref?.owner_email ?? null,
       });
     }
   } catch (err) {

@@ -277,6 +277,7 @@ bookings.put("/:bookingId/status", async (c) => {
             shop_name:      shop.name,
             shop_slug:      shop.slug,
             booking_id:     bookingId,
+            shop_email:     shop.owner_email,
           });
         }
       }

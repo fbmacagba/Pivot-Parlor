@@ -31,6 +31,7 @@ export async function processReminder(
               sv.name AS service_name, sv.duration_min,
               st.display_name AS staff_name,
               sh.name AS shop_name, sh.slug AS shop_slug, sh.timezone AS shop_timezone,
+              sh.owner_email AS shop_email,
               ss.address AS shop_address
        FROM bookings b
        JOIN services sv ON sv.id = b.service_id

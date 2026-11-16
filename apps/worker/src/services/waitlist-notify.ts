@@ -30,7 +30,7 @@ export const WAITLIST_NOTIFY_CAP = 3;
 export async function notifyWaitlistForOpenedSlot(
   db: D1Database,
   apiKey: string | undefined,
-  shop: { id: string; name: string; slug: string },
+  shop: { id: string; name: string; slug: string; owner_email: string },
   slot: { bookingDate: string; staffId: string },
   recorder: AuditRecorder,
 ): Promise<number> {
