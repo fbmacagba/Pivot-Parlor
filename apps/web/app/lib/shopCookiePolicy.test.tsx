@@ -44,6 +44,13 @@ describe("shop Cookie Policy and the Google map", () => {
     expect(body).not.toMatch(/as this site does not currently use any/i);
   });
 
+  it("names Cloudflare's security cookie and the chat's Turnstile check", () => {
+    const body = text();
+    expect(body).toContain("cf_clearance");
+    expect(body).toMatch(/up to one year/);
+    expect(body).toMatch(/Cloudflare Turnstile[^.]*chat/);
+  });
+
   it("carries the new date", () => {
     expect(text()).toContain("Last updated: November 2026");
   });

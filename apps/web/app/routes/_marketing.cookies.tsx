@@ -80,9 +80,27 @@ export default function Cookies() {
                 HttpOnly and Secure flags applied.
               </li>
               <li>
+                <strong>cf_clearance</strong>: set by Cloudflare, our hosting
+                and security provider, when your browser passes its automatic
+                check for bots. It protects the site and its forms from
+                automated abuse and lasts up to one year.
+              </li>
+              <li>
                 <strong>pp_platform_consent</strong>: records that you have
                 seen our cookie notice so it is not shown again. Stored in
                 localStorage until you clear your browser data.
+              </li>
+              <li>
+                <strong>pp-install-dismissed</strong>: records that you chose
+                &ldquo;Not now&rdquo; on the invitation to install the Pivot
+                Parlor app, so it is not shown again. Stored in localStorage
+                until you clear your browser data.
+              </li>
+              <li>
+                <strong>react-router-scroll-positions</strong>: remembers how
+                far down each page you had scrolled, so going back returns you
+                to the same place. Stored in sessionStorage and cleared when
+                you close the tab.
               </li>
             </ul>
 
@@ -120,9 +138,24 @@ export default function Cookies() {
                 .
               </li>
               <li>
-                <strong>Social login providers</strong> (Google, LinkedIn): if
-                you use social login, these providers may set their own cookies
-                in accordance with their respective privacy policies.
+                <strong>Cloudflare Turnstile</strong>: a security check on our
+                contact form that helps tell people from automated spam. It runs
+                in a frame served by Cloudflare. See{" "}
+                <a
+                  href="https://www.cloudflare.com/privacypolicy/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline text-white/60 hover:text-white/90"
+                >
+                  Cloudflare&rsquo;s Privacy Policy
+                </a>
+                .
+              </li>
+              <li>
+                <strong>Social login providers</strong> (Google, Facebook,
+                LinkedIn): if you use social login, these providers may set
+                their own cookies in accordance with their respective privacy
+                policies.
               </li>
             </ul>
           </section>
