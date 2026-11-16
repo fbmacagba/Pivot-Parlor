@@ -12,6 +12,25 @@
       min-width: 2.75rem;
     }
   }
+
+  /* The platform cookie notice rises into place once, so a first visit sees
+     it arrive rather than mistaking it for part of the page. It starts
+     visible (half opacity, one step down), never from nothing. */
+  .pp-notice-rise {
+    animation: pp-notice-rise 420ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pp-notice-rise {
+      animation: none;
+    }
+  }
+}
+
+@keyframes pp-notice-rise {
+  from {
+    opacity: 0.5;
+    transform: translateY(1rem);
+  }
 }
 
 @layer base {
@@ -29,14 +48,40 @@
     scroll-padding-bottom: var(--pp-cookie-notice-h, 0px);
   }
 
+  /* ...and the page gets that much room at its end, so its last lines (the
+     footer's legal links) can scroll clear of the notice too: scroll padding
+     cannot scroll past the end of the page. Nothing while no notice is open. */
+  body {
+    padding-bottom: var(--pp-cookie-notice-h, 0px);
+  }
+
+  /* Wider dashboards scroll inside their own main area, not the page: the
+     room goes there instead, so the page itself never gains a stray scroll. */
+  @media (min-width: 768px) {
+    body:has(.pp-dashboard) {
+      padding-bottom: 0;
+    }
+    .pp-dashboard main {
+      padding-bottom: calc(1.5rem + var(--pp-cookie-notice-h, 0px));
+      scroll-padding-bottom: var(--pp-cookie-notice-h, 0px);
+    }
+  }
+
   /* Installed (standalone) mode: paint edge to edge but keep content clear
      of the notch and home indicator on devices that have them. */
   @media all and (display-mode: standalone) {
     body {
       padding-top: env(safe-area-inset-top);
-      padding-bottom: env(safe-area-inset-bottom);
+      padding-bottom: calc(env(safe-area-inset-bottom) + var(--pp-cookie-notice-h, 0px));
       padding-left: env(safe-area-inset-left);
       padding-right: env(safe-area-inset-right);
+    }
+  }
+  /* The wider dashboards' rule above outranks the plain body rule, so it
+     restates the inset (without the notice's room) for the installed app. */
+  @media all and (display-mode: standalone) and (min-width: 768px) {
+    body:has(.pp-dashboard) {
+      padding-bottom: env(safe-area-inset-bottom);
     }
   }
 }

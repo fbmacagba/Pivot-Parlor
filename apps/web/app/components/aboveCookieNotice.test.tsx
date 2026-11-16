@@ -78,11 +78,17 @@ describe("Pip's teaser is one interruption at a time", () => {
 });
 
 describe("fixed controls stand clear of the cookie notice", () => {
-  it("the floating sign-up button", async () => {
+  it("the floating sign-up button steps aside while a notice is open, and comes back after", async () => {
+    // Lifted above the floating cookie card it covered the hero's own
+    // sign-up button, which does the same job, so it waits instead.
+    const layer = await import("~/lib/cookieNoticeLayer");
+    act(() => layer.publishCookieNotice("platform", 254));
     const c = await mount(FloatingCTA);
-    const link = c.querySelector('a[aria-label="Get your shop on Pivot"]');
-    expect(classesOf(link)).toContain(ABOVE_COOKIE_NOTICE.bottom6);
-    expect(classesOf(link)).not.toContain("bottom-6");
+    const link = () => c.querySelector('a[aria-label="Get your shop on Pivot"]');
+    expect(link()).toBeNull();
+
+    act(() => layer.publishCookieNotice("platform", null));
+    expect(classesOf(link())).toContain("bottom-6");
   });
 
   it("Pip's launcher, teaser and chat window", async () => {
@@ -110,6 +116,11 @@ describe("fixed controls stand clear of the cookie notice", () => {
     expect(classesOf(chat)).toContain(ABOVE_COOKIE_NOTICE.bottom0);
     expect(classesOf(chat)).toContain(ABOVE_COOKIE_NOTICE.smBottom24);
     expect(classesOf(chat)).not.toContain("sm:bottom-24");
+    // Lifted above a tall floating card, the 574px panel would push its own
+    // header (and close button) off the top of a 768px laptop screen: wider
+    // up, it never grows taller than the space the notice leaves.
+    expect(classesOf(chat)).toContain(ABOVE_COOKIE_NOTICE.smFitAbove);
+    expect(ABOVE_COOKIE_NOTICE.smFitAbove).toMatch(/^sm:max-h-\[/);
   });
 
   it("the dashboards' phone tab bar", async () => {
