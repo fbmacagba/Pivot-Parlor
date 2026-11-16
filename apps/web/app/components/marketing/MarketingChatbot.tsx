@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router";
 import { X, Send, ThumbsUp, Smile, Scissors, ChevronDown } from "lucide-react";
 import { useModalA11y } from "~/lib/useModalA11y";
+import { ABOVE_COOKIE_NOTICE, useCookieNoticeOpen } from "~/lib/cookieNoticeLayer";
 
 type Message = {
   role: "user" | "assistant";
@@ -65,12 +66,18 @@ export function MarketingChatbot() {
     trapTabs: false,
   });
 
+  // The teaser comes 4s after load, but never while a cookie notice is open:
+  // lifted above it, the bubble would cover the hero's sign-up button. One
+  // interruption at a time; it follows once the notice is dismissed.
+  const cookieNoticeOpen = useCookieNoticeOpen();
+  const [teaserDue, setTeaserDue] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => {
-      if (!open) setShowTeaser(true);
-    }, 4000);
+    const t = setTimeout(() => setTeaserDue(true), 4000);
     return () => clearTimeout(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- teaser delay once on mount only (not when `open` changes)
+  }, []);
+  useEffect(() => {
+    if (teaserDue && !cookieNoticeOpen && !open) setShowTeaser(true);
+  }, [teaserDue, cookieNoticeOpen, open]);
 
   useEffect(() => {
     if (open) { setShowTeaser(false); setTeaserDismissed(true); }
@@ -166,7 +173,7 @@ export function MarketingChatbot() {
     <>
       {/* ── Teaser bubble ── */}
       {showTeaser && !teaserDismissed && !open && (
-        <div className="fixed bottom-24 right-6 z-50"
+        <div className={`fixed ${ABOVE_COOKIE_NOTICE.bottom24} right-6 z-50`}
           style={{ animation: "pip-slide-up 0.4s cubic-bezier(0.34,1.56,0.64,1) both" }}>
           <div
             className="relative cursor-pointer rounded-2xl rounded-br-sm px-4 py-2.5 text-sm font-semibold shadow-xl"
@@ -186,7 +193,7 @@ export function MarketingChatbot() {
       )}
 
       {/* ── Launcher button — hidden on mobile when chat is open ── */}
-      <div className={`fixed bottom-6 right-6 z-50 ${open ? "hidden sm:block" : ""}`}>
+      <div className={`fixed ${ABOVE_COOKIE_NOTICE.bottom6} right-6 z-50 ${open ? "hidden sm:block" : ""}`}>
         {!open && (
           <>
             <span className="absolute inset-0 rounded-full"
@@ -212,11 +219,11 @@ export function MarketingChatbot() {
       {/* ── Chat window ── */}
       {open && (
         <div ref={dialogRef} role="dialog" data-pip-chat="" aria-label="Chat with Pip, Pivot Parlor's AI assistant"
-          className="
+          className={`
             fixed z-50 flex flex-col overflow-hidden
-            inset-0
-            sm:inset-auto sm:bottom-24 sm:right-6 sm:rounded-2xl
-          "
+            inset-0 ${ABOVE_COOKIE_NOTICE.bottom0}
+            sm:inset-auto ${ABOVE_COOKIE_NOTICE.smBottom24} sm:right-6 sm:rounded-2xl
+          `}
           style={{
             background: DARK,
             border: "none",

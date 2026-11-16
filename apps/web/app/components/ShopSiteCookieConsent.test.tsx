@@ -8,6 +8,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { ShopSiteCookieConsent } from "./ShopSiteCookieConsent";
 import { ConsentedMap } from "./ConsentedMap";
 import { readMapConsent, recordShopConsent } from "~/lib/mapConsent";
+import { COOKIE_NOTICE_HEIGHT_VAR, isCookieNoticeOpen } from "~/lib/cookieNoticeLayer";
 
 describe("ShopSiteCookieConsent", () => {
   let root: Root | null = null;
@@ -33,6 +34,35 @@ describe("ShopSiteCookieConsent", () => {
     expect(classes).toContain("text-[color:var(--st-on-accent,#000)]");
     expect(classes).not.toContain("text-black");
     expect(classes).toContain("bg-[color:var(--color-accent)]");
+  });
+
+  describe("tells the rest of the page it is on screen (the install invitation waits for it)", () => {
+    afterEach(() => {
+      document.documentElement.style.removeProperty(COOKIE_NOTICE_HEIGHT_VAR);
+      delete document.documentElement.dataset.cookieNotice;
+    });
+
+    it("while the informational notice shows, until Got it", () => {
+      const button = mountNotice({});
+      expect(isCookieNoticeOpen()).toBe(true);
+      act(() => button("Got it")!.click());
+      expect(isCookieNoticeOpen()).toBe(false);
+    });
+
+    it("while the map question shows, until it is answered", () => {
+      const button = mountNotice({ asksAboutMap: true });
+      expect(isCookieNoticeOpen()).toBe(true);
+      act(() => button("Essential only")!.click());
+      expect(isCookieNoticeOpen()).toBe(false);
+    });
+
+    it("and stops when it unmounts", () => {
+      mountNotice({});
+      expect(isCookieNoticeOpen()).toBe(true);
+      act(() => root?.unmount());
+      root = null;
+      expect(isCookieNoticeOpen()).toBe(false);
+    });
   });
 
   function mountNotice(props: { forceOpen?: boolean; asksAboutMap?: boolean }) {

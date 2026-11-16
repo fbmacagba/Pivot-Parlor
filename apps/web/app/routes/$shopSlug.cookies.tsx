@@ -91,9 +91,20 @@ export default function ShopCookiePolicy() {
             Secure.
           </li>
           <li>
+            <strong>cf_clearance</strong>: set by Cloudflare, the hosting and
+            security provider for this website, when your browser passes its
+            automatic check for bots. It protects the site and its forms from
+            automated abuse and lasts up to one year.
+          </li>
+          <li>
             <strong>Cookie preference</strong>: records that you have seen our
             cookie notice, and your choice about the map, so the notice is not
             shown again. Stored in your browser&rsquo;s local storage.
+          </li>
+          <li>
+            <strong>App invitation</strong>: records that you chose &ldquo;Not
+            now&rdquo; on the invitation to install this website as an app, so
+            it is not shown again. Stored in your browser&rsquo;s local storage.
           </li>
         </ul>
 
@@ -158,6 +169,20 @@ export default function ShopCookiePolicy() {
           <li>
             <strong>Google Maps</strong>: only if you allow the map (section
             2.3).
+          </li>
+          <li>
+            <strong>Cloudflare Turnstile</strong>: a security check on this
+            website&rsquo;s chat assistant that helps tell people from automated
+            messages. It runs in a frame served by Cloudflare. See{" "}
+            <a
+              href="https://www.cloudflare.com/privacypolicy/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-[color:var(--st-ink-60)] hover:text-[color:var(--st-ink-90)]"
+            >
+              Cloudflare&rsquo;s Privacy Policy
+            </a>
+            .
           </li>
           <li>
             <strong>Social login providers</strong> (Google, Facebook, LinkedIn):
