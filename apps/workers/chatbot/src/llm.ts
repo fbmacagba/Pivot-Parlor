@@ -1,4 +1,4 @@
-import { chatComplete, type ChatDeps, type ProviderKeys } from "@repo/llm";
+import { chatComplete, type ChatDeps, type Effort, type ProviderKeys } from "@repo/llm";
 import { DEFAULT_CHATBOT_MODEL } from "./model.js";
 
 export type HistoryMessage = { role: "user" | "assistant" | "system"; content: string };
@@ -18,18 +18,53 @@ export type ChatCallResult =
   | { ok: false };
 
 /**
+ * Output budget for one reply. The prompt asks for 2-3 short sentences, about
+ * a hundred tokens, but a model that reasons spends its thinking from the same
+ * budget first; at the old flat 150 a reasoning model ran out before writing
+ * anything, the call failed and the default model answered instead. `effort`
+ * is the level that will run: the chosen one, else the model's own default.
+ * Unknown (a record saved before effort existed, or the default-model rescue)
+ * gets room for medium, the most common default.
+ */
+export function chatReplyBudget(effort: Effort | undefined): number {
+  switch (effort) {
+    case "none":
+      return 300;
+    case "minimal":
+      return 1024;
+    case "low":
+      return 2048;
+    case "medium":
+    case undefined:
+      return 4096;
+    default:
+      // high, xhigh, max: only ever a model's own default, never chosen for the chatbot.
+      return 8192;
+  }
+}
+
+/** A visitor is waiting: a model that has not answered by then is abandoned for the next candidate. */
+export const CHAT_ATTEMPT_TIMEOUT_MS = 20_000;
+
+/**
  * One reply for the shop chatbot. The chosen model is tried once (a visitor
- * is waiting, so no HTTP back-off); if it fails for any reason (missing
- * direct key, vendor error) the code default is tried once. Effort is never
- * sent for the chatbot.
+ * is waiting, so no HTTP back-off) with the chosen effort, if any; if it fails
+ * for any reason (missing direct key, vendor error, no answer within the time
+ * limit) the code default is tried once, without effort.
  */
 export async function generateReply(
   params: {
     keys: ProviderKeys;
     modelId: string;
+    /** Sent to the chosen model only. */
+    effort?: Effort;
+    /** The chosen model's own default, for sizing when no effort is chosen. */
+    defaultEffort?: Effort;
     systemPrompt: string;
     history: HistoryMessage[];
     userMessage: string;
+    /** Per-attempt limit; tests shorten it. */
+    attemptTimeoutMs?: number;
   },
   deps: ChatDeps = {}
 ): Promise<ChatCallResult> {
@@ -42,14 +77,19 @@ export async function generateReply(
   const candidates = params.modelId === DEFAULT_CHATBOT_MODEL ? [params.modelId] : [params.modelId, DEFAULT_CHATBOT_MODEL];
 
   for (const modelId of candidates) {
+    const chosen = modelId === params.modelId;
+    const effort = chosen ? params.effort : undefined;
+    const budgetEffort = chosen ? (params.effort ?? params.defaultEffort) : undefined;
     try {
       const r = await chatComplete(
         {
           modelId,
           system: params.systemPrompt,
           messages,
-          maxTokens: 150,
+          ...(effort ? { effort } : {}),
+          maxTokens: chatReplyBudget(budgetEffort),
           maxRetries: 0,
+          signal: AbortSignal.timeout(params.attemptTimeoutMs ?? CHAT_ATTEMPT_TIMEOUT_MS),
           appTitle: "Pivot Parlor Chatbot",
         },
         params.keys,
@@ -57,7 +97,9 @@ export async function generateReply(
       );
       const prompt_tokens = r.usage?.inputTokens ?? 0;
       const completion_tokens = r.usage?.outputTokens ?? 0;
-      console.log(`[chatbot] llm route=${r.route} model=${r.model} in=${prompt_tokens} out=${completion_tokens}`);
+      console.log(
+        `[chatbot] llm route=${r.route} model=${r.model}${effort ? ` effort=${effort}` : ""} in=${prompt_tokens} out=${completion_tokens}`
+      );
       return {
         ok: true,
         content: r.text,

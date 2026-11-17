@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getSessionToken } from "~/lib/auth";
 import { buildWorkerUpstreamHeaders, workerResponseLooksLikeJson } from "~/lib/worker-upstream-headers";
 
-/** Proxy for the platform chatbot model: GET reads it, POST { model_id } saves it. */
+/** Proxy for the platform chatbot model: GET reads it, POST { model_id, effort? } saves it (body passed through). */
 async function proxy(request: Request, context: LoaderFunctionArgs["context"], method: "GET" | "POST") {
   const token = getSessionToken(request);
   if (!token) return json({ success: false, error: "Unauthorized" }, 401);

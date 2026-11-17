@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { safeJsonParse, readJsonObject } from "@repo/utils";
+import { safeJsonParse, readJsonObject, CHATBOT_EFFORT_LEVELS } from "@repo/utils";
 import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
 import { authMiddleware, getUser } from "../middleware/auth.js";
@@ -53,37 +53,67 @@ ai.get("/models", async (c) => {
   return c.json({ success: true, data: await getLiveModels(c.env.KV, providerKeysFromEnv(c.env)) });
 });
 
-/** Platform-wide chatbot model choice: `{ model_id, updated_at }`, no expiry. */
+/**
+ * Platform-wide chatbot choice, no expiry:
+ * `{ model_id, effort?, default_effort?, updated_at }`. `effort` is the chosen
+ * level (sent to the model); `default_effort` is the model's own default at
+ * save time, which only sizes the chatbot's output budget. Records saved
+ * before effort existed hold just `model_id` and `updated_at`.
+ */
 export const CHATBOT_MODEL_KV_KEY = "platform:chatbot:model";
 
-// GET /api/ai/chatbot-model — current platform-wide chatbot model (nulls when unset)
+type StoredChatbotChoice = { model_id?: unknown; effort?: unknown; default_effort?: unknown; updated_at?: unknown };
+
+// GET /api/ai/chatbot-model — current platform-wide chatbot model and effort (nulls when unset)
 ai.get("/chatbot-model", async (c) => {
-  const stored = safeJsonParse<{ model_id?: unknown; updated_at?: unknown }>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+  const stored = safeJsonParse<StoredChatbotChoice>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
   return c.json({
     success: true,
     data: {
       model_id: typeof stored?.model_id === "string" ? stored.model_id : null,
+      effort: parseTextEffort(stored?.effort) ?? null,
       updated_at: typeof stored?.updated_at === "string" ? stored.updated_at : null,
     },
   });
 });
 
-// POST /api/ai/chatbot-model — body { model_id }; must be a listed text model
+// POST /api/ai/chatbot-model — body { model_id, effort? }; a listed text model,
+// and a level that model takes, no higher than medium ("" or absent = the
+// model decides).
 ai.post("/chatbot-model", async (c) => {
-  const body: { model_id?: unknown } = (await readJsonObject(c.req)) ?? {};
+  const body: { model_id?: unknown; effort?: unknown } = (await readJsonObject(c.req)) ?? {};
   const modelId = typeof body.model_id === "string" ? body.model_id.trim() : "";
   if (!modelId) return c.json({ success: false, error: "model_id is required" }, 400);
+  const effortGiven = body.effort !== undefined && body.effort !== null && body.effort !== "";
+  const effort = parseTextEffort(body.effort);
+  if (effortGiven && !effort) return c.json({ success: false, error: EFFORT_VALUES_MESSAGE }, 400);
   const model = await getModel(c.env.KV, providerKeysFromEnv(c.env), modelId, "text");
   if (!model) return c.json({ success: false, error: `Unknown text model: ${modelId}` }, 400);
-  const record = { model_id: modelId, updated_at: new Date().toISOString() };
-  const previous = safeJsonParse<{ model_id?: unknown }>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+  if (effort && !model.effortLevels.includes(effort)) {
+    return c.json({ success: false, error: `${model.name} does not take effort ${effort}` }, 400);
+  }
+  if (effort && !CHATBOT_EFFORT_LEVELS.includes(effort)) {
+    return c.json({ success: false, error: `The chatbot takes effort up to medium, not ${effort}` }, 400);
+  }
+  const record = {
+    model_id: modelId,
+    ...(effort ? { effort } : {}),
+    ...(model.defaultEffort ? { default_effort: model.defaultEffort } : {}),
+    updated_at: new Date().toISOString(),
+  };
+  const previous = safeJsonParse<StoredChatbotChoice>(await c.env.KV.get(CHATBOT_MODEL_KV_KEY));
+  const previousEffort = parseTextEffort(previous?.effort) ?? null;
   try {
     await auditFor(c).run(
       {
         action: "ai.chatbot_model.set",
         entityType: "platform_setting",
         entityId: "chatbot_model",
-        changes: { chatbot_model: [typeof previous?.model_id === "string" ? previous.model_id : null, modelId] },
+        changes: {
+          chatbot_model: [typeof previous?.model_id === "string" ? previous.model_id : null, modelId],
+          // Only when an effort was or is set, so a model-only save reads as before.
+          ...(previousEffort || effort ? { chatbot_effort: [previousEffort, effort ?? null] as [unknown, unknown] } : {}),
+        },
       },
       () => c.env.KV.put(CHATBOT_MODEL_KV_KEY, JSON.stringify(record))
     );

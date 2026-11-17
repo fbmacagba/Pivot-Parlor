@@ -39,7 +39,7 @@ export function ModelPicker({
   models: PickerModel[];
   value: string;
   onChange: (id: string) => void;
-  /** Current effort ("" = model decides). Omit both effort props to hide the effort select (image models, chatbot). */
+  /** Current effort ("" = model decides). Omit both effort props to hide the effort select (image models). */
   effort?: string;
   onEffortChange?: (effort: string) => void;
   disabled?: boolean;

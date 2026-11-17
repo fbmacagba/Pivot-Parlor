@@ -138,7 +138,7 @@ const LABELS: Record<string, string> = {
   "customer.view": "Customer details viewed",
   "data.retention": "Old records cleared",
   "ai.call": "AI call",
-  "ai.chatbot_model.set": "Chatbot model changed",
+  "ai.chatbot_model.set": "Chatbot model or effort changed",
   "ai.registry.refresh": "AI model list refreshed",
   "audit.view": "Activity viewed",
   "audit.export": "Activity exported",

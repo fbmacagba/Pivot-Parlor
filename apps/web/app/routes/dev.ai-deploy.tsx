@@ -21,7 +21,7 @@ interface Shop {
   type: string;
 }
 
-type ChatbotModelRecord = { model_id: string | null; updated_at: string | null };
+type ChatbotModelRecord = { model_id: string | null; effort?: string | null; updated_at: string | null };
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -40,7 +40,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     // silent
   }
   // Separate try: a failure here must not blank the model list.
-  let chatbotModel: ChatbotModelRecord = { model_id: null, updated_at: null };
+  let chatbotModel: ChatbotModelRecord = { model_id: null, effort: null, updated_at: null };
   try {
     chatbotModel = await api.get<ChatbotModelRecord>("/api/ai/chatbot-model");
   } catch {
@@ -329,10 +329,11 @@ export default function DevAIDeploy() {
           <ChatbotModelCard
             models={textModels}
             savedModelId={chatbotModel.model_id}
+            savedEffort={chatbotModel.effort ?? null}
             savedAt={chatbotModel.updated_at}
             defaultModelId={DEFAULT_TEXT_MODEL_ID}
-            onSave={async (id) => {
-              await postJson("/api/ai/chatbot-model", { model_id: id });
+            onSave={async (id, effort) => {
+              await postJson("/api/ai/chatbot-model", { model_id: id, ...(effort ? { effort } : {}) });
               revalidator.revalidate();
             }}
           />
