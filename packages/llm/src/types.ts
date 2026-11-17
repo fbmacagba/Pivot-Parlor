@@ -72,6 +72,8 @@ export interface Adapter {
   buildRequest(req: AdapterRequest, apiKey: string): { url: string; init: RequestInit };
   /** null when the body carries no usable text. */
   parseResponse(body: unknown): AdapterResponse | null;
+  /** The token counts in a 200 body, read on their own: an empty reply is still billed. */
+  parseUsage(body: unknown): ChatUsage | null;
   /** True when a 400 body is complaining about the effort parameter. */
   isEffortRejection(body: string): boolean;
 }

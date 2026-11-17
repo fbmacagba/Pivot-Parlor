@@ -345,3 +345,26 @@ describe("research budget from the model's default", () => {
     expect((c.sends.text[0] as { text_effort_default?: unknown }).text_effort_default).toBeUndefined();
   });
 });
+
+describe("research cost log for an empty reply", () => {
+  it("logs the billed tokens of an empty reply under the job, then retries as before", async () => {
+    let n = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      n++;
+      return n === 1
+        ? new Response(JSON.stringify({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 150 } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : completion(JSON.stringify(spec()));
+    });
+    const h = harness();
+    await h.run(message());
+    const usage = h.fake.statements.filter((s) => s.sql.includes("INSERT INTO ai_usage_log"));
+    expect(usage.map((s) => [s.args[3], s.args[4], s.args[5], s.args[6], s.args[10]])).toEqual([
+      [MODEL, "site_research", 90, 150, "job-1"],
+      [MODEL, "site_research", 120, 80, "job-1"],
+    ]);
+    expect(h.sends.text).toHaveLength(1);
+  });
+});

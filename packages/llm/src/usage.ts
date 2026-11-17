@@ -6,6 +6,14 @@ import type { ChatUsage } from "./types";
  * per job. Before this, only the shop chatbot wrote rows; the research and
  * text workers that build every website only printed token counts to logs.
  *
+ * A failed attempt the provider plausibly billed gets a row too, under the
+ * same job or chat request as its `ai.call` entry: an empty reply (a
+ * reasoning model that spent its budget thinking) with the counts the
+ * provider sent, and a chatbot attempt abandoned at its time limit with none
+ * (0 tokens, no cost basis: unknown). Those rows are not in the `ai.call`
+ * outcome, which describes only the attempt that answered. Research, text and
+ * the chatbot write them; theme generation writes no rows at all.
+ *
  * Prices come from the API worker's model list, which it caches in the KV
  * namespace the background workers share: the same list (and so the same
  * price) the audit trail's `ai.call` entries use. No price is ever guessed:

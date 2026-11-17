@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chatComplete, LlmError, type ChatRequest, type ProviderKeys } from "../src/index";
+import { billedUsageOf, chatComplete, LlmError, type ChatRequest, type ProviderKeys } from "../src/index";
 
 type Call = { url: string; init: RequestInit; body: Record<string, unknown> };
 
@@ -297,7 +297,45 @@ describe("chatComplete failure handling", () => {
     await expect(chatComplete({ ...base, modelId: "x-ai/grok-4.6" }, KEYS, { fetch: fetchImpl })).rejects.toMatchObject({
       retryable: false,
       status: 200,
+      usage: null,
     });
+  });
+
+  it("an empty reply still carries the tokens it was billed for, on every route", async () => {
+    // A reasoning model that spent its whole budget thinking: no text, real usage.
+    const cases: Array<[string, () => Response, { inputTokens: number; outputTokens: number }]> = [
+      [
+        "openai/gpt-6.1-terra",
+        () => Response.json({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 150 } }),
+        { inputTokens: 90, outputTokens: 150 },
+      ],
+      [
+        "openai-api/gpt-6.1-terra",
+        () => Response.json({ choices: [{ message: { content: null } }], usage: { prompt_tokens: 91, completion_tokens: 151 } }),
+        { inputTokens: 91, outputTokens: 151 },
+      ],
+      [
+        "anthropic-api/claude-haiku-5-5",
+        () => Response.json({ content: [{ type: "thinking", thinking: "..." }], usage: { input_tokens: 40, output_tokens: 300 } }),
+        { inputTokens: 40, outputTokens: 300 },
+      ],
+    ];
+    for (const [modelId, response, usage] of cases) {
+      const { fetchImpl } = makeFetch([response]);
+      const err = await chatComplete({ ...base, modelId }, KEYS, { fetch: fetchImpl }).catch((e: unknown) => e);
+      expect(err, modelId).toBeInstanceOf(LlmError);
+      expect((err as LlmError).usage, modelId).toEqual(usage);
+      expect(billedUsageOf(err), modelId).toEqual(usage);
+    }
+  });
+
+  it("carries no billed usage for failures the provider does not bill", async () => {
+    const { fetchImpl } = makeFetch([() => new Response("nope", { status: 401 })]);
+    const err = await chatComplete({ ...base, modelId: "openai/gpt-6.1-terra" }, KEYS, { fetch: fetchImpl }).catch((e: unknown) => e);
+    expect((err as LlmError).usage).toBeNull();
+    expect(billedUsageOf(err)).toBeNull();
+    expect(billedUsageOf(new Error("plain"))).toBeNull();
+    expect(billedUsageOf("not an error")).toBeNull();
   });
 });
 

@@ -85,7 +85,8 @@ export async function chatComplete(req: ChatRequest, keys: ProviderKeys, deps: C
         });
       }
       const out = adapter.parseResponse(parsed);
-      if (!out) throw noContentError(route, model, res.status, raw);
+      // An empty reply was still billed: the error carries its token counts.
+      if (!out) throw noContentError(route, model, res.status, raw, adapter.parseUsage(parsed));
       return {
         text: base.jsonOnly ? extractJsonObject(out.text) : out.text.trim(),
         usage: out.usage,

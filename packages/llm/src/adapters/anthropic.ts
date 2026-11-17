@@ -1,8 +1,16 @@
-import type { Adapter, ChatMessage, Effort } from "../types";
+import type { Adapter, ChatMessage, ChatUsage, Effort } from "../types";
 
 interface AnthropicBody {
   content?: Array<{ type?: string; text?: string }>;
   usage?: { input_tokens?: number; output_tokens?: number };
+}
+
+/** Token counts from a Messages API body. */
+function parseAnthropicUsage(body: unknown): ChatUsage | null {
+  const o = (body ?? {}) as AnthropicBody;
+  return typeof o.usage?.input_tokens === "number" && typeof o.usage?.output_tokens === "number"
+    ? { inputTokens: o.usage.input_tokens, outputTokens: o.usage.output_tokens }
+    : null;
 }
 
 /**
@@ -63,11 +71,8 @@ export const anthropicAdapter: Adapter = {
       .map((b) => b.text as string)
       .join("");
     if (!text.trim()) return null;
-    const usage =
-      typeof o.usage?.input_tokens === "number" && typeof o.usage?.output_tokens === "number"
-        ? { inputTokens: o.usage.input_tokens, outputTokens: o.usage.output_tokens }
-        : null;
-    return { text, usage };
+    return { text, usage: parseAnthropicUsage(body) };
   },
+  parseUsage: parseAnthropicUsage,
   isEffortRejection: (body) => /output_config|effort/i.test(body),
 };

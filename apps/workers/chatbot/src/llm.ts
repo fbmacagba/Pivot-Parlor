@@ -1,7 +1,14 @@
-import { chatComplete, type ChatDeps, type Effort, type ProviderKeys } from "@repo/llm";
+import { billedUsageOf, chatComplete, type ChatDeps, type ChatUsage, type Effort, type ProviderKeys } from "@repo/llm";
 import { DEFAULT_CHATBOT_MODEL } from "./model.js";
 
 export type HistoryMessage = { role: "user" | "assistant" | "system"; content: string };
+
+/**
+ * A failed attempt the provider plausibly billed: an empty reply (its token
+ * counts are known) or an attempt abandoned at the time limit (unknown: the
+ * vendor may have generated, and billed, tokens nobody received).
+ */
+export type WastedCall = { model: string; usage: ChatUsage | null; reason: "no_content" | "timed_out" };
 
 export type ChatCallResult =
   | {
@@ -14,8 +21,10 @@ export type ChatCallResult =
       route: string;
       /** The provider's own counts, null when it sent none (usage above then reads 0). */
       rawUsage: { inputTokens: number; outputTokens: number } | null;
+      /** Earlier attempts that failed but were plausibly billed, for the cost log. */
+      wasted: WastedCall[];
     }
-  | { ok: false };
+  | { ok: false; wasted: WastedCall[] };
 
 /**
  * Output budget for one reply. The prompt asks for 2-3 short sentences, about
@@ -76,8 +85,10 @@ export async function generateReply(
   ];
   const candidates = params.modelId === DEFAULT_CHATBOT_MODEL ? [params.modelId] : [params.modelId, DEFAULT_CHATBOT_MODEL];
 
+  const wasted: WastedCall[] = [];
   for (const modelId of candidates) {
     const chosen = modelId === params.modelId;
+    const signal = AbortSignal.timeout(params.attemptTimeoutMs ?? CHAT_ATTEMPT_TIMEOUT_MS);
     const effort = chosen ? params.effort : undefined;
     const budgetEffort = chosen ? (params.effort ?? params.defaultEffort) : undefined;
     try {
@@ -89,7 +100,7 @@ export async function generateReply(
           ...(effort ? { effort } : {}),
           maxTokens: chatReplyBudget(budgetEffort),
           maxRetries: 0,
-          signal: AbortSignal.timeout(params.attemptTimeoutMs ?? CHAT_ATTEMPT_TIMEOUT_MS),
+          signal,
           appTitle: "Pivot Parlor Chatbot",
         },
         params.keys,
@@ -107,10 +118,16 @@ export async function generateReply(
         usage: { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens },
         route: r.route,
         rawUsage: r.usage ? { inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens } : null,
+        wasted,
       };
     } catch (err) {
       console.warn(`[chatbot] ${modelId} failed: ${err instanceof Error ? err.message : String(err)}`);
+      // Only the two failures a provider plausibly billed; an HTTP error,
+      // a missing key or a network failure was not.
+      const billed = billedUsageOf(err);
+      if (billed) wasted.push({ model: modelId, usage: billed, reason: "no_content" });
+      else if (signal.aborted) wasted.push({ model: modelId, usage: null, reason: "timed_out" });
     }
   }
-  return { ok: false };
+  return { ok: false, wasted };
 }

@@ -1,5 +1,5 @@
 import type { Adapter } from "../types";
-import { parseOpenAiStyle } from "./openrouter";
+import { parseOpenAiStyle, parseOpenAiStyleUsage } from "./openrouter";
 
 export const openAiAdapter: Adapter = {
   route: "openai",
@@ -27,5 +27,6 @@ export const openAiAdapter: Adapter = {
     };
   },
   parseResponse: parseOpenAiStyle,
+  parseUsage: parseOpenAiStyleUsage,
   isEffortRejection: (body) => /reasoning_effort|reasoning|effort/i.test(body),
 };
