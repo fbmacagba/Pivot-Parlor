@@ -575,3 +575,149 @@ describe("site images", () => {
     expect(site!.n).toBe(0);
   });
 });
+
+describe("site image cost log", () => {
+  const CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+  const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
+  const MODEL = "google/gemini-3.1-flash-image";
+
+  /** Answers only the image call, with a fresh Response each time; anything
+   *  else gets a 404, so no other outbound call can pass for it. */
+  function mockImage(reply: () => Response) {
+    const imageCalls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url !== CHAT_URL) return new Response("not found", { status: 404 });
+      imageCalls.push(url);
+      return reply();
+    });
+    return imageCalls;
+  }
+
+  const withImage = (usage?: Record<string, unknown>) => () =>
+    Response.json({ choices: [{ message: { images: [{ image_url: { url: PNG_DATA_URL } }] } }], ...(usage ? { usage } : {}) });
+  const withoutImage = (usage: Record<string, unknown>) => () =>
+    Response.json({ choices: [{ message: { content: "I cannot draw that." } }], usage });
+
+  const usageRows = (shopId: string) =>
+    env.DB.prepare("SELECT * FROM ai_usage_log WHERE shop_id = ? ORDER BY created_at")
+      .bind(shopId)
+      .all<Record<string, unknown>>()
+      .then((r) => r.results ?? []);
+
+  const generate = async (shopId: string, type: string) =>
+    dispatch("POST", `/api/shops/${shopId}/generate-image`, { headers: await devHeaders(), body: { type } });
+
+  it("logs a generated image at its billed cost under the request, beside its live ai.call", async () => {
+    const shopId = await seedShop("Image Cost Shop");
+    const imageCalls = mockImage(withImage({ prompt_tokens: 12, completion_tokens: 1290, cost: 0.0387 }));
+    const res = await generate(shopId, "hero");
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(imageCalls).toHaveLength(1);
+    const rows = await usageRows(shopId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      worker_name: "pivot-parlor-api",
+      model: MODEL,
+      usage_type: "site_image_hero",
+      input_tokens: 12,
+      output_tokens: 1290,
+      total_tokens: 1302,
+      estimated_cost_usd: 0.0387,
+      cost_basis: "reported",
+    });
+    // The import pairs the row with its live ai.call by job id AND worker.
+    expect(rows[0]!.job_id).toBe(rid(res));
+    const calls = await rowsForRequest(rid(res), "ai.call");
+    expect(calls.map((r) => [r.phase, r.outcome])).toEqual([["started", null], ["outcome", "succeeded"]]);
+    for (const call of calls) expect(call.worker).toBe("pivot-parlor-api");
+  });
+
+  it("logs a logo and a service image under their own usage types", async () => {
+    const shopId = await seedShop("Image Cost Kinds Shop");
+    const svcId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO services (id, shop_id, name, duration_min, price_pence, is_active) VALUES (?, ?, 'Fade', 30, 2500, 1)",
+    )
+      .bind(svcId, shopId)
+      .run();
+    mockImage(withImage({ prompt_tokens: 10, completion_tokens: 1290, cost: 0.04 }));
+    expect((await generate(shopId, "logo")).status).toBe(200);
+    expect((await generate(shopId, `service:${svcId}`)).status).toBe(200);
+    const types = (await usageRows(shopId)).map((r) => r.usage_type).sort();
+    expect(types).toEqual(["site_image_logo", "site_image_service"]);
+  });
+
+  it("logs a billed reply that carries no image before the call fails", async () => {
+    const shopId = await seedShop("Image Cost No Image Shop");
+    mockImage(withoutImage({ prompt_tokens: 12, completion_tokens: 8, cost: 0.0002 }));
+    const res = await generate(shopId, "hero");
+    expect(res.status).toBe(500);
+    const rows = await usageRows(shopId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ input_tokens: 12, output_tokens: 8, estimated_cost_usd: 0.0002, cost_basis: "reported" });
+    expect(rows[0]!.job_id).toBe(rid(res));
+    const calls = await rowsForRequest(rid(res), "ai.call");
+    expect(calls.map((r) => r.outcome)).toEqual([null, "failed"]);
+  });
+
+  it("leaves a BYOK call and a reply with no cost unpriced, never free", async () => {
+    const byokShop = await seedShop("Image Cost BYOK Shop");
+    mockImage(withImage({ prompt_tokens: 12, completion_tokens: 1290, cost: 0.0005, is_byok: true }));
+    expect((await generate(byokShop, "hero")).status).toBe(200);
+    vi.restoreAllMocks();
+    const noCostShop = await seedShop("Image Cost No Cost Shop");
+    mockImage(withImage({ prompt_tokens: 12, completion_tokens: 1290 }));
+    expect((await generate(noCostShop, "hero")).status).toBe(200);
+    for (const shopId of [byokShop, noCostShop]) {
+      const rows = await usageRows(shopId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ input_tokens: 12, output_tokens: 1290, estimated_cost_usd: 0, cost_basis: null });
+    }
+  });
+
+  it("logs nothing for a refused call, a reply without usage, or a refused audit entry", async () => {
+    const refusedShop = await seedShop("Image Cost Refused Shop");
+    mockImage(() => new Response("upstream says no", { status: 500 }));
+    expect((await generate(refusedShop, "hero")).status).toBe(500);
+    vi.restoreAllMocks();
+
+    const noUsageShop = await seedShop("Image Cost No Usage Shop");
+    mockImage(withImage());
+    expect((await generate(noUsageShop, "hero")).status).toBe(200);
+    vi.restoreAllMocks();
+
+    const auditOffShop = await seedShop("Image Cost Audit Off Shop");
+    const imageCalls = mockImage(withImage({ prompt_tokens: 12, completion_tokens: 1290, cost: 0.04 }));
+    const headers = await devHeaders();
+    const res = await withAuditOff(() =>
+      dispatch("POST", `/api/shops/${auditOffShop}/generate-image`, { headers, body: { type: "hero" } }),
+    );
+    expect(res.status).toBe(503);
+    expect(imageCalls).toHaveLength(0);
+
+    for (const shopId of [refusedShop, noUsageShop, auditOffShop]) expect(await usageRows(shopId)).toHaveLength(0);
+  });
+
+  it("is never copied as a historical entry, while a row with no live ai.call is", async () => {
+    const shopId = await seedShop("Image Cost Import Shop");
+    mockImage(withImage({ prompt_tokens: 12, completion_tokens: 1290, cost: 0.0387 }));
+    expect((await generate(shopId, "hero")).status).toBe(200);
+    vi.restoreAllMocks();
+    const [row] = await usageRows(shopId);
+    expect(row).toBeDefined();
+    // Control: the same worker and usage type under a job id no ai.call carries.
+    const control = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, cost_basis, job_id)
+       VALUES (?, ?, 'pivot-parlor-api', ?, 'site_image_hero', 1, 1, 2, 0, NULL, ?)`,
+    )
+      .bind(control, shopId, MODEL, crypto.randomUUID())
+      .run();
+    const imported = await dispatch("POST", "/api/audit/import-historical", { headers: await devHeaders() });
+    expect(imported.status, await imported.clone().text()).toBe(200);
+    const hist = (id: unknown) => env.DB.prepare("SELECT id FROM audit_log WHERE id = ?").bind(`hist_${String(id)}`).first();
+    expect(await hist(control)).not.toBeNull();
+    expect(await hist(row!.id)).toBeNull();
+  });
+});

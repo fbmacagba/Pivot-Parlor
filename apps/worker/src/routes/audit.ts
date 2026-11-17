@@ -385,13 +385,14 @@ function historicalIso(createdAt: unknown): string | null {
 //
 // A usage row that already has a LIVE twin is never a candidate (Plan 4 final
 // review I1): since Plan 4, research, text and chatbot record each call as a
-// live ai.call AND an ai_usage_log row, and so does this worker's theme
-// generation, and importing the row would add a
-// false, permanent "historical" duplicate. The twin is a live ai.call (any
-// phase: a started-only row still counts) from the SAME worker, so a row from
-// a worker that never recorded live (a partial deploy) still imports. Its
-// request id is the job id for the queue workers (queueAudit), the HTTP
-// request id for theme generation, and the
+// live ai.call AND an ai_usage_log row, and so do this worker's theme
+// generation and its image route (POST /api/shops/:shopId/generate-image),
+// and importing the row would add a false, permanent "historical" duplicate.
+// The twin is a live ai.call (any phase: a started-only row still counts)
+// from the SAME worker, so a row from a worker that never recorded live (a
+// partial deploy) still imports. Its request id is the job id for the queue
+// workers (queueAudit), the HTTP request id for theme generation and the
+// image route, and the
 // <uuid> of the chatbot's 'public-chat:<uuid>' job id (Ruling P13). l.request_id
 // is compared bare, so idx_audit_log_request serves the lookup. The exclusion
 // is in SQL, not a filter after the LIMIT, so `more` stays truthful.
