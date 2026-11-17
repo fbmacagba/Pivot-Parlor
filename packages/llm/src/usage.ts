@@ -11,8 +11,8 @@ import type { ChatUsage } from "./types";
  * reasoning model that spent its budget thinking) with the counts the
  * provider sent, and a chatbot attempt abandoned at its time limit with none
  * (0 tokens, no cost basis: unknown). Those rows are not in the `ai.call`
- * outcome, which describes only the attempt that answered. Research, text and
- * the chatbot write them; theme generation writes no rows at all.
+ * outcome, which describes only the attempt that answered. Research, text, the
+ * chatbot and the API worker's theme generation write them.
  *
  * Prices come from the API worker's model list, which it caches in the KV
  * namespace the background workers share: the same list (and so the same

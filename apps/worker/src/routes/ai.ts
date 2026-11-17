@@ -197,6 +197,7 @@ ai.post("/generate-theme", async (c) => {
           palette: parsePalette(body),
           persist: body.preview !== true,
           audit,
+          costLogJobId: c.get("requestId"),
         })
     );
     return c.json({ success: true, data: theme, cached: false, model_used: modelId });
@@ -302,7 +303,7 @@ ai.post("/compare", async (c) => {
   // Comparisons are ALWAYS previews: persisting both sides made the slower
   // model silently win. The caller applies its pick via /api/ai/apply-theme.
   const audit = auditFor(c);
-  const options = { palette: parsePalette(body), persist: false as const, audit };
+  const options = { palette: parsePalette(body), persist: false as const, audit, costLogJobId: c.get("requestId") };
   let resultA: PromiseSettledResult<BrandConfig>;
   let resultB: PromiseSettledResult<BrandConfig>;
   try {
