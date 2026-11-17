@@ -1032,7 +1032,15 @@ shops.post("/:shopId/generate-image", authMiddleware, async (c) => {
                 aspectRatio,
                 apiKey,
                 `[shop-generate-image][${typeLabel}]`,
-                imageModel
+                imageModel,
+                // Under this request's id, as its ai.call entry is.
+                {
+                  db: c.env.DB,
+                  kv: c.env.KV,
+                  shopId: shop.id,
+                  jobId: c.get("requestId"),
+                  usageType: `site_image_${target.kind}`,
+                }
               )
           );
           await c.env.ASSETS.put(key, buf, { httpMetadata: { contentType: "image/png" } });

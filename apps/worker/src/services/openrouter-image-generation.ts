@@ -3,7 +3,71 @@
  * FLUX (plain chat body, image URL in response.data[0].url or message).
  */
 
+import { recordAiUsage } from "@repo/llm";
+import { WORKER_NAME } from "../audit/context.js";
+
 export const OPENROUTER_IMAGE_MODEL = "google/gemini-3.1-flash-image";
+
+/**
+ * Where an answered image call is written in the cost log (`ai_usage_log`).
+ * Only pass it for a call that is also audited: the historical import pairs a
+ * `pivot-parlor-api` row with its live `ai.call` entry by this job id, and a
+ * row without one would be copied later as a false historical entry.
+ */
+export interface ImageCostLog {
+  db: D1Database;
+  kv: KVNamespace;
+  shopId: string;
+  /** The request id the call's `ai.call` entry records. */
+  jobId: string;
+  /** e.g. "site_image_hero". */
+  usageType: string;
+}
+
+/** OpenRouter's `usage` block on a reply. `cost` is what it charged, in USD credits. */
+interface OpenRouterImageUsage {
+  prompt_tokens?: unknown;
+  completion_tokens?: unknown;
+  cost?: unknown;
+  is_byok?: unknown;
+}
+
+function tokenCount(n: unknown): number {
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** What the image cost, or null when the reply does not say. A BYOK call's
+ *  `cost` is only OpenRouter's fee (the provider bills the key's owner), so it
+ *  is left unpriced rather than recorded many times too low. Same rule as the
+ *  images worker's `billedUsd`. */
+function billedImageUsd(usage: OpenRouterImageUsage): number | null {
+  if (usage.is_byok === true) return null;
+  return typeof usage.cost === "number" ? usage.cost : null;
+}
+
+/**
+ * Writes the reply's cost-log row, priced only from what OpenRouter reported
+ * it charged: image output has its own rate the model list does not carry, so
+ * a missing figure stays unpriced rather than guessed. A reply without a
+ * `usage` block writes nothing, as in the images worker.
+ */
+async function recordImageUsage(costLog: ImageCostLog, model: string, data: unknown): Promise<void> {
+  const raw = data && typeof data === "object" ? (data as { usage?: unknown }).usage : undefined;
+  if (!raw || typeof raw !== "object") return;
+  const usage = raw as OpenRouterImageUsage;
+  await recordAiUsage(
+    { DB: costLog.db, KV: costLog.kv },
+    {
+      shopId: costLog.shopId,
+      workerName: WORKER_NAME,
+      modelId: model,
+      usageType: costLog.usageType,
+      usage: { inputTokens: tokenCount(usage.prompt_tokens), outputTokens: tokenCount(usage.completion_tokens) },
+      jobId: costLog.jobId,
+      pricing: { from: "reported", usd: billedImageUsd(usage) },
+    }
+  );
+}
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -199,7 +263,8 @@ export async function generateOpenRouterImageBuffer(
   aspectRatio: string,
   apiKey: string,
   logPrefix = "[site-gen][image]",
-  model?: string
+  model?: string,
+  costLog?: ImageCostLog
 ): Promise<ArrayBuffer> {
   const resolvedModel = (model && model.trim()) || OPENROUTER_IMAGE_MODEL;
   const requestBody = buildOpenRouterRequestBody(resolvedModel, prompt, aspectRatio);
@@ -243,6 +308,9 @@ export async function generateOpenRouterImageBuffer(
     console.error(`${logPrefix} Failed to parse OpenRouter JSON:`, e);
     throw new Error("OpenRouter image response was not valid JSON");
   }
+
+  // Every answered reply is billed, image or not: log it before looking for one.
+  if (costLog) await recordImageUsage(costLog, resolvedModel, data);
 
   const message = (data as { choices?: Array<{ message?: unknown }> })?.choices?.[0]?.message;
 
