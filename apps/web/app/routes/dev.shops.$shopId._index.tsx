@@ -10,6 +10,7 @@ import {
   DialogTrigger,
 } from "~/components/ui/Dialog";
 import { ModelPicker } from "~/components/dev-shops/ModelPicker";
+import { effortToSend } from "~/components/dev-shops/modelPicker.helpers";
 import { RegenStepRow } from "~/components/dev-shops/RegenStepRow";
 import { COLOR_PALETTES } from "~/lib/color-palettes";
 import {
@@ -79,7 +80,10 @@ export default function DevShopDetailIndex() {
         body: JSON.stringify({
           design_notes: designNotes,
           text_model: textModel,
-          text_effort: textEffort,
+          text_effort: effortToSend(
+            textPickerModels.find((m) => m.id === textModel),
+            textEffort,
+          ),
           image_model: imageModel,
           composer,
         }),

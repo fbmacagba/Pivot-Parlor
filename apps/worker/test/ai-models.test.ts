@@ -109,9 +109,9 @@ describe("GET /api/ai/models", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[] };
     expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(29);
+    expect(body.data).toHaveLength(39);
 
-    const sonnet = body.data.find((m) => m.id === "anthropic/claude-sonnet-5")!;
+    const sonnet = body.data.find((m) => m.id === "anthropic/claude-sonnet-5.5")!;
     expect(sonnet.provider).toBe("openrouter");
     expect(sonnet.vendor).toBe("anthropic");
     expect(sonnet.costPer1MInput).toBe(2);
@@ -125,9 +125,10 @@ describe("GET /api/ai/models", () => {
     expect(astra.costPer1MInput).toBe(10);
     expect(astra.livePricing).toBe(true);
 
-    const fable = body.data.find((m) => m.id === "anthropic-api/claude-fable-5.1")!;
+    const fable = body.data.find((m) => m.id === "anthropic-api/claude-fable-5-2")!;
     expect(fable.provider).toBe("anthropic");
-    expect(fable.effortLevels).toEqual(["low", "medium", "high"]);
+    // Read from the Models API capability tree: Anthropic takes low to max.
+    expect(fable.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
 
     // The refresh wrote both cache keys.
     expect(await env.KV.get(MODELS_KV_KEY)).not.toBeNull();
@@ -140,7 +141,7 @@ describe("GET /api/ai/models", () => {
     const res = await dispatch("GET", "/api/ai/models", { headers: authHeaders(await devToken()) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[] };
-    expect(body.data).toHaveLength(29);
+    expect(body.data).toHaveLength(39);
     expect(body.data.every((m) => m.livePricing === false)).toBe(true);
     for (const m of body.data) {
       expect(typeof m.costPer1MInput).toBe("number");
@@ -185,7 +186,7 @@ describe("GET /api/ai/models", () => {
     };
 
     const models = await getLiveModels(env.KV, { openrouter: "k", openai: "k", anthropic: "k" });
-    expect(models).toHaveLength(29);
+    expect(models).toHaveLength(39);
     expect(models.some((m) => m.livePricing)).toBe(true);
     expect(seen.filter((u) => listVendorOf(u) !== null)).toEqual([]);
   });
@@ -244,7 +245,7 @@ describe("POST /api/ai/generate-theme effort", () => {
     const shopId = await seedShop("Effort Validation Shop");
     const res = await dispatch("POST", "/api/ai/generate-theme", {
       headers: authHeaders(await devToken()),
-      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5", effort: "extreme" },
+      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5.5", effort: "extreme" },
     });
     expect(res.status).toBe(400);
   });
@@ -279,15 +280,59 @@ describe("POST /api/ai/generate-theme effort", () => {
 
     const res = await dispatch("POST", "/api/ai/generate-theme", {
       headers: authHeaders(await devToken()),
-      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5", effort: "high", regenerate: true },
+      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5.5", effort: "high", regenerate: true },
     });
 
     expect(res.status).toBe(200);
     expect(captured).not.toBeNull();
-    expect(captured!.model).toBe("anthropic/claude-sonnet-5");
+    expect(captured!.model).toBe("anthropic/claude-sonnet-5.5");
     expect(captured!.reasoning).toEqual({ effort: "high" });
     // Effort raises the completion budget so reasoning doesn't starve output.
     expect(captured!.max_tokens).toBe(8192);
+  });
+
+  it("sends xhigh with a larger budget, and drops a level the model does not take", async () => {
+    const shopId = await seedShop("Effort Ladder Shop");
+    const bodies: Record<string, unknown>[] = [];
+    const theme = {
+      primaryColor: "#1A1A1A", accentColor: "#C9A84C", fontHeading: "Playfair Display", fontBody: "DM Sans",
+      tagline: "t", heroHeadline: "h", heroSubheadline: "s", shortDescription: "d", ctaText: "Book now",
+      aestheticKeywords: ["luxury"], servicesIntro: "i", trustStatement: "trust", urgencyText: "u",
+    };
+    stub = compose(listStub(), (url, init) => {
+      if (url.startsWith("https://openrouter.ai/api/v1/chat/completions")) {
+        bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return Promise.resolve(Response.json({ choices: [{ message: { content: JSON.stringify(theme) } }] }));
+      }
+      return null;
+    });
+    const headers = authHeaders(await devToken());
+
+    const xhigh = await dispatch("POST", "/api/ai/generate-theme", {
+      headers,
+      body: { shop_id: shopId, model_id: "anthropic/claude-opus-5.5", effort: "xhigh", regenerate: true, preview: true },
+    });
+    expect(xhigh.status).toBe(200);
+    expect(bodies[0]!.reasoning).toEqual({ effort: "xhigh" });
+    expect(bodies[0]!.max_tokens).toBe(12_288);
+
+    // DeepSeek V4 Pro takes none, high and xhigh: "low" is dropped, and the
+    // budget follows the model's own default (high).
+    const low = await dispatch("POST", "/api/ai/generate-theme", {
+      headers,
+      body: { shop_id: shopId, model_id: "deepseek/deepseek-v4-pro", effort: "low", regenerate: true, preview: true },
+    });
+    expect(low.status).toBe(200);
+    expect(bodies[1]!.reasoning).toBeUndefined();
+    expect(bodies[1]!.max_tokens).toBe(8192);
+
+    // GLM defaults to max: with no effort chosen, the budget is sized for max.
+    await dispatch("POST", "/api/ai/generate-theme", {
+      headers,
+      body: { shop_id: shopId, model_id: "z-ai/glm-5.3", regenerate: true, preview: true },
+    });
+    expect(bodies[2]!.reasoning).toBeUndefined();
+    expect(bodies[2]!.max_tokens).toBe(16_000);
   });
 
   it("rejects an unknown model with 400", async () => {
@@ -338,7 +383,7 @@ describe("POST /api/ai/generate-theme effort", () => {
       expect(res.status).toBe(200);
       expect(captured).not.toBeNull();
       // An empty id must never reach the generator; the default model is used.
-      expect(captured!.model).toBe("anthropic/claude-sonnet-5");
+      expect(captured!.model).toBe("anthropic/claude-sonnet-5.5");
     }
   });
 });
@@ -379,18 +424,18 @@ describe("POST /api/ai/generate-theme via direct routes", () => {
 
     const res = await dispatch("POST", "/api/ai/generate-theme", {
       headers: authHeaders(await devToken()),
-      body: { shop_id: shopId, model_id: "anthropic-api/claude-sonnet-5", effort: "high", regenerate: true },
+      body: { shop_id: shopId, model_id: "anthropic-api/claude-sonnet-5-5", effort: "high", regenerate: true },
     });
     expect(res.status).toBe(200);
     expect(captured).not.toBeNull();
     expect(captured!.headers["x-api-key"]).toBe("test-anthropic-key");
     expect(captured!.headers["anthropic-version"]).toBe("2023-06-01");
-    expect(captured!.body.model).toBe("claude-sonnet-5");
+    expect(captured!.body.model).toBe("claude-sonnet-5-5");
     expect(captured!.body.output_config).toEqual({ effort: "high" });
     expect(captured!.body.max_tokens).toBe(8192);
 
     const row = await env.DB.prepare("SELECT ai_model FROM shops WHERE id = ?").bind(shopId).first<{ ai_model: string }>();
-    expect(row?.ai_model).toBe("anthropic-api/claude-sonnet-5");
+    expect(row?.ai_model).toBe("anthropic-api/claude-sonnet-5-5");
   });
 
   it("calls OpenAI directly for an openai-api id with reasoning_effort and max_completion_tokens", async () => {
@@ -426,7 +471,7 @@ describe("POST /api/ai/generate-theme via direct routes", () => {
     });
     const res = await dispatch("POST", "/api/ai/generate-theme", {
       headers: authHeaders(await devToken()),
-      body: { shop_id: shopId, model_id: "openai-api/gpt-5.6-luna", regenerate: true, preview: true },
+      body: { shop_id: shopId, model_id: "openai-api/gpt-6-luna", regenerate: true, preview: true },
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { heroHeadline: string } };

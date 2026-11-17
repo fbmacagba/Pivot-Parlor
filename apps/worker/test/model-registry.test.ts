@@ -6,14 +6,21 @@ import { describe, it, expect } from "vitest";
 import type { AIModel } from "@repo/types";
 import { MODEL_SNAPSHOT, catalogModels } from "@repo/utils";
 import { costFromModelList } from "@repo/llm";
+import { EFFORT_LEVELS as LLM_EFFORT_LEVELS } from "@repo/llm";
+import { EFFORT_LEVELS as UTILS_EFFORT_LEVELS } from "@repo/utils";
 import {
   anthropicCanonical,
+  anthropicEfforts,
   buildRegistry,
+  driftWarnings,
+  effortFor,
+  feedEfforts,
   fetchRegistrySources,
   priceKeyFor,
   rankAnthropicIds,
   rankOpenAiIds,
   rankOpenRouterText,
+  type AnthropicListedModel,
   type OpenRouterFeedModel,
   type RegistryInputs,
 } from "../src/services/model-registry";
@@ -30,7 +37,7 @@ const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
 describe("rankOpenAiIds", () => {
   it("keeps the newest generation of each of the four tiers, in tier order", () => {
-    expect(rankOpenAiIds(OPENAI_IDS)).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+    expect(rankOpenAiIds(OPENAI_IDS)).toEqual(["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"]);
   });
 
   it("lets a fabricated gpt-7-astra displace gpt-6-astra and ignores -pro, chat-latest and image ids", () => {
@@ -45,14 +52,14 @@ describe("rankOpenAiIds", () => {
 describe("rankAnthropicIds", () => {
   it("keeps the highest version per family in fable, opus, sonnet, haiku order", () => {
     expect(rankAnthropicIds(ANTHROPIC_MODELS.map((m) => m.id))).toEqual([
-      "claude-fable-5.1",
-      "claude-opus-5",
-      "claude-sonnet-5",
-      "claude-haiku-4.5",
+      "claude-fable-5-2",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
     ]);
   });
 
-  it("lets a fabricated claude-opus-6 displace Opus 5", () => {
+  it("lets a fabricated claude-opus-6 displace Opus 5.5", () => {
     expect(rankAnthropicIds([...ANTHROPIC_MODELS.map((m) => m.id), "claude-opus-6"])[1]).toBe("claude-opus-6");
   });
 
@@ -72,21 +79,31 @@ describe("rankOpenRouterText", () => {
   it("produces the top tier per family per vendor, vendors in catalogue order, defaults pinned", () => {
     expect(rankOpenRouterText(OPENROUTER_FEED)).toEqual([
       "google/gemini-3.1-flash-lite-preview",
-      "google/gemini-3.1-pro-preview",
+      "google/gemini-4-carbon",
+      "google/gemini-4-argon",
+      "google/gemini-4-hydrogen",
       "google/gemini-3.8-flash",
       "google/gemini-3.5-flash-lite",
-      "anthropic/claude-fable-5.1",
-      "anthropic/claude-opus-5",
-      "anthropic/claude-sonnet-5",
-      "anthropic/claude-haiku-4.5",
+      "anthropic/claude-fable-5.2",
+      "anthropic/claude-opus-5.5",
+      "anthropic/claude-sonnet-5.5",
+      "anthropic/claude-haiku-5.5",
       "openai/gpt-6-astra",
-      "openai/gpt-5.6-sol",
-      "openai/gpt-5.6-terra",
-      "openai/gpt-5.6-luna",
-      "x-ai/grok-4.6",
+      "openai/gpt-6.1-sol",
+      "openai/gpt-6.1-terra",
+      "openai/gpt-6-luna",
+      "x-ai/grok-4.7",
       "x-ai/grok-4.20-multi-agent",
       "deepseek/deepseek-v4-pro",
       "deepseek/deepseek-v4.1-flash",
+      "z-ai/glm-5.3-prime",
+      "z-ai/glm-5.3",
+      "z-ai/glm-5.3-flash",
+      "qwen/qwen4-max",
+      "qwen/qwen3.7-plus",
+      "qwen/qwen3.8-flash",
+      "mistralai/mistral-large-4-0",
+      "mistralai/mistral-medium-3-5",
     ]);
   });
 
@@ -105,32 +122,143 @@ describe("rankOpenRouterText", () => {
       "deepseek/deepseek-v4-pro-0813",
       "deepseek/deepseek-v4-flash-0731",
       "google/gemini-3.1-flash-image",
-      "anthropic/claude-3-haiku",
+      "google/gemini-omni-1.2-flash",
+      "anthropic/claude-sonnet-5",
       "anthropic/claude-opus-4.8",
+      "openai/gpt-6.1-terra-pro",
       "x-ai/grok-build-0.1",
       "google/gemma-4-31b-it",
+      "deepseek/deepseek-v4.1-flash-1017",
+      "z-ai/glm-5.3-flashx-legal",
+      "qwen/qwen3.8-max-0902",
+      "qwen/qwen3.8-max-prime",
+      "mistralai/mistral-large-2512",
+      "mistralai/mistral-small-2603",
     ]) {
       expect(ranked).not.toContain(excluded);
     }
   });
 
   it("prefers a stable id over a preview at the same version and a newer preview over an older stable", () => {
-    const withStablePro: OpenRouterFeedModel[] = [
+    const text = (id: string): OpenRouterFeedModel => ({
+      id,
+      pricing: { prompt: "0.000002", completion: "0.00001" },
+      supported_parameters: ["reasoning"],
+      architecture: { output_modalities: ["text"] },
+    });
+    const withSamePreview = [...OPENROUTER_FEED, text("google/gemini-4-carbon-preview")];
+    expect(rankOpenRouterText(withSamePreview)).toContain("google/gemini-4-carbon");
+    expect(rankOpenRouterText(withSamePreview)).not.toContain("google/gemini-4-carbon-preview");
+    const withNewerPreview = [...OPENROUTER_FEED, text("google/gemini-4.5-carbon-preview")];
+    expect(rankOpenRouterText(withNewerPreview)).toContain("google/gemini-4.5-carbon-preview");
+    expect(rankOpenRouterText(withNewerPreview)).not.toContain("google/gemini-4-carbon");
+  });
+
+  it("puts Gemini 4 Carbon in the flagship slot over the Gemini 3 Pro line, and keeps 3.8 Flash beside Hydrogen", () => {
+    const ranked = rankOpenRouterText(OPENROUTER_FEED);
+    expect(ranked).toContain("google/gemini-4-carbon");
+    expect(ranked).not.toContain("google/gemini-3.1-pro-preview");
+    expect(ranked).not.toContain("google/gemini-2.5-pro");
+    // Hydrogen costs about twice 3.8 Flash, so the cheaper Flash stays listed.
+    expect(ranked).toContain("google/gemini-4-hydrogen");
+    expect(ranked).toContain("google/gemini-3.8-flash");
+    // Without Gemini 4, the 3.1 Pro preview still beats the stable 2.5 Pro.
+    const noGemini4 = OPENROUTER_FEED.filter((m) => !m.id.startsWith("google/gemini-4-"));
+    expect(rankOpenRouterText(noGemini4)).toContain("google/gemini-3.1-pro-preview");
+  });
+
+  it("reads Mistral's hyphenated versions", () => {
+    // 3-5 beats 3.1 and 3 in the recorded feed; a 4-0 would beat 3-5.
+    expect(rankOpenRouterText(OPENROUTER_FEED)).toContain("mistralai/mistral-medium-3-5");
+    const ranked = rankOpenRouterText([
       ...OPENROUTER_FEED,
-      { id: "google/gemini-3.1-pro", pricing: { prompt: "0.000002", completion: "0.000012" }, supported_parameters: ["reasoning"], architecture: { output_modalities: ["text"] } },
-    ];
-    expect(rankOpenRouterText(withStablePro)).toContain("google/gemini-3.1-pro");
-    expect(rankOpenRouterText(withStablePro)).not.toContain("google/gemini-3.1-pro-preview");
-    // Without any 3.x pro, the stable 2.5 loses to the 3.1 preview (Decision 1).
-    expect(rankOpenRouterText(OPENROUTER_FEED)).toContain("google/gemini-3.1-pro-preview");
-    expect(rankOpenRouterText(OPENROUTER_FEED)).not.toContain("google/gemini-2.5-pro");
+      { id: "mistralai/mistral-medium-4-0", architecture: { output_modalities: ["text"] } },
+    ]);
+    expect(ranked).toContain("mistralai/mistral-medium-4-0");
+    expect(ranked).not.toContain("mistralai/mistral-medium-3-5");
+    // Versions compare as decimals, so "3-10" reads as 3.1 (xAI's 4.20 predates
+    // its 4.3, which this ordering gets right); see the audit notes.
   });
 
   it("keeps the pinned defaults even when the feed no longer lists them", () => {
-    const feed = OPENROUTER_FEED.filter((m) => m.id !== "google/gemini-3.1-flash-lite-preview" && m.id !== "anthropic/claude-sonnet-5");
+    const feed = OPENROUTER_FEED.filter((m) => m.id !== "google/gemini-3.1-flash-lite-preview" && m.id !== "anthropic/claude-sonnet-5.5");
     const ranked = rankOpenRouterText(feed);
     expect(ranked[0]).toBe("google/gemini-3.1-flash-lite-preview");
-    expect(ranked).toContain("anthropic/claude-sonnet-5");
+    expect(ranked).toContain("anthropic/claude-sonnet-5.5");
+  });
+});
+
+describe("driftWarnings", () => {
+  const DAY = 24 * 3600;
+  const newest = Math.max(...OPENROUTER_FEED.map((m) => m.created ?? 0));
+  const gemini = (id: string, created: number): OpenRouterFeedModel => ({ id, created, architecture: { output_modalities: ["text"] } });
+
+  it("is quiet on the recorded feed", () => {
+    expect(driftWarnings(OPENROUTER_FEED, rankOpenRouterText(OPENROUTER_FEED))).toEqual([]);
+  });
+
+  it("names a vendor's newest model when no rule matches it and it is more than a week newer than every pick", () => {
+    const feed = [...OPENROUTER_FEED, gemini("google/gemini-5-neon", newest + 30 * DAY)];
+    expect(driftWarnings(feed, rankOpenRouterText(feed))).toEqual([
+      expect.stringMatching(/^google: newest model google\/gemini-5-neon \(\d{4}-\d{2}-\d{2}\) is not listed/),
+    ]);
+  });
+
+  it("would have caught Gemini 4 under the old Gemini 3 rules", () => {
+    const oldRulesPicks = rankOpenRouterText(OPENROUTER_FEED).filter((id) => !id.startsWith("google/gemini-4-"));
+    expect(driftWarnings(OPENROUTER_FEED, oldRulesPicks).some((w) => w.startsWith("google: newest model google/gemini-4-hydrogen"))).toBe(true);
+  });
+
+  it("ignores a model released within a week of a pick, and specialist lines", () => {
+    const googleNewestPick = Math.max(...OPENROUTER_FEED.filter((m) => m.id.startsWith("google/gemini-4-")).map((m) => m.created ?? 0));
+    const soon = [...OPENROUTER_FEED, gemini("google/gemini-5-neon", googleNewestPick + 3 * DAY)];
+    expect(driftWarnings(soon, rankOpenRouterText(soon))).toEqual([]);
+    const legal = [...OPENROUTER_FEED, gemini("z-ai/glm-9-legal", newest + 30 * DAY)];
+    expect(driftWarnings(legal, rankOpenRouterText(legal))).toEqual([]);
+  });
+});
+
+describe("effort levels", () => {
+  const feedById = new Map(OPENROUTER_FEED.map((m) => [m.id, m]));
+
+  it("keeps the two ladders in step", () => {
+    expect([...UTILS_EFFORT_LEVELS]).toEqual([...LLM_EFFORT_LEVELS]);
+  });
+
+  it("reads the feed's levels in ladder order, with the reported default", () => {
+    expect(feedEfforts(feedById.get("deepseek/deepseek-v4-pro"))).toEqual({ levels: ["none", "high", "xhigh"], defaultEffort: "high" });
+    expect(feedEfforts(feedById.get("z-ai/glm-5.3"))).toEqual({ levels: ["low", "high", "max"], defaultEffort: "max" });
+  });
+
+  it("gives no select to a reasoning block without levels, and the old three to a feed entry without a block", () => {
+    expect(feedEfforts(feedById.get("qwen/qwen3.7-plus"))).toEqual({ levels: [], defaultEffort: null });
+    expect(feedEfforts({ id: "x/legacy", supported_parameters: ["max_tokens", "reasoning"] })).toEqual({ levels: ["low", "medium", "high"], defaultEffort: null });
+    expect(feedEfforts({ id: "x/plain", supported_parameters: ["max_tokens"] })).toEqual({ levels: [], defaultEffort: null });
+    expect(feedEfforts(undefined)).toBeUndefined();
+  });
+
+  it("drops a default the model does not list", () => {
+    expect(feedEfforts({ id: "x/odd", reasoning: { supported_efforts: ["low", "high"], default_effort: "medium" } })).toEqual({ levels: ["low", "high"], defaultEffort: null });
+  });
+
+  it("reads Anthropic's capability tree, with no default and no none or minimal", () => {
+    const listed = (effort: unknown): AnthropicListedModel => ({ id: "claude-x-1", capabilities: { effort } as AnthropicListedModel["capabilities"] });
+    const twin = feedById.get("anthropic/claude-haiku-5.5");
+    expect(anthropicEfforts(listed({ supported: false }), twin)).toEqual({ levels: [], defaultEffort: null });
+    expect(
+      anthropicEfforts(listed({ supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: null, max: { supported: true } }), twin),
+    ).toEqual({ levels: ["low", "medium", "high", "max"], defaultEffort: null });
+    // No capabilities: the OpenRouter twin's levels without its "none".
+    expect(anthropicEfforts({ id: "claude-haiku-5-5", capabilities: null }, twin)).toEqual({ levels: ["low", "medium", "high", "xhigh", "max"], defaultEffort: null });
+    expect(anthropicEfforts({ id: "claude-x-1" }, undefined)).toEqual({ levels: ["low", "medium", "high"], defaultEffort: null });
+  });
+
+  it("sends only a level the model takes", () => {
+    const deepseek = { effortLevels: ["none", "high", "xhigh"] as const }.effortLevels;
+    expect(effortFor({ effortLevels: [...deepseek] }, "xhigh")).toEqual({ effort: "xhigh", dropped: null });
+    expect(effortFor({ effortLevels: [...deepseek] }, "medium")).toEqual({ effort: undefined, dropped: "medium" });
+    expect(effortFor({ effortLevels: [] }, "high")).toEqual({ effort: undefined, dropped: "high" });
+    expect(effortFor({ effortLevels: [...deepseek] }, undefined)).toEqual({ effort: undefined, dropped: null });
   });
 });
 
@@ -166,7 +294,7 @@ describe("buildRegistry", () => {
   it("assembles the four groups in order with route, vendor, prices and effort levels", () => {
     const { models, warnings } = buildRegistry(allOk());
     expect(warnings).toEqual([]);
-    expect(models).toHaveLength(29);
+    expect(models).toHaveLength(39);
     expect(models.map((m) => m.id)).toEqual(MODEL_SNAPSHOT.map((m) => m.id));
 
     const astra = models.find((m) => m.id === "openai-api/gpt-6-astra")!;
@@ -181,26 +309,60 @@ describe("buildRegistry", () => {
       costPer1MOutput: 50,
       livePricing: true,
       supportsEffort: true,
-      effortLevels: ["low", "medium", "high"],
+      // From the OpenRouter twin: GPT-6 Astra takes no "none".
+      effortLevels: ["low", "medium", "high", "xhigh", "max"],
+      defaultEffort: "medium",
       recommended: false,
     });
+    expect(models.find((m) => m.id === "openai-api/gpt-6-luna")?.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
 
-    const sonnetDirect = models.find((m) => m.id === "anthropic-api/claude-sonnet-5")!;
-    expect(sonnetDirect.name).toBe("Claude Sonnet 5");
-    expect(sonnetDirect.effortLevels).toEqual(["medium", "high"]);
+    const sonnetDirect = models.find((m) => m.id === "anthropic-api/claude-sonnet-5-5")!;
+    expect(sonnetDirect.name).toBe("Claude Sonnet 5.5");
+    expect(sonnetDirect.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(sonnetDirect.defaultEffort).toBeUndefined();
     expect(sonnetDirect.livePricing).toBe(true);
     expect(sonnetDirect.costPer1MInput).toBe(2);
 
-    const sonnet = models.find((m) => m.id === "anthropic/claude-sonnet-5")!;
-    expect(sonnet).toMatchObject({ provider: "openrouter", vendor: "anthropic", vendorLabel: "Anthropic", recommended: true, name: "Claude Sonnet 5" });
-    expect(models.filter((m) => m.recommended).map((m) => m.id)).toEqual(["anthropic/claude-sonnet-5"]);
+    const sonnet = models.find((m) => m.id === "anthropic/claude-sonnet-5.5")!;
+    expect(sonnet).toMatchObject({ provider: "openrouter", vendor: "anthropic", vendorLabel: "Anthropic", recommended: true, name: "Claude Sonnet 5.5" });
+    expect(models.filter((m) => m.recommended).map((m) => m.id)).toEqual(["anthropic/claude-sonnet-5.5"]);
 
-    const grok = models.find((m) => m.id === "x-ai/grok-4.6")!;
-    expect(grok.name).toBe("Grok 4.6"); // vendor prefix stripped from the feed name
-    expect(grok.effortLevels).toEqual(["low", "medium", "high"]);
+    const grok = models.find((m) => m.id === "x-ai/grok-4.7")!;
+    expect(grok.name).toBe("Grok 4.7"); // vendor prefix stripped from the feed name
+    expect(grok.effortLevels).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(grok.defaultEffort).toBe("high");
+
+    const qwenPlus = models.find((m) => m.id === "qwen/qwen3.7-plus")!;
+    expect(qwenPlus).toMatchObject({ vendorLabel: "Qwen", supportsEffort: false, effortLevels: [] });
+    expect(models.find((m) => m.id === "z-ai/glm-5.3")).toMatchObject({ vendorLabel: "Z.ai", defaultEffort: "max" });
+    expect(models.find((m) => m.id === "mistralai/mistral-large-4-0")?.vendorLabel).toBe("Mistral");
 
     const image = models.find((m) => m.id === "google/gemini-3.1-flash-image")!;
     expect(image).toMatchObject({ kind: "image", provider: "openrouter", supportsEffort: false, effortLevels: [], livePricing: true, costPer1MInput: 0.5 });
+  });
+
+  it("serves the snapshot's effort levels and defaults exactly as the registry builds them", () => {
+    const { models } = buildRegistry(allOk());
+    const built = models.map((m) => ({ id: m.id, levels: m.effortLevels, def: m.defaultEffort ?? null }));
+    const snap = MODEL_SNAPSHOT.map((m) => ({
+      id: m.id,
+      levels: m.supportsEffort ? (m.effortLevels ?? ["low", "medium", "high"]) : [],
+      def: m.defaultEffort ?? null,
+    }));
+    expect(snap).toEqual(built);
+  });
+
+  it("skips a retired Anthropic model", () => {
+    const retired: AnthropicListedModel = { id: "claude-opus-9", display_name: "Claude Opus 9", lifecycle: "retired", capabilities: null };
+    const { models } = buildRegistry({ ...allOk(), anthropic: { ok: true, data: [...ANTHROPIC_MODELS, retired] } });
+    expect(models.some((m) => m.id === "anthropic-api/claude-opus-9")).toBe(false);
+    expect(models.some((m) => m.id === "anthropic-api/claude-opus-5-5")).toBe(true);
+  });
+
+  it("warns when a listed model is scheduled to leave OpenRouter", () => {
+    const feed = OPENROUTER_FEED.map((m) => (m.id === "x-ai/grok-4.7" ? { ...m, expiration_date: "2026-12-31" } : m));
+    const { warnings } = buildRegistry({ ...allOk(), openrouter: { ok: true, data: feed } });
+    expect(warnings).toEqual(["openrouter: x-ai/grok-4.7 is scheduled to leave OpenRouter on 2026-12-31"]);
   });
 
   it("hides a direct group when its key is missing and says so", () => {
@@ -212,18 +374,20 @@ describe("buildRegistry", () => {
 
   it("keeps a group from the previous build when its fetch failed", () => {
     const previous: AIModel[] = buildRegistry(allOk()).models.map((m) =>
-      m.id === "anthropic-api/claude-opus-5" ? { ...m, name: "Opus from cache" } : m,
+      m.id === "anthropic-api/claude-opus-5-5" ? { ...m, name: "Opus from cache" } : m,
     );
     const { models } = buildRegistry({ ...allOk(), anthropic: { ok: false, reason: "fetch-failed" }, previous });
-    expect(models.find((m) => m.id === "anthropic-api/claude-opus-5")?.name).toBe("Opus from cache");
+    expect(models.find((m) => m.id === "anthropic-api/claude-opus-5-5")?.name).toBe("Opus from cache");
     expect(models.filter((m) => m.provider === "anthropic")).toHaveLength(4);
   });
 
   it("falls back to the snapshot for a failed group with no previous build, still priced from the feed", () => {
     const { models } = buildRegistry({ ...allOk(), openai: { ok: false, reason: "fetch-failed" } });
-    const luna = models.find((m) => m.id === "openai-api/gpt-5.6-luna")!;
+    const luna = models.find((m) => m.id === "openai-api/gpt-6-luna")!;
     expect(luna.livePricing).toBe(true);
-    expect(luna.costPer1MInput).toBe(0.2);
+    expect(luna.costPer1MInput).toBe(0.1);
+    // The snapshot carries the levels, so the offline group matches the live one.
+    expect(luna.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
   });
 
   it("serves the whole snapshot with fallback prices when every source failed", () => {
@@ -235,7 +399,8 @@ describe("buildRegistry", () => {
     });
     expect(models.map((m) => m.id)).toEqual(MODEL_SNAPSHOT.map((m) => m.id));
     expect(models.every((m) => m.livePricing === false)).toBe(true);
-    expect(models.find((m) => m.id === "anthropic/claude-sonnet-5")?.costPer1MInput).toBe(2);
+    expect(models.find((m) => m.id === "anthropic/claude-sonnet-5.5")?.costPer1MInput).toBe(2);
+    expect(models.find((m) => m.id === "anthropic-api/claude-haiku-5-5")?.effortLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 
   it("marks a live id nobody can price as unavailable rather than free", () => {
@@ -259,7 +424,7 @@ describe("buildRegistry", () => {
       expect(m.fallbackInput, m.id).toBe(round3(Number(twin.pricing!.prompt) * 1e6));
       expect(m.fallbackOutput, m.id).toBe(round3(Number(twin.pricing!.completion) * 1e6));
     }
-    expect(checked).toBe(29);
+    expect(checked).toBe(39);
   });
 });
 

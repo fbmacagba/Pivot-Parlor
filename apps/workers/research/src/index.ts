@@ -11,7 +11,15 @@ import {
   type DesignSpec,
   type ComposerId,
 } from "./design-spec";
-import { chatComplete, recordAiUsage, type ProviderKeys, type UsageCost } from "@repo/llm";
+import {
+  chatComplete,
+  outputBudgetForEffort,
+  parseEffort,
+  recordAiUsage,
+  type Effort,
+  type ProviderKeys,
+  type UsageCost,
+} from "@repo/llm";
 import {
   AuditWriteError,
   auditAiCall,
@@ -43,8 +51,8 @@ export interface Env {
   ENVIRONMENT: string;
 }
 
-/** Reasoning-effort level for models that support it (OpenRouter `reasoning`). */
-export type TextEffort = "low" | "medium" | "high";
+/** Reasoning-effort level, none to max (the API worker only queues a level the model takes). */
+export type TextEffort = Effort;
 
 export interface ResearchQueueMessage {
   jobId: string;
@@ -59,6 +67,8 @@ export interface ResearchQueueMessage {
   hasLogoFile: boolean;
   text_model: string;
   text_effort?: TextEffort;
+  /** The text model's own default level when none was chosen: sizes the output budget only, never sent. */
+  text_effort_default?: TextEffort;
   image_model: string;
   skip_images?: boolean;
   /** Owner-chosen palette override (6-digit hex). Honoured only as a complete pair. */
@@ -134,6 +144,8 @@ export interface GenResearchKvPayload {
   template: string;
   text_model: string;
   text_effort?: TextEffort;
+  /** The text model's own default level when none was chosen: sizes the output budget only, never sent. */
+  text_effort_default?: TextEffort;
   image_model: string;
   /** Owner-chosen palette override forwarded to the text worker (6-digit hex pair). */
   owner_color_primary?: string;
@@ -372,6 +384,8 @@ async function researchJson(
   system: string,
   user: string,
   effort: TextEffort | undefined,
+  /** The level that will run (effort, else the model's default): sizes the budget. */
+  budgetEffort: TextEffort | undefined,
   costLog: { env: Pick<Env, "DB" | "KV">; shopId: string },
   audit: { rec: AuditRecorder; origin: string | null }
 ): Promise<string> {
@@ -388,7 +402,9 @@ async function researchJson(
           system,
           messages: [{ role: "user", content: user }],
           effort,
-          maxTokens: 8000,
+          // Reasoning shares this budget; xhigh and max (chosen, or the model's
+          // own default, as on GLM) get room to finish the JSON.
+          maxTokens: outputBudgetForEffort(budgetEffort, 8000),
           jsonOnly: true,
           appTitle: "Pivot Parlor Research",
         },
@@ -559,10 +575,8 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
   // old two-service floor was met upstream by inventing placeholder services.
   const text_model =
     typeof o.text_model === "string" && o.text_model.trim() ? o.text_model.trim() : DEFAULT_TEXT_MODEL;
-  const text_effort =
-    o.text_effort === "low" || o.text_effort === "medium" || o.text_effort === "high"
-      ? o.text_effort
-      : undefined;
+  const text_effort = parseEffort(o.text_effort);
+  const text_effort_default = text_effort ? undefined : parseEffort(o.text_effort_default);
   const image_model =
     typeof o.image_model === "string" && o.image_model.trim() ? o.image_model.trim() : DEFAULT_IMAGE_MODEL;
   const skip_images = o.skip_images === true;
@@ -586,6 +600,7 @@ function parseInput(body: unknown): ResearchQueueMessage | null {
     hasLogoFile: o.hasLogoFile,
     text_model,
     ...(text_effort ? { text_effort } : {}),
+    ...(text_effort_default ? { text_effort_default } : {}),
     image_model,
     skip_images,
     ...(hasColorOverride ? { color_primary: op, color_accent: oa } : {}),
@@ -691,15 +706,16 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
     // failures): two tries of the chosen model, then rescue the job with the
     // default model on OpenRouter — a direct vendor with a missing key or an
     // outage must not sink the run.
-    const attempts: { model: string; effort?: TextEffort }[] = [
-      { model: input.text_model, effort: input.text_effort },
-      { model: input.text_model, effort: input.text_effort },
+    const chosenBudget = input.text_effort ?? input.text_effort_default;
+    const attempts: { model: string; effort?: TextEffort; budget?: TextEffort }[] = [
+      { model: input.text_model, effort: input.text_effort, budget: chosenBudget },
+      { model: input.text_model, effort: input.text_effort, budget: chosenBudget },
       ...(input.text_model !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
     ];
     let spec: ResearchSpec | null = null;
     let lastError = "unknown";
     for (let i = 0; i < attempts.length; i++) {
-      const { model, effort } = attempts[i]!;
+      const { model, effort, budget } = attempts[i]!;
       const attempt = i + 1;
       if (model !== input.text_model) {
         console.warn(
@@ -708,7 +724,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       }
       let rawText: string;
       try {
-        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort, { env, shopId }, { rec, origin });
+        rawText = await researchJson(jobId, keys, model, SYSTEM_PROMPT, userPrompt, effort, budget, { env, shopId }, { rec, origin });
       } catch (e) {
         // A refused audit write ends the job; any other failure tries the next attempt.
         if (e instanceof AuditWriteError) throw e;
@@ -806,6 +822,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       template: templateFromLayoutMood(spec.layout_mood),
       text_model: input.text_model,
       ...(input.text_effort ? { text_effort: input.text_effort } : {}),
+      ...(input.text_effort_default ? { text_effort_default: input.text_effort_default } : {}),
       image_model: input.image_model,
       ...(input.color_primary && input.color_accent
         ? { owner_color_primary: input.color_primary, owner_color_accent: input.color_accent }
@@ -877,6 +894,7 @@ async function processOneMessage(body: unknown, env: Env): Promise<void> {
       shopSlug: input.shopSlug,
       text_model: input.text_model,
       ...(input.text_effort ? { text_effort: input.text_effort } : {}),
+      ...(input.text_effort_default ? { text_effort_default: input.text_effort_default } : {}),
       origin_actor_ref: origin,
     });
     console.log(`[${jobId}] [pivot-parlor-research] enqueued site-text-queue`);

@@ -11,6 +11,7 @@ import { COLOR_PALETTES } from "~/lib/color-palettes";
 import { ModelPicker } from "~/components/dev-shops/ModelPicker";
 import { ChatbotModelCard } from "~/components/dev-shops/ChatbotModelCard";
 import { pickerModelsFrom } from "~/components/dev-shops/constants";
+import { effortToSend } from "~/components/dev-shops/modelPicker.helpers";
 import { DEFAULT_TEXT_MODEL_ID } from "@repo/utils";
 import type { AIModel, BrandConfig } from "@repo/types";
 
@@ -76,7 +77,8 @@ export default function DevAIDeploy() {
 
   const modelId = modelChoice || recommendedId;
   const selectedModel = textModels.find((m) => m.id === modelId);
-  const effortAvailable = selectedModel?.supportsEffort ?? false;
+  // Only a level the chosen model takes is sent; "" lets the model decide.
+  const sentEffort = effortToSend(selectedModel, effort);
 
   /**
    * Theme generation can run for a while on high-effort models. On production
@@ -134,7 +136,7 @@ export default function DevAIDeploy() {
         regenerate: true,
         preview: true,
         ...paletteBody(),
-        ...(effortAvailable && effort ? { effort } : {}),
+        ...(sentEffort ? { effort: sentEffort } : {}),
       })) as { data?: BrandConfig; error?: string };
       if (!data.data) throw new Error(data.error ?? "Generation failed");
       setResult({ theme: data.data, model: selectedModel?.name ?? modelId, modelId });
@@ -159,7 +161,7 @@ export default function DevAIDeploy() {
         model_b_id: modelBId,
         style_keywords: keywords,
         ...paletteBody(),
-        ...(effortAvailable && effort ? { effort } : {}),
+        ...(sentEffort ? { effort: sentEffort } : {}),
       })) as { data?: { model_a: CompareSide; model_b: CompareSide }; error?: string };
       if (!data.data) throw new Error(data.error ?? "Comparison failed");
       const { model_a, model_b } = data.data;

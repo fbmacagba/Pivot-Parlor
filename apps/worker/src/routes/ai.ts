@@ -18,6 +18,7 @@ import {
   getLiveModels,
   getModel,
   parseTextEffort,
+  EFFORT_VALUES_MESSAGE,
   providerKeysFromEnv,
 } from "../services/model-registry.js";
 
@@ -129,7 +130,7 @@ ai.post("/generate-theme", async (c) => {
     return c.json({ success: false, error: "shop_id is required" }, 400);
   }
   if (body.effort !== undefined && body.effort !== "" && !parseTextEffort(body.effort)) {
-    return c.json({ success: false, error: "effort must be low, medium or high" }, 400);
+    return c.json({ success: false, error: EFFORT_VALUES_MESSAGE }, 400);
   }
   const effort = parseTextEffort(body.effort);
   // A blank or whitespace model_id means "not chosen": fall back to the default
@@ -240,7 +241,7 @@ ai.post("/compare", async (c) => {
     );
   }
   if (body.effort !== undefined && body.effort !== "" && !parseTextEffort(body.effort)) {
-    return c.json({ success: false, error: "effort must be low, medium or high" }, 400);
+    return c.json({ success: false, error: EFFORT_VALUES_MESSAGE }, 400);
   }
   const effort = parseTextEffort(body.effort);
 

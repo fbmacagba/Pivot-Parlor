@@ -9,14 +9,16 @@ export interface PickerModel {
   /** Route: "openrouter" | "openai" | "anthropic". */
   provider: string;
   providerLabel: string;
-  /** Model maker: google, anthropic, openai, x-ai, deepseek. */
+  /** Model maker: google, anthropic, openai, x-ai, deepseek, z-ai, qwen, mistralai. */
   vendor: string;
   vendorLabel: string;
   costPer1MInput: number;
   costPer1MOutput: number;
   supportsEffort: boolean;
-  /** Effort levels the model accepts; absent means "all three" when supportsEffort. */
+  /** Effort levels the model accepts, lowest first; absent means low/medium/high when supportsEffort. */
   effortLevels?: string[];
+  /** The level the model uses when none is sent, when the vendor reports it. */
+  defaultEffort?: string | null;
   recommended?: boolean;
   livePricing?: boolean;
 }
@@ -31,10 +33,21 @@ export interface RouteGroup extends PickerGroup {
   vendors: PickerGroup[];
 }
 
-export type Effort = "low" | "medium" | "high";
+export type Effort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-const effortLevels: Effort[] = ["low", "medium", "high"];
-export const ALL_EFFORT_LEVELS: readonly Effort[] = Object.freeze(effortLevels);
+/** Every level, lowest first (matches EFFORT_LEVELS in @repo/utils). */
+export const ALL_EFFORT_LEVELS: readonly Effort[] = Object.freeze<Effort[]>([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+/** What a model that reports no levels is offered (the rule before levels were reported). */
+const UNREPORTED_LEVELS: readonly Effort[] = Object.freeze<Effort[]>(["low", "medium", "high"]);
 
 function groupBy(models: PickerModel[], key: (m: PickerModel) => { id: string; label: string }): PickerGroup[] {
   const groups: PickerGroup[] = [];
@@ -73,9 +86,15 @@ export function defaultModelForGroup(group: PickerGroup): PickerModel | undefine
   return group.models.find((m) => m.recommended) ?? group.models[0];
 }
 
-/** Effort levels to offer for a model: the reported subset, all three when unreported, none when unsupported. */
+/** Effort levels to offer for a model: the reported subset in ladder order, low/medium/high when unreported, none when unsupported. */
 export function effortLevelsFor(m: PickerModel | undefined): string[] {
   if (!m || !m.supportsEffort) return [];
-  if (m.effortLevels === undefined) return [...ALL_EFFORT_LEVELS];
-  return m.effortLevels.filter((level) => (ALL_EFFORT_LEVELS as readonly string[]).includes(level));
+  if (m.effortLevels === undefined) return [...UNREPORTED_LEVELS];
+  const reported = m.effortLevels;
+  return ALL_EFFORT_LEVELS.filter((level) => reported.includes(level));
+}
+
+/** The effort to send: the chosen level when this model takes it, else "" (the model decides). */
+export function effortToSend(m: PickerModel | undefined, effort: string): string {
+  return effort && effortLevelsFor(m).includes(effort) ? effort : "";
 }

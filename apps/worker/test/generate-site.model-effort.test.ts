@@ -41,12 +41,12 @@ describe("generate-site model + effort forwarding", () => {
 
     const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
       headers: authHeaders(token),
-      body: { skip_images: true, text_model: "anthropic/claude-sonnet-5", text_effort: "high" },
+      body: { skip_images: true, text_model: "anthropic/claude-sonnet-5.5", text_effort: "high" },
     });
 
     expect(res.status).toBe(202);
     expect(captured).not.toBeNull();
-    expect(captured!.text_model).toBe("anthropic/claude-sonnet-5");
+    expect(captured!.text_model).toBe("anthropic/claude-sonnet-5.5");
     expect(captured!.text_effort).toBe("high");
   });
 
@@ -55,12 +55,12 @@ describe("generate-site model + effort forwarding", () => {
 
     const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
       headers: authHeaders(token),
-      body: { skip_images: true, text_model: "x-ai/grok-4.6", text_effort: "turbo" },
+      body: { skip_images: true, text_model: "x-ai/grok-4.7", text_effort: "turbo" },
     });
 
     expect(res.status).toBe(202);
     expect(captured).not.toBeNull();
-    expect(captured!.text_model).toBe("x-ai/grok-4.6");
+    expect(captured!.text_model).toBe("x-ai/grok-4.7");
     expect(captured!.text_effort).toBeUndefined();
   });
 
@@ -83,7 +83,7 @@ describe("generate-site model + effort forwarding", () => {
 
     const save = await dispatch("POST", `/api/shops/${shopId}/settings`, {
       headers: authHeaders(token),
-      body: { text_model: "deepseek/deepseek-v4-pro", text_effort: "medium" },
+      body: { text_model: "deepseek/deepseek-v4-pro", text_effort: "xhigh" },
     });
     expect(save.status).toBe(200);
 
@@ -95,6 +95,51 @@ describe("generate-site model + effort forwarding", () => {
     expect(res.status).toBe(202);
     expect(captured).not.toBeNull();
     expect(captured!.text_model).toBe("deepseek/deepseek-v4-pro");
-    expect(captured!.text_effort).toBe("medium");
+    expect(captured!.text_effort).toBe("xhigh");
+  });
+
+  it("drops a saved effort the model does not take, so the model's default runs", async () => {
+    const { shopId, token } = await devTokenForShop();
+
+    // DeepSeek V4 Pro takes none, high and xhigh only (recorded feed).
+    const save = await dispatch("POST", `/api/shops/${shopId}/settings`, {
+      headers: authHeaders(token),
+      body: { text_model: "deepseek/deepseek-v4-pro", text_effort: "medium" },
+    });
+    expect(save.status).toBe(200);
+
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
+      headers: authHeaders(token),
+      body: { skip_images: true },
+    });
+
+    expect(res.status).toBe(202);
+    expect(captured!.text_model).toBe("deepseek/deepseek-v4-pro");
+    expect(captured!.text_effort).toBeUndefined();
+  });
+
+  it("queues the model's own default as a sizing hint when no level is chosen", async () => {
+    const { shopId, token } = await devTokenForShop();
+
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
+      headers: authHeaders(token),
+      body: { skip_images: true, text_model: "z-ai/glm-5.3" },
+    });
+
+    expect(res.status).toBe(202);
+    expect(captured!.text_effort).toBeUndefined();
+    expect(captured!.text_effort_default).toBe("max");
+  });
+
+  it("forwards a level beyond high when the model takes it", async () => {
+    const { shopId, token } = await devTokenForShop();
+
+    const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
+      headers: authHeaders(token),
+      body: { skip_images: true, text_model: "anthropic/claude-opus-5.5", text_effort: "max" },
+    });
+
+    expect(res.status).toBe(202);
+    expect(captured!.text_effort).toBe("max");
   });
 });

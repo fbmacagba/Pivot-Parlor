@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   defaultModelForGroup,
   effortLevelsFor,
+  effortToSend,
   groupByRoute,
   groupByVendor,
   modelPriceLabel,
@@ -71,6 +72,15 @@ describe("effortLevelsFor", () => {
     expect(effortLevelsFor(m("z", "openrouter", "OpenRouter", "google", "Google", { supportsEffort: false }))).toEqual([]);
     expect(effortLevelsFor(m("z", "openrouter", "OpenRouter", "google", "Google", { effortLevels: [] }))).toEqual([]);
     expect(effortLevelsFor(undefined)).toEqual([]);
+    expect(effortLevelsFor(m("z", "openrouter", "OpenRouter", "z-ai", "Z.ai", { effortLevels: ["max", "high", "low", "turbo"] }))).toEqual(["low", "high", "max"]);
+  });
+
+  it("effortToSend keeps a level the model takes and blanks anything else", () => {
+    const deepseek = m("deepseek/deepseek-v4-pro", "openrouter", "OpenRouter", "deepseek", "DeepSeek", { effortLevels: ["none", "high", "xhigh"] });
+    expect(effortToSend(deepseek, "xhigh")).toBe("xhigh");
+    expect(effortToSend(deepseek, "medium")).toBe("");
+    expect(effortToSend(deepseek, "")).toBe("");
+    expect(effortToSend(undefined, "high")).toBe("");
   });
 });
 

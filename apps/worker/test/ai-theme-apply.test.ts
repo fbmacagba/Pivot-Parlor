@@ -78,7 +78,7 @@ describe("theme preview/apply semantics", () => {
       headers: authHeaders(await devToken()),
       body: {
         shop_id: shopId,
-        model_a_id: "anthropic/claude-sonnet-5",
+        model_a_id: "anthropic/claude-sonnet-5.5",
         model_b_id: "z-ai/glm-5.2",
       },
     });
@@ -94,14 +94,14 @@ describe("theme preview/apply semantics", () => {
 
     const preview = await dispatch("POST", "/api/ai/generate-theme", {
       headers: authHeaders(token),
-      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5", regenerate: true, preview: true },
+      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5.5", regenerate: true, preview: true },
     });
     expect(preview.status).toBe(200);
     expect(await storedTheme(shopId)).toBeNull();
 
     const persisted = await dispatch("POST", "/api/ai/generate-theme", {
       headers: authHeaders(token),
-      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5", regenerate: true },
+      body: { shop_id: shopId, model_id: "anthropic/claude-sonnet-5.5", regenerate: true },
     });
     expect(persisted.status).toBe(200);
     expect(await storedTheme(shopId)).not.toBeNull();
@@ -115,7 +115,7 @@ describe("theme preview/apply semantics", () => {
       headers: authHeaders(await devToken()),
       body: {
         shop_id: shopId,
-        model_id: "anthropic/claude-sonnet-5",
+        model_id: "anthropic/claude-sonnet-5.5",
         regenerate: true,
         preview: true,
         color_primary: "#0D0D0D",
@@ -137,7 +137,7 @@ describe("theme preview/apply semantics", () => {
       headers: authHeaders(await devToken()),
       body: {
         shop_id: shopId,
-        model_id: "anthropic/claude-sonnet-5",
+        model_id: "anthropic/claude-sonnet-5.5",
         regenerate: true,
         preview: true,
         color_primary: "#0D0D0D", // accent missing -> pair not honoured

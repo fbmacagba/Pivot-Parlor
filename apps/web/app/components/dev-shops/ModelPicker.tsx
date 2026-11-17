@@ -3,7 +3,7 @@
 // the model. Pass live models (from /api/ai/models) when available, else the
 // static snapshot from staticPickerModels().
 import { useId, type ReactNode } from "react";
-import { EFFORT_OPTIONS } from "./constants";
+import { defaultEffortLabel, EFFORT_OPTIONS } from "./constants";
 import {
   defaultModelForGroup,
   effortLevelsFor,
@@ -55,7 +55,11 @@ export function ModelPicker({
   const modelOptions = showVendors ? (vendor?.models ?? []) : (route?.models ?? []);
   const levels = effortLevelsFor(selected);
   const effortVisible = onEffortChange !== undefined && levels.length > 0;
-  const effortOptions = EFFORT_OPTIONS.filter((o) => o.value === "" || levels.includes(o.value));
+  const effortOptions = EFFORT_OPTIONS.filter((o) => o.value === "" || levels.includes(o.value)).map((o) =>
+    o.value === "" ? { ...o, label: defaultEffortLabel(selected?.defaultEffort) } : o,
+  );
+  // A saved level this model does not take is never shown as chosen.
+  const effortValue = effort && levels.includes(effort) ? effort : "";
 
   function pick(next: PickerModel | undefined) {
     if (!next) return;
@@ -134,7 +138,7 @@ export function ModelPicker({
         <Field id={`${uid}-effort`} label="Reasoning effort">
           <select
             id={`${uid}-effort`}
-            value={effort ?? ""}
+            value={effortValue}
             onChange={(e) => onEffortChange?.(e.target.value)}
             disabled={disabled}
             className={SELECT_CLASS}
