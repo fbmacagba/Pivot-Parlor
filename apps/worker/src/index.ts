@@ -281,6 +281,10 @@ export { app, stripeWebhookApp, cspReportApp };
 // through a service binding; apps/web/wrangler.toml WEB_ERRORS).
 export { WebErrors } from "./web-errors.js";
 
+// Named entrypoint the website binds to for Pip, its marketing chat widget
+// (reachable only through a service binding; apps/web/wrangler.toml MARKETING_CHAT).
+export { MarketingChat } from "./marketing-chat.js";
+
 export default {
   fetch(request: Request, env: Bindings, ctx: ExecutionContext) {
     const url = new URL(request.url);
