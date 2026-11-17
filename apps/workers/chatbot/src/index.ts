@@ -296,6 +296,8 @@ chat.post("/", async (c) => {
                 anthropic: c.env.ANTHROPIC_API_KEY || undefined,
               },
               modelId: choice.modelId,
+              ...(choice.effort ? { effort: choice.effort } : {}),
+              ...(choice.defaultEffort ? { defaultEffort: choice.defaultEffort } : {}),
               systemPrompt,
               history: priorMessages,
               userMessage: visitorMessage,

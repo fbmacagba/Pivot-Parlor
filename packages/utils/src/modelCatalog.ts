@@ -16,6 +16,19 @@
 /** Reasoning effort, lowest to highest. Keep in step with EFFORT_LEVELS in @repo/llm. */
 export const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type TextEffort = (typeof EFFORT_LEVELS)[number];
+
+/**
+ * The levels the shop chatbot may be set to. A visitor waits for every reply
+ * and the prompt asks for 2-3 short sentences, so the levels above medium
+ * add delay and cost without a better answer. The model's own default still
+ * applies when none is chosen.
+ */
+export const CHATBOT_EFFORT_LEVELS: readonly TextEffort[] = ["none", "minimal", "low", "medium"];
+
+/** The subset of `levels` the chatbot may use, in ladder order. */
+export function chatbotEffortLevels(levels: readonly string[] | null | undefined): TextEffort[] {
+  return CHATBOT_EFFORT_LEVELS.filter((l) => (levels ?? []).includes(l));
+}
 export type ModelKind = "text" | "image";
 /** Which API a model is called through. */
 export type ModelRoute = "openrouter" | "openai" | "anthropic";

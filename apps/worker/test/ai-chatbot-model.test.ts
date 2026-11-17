@@ -24,7 +24,7 @@ describe("chatbot model endpoints", () => {
   it("reports nulls before anything is saved", async () => {
     const res = await dispatch("GET", "/api/ai/chatbot-model", { headers: await devHeaders() });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ success: true, data: { model_id: null, updated_at: null } });
+    expect(await res.json()).toEqual({ success: true, data: { model_id: null, effort: null, updated_at: null } });
   });
 
   it("saves a listed text model and reads it back", async () => {
@@ -63,6 +63,61 @@ describe("chatbot model endpoints", () => {
       expect(((await res.json()) as { error: string }).error).toBe(error);
     }
     expect(await env.KV.get(CHATBOT_MODEL_KV_KEY)).toBeNull();
+  });
+
+  it("saves an effort the model takes, with the model's own default for sizing, and reads it back", async () => {
+    const headers = await devHeaders();
+    const save = await dispatch("POST", "/api/ai/chatbot-model", {
+      headers,
+      body: { model_id: "openai-api/gpt-6-luna", effort: "low" },
+    });
+    expect(save.status).toBe(200);
+    const stored = JSON.parse((await env.KV.get(CHATBOT_MODEL_KV_KEY)) ?? "{}") as Record<string, unknown>;
+    expect(stored).toMatchObject({ model_id: "openai-api/gpt-6-luna", effort: "low", default_effort: "medium" });
+
+    const read = await dispatch("GET", "/api/ai/chatbot-model", { headers });
+    expect(((await read.json()) as { data: unknown }).data).toMatchObject({ model_id: "openai-api/gpt-6-luna", effort: "low" });
+  });
+
+  it("treats a missing or empty effort as the model's choice, still recording its default for sizing", async () => {
+    const headers = await devHeaders();
+    // Grok 4.7 reasons at high by default.
+    for (const body of [{ model_id: "x-ai/grok-4.7" }, { model_id: "x-ai/grok-4.7", effort: "" }]) {
+      const res = await dispatch("POST", "/api/ai/chatbot-model", { headers, body });
+      expect(res.status).toBe(200);
+      const stored = JSON.parse((await env.KV.get(CHATBOT_MODEL_KV_KEY)) ?? "{}") as Record<string, unknown>;
+      expect(stored).not.toHaveProperty("effort");
+      expect(stored.default_effort).toBe("high");
+    }
+    const read = await dispatch("GET", "/api/ai/chatbot-model", { headers });
+    expect(((await read.json()) as { data: { effort: unknown } }).data.effort).toBeNull();
+  });
+
+  it("refuses an effort off the ladder, one the model does not take, and one above medium, saving nothing", async () => {
+    const headers = await devHeaders();
+    const cases: Array<[string, unknown, string]> = [
+      ["openai-api/gpt-6-luna", "turbo", "effort must be one of none, minimal, low, medium, high, xhigh, max"],
+      // DeepSeek V4 Pro takes none, high and xhigh.
+      ["deepseek/deepseek-v4-pro", "low", "DeepSeek V4 Pro 0423 does not take effort low"],
+      ["openai-api/gpt-6-luna", "high", "The chatbot takes effort up to medium, not high"],
+    ];
+    for (const [model_id, effort, error] of cases) {
+      const res = await dispatch("POST", "/api/ai/chatbot-model", { headers, body: { model_id, effort } });
+      expect(res.status, `${model_id} ${String(effort)}`).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe(error);
+    }
+    expect(await env.KV.get(CHATBOT_MODEL_KV_KEY)).toBeNull();
+  });
+
+  it("reads a record saved before effort existed as no effort", async () => {
+    const headers = await devHeaders();
+    await env.KV.put(CHATBOT_MODEL_KV_KEY, JSON.stringify({ model_id: "openai-api/gpt-5.6-luna", updated_at: "2026-09-22T00:54:00Z" }));
+    const read = await dispatch("GET", "/api/ai/chatbot-model", { headers });
+    expect(((await read.json()) as { data: unknown }).data).toEqual({
+      model_id: "openai-api/gpt-5.6-luna",
+      effort: null,
+      updated_at: "2026-09-22T00:54:00Z",
+    });
   });
 
   it("is developer-only", async () => {

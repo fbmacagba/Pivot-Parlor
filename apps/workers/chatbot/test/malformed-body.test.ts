@@ -187,3 +187,23 @@ describe("POST /chat, a well-formed message (control)", () => {
     expect(r.rows).toBe(2);
   });
 });
+
+describe("POST /chat, the saved model and effort", () => {
+  const save = (record: Record<string, unknown>) =>
+    (env.KV as { put(k: string, v: string): Promise<void> }).put("platform:chatbot:model", JSON.stringify(record));
+
+  it("sends the saved effort to the saved model with a budget sized for it", async () => {
+    await save({ model_id: "openai/gpt-6-luna", effort: "low", default_effort: "medium", updated_at: "2026-11-17T00:00:00Z" });
+    const r = await sendJson(valid);
+    expect(r).toMatchObject({ status: 200, body: { reply: MODEL_REPLY } });
+    expect(modelBodies[0]).toMatchObject({ model: "openai/gpt-6-luna", reasoning: { effort: "low" }, max_tokens: 2048 });
+  });
+
+  it("a record saved before effort existed sends no effort and leaves room for the model's default reasoning", async () => {
+    await save({ model_id: "openai/gpt-5.6-luna", updated_at: "2026-09-22T00:54:00Z" });
+    const r = await sendJson(valid);
+    expect(r).toMatchObject({ status: 200, body: { reply: MODEL_REPLY } });
+    expect(modelBodies[0]).toMatchObject({ model: "openai/gpt-5.6-luna", max_tokens: 4096 });
+    expect(modelBodies[0]).not.toHaveProperty("reasoning");
+  });
+});

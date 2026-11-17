@@ -28,6 +28,17 @@ describe("AI routes are audited", () => {
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ chatbot_model: [null, listed.id] });
   });
 
+  it("chatbot-model records an effort change beside the model", async () => {
+    const token = await dev();
+    await dispatch("POST", "/api/ai/chatbot-model", { headers: authHeaders(token), body: { model_id: "openai-api/gpt-6-luna", effort: "low" } });
+    await dispatch("POST", "/api/ai/chatbot-model", { headers: authHeaders(token), body: { model_id: "openai-api/gpt-6-luna" } });
+    const outcomes = (await byAction("ai.chatbot_model.set")).filter((r) => r.phase === "outcome").slice(-2);
+    expect(outcomes.map((r) => JSON.parse(r.changes_json as string))).toEqual([
+      { chatbot_model: [expect.anything(), "openai-api/gpt-6-luna"], chatbot_effort: [null, "low"] },
+      { chatbot_model: ["openai-api/gpt-6-luna", "openai-api/gpt-6-luna"], chatbot_effort: ["low", null] },
+    ]);
+  });
+
   it("apply-theme commits the theme and its entry together", async () => {
     const token = await dev();
     const shopId = await seedShop("Theme Shop");

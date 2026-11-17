@@ -13,7 +13,7 @@ export const CHANGE_ALLOWLIST: Record<string, readonly string[]> = {
   // copy routinely carries the shop name (personal data) and, applied via
   // /apply-theme, is unbounded client text — both locked forever once hashed.
   theme: ["ai_model", "primaryColor", "accentColor", "fontHeading", "fontBody"],
-  platform_setting: ["chatbot_model"],
+  platform_setting: ["chatbot_model", "chatbot_effort"],
   generation_job: ["status", "text_model", "image_model", "skip_images", "composer", "template"],
   audit_subject: ["redact_after"],
   // Plan 2. Only structured fields: a person's name, email, phone, notes, bio
