@@ -290,3 +290,58 @@ describe("research audit", () => {
     expect(writes[1]!.args).toContain("parallel");
   });
 });
+
+describe("research effort", () => {
+  it("forwards a level beyond high with room to finish the JSON, and drops an unknown one", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      bodies.push(JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as Record<string, unknown>);
+      return completion(JSON.stringify(spec()));
+    });
+    const h = harness();
+    await h.run(message({ text_effort: "xhigh" }));
+    expect(bodies[0]!.reasoning).toEqual({ effort: "xhigh" });
+    expect(bodies[0]!.max_tokens).toBe(8000); // the default Flash Lite model caps output at 8000
+    expect((h.sends.text[0] as { text_effort?: unknown }).text_effort).toBe("xhigh");
+
+    const u = harness();
+    await u.run(message({ text_effort: "turbo" }));
+    expect(bodies[1]!.reasoning).toBeUndefined();
+    expect((u.sends.text[0] as { text_effort?: unknown }).text_effort).toBeUndefined();
+  });
+
+  it("gives xhigh and max a larger output budget on models without a lower cap", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      bodies.push(JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as Record<string, unknown>);
+      return completion(JSON.stringify(spec()));
+    });
+    const h = harness();
+    await h.run(message({ text_model: "anthropic/claude-opus-5.5", text_effort: "max" }));
+    expect(bodies[0]!.reasoning).toEqual({ effort: "max" });
+    expect(bodies[0]!.max_tokens).toBe(16_000);
+  });
+});
+
+describe("research budget from the model's default", () => {
+  it("sizes for the model's own default when no level is chosen, without sending it, and passes it to the text stage", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      bodies.push(JSON.parse(String((init as RequestInit | undefined)?.body ?? "{}")) as Record<string, unknown>);
+      return completion(JSON.stringify(spec()));
+    });
+    const h = harness();
+    // GLM 5.3 reasons at max by default.
+    await h.run(message({ text_model: "z-ai/glm-5.3", text_effort_default: "max" }));
+    expect(bodies[0]!.reasoning).toBeUndefined();
+    expect(bodies[0]!.max_tokens).toBe(16_000);
+    expect((h.sends.text[0] as { text_effort_default?: unknown }).text_effort_default).toBe("max");
+
+    // A chosen level wins over the default hint.
+    const c = harness();
+    await c.run(message({ text_model: "z-ai/glm-5.3", text_effort: "low", text_effort_default: "max" }));
+    expect(bodies[1]!.reasoning).toEqual({ effort: "low" });
+    expect(bodies[1]!.max_tokens).toBe(8000);
+    expect((c.sends.text[0] as { text_effort_default?: unknown }).text_effort_default).toBeUndefined();
+  });
+});

@@ -1,5 +1,5 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
-import { getModel, type TextEffort } from "./model-registry.js";
+import { effortFor, getModel, type TextEffort } from "./model-registry.js";
 import { chatComplete, type ProviderKeys } from "@repo/llm";
 import { AuditWriteError, type AuditRecorder } from "@repo/audit";
 import { safeJsonParse } from "@repo/utils";
@@ -101,13 +101,28 @@ function defaultTheme(shopName: string, shopType: string): BrandConfig {
 
 // ─── Model caller (OpenRouter, OpenAI API or Anthropic API by id prefix) ─────
 
-/** Reasoning tokens count against the completion budget on most providers, so
- *  give thinking models room to reason AND still emit the full JSON. */
-function maxTokensForEffort(effort: TextEffort | undefined): number {
-  if (effort === "high") return 8192;
-  if (effort === "medium") return 4096;
-  if (effort === "low") return 2048;
-  return 1024;
+/** Reasoning tokens count against the completion budget on every route, so
+ *  give thinking models room to reason AND still emit the full JSON. Pass the
+ *  level that will actually run: the chosen one, else the model's reported
+ *  default. With neither known, budget for "high" (Claude, Grok and DeepSeek
+ *  default to it and GLM to max); the old 1024 could be spent on thinking
+ *  alone. A ceiling, not a charge: only generated tokens are billed.
+ *  Estimated from the vendors' docs, not measured. */
+export function maxTokensForEffort(effort: TextEffort | undefined): number {
+  switch (effort) {
+    case "none":
+    case "minimal":
+    case "low":
+      return 2048;
+    case "medium":
+      return 4096;
+    case "xhigh":
+      return 12_288;
+    case "max":
+      return 16_000;
+    default:
+      return 8192;
+  }
 }
 
 /** estimated_cost_usd is permanent (details_json); round rather than carry
@@ -123,7 +138,9 @@ async function callThemeModel(
   modelId: string,
   prompt: string,
   keys: ProviderKeys,
-  effort?: TextEffort
+  effort: TextEffort | undefined,
+  /** The level that will run (effort, else the model's default): sizes the budget. */
+  budgetEffort: TextEffort | undefined
 ): Promise<{ config: BrandConfig; route: string; model: string; inputTokens: number | null; outputTokens: number | null }> {
   // A developer is waiting on this request: one retry, not three.
   const result = await chatComplete(
@@ -132,7 +149,7 @@ async function callThemeModel(
       system: THEME_SYSTEM_PROMPT,
       messages: [{ role: "user", content: prompt }],
       effort,
-      maxTokens: maxTokensForEffort(effort),
+      maxTokens: maxTokensForEffort(budgetEffort),
       jsonOnly: true,
       maxRetries: 1,
       appTitle: "Pivot Parlor",
@@ -293,10 +310,13 @@ export async function generateShopTheme(
 
   let config: BrandConfig;
   let fallback = false;
-  // Only forward effort to models that accept it — OpenRouter rejects the
-  // reasoning parameter on some non-reasoning providers.
-  const effectiveEffort = model.supportsEffort ? effort : undefined;
-  const call = () => callThemeModel(modelId, prompt, keys, effectiveEffort);
+  // Only forward a level the model accepts: vendors reject others, and the
+  // one-shot retry without effort would then run the default while the
+  // request said otherwise.
+  const { effort: effectiveEffort, dropped } = effortFor(model, effort);
+  if (dropped) console.warn(`[AI Generator] ${modelId} does not take effort ${dropped}; using the model's default`);
+  const budgetEffort = effectiveEffort ?? model.defaultEffort ?? undefined;
+  const call = () => callThemeModel(modelId, prompt, keys, effectiveEffort, budgetEffort);
   try {
     const result = options.audit
       ? await options.audit.run(

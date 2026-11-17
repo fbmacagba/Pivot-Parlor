@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import Stripe from "stripe";
 import type { D1Database } from "@cloudflare/workers-types";
+import type { AIModel } from "@repo/types";
 import type { Bindings } from "../bindings.js";
 import {
   getAllShops,
@@ -67,12 +68,18 @@ import { requireRole, requireShopRole } from "../middleware/rbac.js";
 import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
-import { getLiveModels, parseTextEffort, providerKeysFromEnv } from "../services/model-registry.js";
+import { effortFor, getLiveModels, parseTextEffort, providerKeysFromEnv } from "../services/model-registry.js";
 
 /** `listed(id, kind)` against the live registry (KV-cached); one read per request. */
-async function modelLister(c: Context<{ Bindings: Bindings }>): Promise<(id: string, kind: "text" | "image") => boolean> {
+type ModelLookup = ((id: string, kind: "text" | "image") => boolean) & {
+  /** The listed entry itself (effort levels, prices), or undefined. */
+  find: (id: string, kind: "text" | "image") => AIModel | undefined;
+};
+
+async function modelLister(c: Context<{ Bindings: Bindings }>): Promise<ModelLookup> {
   const registry = await getLiveModels(c.env.KV, providerKeysFromEnv(c.env));
-  return (id, kind) => registry.some((m) => m.id === id && m.kind === kind);
+  const find = (id: string, kind: "text" | "image") => registry.find((m) => m.id === id && m.kind === kind);
+  return Object.assign((id: string, kind: "text" | "image") => find(id, kind) !== undefined, { find });
 }
 
 const shops = new Hono<{ Bindings: Bindings }>();
@@ -1594,9 +1601,19 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
           }
           const text_model = bodyText || (storedTextListed ? storedText : DEFAULT_TEXT_MODEL_ID);
           // Reasoning effort for the text/research model. Request wins over saved
-          // settings; anything but low/medium/high is dropped (pipeline default).
-          const text_effort =
+          // settings; an unknown value, or a level this model does not take
+          // (a saved "medium" after switching to a model without it), is
+          // dropped so the model uses its own default and the job never
+          // carries a level the vendor would reject.
+          const requestedEffort =
             parseTextEffort(body.text_effort) ?? parseTextEffort(settingsKv.text_effort);
+          const textModelEntry = listed.find(text_model, "text");
+          const { effort: text_effort, dropped: droppedEffort } = textModelEntry
+            ? effortFor(textModelEntry, requestedEffort)
+            : { effort: requestedEffort, dropped: null };
+          if (droppedEffort) {
+            console.warn(`[generate-site] ${text_model} does not take effort ${droppedEffort}; using the model's default`);
+          }
           const storedImage = settingsKv.image_model?.trim() ?? "";
           const storedImageListed = Boolean(storedImage) && listed(storedImage, "image");
           if (!bodyImage && storedImage && !storedImageListed) {
@@ -1627,7 +1644,14 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
             services: researchServices,
             business,
             text_model,
-            ...(text_effort ? { text_effort } : {}),
+            // With no level chosen, the model's own default (GLM's is max)
+            // rides along so the workers size the output budget for it; it
+            // is never sent to the model.
+            ...(text_effort
+              ? { text_effort }
+              : textModelEntry?.defaultEffort
+                ? { text_effort_default: textModelEntry.defaultEffort }
+                : {}),
             image_model,
             composer,
             origin_actor_ref: user.sub ? userSubjectId(user.sub) : null,

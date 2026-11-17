@@ -25,7 +25,8 @@ export function staticPickerModels(kind: ModelKind): PickerModel[] {
     costPer1MInput: m.fallbackInput,
     costPer1MOutput: m.fallbackOutput,
     supportsEffort: m.supportsEffort,
-    effortLevels: m.supportsEffort ? ["low", "medium", "high"] : [],
+    effortLevels: m.supportsEffort ? (m.effortLevels ?? ["low", "medium", "high"]) : [],
+    defaultEffort: m.defaultEffort ?? null,
     recommended: m.recommended,
     livePricing: false,
   }));
@@ -37,13 +38,33 @@ export function pickerModelsFrom(live: AIModel[] | null | undefined, kind: Model
   return fromLive.length > 0 ? fromLive : staticPickerModels(kind);
 }
 
-/** Reasoning-effort choices; the picker filters them to the levels a model reports. */
+/** Reasoning-effort choices, lowest first; the picker shows only the levels a model reports. */
 export const EFFORT_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Default (model decides)" },
-  { value: "low", label: "Low - fastest, cheapest" },
+  { value: "none", label: "None - no reasoning, fastest" },
+  { value: "minimal", label: "Minimal - a brief think" },
+  { value: "low", label: "Low - quick and cheap" },
   { value: "medium", label: "Medium - balanced" },
-  { value: "high", label: "High - deepest thinking, most tokens" },
+  { value: "high", label: "High - deeper thinking, more tokens" },
+  { value: "xhigh", label: "Extra high - slower, many more tokens" },
+  { value: "max", label: "Max - slowest and most expensive" },
 ];
+
+const EFFORT_NAMES: Record<string, string> = {
+  none: "none",
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "extra high",
+  max: "max",
+};
+
+/** The "Default" option's label, naming the model's own level when the vendor reports it. */
+export function defaultEffortLabel(defaultEffort: string | null | undefined): string {
+  const name = defaultEffort ? EFFORT_NAMES[defaultEffort] : undefined;
+  return name ? `Default (model decides: ${name})` : "Default (model decides)";
+}
 
 export const REGEN_STEP_LABELS = [
   "Researching brand & style",

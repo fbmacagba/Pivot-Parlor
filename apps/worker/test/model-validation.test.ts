@@ -56,7 +56,7 @@ describe("model id validation", () => {
     const { shopId, devHeaders } = await seedShopWithDev();
     const res = await dispatch("POST", `/api/shops/${shopId}/settings`, {
       headers: devHeaders,
-      body: { image_model: "anthropic/claude-sonnet-5" },
+      body: { image_model: "anthropic/claude-sonnet-5.5" },
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { success: boolean; error?: string };
@@ -85,7 +85,7 @@ describe("model id validation", () => {
     expect(res.status).toBe(200);
     const res2 = await dispatch("POST", `/api/shops/${shopId}/settings`, {
       headers: devHeaders,
-      body: { text_model: "anthropic-api/claude-fable-5.1" },
+      body: { text_model: "anthropic-api/claude-fable-5-2" },
     });
     expect(res2.status).toBe(200);
   });
@@ -104,10 +104,10 @@ describe("model id validation", () => {
     const { shopId, devHeaders } = await seedShopWithDev();
     const res = await dispatch("POST", `/api/shops/${shopId}/generate-site`, {
       headers: devHeaders,
-      body: { skip_images: true, text_model: "anthropic-api/claude-opus-5", text_effort: "medium" },
+      body: { skip_images: true, text_model: "anthropic-api/claude-opus-5-5", text_effort: "medium" },
     });
     expect(res.status).toBe(202);
-    expect(captured!.text_model).toBe("anthropic-api/claude-opus-5");
+    expect(captured!.text_model).toBe("anthropic-api/claude-opus-5-5");
     expect(captured!.text_effort).toBe("medium");
   });
 
@@ -140,7 +140,7 @@ describe("model id validation", () => {
     const { shopId, devHeaders } = await seedShopWithDev();
     const res = await dispatch("POST", `/api/shops/${shopId}/generate-image`, {
       headers: devHeaders,
-      body: { type: "logo", image_model: "anthropic/claude-sonnet-5" },
+      body: { type: "logo", image_model: "anthropic/claude-sonnet-5.5" },
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { success: boolean; error?: string };

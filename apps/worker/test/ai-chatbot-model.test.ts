@@ -70,7 +70,7 @@ describe("chatbot model endpoints", () => {
     const adminId = await seedUser("admin", shopId);
     const headers = authHeaders(await tokenFor(adminId, "admin", shopId));
     expect((await dispatch("GET", "/api/ai/chatbot-model", { headers })).status).toBe(403);
-    expect((await dispatch("POST", "/api/ai/chatbot-model", { headers, body: { model_id: "anthropic/claude-sonnet-5" } })).status).toBe(403);
+    expect((await dispatch("POST", "/api/ai/chatbot-model", { headers, body: { model_id: "anthropic/claude-sonnet-5.5" } })).status).toBe(403);
   });
 });
 
@@ -81,7 +81,7 @@ describe("AI read routes and the generation rate limit", () => {
       const res = await dispatch("GET", "/api/ai/models", { headers });
       expect(res.status, `call ${i + 1}`).toBe(200);
     }
-    const setting = await dispatch("POST", "/api/ai/chatbot-model", { headers, body: { model_id: "anthropic/claude-sonnet-5" } });
+    const setting = await dispatch("POST", "/api/ai/chatbot-model", { headers, body: { model_id: "anthropic/claude-sonnet-5.5" } });
     expect(setting.status).toBe(200);
   });
 });

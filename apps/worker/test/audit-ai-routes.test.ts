@@ -224,7 +224,7 @@ describe("AI routes are audited", () => {
     try {
       const res = await dispatch("POST", "/api/ai/compare", {
         headers: authHeaders(token),
-        body: { shop_id: shopId, model_a_id: "anthropic/claude-sonnet-5", model_b_id: "openai-api/gpt-6-astra" },
+        body: { shop_id: shopId, model_a_id: "anthropic/claude-sonnet-5.5", model_b_id: "openai-api/gpt-6-astra" },
       });
       expect(res.status).toBe(503);
       expect(await res.json()).toEqual({ success: false, error: AUDIT_REFUSED_MESSAGE });
@@ -239,10 +239,10 @@ describe("AI routes are audited", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("unauthorized", { status: 401 }));
     const res = await dispatch("POST", "/api/ai/compare", {
       headers: authHeaders(token),
-      body: { shop_id: shopId, model_a_id: "anthropic/claude-sonnet-5", model_b_id: "z-ai/glm-5.2" },
+      body: { shop_id: shopId, model_a_id: "anthropic/claude-sonnet-5.5", model_b_id: "z-ai/glm-5.2" },
     });
     expect(res.status).toBe(200);
     const entry = (await byAction("theme.compare")).find((r) => r.shop_id === shopId)!;
-    expect(JSON.parse(entry.details_json as string)).toEqual({ model_a: "anthropic/claude-sonnet-5", model_b: null });
+    expect(JSON.parse(entry.details_json as string)).toEqual({ model_a: "anthropic/claude-sonnet-5.5", model_b: null });
   });
 });

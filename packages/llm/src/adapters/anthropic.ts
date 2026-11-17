@@ -1,4 +1,4 @@
-import type { Adapter, ChatMessage } from "../types";
+import type { Adapter, ChatMessage, Effort } from "../types";
 
 interface AnthropicBody {
   content?: Array<{ type?: string; text?: string }>;
@@ -24,6 +24,15 @@ export function normalizeAnthropicMessages(messages: ChatMessage[]): ChatMessage
   return out;
 }
 
+/**
+ * The Messages API takes low to max. "none" and "minimal" exist only on other
+ * routes (pickers never offer them here), so a stray one becomes "low", the
+ * nearest level Anthropic accepts.
+ */
+export function anthropicEffort(effort: Effort): Exclude<Effort, "none" | "minimal"> {
+  return effort === "none" || effort === "minimal" ? "low" : effort;
+}
+
 export const anthropicAdapter: Adapter = {
   route: "anthropic",
   buildRequest(req, apiKey) {
@@ -40,7 +49,7 @@ export const anthropicAdapter: Adapter = {
           model: req.model,
           max_tokens: req.maxTokens,
           ...(req.system ? { system: req.system } : {}),
-          ...(req.effort ? { output_config: { effort: req.effort } } : {}),
+          ...(req.effort ? { output_config: { effort: anthropicEffort(req.effort) } } : {}),
           messages: normalizeAnthropicMessages(req.messages),
         }),
         signal: req.signal,

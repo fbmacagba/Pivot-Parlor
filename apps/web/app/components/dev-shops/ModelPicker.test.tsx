@@ -36,11 +36,18 @@ const MODELS: PickerModel[] = [
   m("anthropic-api/claude-sonnet-5", "Claude Sonnet 5", "anthropic", "Anthropic API", "anthropic", "Anthropic", {
     effortLevels: ["medium", "high"],
   }),
+  m("anthropic-api/claude-opus-5-5", "Claude Opus 5.5", "anthropic", "Anthropic API", "anthropic", "Anthropic", {
+    effortLevels: ["max", "low", "xhigh", "high", "medium"],
+  }),
+  m("openai-api/gpt-6-luna", "GPT-6 Luna", "openai", "OpenAI API", "openai", "OpenAI", {
+    effortLevels: ["none", "low", "medium", "high", "xhigh", "max"],
+    defaultEffort: "medium",
+  }),
 ];
 
-function Harness({ initial, withEffort }: { initial: string; withEffort: boolean }) {
+function Harness({ initial, withEffort, initialEffort = "" }: { initial: string; withEffort: boolean; initialEffort?: string }) {
   const [value, setValue] = useState(initial);
-  const [effort, setEffort] = useState("");
+  const [effort, setEffort] = useState(initialEffort);
   return (
     <ModelPicker
       label="Text"
@@ -67,9 +74,9 @@ describe("ModelPicker", () => {
     container.remove();
   });
 
-  function render(initial: string, withEffort = true) {
+  function render(initial: string, withEffort = true, initialEffort = "") {
     root = createRoot(container);
-    act(() => root!.render(<Harness initial={initial} withEffort={withEffort} />));
+    act(() => root!.render(<Harness initial={initial} withEffort={withEffort} initialEffort={initialEffort} />));
   }
 
   const sel = (id: string) => container.querySelector(`[data-testid="${id}"]`) as HTMLSelectElement | null;
@@ -100,7 +107,7 @@ describe("ModelPicker", () => {
     expect(sel("picker-vendor")).toBeNull();
     const model = sel("picker-model")!;
     expect(model.value).toBe("openai-api/gpt-6-astra");
-    expect(optionValues(model)).toEqual(["openai-api/gpt-6-astra", "openai-api/gpt-5.6-luna"]);
+    expect(optionValues(model)).toEqual(["openai-api/gpt-6-astra", "openai-api/gpt-5.6-luna", "openai-api/gpt-6-luna"]);
   });
 
   it("switching back to OpenRouter picks the recommended model and its vendor", () => {
@@ -125,6 +132,31 @@ describe("ModelPicker", () => {
   it("offers all three levels when the model supports effort without a reported list", () => {
     render("google/gemini-3.1-flash-lite-preview");
     expect(optionValues(sel("picker-effort")!)).toEqual(["", "low", "medium", "high"]);
+  });
+
+  it("offers levels beyond high in ladder order, whatever order the model reports them in", () => {
+    render("anthropic-api/claude-opus-5-5");
+    expect(optionValues(sel("picker-effort")!)).toEqual(["", "low", "medium", "high", "xhigh", "max"]);
+    expect(optionLabels(sel("picker-effort")!)).toEqual([
+      "Default (model decides)",
+      "Low - quick and cheap",
+      "Medium - balanced",
+      "High - deeper thinking, more tokens",
+      "Extra high - slower, many more tokens",
+      "Max - slowest and most expensive",
+    ]);
+  });
+
+  it("names the model's own default on the Default option and offers none where the model takes it", () => {
+    render("openai-api/gpt-6-luna");
+    const effort = sel("picker-effort")!;
+    expect(optionLabels(effort)[0]).toBe("Default (model decides: medium)");
+    expect(optionValues(effort)).toEqual(["", "none", "low", "medium", "high", "xhigh", "max"]);
+  });
+
+  it("shows Default when the held effort is a level this model does not take", () => {
+    render("anthropic-api/claude-sonnet-5", true, "xhigh");
+    expect(sel("picker-effort")!.value).toBe("");
   });
 
   it("hides the effort step when the caller does not handle effort", () => {

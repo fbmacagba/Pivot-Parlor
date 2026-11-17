@@ -1,119 +1,133 @@
 /**
- * Recorded 2026-09-12 from the three live lists: a subset covering the five
- * catalogue vendors plus the distractors the ranking rules must skip
- * (`:batch`/`:free` variants, `-pro` tiers, dated snapshots, `-exp`, image
- * models, legacy families). OpenRouter prices are USD per token, as served.
- * The snapshot in packages/utils/src/modelCatalog.ts is checked against
- * OPENROUTER_FEED by model-registry.test.ts; refresh both together.
+ * Recorded 2026-11-17 (04:16 UTC) from OpenRouter's public model list: a
+ * subset covering the catalogue vendors plus the distractors the ranking
+ * rules must skip (`:batch` variants, `-pro` tiers, dated snapshots, `-exp`,
+ * image and video models, specialist and legacy lines). Prices are USD per
+ * token and `reasoning` is the feed's own block, both as served; only the
+ * `supported_parameters` relevant to reasoning are kept.
+ *
+ * OPENAI_IDS and ANTHROPIC_MODELS were not fetched (no vendor keys on this
+ * machine): the ids are modelled on the OpenRouter slugs and Anthropic's
+ * model table, and the Anthropic entries follow the Models API reference's
+ * shape (`capabilities.effort` with one `{ supported }` per level).
+ *
+ * The snapshot in packages/utils/src/modelCatalog.ts must equal what the
+ * registry builds from these lists (model-registry.test.ts); refresh both
+ * together.
  */
 import type { AnthropicListedModel, OpenRouterFeedModel } from "../../src/services/model-registry";
 
-function or(
-  id: string,
-  prompt: number,
-  completion: number,
-  opts: { name?: string; reasoning?: boolean; out?: string[] } = {},
-): OpenRouterFeedModel {
-  return {
-    id,
-    name: opts.name ?? id,
-    pricing: { prompt: String(prompt), completion: String(completion) },
-    supported_parameters: opts.reasoning === false ? ["max_tokens"] : ["max_tokens", "reasoning"],
-    architecture: { output_modalities: opts.out ?? ["text"] },
-  };
-}
-
 export const OPENROUTER_FEED: OpenRouterFeedModel[] = [
-  // google
-  or("google/gemini-2.5-pro", 0.00000125, 0.00001, { name: "Google: Gemini 2.5 Pro" }),
-  or("google/gemini-3.1-pro-preview", 0.000002, 0.000012, { name: "Google: Gemini 3.1 Pro Preview" }),
-  or("google/gemini-3.1-pro-preview:batch", 0.000001, 0.000006),
-  or("google/gemini-3-flash-preview", 0.0000005, 0.000003),
-  or("google/gemini-3.5-flash", 0.0000015, 0.000009, { name: "Google: Gemini 3.5 Flash" }),
-  or("google/gemini-3.8-flash", 0.00000075, 0.00000375, { name: "Google: Gemini 3.8 Flash" }),
-  or("google/gemini-3.8-flash:batch", 0.000000375, 0.000001875),
-  or("google/gemini-3.1-flash-lite", 0.00000025, 0.0000015, { name: "Google: Gemini 3.1 Flash Lite" }),
-  or("google/gemini-3.1-flash-lite-preview", 0.00000025, 0.0000015, { name: "Google: Gemini 3.1 Flash Lite Preview" }),
-  or("google/gemini-3.5-flash-lite", 0.0000003, 0.0000025, { name: "Google: Gemini 3.5 Flash Lite" }),
-  or("google/gemini-3.1-flash-image", 0.0000005, 0.000003, { name: "Google: Nano Banana 2 (Gemini 3.1 Flash Image)", out: ["image", "text"] }),
-  or("google/gemini-3.1-flash-lite-image", 0.00000025, 0.0000015, { out: ["image", "text"] }),
-  or("google/gemini-3-pro-image", 0.000002, 0.000012, { out: ["image", "text"] }),
-  or("google/gemma-4-31b-it", 0.00000009, 0.00000034),
-  // anthropic
-  or("anthropic/claude-3-haiku", 0.00000025, 0.00000125, { reasoning: false }),
-  or("anthropic/claude-fable-5", 0.00001, 0.00005),
-  or("anthropic/claude-fable-5.1", 0.00001, 0.00005, { name: "Anthropic: Claude Fable 5.1" }),
-  or("anthropic/claude-fable-5.1:batch", 0.000005, 0.000025),
-  or("anthropic/claude-opus-4.8", 0.000005, 0.000025, { name: "Anthropic: Claude Opus 4.8" }),
-  or("anthropic/claude-opus-5", 0.000005, 0.000025, { name: "Claude Opus 5" }),
-  or("anthropic/claude-sonnet-4.6", 0.000003, 0.000015),
-  or("anthropic/claude-sonnet-5", 0.000002, 0.00001, { name: "Anthropic: Claude Sonnet 5" }),
-  or("anthropic/claude-haiku-4.5", 0.000001, 0.000005, { name: "Anthropic: Claude Haiku 4.5" }),
-  // openai
-  or("openai/gpt-6-astra", 0.00001, 0.00005, { name: "OpenAI: GPT-6 Astra" }),
-  or("openai/gpt-6-astra-pro", 0.00001, 0.00005),
-  or("openai/gpt-6-astra:batch", 0.000005, 0.000025),
-  or("openai/gpt-5.6-sol", 0.000002, 0.00001, { name: "OpenAI: GPT-5.6 Sol" }),
-  or("openai/gpt-5.6-sol-pro", 0.000002, 0.00001),
-  or("openai/gpt-5.6-terra", 0.000002, 0.000012, { name: "OpenAI: GPT-5.6 Terra" }),
-  or("openai/gpt-5.6-luna", 0.0000002, 0.0000012, { name: "OpenAI: GPT-5.6 Luna" }),
-  or("openai/gpt-5.5", 0.000005, 0.00003),
-  or("openai/gpt-5.4-mini", 0.00000075, 0.0000045),
-  or("openai/gpt-chat-latest", 0.000005, 0.00003, { reasoning: false }),
-  or("openai/gpt-4o-2024-11-20", 0.0000025, 0.00001, { reasoning: false }),
-  or("openai/gpt-5-image-mini", 0.0000025, 0.000002, { out: ["image", "text"] }),
-  or("openai/gpt-5.4-image-2", 0.000008, 0.000015, { out: ["image", "text"] }),
-  // x-ai
-  or("x-ai/grok-4.20", 0.00000125, 0.0000025),
-  or("x-ai/grok-4.20-multi-agent", 0.00000125, 0.0000025, { name: "SpaceXAI: Grok 4.20 Multi-Agent" }),
-  or("x-ai/grok-4.3", 0.00000125, 0.0000025),
-  or("x-ai/grok-4.5", 0.000002, 0.000006),
-  or("x-ai/grok-4.6", 0.000002, 0.000006, { name: "SpaceXAI: Grok 4.6" }),
-  or("x-ai/grok-build-0.1", 0.000001, 0.000002),
-  // deepseek
-  or("deepseek/deepseek-v3.2-exp", 0.00000027, 0.00000041),
-  or("deepseek/deepseek-v4-flash", 0.00000006734, 0.00000013468),
-  or("deepseek/deepseek-v4-flash-0731", 0.000000065, 0.00000018),
-  or("deepseek/deepseek-v4-pro", 0.000000849816, 0.000001699632, { name: "DeepSeek: DeepSeek V4 Pro 0423" }),
-  or("deepseek/deepseek-v4-pro-0813", 0.00000057816, 0.00000173448),
-  or("deepseek/deepseek-v4.1-flash", 0.00000015, 0.0000006, { name: "DeepSeek: DeepSeek V4.1 Flash" }),
+  { id: "google/gemini-2.5-pro", name: "Google: Gemini 2.5 Pro", created: 1750169544, pricing: { prompt: "0.00000125", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true} },
+  { id: "google/gemini-3.1-pro-preview", name: "Google: Gemini 3.1 Pro Preview", created: 1771509627, pricing: { prompt: "0.000002", completion: "0.000012" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-3.1-pro-preview:batch", name: "Google: Gemini 3.1 Pro Preview (batch)", created: 1771509627, pricing: { prompt: "0.000001", completion: "0.000006" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-3-flash-preview", name: "Google: Gemini 3 Flash Preview", created: 1765987078, pricing: { prompt: "0.0000005", completion: "0.000003" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "medium", "low", "minimal", "none"], default_effort: "medium"} },
+  { id: "google/gemini-3.5-flash", name: "Google: Gemini 3.5 Flash", created: 1779193800, pricing: { prompt: "0.0000015", completion: "0.000009" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low", "minimal"], default_effort: "medium"} },
+  { id: "google/gemini-3.7-flash", name: "Google: Gemini 3.7 Flash", created: 1786640581, pricing: { prompt: "0.00000075", completion: "0.00000375" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-3.8-flash", name: "Google: Gemini 3.8 Flash", created: 1788362056, pricing: { prompt: "0.000000825", completion: "0.000004125" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-3.8-flash:batch", name: "Google: Gemini 3.8 Flash (batch)", created: 1788362056, pricing: { prompt: "0.000000375", completion: "0.000001875" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-3.1-flash-lite", name: "Google: Gemini 3.1 Flash Lite", created: 1778168828, pricing: { prompt: "0.00000025", completion: "0.0000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "medium", "low", "minimal", "none"], default_effort: "minimal"} },
+  { id: "google/gemini-3.1-flash-lite-preview", name: "Google: Gemini 3.1 Flash Lite Preview", created: 1772512673, pricing: { prompt: "0.00000025", completion: "0.0000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "medium", "low", "minimal", "none"], default_effort: "minimal"} },
+  { id: "google/gemini-3.5-flash-lite", name: "Google: Gemini 3.5 Flash Lite", created: 1784646726, pricing: { prompt: "0.0000003", completion: "0.0000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low", "minimal"], default_effort: "minimal"} },
+  { id: "google/gemini-4-carbon", name: "Google: Gemini 4 Carbon", created: 1794326871, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-4-argon", name: "Google: Gemini 4 Argon", created: 1791907477, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-4-hydrogen", name: "Google: Gemini 4 Hydrogen", created: 1794506460, pricing: { prompt: "0.0000015", completion: "0.0000075" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-4-hydrogen:batch", name: "Google: Gemini 4 Hydrogen (batch)", created: 1794506460, pricing: { prompt: "0.00000075", completion: "0.00000375" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "google/gemini-omni-1.2-flash", name: "Google: Gemini Omni 1.2 Flash", created: 1793898961, pricing: { prompt: "0.0000015", completion: "0.000009" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text", "video"] }, reasoning: {mandatory: true, supported_efforts: ["high", "low"], default_effort: "low"} },
+  { id: "google/gemini-3.1-flash-image", name: "Google: Nano Banana 2 (Gemini 3.1 Flash Image)", created: 1781754065, pricing: { prompt: "0.0000005", completion: "0.000003" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["image", "text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "minimal", "none"], default_effort: "minimal"} },
+  { id: "google/gemini-3.1-flash-lite-image", name: "Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image)", created: 1782837225, pricing: { prompt: "0.00000025", completion: "0.0000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["image", "text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "minimal", "none"], default_effort: "minimal"} },
+  { id: "google/gemini-3-pro-image", name: "Google: Nano Banana Pro (Gemini 3 Pro Image)", created: 1781754054, pricing: { prompt: "0.000002", completion: "0.000012" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["image", "text"] }, reasoning: {mandatory: true} },
+  { id: "google/gemini-nano-banana-2.1", name: "Google: Nano Banana 2.1", created: 1791300825, pricing: { prompt: "0.0000015", completion: "0.0000075" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["image", "text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "minimal", "none"], default_effort: "minimal"} },
+  { id: "google/gemma-4-31b-it", name: "Google: Gemma 4 31B", created: 1775148486, pricing: { prompt: "0.0000002", completion: "0.0000004" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "anthropic/claude-fable-5", name: "Anthropic: Claude Fable 5", created: 1781007515, pricing: { prompt: "0.00001", completion: "0.00005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "anthropic/claude-fable-5.1", name: "Anthropic: Claude Fable 5.1", created: 1788285838, pricing: { prompt: "0.00001", completion: "0.00005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "anthropic/claude-fable-5.2", name: "Anthropic: Claude Fable 5.2", created: 1794253781, pricing: { prompt: "0.000008", completion: "0.00004" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "anthropic/claude-fable-5.2:batch", name: "Anthropic: Claude Fable 5.2 (batch)", created: 1794253781, pricing: { prompt: "0.000004", completion: "0.00002" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "anthropic/claude-opus-4.8", name: "Anthropic: Claude Opus 4.8", created: 1779905091, pricing: { prompt: "0.000005", completion: "0.000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "high"} },
+  { id: "anthropic/claude-opus-5", name: "Anthropic: Claude Opus 5", created: 1784912544, pricing: { prompt: "0.000005", completion: "0.000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "high"} },
+  { id: "anthropic/claude-opus-5.5", name: "Anthropic: Claude Opus 5.5", created: 1790094732, pricing: { prompt: "0.000004", completion: "0.00002" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "anthropic/claude-sonnet-4.6", name: "Anthropic: Claude Sonnet 4.6", created: 1771342990, pricing: { prompt: "0.000003", completion: "0.000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "anthropic/claude-sonnet-5", name: "Anthropic: Claude Sonnet 5", created: 1782843083, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "high"} },
+  { id: "anthropic/claude-sonnet-5.5", name: "Anthropic: Claude Sonnet 5.5", created: 1790618686, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "anthropic/claude-haiku-4.5", name: "Anthropic: Claude Haiku 4.5", created: 1760547638, pricing: { prompt: "0.000001", completion: "0.000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "anthropic/claude-haiku-5.5", name: "Anthropic: Claude Haiku 5.5", created: 1791397883, pricing: { prompt: "0.0000001", completion: "0.0000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-6-astra", name: "OpenAI: GPT-6 Astra", created: 1788552838, pricing: { prompt: "0.00001", completion: "0.00005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "openai/gpt-6-astra-pro", name: "OpenAI: GPT-6 Astra Pro", created: 1788552835, pricing: { prompt: "0.00001", completion: "0.00005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "openai/gpt-6-astra:batch", name: "OpenAI: GPT-6 Astra (batch)", created: 1788552838, pricing: { prompt: "0.000005", completion: "0.000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "openai/gpt-6-sol", name: "OpenAI: GPT-6 Sol", created: 1790100775, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-6.1-sol", name: "OpenAI: GPT-6.1 Sol", created: 1790702882, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "openai/gpt-6.1-sol-pro", name: "OpenAI: GPT-6.1 Sol Pro", created: 1790702886, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "openai/gpt-6.1-terra", name: "OpenAI: GPT-6.1 Terra", created: 1793038409, pricing: { prompt: "0.000001", completion: "0.000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-6.1-terra-pro", name: "OpenAI: GPT-6.1 Terra Pro", created: 1793038556, pricing: { prompt: "0.000001", completion: "0.000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "openai/gpt-6-luna", name: "OpenAI: GPT-6 Luna", created: 1790100786, pricing: { prompt: "0.0000001", completion: "0.0000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-6-luna-pro", name: "OpenAI: GPT-6 Luna Pro", created: 1790100791, pricing: { prompt: "0.0000001", completion: "0.0000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-5.6-sol", name: "OpenAI: GPT-5.6 Sol", created: 1783590850, pricing: { prompt: "0.000004", completion: "0.00002" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-5.6-terra", name: "OpenAI: GPT-5.6 Terra", created: 1783590857, pricing: { prompt: "0.000002", completion: "0.000012" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-5.6-luna", name: "OpenAI: GPT-5.6 Luna", created: 1783590864, pricing: { prompt: "0.0000002", completion: "0.0000012" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-5.5", name: "OpenAI: GPT-5.5", created: 1777051893, pricing: { prompt: "0.000005", completion: "0.00003" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-5.4-mini", name: "OpenAI: GPT-5.4 Mini", created: 1773748178, pricing: { prompt: "0.00000075", completion: "0.0000045" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "openai/gpt-chat-latest", name: "OpenAI: GPT Chat Latest", created: 1778000212, pricing: { prompt: "0.000005", completion: "0.00003" }, supported_parameters: ["max_tokens"], architecture: { output_modalities: ["text"] } },
+  { id: "openai/gpt-5-image-mini", name: "OpenAI: GPT-5 Image Mini", created: 1760624583, pricing: { prompt: "0.0000025", completion: "0.000002" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["image", "text"] }, reasoning: {mandatory: true}, expiration_date: "2026-12-01" },
+  { id: "openai/gpt-5.4-image-2", name: "OpenAI: GPT-5.4 Image 2", created: 1776797528, pricing: { prompt: "0.000008", completion: "0.000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["image", "text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "medium", "low", "none"], default_effort: "medium"} },
+  { id: "x-ai/grok-4.20", name: "SpaceXAI: Grok 4.20", created: 1774979019, pricing: { prompt: "0.00000125", completion: "0.0000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "x-ai/grok-4.20-multi-agent", name: "SpaceXAI: Grok 4.20 Multi-Agent", created: 1774979158, pricing: { prompt: "0.00000125", completion: "0.0000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low"], default_effort: "medium"} },
+  { id: "x-ai/grok-4.3", name: "SpaceXAI: Grok 4.3", created: 1777591821, pricing: { prompt: "0.00000125", completion: "0.0000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "medium", "low", "none"], default_effort: "low"} },
+  { id: "x-ai/grok-4.5", name: "SpaceXAI: Grok 4.5", created: 1783523154, pricing: { prompt: "0.000002", completion: "0.000006" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "high"} },
+  { id: "x-ai/grok-4.6", name: "SpaceXAI: Grok 4.6", created: 1786548957, pricing: { prompt: "0.000002", completion: "0.000006" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "x-ai/grok-4.7", name: "SpaceXAI: Grok 4.7", created: 1790007541, pricing: { prompt: "0.000002", completion: "0.000006" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low"], default_effort: "high"} },
+  { id: "x-ai/grok-build-0.1", name: "SpaceXAI: Grok Build 0.1", created: 1779298123, pricing: { prompt: "0.000001", completion: "0.000002" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true} },
+  { id: "deepseek/deepseek-v3.2-exp", name: "DeepSeek: DeepSeek V3.2 Exp", created: 1759150481, pricing: { prompt: "0.00000027", completion: "0.00000041" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "deepseek/deepseek-v4-flash", name: "DeepSeek: DeepSeek V4 Flash 0423", created: 1777000666, pricing: { prompt: "0.00000009", completion: "0.00000018" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "none"], default_effort: "high"} },
+  { id: "deepseek/deepseek-v4-flash-0731", name: "DeepSeek: DeepSeek V4 Flash 0731", created: 1785478908, pricing: { prompt: "0.00000006", completion: "0.00000018" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "high", "low", "none"], default_effort: "high"} },
+  { id: "deepseek/deepseek-v4-pro", name: "DeepSeek: DeepSeek V4 Pro 0423", created: 1777000679, pricing: { prompt: "0.0000009", completion: "0.0000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "none"], default_effort: "high"} },
+  { id: "deepseek/deepseek-v4-pro-0813", name: "DeepSeek: DeepSeek V4 Pro 0813", created: 1786549364, pricing: { prompt: "0.000000111", completion: "0.00000444" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "high", "low", "none"], default_effort: "high"} },
+  { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek: DeepSeek V4.1 Flash", created: 1789021285, pricing: { prompt: "0.00000014", completion: "0.00000042" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "high", "low", "none"], default_effort: "high"} },
+  { id: "deepseek/deepseek-v4.1-flash-1017", name: "DeepSeek: DeepSeek V4.1 Flash 1017", created: 1792225624, pricing: { prompt: "0.000000036", completion: "0.0000005" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["max", "high", "low", "none"], default_effort: "high"} },
+  { id: "z-ai/glm-5.3-prime", name: "Z.ai: GLM 5.3 Prime", created: 1790199651, pricing: { prompt: "0.00000168", completion: "0.00000528" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "high", "low"], default_effort: "max"} },
+  { id: "z-ai/glm-5.3", name: "Z.ai: GLM 5.3", created: 1787086655, pricing: { prompt: "0.0000000699", completion: "0.0000014" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "high", "low"], default_effort: "max"} },
+  { id: "z-ai/glm-5.3-flash", name: "Z.ai: GLM 5.3 Flash", created: 1787752741, pricing: { prompt: "0.0000000399", completion: "0.0000000784" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "high", "low"], default_effort: "max"} },
+  { id: "z-ai/glm-5.3-flashx", name: "Z.ai: GLM 5.3 FlashX", created: 1789744020, pricing: { prompt: "0.00000037", completion: "0.00000125" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "high", "low"], default_effort: "max"} },
+  { id: "z-ai/glm-5.3-flashx-legal", name: "Z.ai: GLM 5.3 FlashX Legal", created: 1793626154, pricing: { prompt: "0.00000037", completion: "0.00000125" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["max", "high", "low"], default_effort: "max"} },
+  { id: "z-ai/glm-5.2", name: "Z.ai: GLM 5.2", created: 1781631930, pricing: { prompt: "0.000000007", completion: "0.0000068" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "none"], default_effort: "high"} },
+  { id: "z-ai/glm-4.7-flash", name: "Z.ai: GLM 4.7 Flash", created: 1768833913, pricing: { prompt: "0.0000000605", completion: "0.0000004" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "qwen/qwen4-max", name: "Qwen: Qwen4 Max", created: 1794795526, pricing: { prompt: "0.000001425", completion: "0.000004275" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "high", "low", "none"], default_effort: "high"} },
+  { id: "qwen/qwen3.8-max-prime", name: "Qwen: Qwen3.8 Max Prime", created: 1790191228, pricing: { prompt: "0.000004", completion: "0.000012" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low", "minimal"], default_effort: "xhigh"} },
+  { id: "qwen/qwen3.8-max-0902", name: "Qwen: Qwen3.8 Max (0902)", created: 1788469704, pricing: { prompt: "0.000002", completion: "0.000006" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low", "minimal"], default_effort: "xhigh"} },
+  { id: "qwen/qwen3.8-flash", name: "Qwen: Qwen3.8 Flash", created: 1787773060, pricing: { prompt: "0.00000015", completion: "0.00000047" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "qwen/qwen3.8-omni-flash", name: "Qwen: Qwen3.8 Omni Flash", created: 1789959954, pricing: { prompt: "0.00000015", completion: "0.00000047" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "qwen/qwen3.7-max", name: "Qwen: Qwen3.7 Max", created: 1779376861, pricing: { prompt: "0.000001475", completion: "0.000004425" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "qwen/qwen3.7-plus", name: "Qwen: Qwen3.7 Plus", created: 1780491783, pricing: { prompt: "0.00000032", completion: "0.00000128" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
+  { id: "qwen/qwen3.8-27b", name: "Qwen: Qwen3.8 27B", created: 1786722910, pricing: { prompt: "0.00000015", completion: "0.000001875" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["xhigh", "medium", "low", "none"], default_effort: "xhigh"} },
+  { id: "mistralai/mistral-large-4-0", name: "Mistral: Mistral Large 4", created: 1791294122, pricing: { prompt: "0.0000007", completion: "0.0000021" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "none"], default_effort: "high"} },
+  { id: "mistralai/mistral-large-2512", name: "Mistral: Mistral Large 3 2512", created: 1764624472, pricing: { prompt: "0.0000005", completion: "0.0000015" }, supported_parameters: ["max_tokens"], architecture: { output_modalities: ["text"] } },
+  { id: "mistralai/mistral-medium-3-5", name: "Mistral: Mistral Medium 3.5", created: 1777570439, pricing: { prompt: "0.0000015", completion: "0.0000075" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "none"], default_effort: "high"} },
+  { id: "mistralai/mistral-medium-3.1", name: "Mistral: Mistral Medium 3.1", created: 1755095639, pricing: { prompt: "0.0000004", completion: "0.000002" }, supported_parameters: ["max_tokens"], architecture: { output_modalities: ["text"] } },
+  { id: "mistralai/mistral-small-2603", name: "Mistral: Mistral Small 4", created: 1773695685, pricing: { prompt: "0.00000015", completion: "0.0000006" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "none"], default_effort: "high"} },
 ];
 
 /** OpenAI `GET /v1/models` ids (only `id` matters to the ranking). */
-export const OPENAI_IDS: string[] = [
-  "gpt-6-astra",
-  "gpt-6-astra-pro",
-  "gpt-5.6-sol",
-  "gpt-5.6-sol-pro",
-  "gpt-5.6-terra",
-  "gpt-5.6-terra-pro",
-  "gpt-5.6-luna",
-  "gpt-5.6-luna-pro",
-  "gpt-5.5",
-  "gpt-5.4-mini",
-  "gpt-5.4-nano",
-  "gpt-chat-latest",
-  "gpt-5-image-mini",
-  "gpt-4o",
-  "o3",
-  "text-embedding-3-small",
-];
+export const OPENAI_IDS: string[] = ["gpt-6-astra", "gpt-6-astra-pro", "gpt-6-sol", "gpt-6-sol-pro", "gpt-6.1-sol", "gpt-6.1-sol-pro", "gpt-6.1-terra", "gpt-6.1-terra-pro", "gpt-6-luna", "gpt-6-luna-pro", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-chat-latest", "gpt-5-image-mini", "gpt-4o", "o3", "text-embedding-3-small"];
 
 /** Anthropic `GET /v1/models` entries; `claude-sonnet-4-6-20260210` exercises canonicalisation. */
 export const ANTHROPIC_MODELS: AnthropicListedModel[] = [
-  { id: "claude-fable-5.1", display_name: "Claude Fable 5.1", capabilities: { effort: { supported: ["low", "medium", "high", "max", "xhigh"] } } },
-  { id: "claude-fable-5", display_name: "Claude Fable 5", capabilities: { effort: { supported: ["low", "medium", "high", "max"] } } },
-  { id: "claude-opus-5", display_name: "Claude Opus 5", capabilities: { effort: { supported: ["low", "medium", "high", "max"] } } },
-  { id: "claude-opus-4.8", display_name: "Claude Opus 4.8", capabilities: { effort: { supported: ["low", "medium", "high"] } } },
-  { id: "claude-sonnet-5", display_name: "Claude Sonnet 5", capabilities: { effort: { supported: ["medium", "high"] } } },
-  { id: "claude-sonnet-4-6-20260210", display_name: "Claude Sonnet 4.6", capabilities: { effort: { supported: ["low", "medium", "high"] } } },
-  { id: "claude-haiku-4.5", display_name: "Claude Haiku 4.5", capabilities: { effort: { supported: ["low", "medium", "high"] } } },
-  { id: "claude-3-haiku-20240307", display_name: "Claude 3 Haiku" },
+  { id: "claude-fable-5-2", display_name: "Claude Fable 5.2", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-mythos-5-2", display_name: "Claude Mythos 5.2", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-fable-5-1", display_name: "Claude Fable 5.1", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-fable-5", display_name: "Claude Fable 5", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-opus-5-5", display_name: "Claude Opus 5.5", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-opus-5", display_name: "Claude Opus 5", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-opus-4-8", display_name: "Claude Opus 4.8", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-sonnet-5", display_name: "Claude Sonnet 5", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-sonnet-4-6-20260210", display_name: "Claude Sonnet 4.6", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: null, max: { supported: true } } } },
+  { id: "claude-haiku-5-5", display_name: "Claude Haiku 5.5", lifecycle: "active", capabilities: { effort: { supported: true, low: { supported: true }, medium: { supported: true }, high: { supported: true }, xhigh: { supported: true }, max: { supported: true } } } },
+  { id: "claude-haiku-4-5", display_name: "Claude Haiku 4.5", lifecycle: "active", capabilities: { effort: { supported: false, low: { supported: false }, medium: { supported: false }, high: { supported: false }, xhigh: { supported: false }, max: { supported: false } } } },
+  { id: "claude-3-haiku-20240307", display_name: "Claude 3 Haiku", lifecycle: "retired", capabilities: null },
 ];
 
 /** Stub body factories for tests that intercept globalThis.fetch. */
 export const feedResponses = {
   openrouter: () => Response.json({ data: OPENROUTER_FEED }),
   openai: () => Response.json({ object: "list", data: OPENAI_IDS.map((id) => ({ id, object: "model", owned_by: "openai" })) }),
-  anthropic: () => Response.json({ data: ANTHROPIC_MODELS, has_more: false, first_id: "claude-fable-5.1", last_id: "claude-3-haiku-20240307" }),
+  anthropic: () => Response.json({ data: ANTHROPIC_MODELS, has_more: false, first_id: "claude-fable-5-2", last_id: "claude-3-haiku-20240307" }),
 };

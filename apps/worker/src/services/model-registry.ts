@@ -21,12 +21,20 @@ import {
   type ModelKind,
   type ModelRoute,
 } from "@repo/utils";
-import { MODELS_KV_KEY, MODELS_LAST_GOOD_KV_KEY, parseModelId, priceTwin, type ProviderKeys } from "@repo/llm";
+import {
+  MODELS_KV_KEY,
+  MODELS_LAST_GOOD_KV_KEY,
+  orderEfforts,
+  parseEffort,
+  parseModelId,
+  priceTwin,
+  type ProviderKeys,
+} from "@repo/llm";
 
 export type { TextEffort };
 
 /** Default model for the theme generator (site pipeline default lives in shops.ts). */
-export const DEFAULT_THEME_MODEL = "anthropic/claude-sonnet-5";
+export const DEFAULT_THEME_MODEL = "anthropic/claude-sonnet-5.5";
 
 /**
  * KV keys for the served list. MODELS_LAST_GOOD_KV_KEY is the last successful
@@ -42,22 +50,46 @@ const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 const ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models";
 const ANTHROPIC_VERSION = "2023-06-01";
-const ALL_EFFORTS: TextEffort[] = ["low", "medium", "high"];
+/** Offered when a source says a model reasons but not at which levels (the pre-2026-11 rule). */
+const CLASSIC_EFFORTS: TextEffort[] = ["low", "medium", "high"];
+/** The levels Anthropic's Messages API takes; it has no "none" or "minimal". */
+const ANTHROPIC_API_EFFORTS: TextEffort[] = ["low", "medium", "high", "xhigh", "max"];
+/** A vendor whose newest pick is this much older than its newest model gets a drift warning. */
+const DRIFT_GRACE_S = 7 * 24 * 3600;
 /** OpenRouter ids that stay listed even when the ranking would drop them. */
 const PINNED_OPENROUTER_TEXT_IDS = [DEFAULT_TEXT_MODEL_ID, DEFAULT_THEME_MODEL];
 
 export interface OpenRouterFeedModel {
   id: string;
   name?: string;
+  /** Unix seconds when OpenRouter added the model. */
+  created?: number;
   pricing?: { prompt?: string; completion?: string };
   supported_parameters?: string[];
   architecture?: { output_modalities?: string[] };
+  /** Present on reasoning models: the levels accepted and the one used when none is sent. */
+  reasoning?: { mandatory?: boolean; supported_efforts?: string[]; default_effort?: string } | null;
+  /** Set when the model is scheduled to leave OpenRouter. */
+  expiration_date?: string | null;
 }
 
+type CapabilitySupport = { supported?: boolean } | null | undefined;
+
+/** One entry of Anthropic's `GET /v1/models` (shape per the Models API reference). */
 export interface AnthropicListedModel {
   id: string;
   display_name?: string;
-  capabilities?: { effort?: { supported?: string[] } | string[] };
+  lifecycle?: string;
+  capabilities?: {
+    effort?: {
+      supported?: boolean;
+      low?: CapabilitySupport;
+      medium?: CapabilitySupport;
+      high?: CapabilitySupport;
+      xhigh?: CapabilitySupport;
+      max?: CapabilitySupport;
+    } | null;
+  } | null;
 }
 
 export type GroupSource<T> = { ok: true; data: T } | { ok: false; reason: "no-key" | "fetch-failed" };
@@ -135,17 +167,34 @@ export function rankAnthropicIds(ids: string[]): string[] {
   });
 }
 
-/** Group 1 = version; optional group 2 = "-preview" (Google ships Pro as preview for months). */
+/**
+ * A slot keeps one model: the highest version among the ids its pattern
+ * matches, so a new generation replaces the old one in the same slot.
+ * Group 1 = version; optional group 2 = "-preview" (Google ships Pro as
+ * preview for months).
+ */
 interface FamilyRule {
   key: string;
   re: RegExp;
 }
 
-const OPENROUTER_FAMILY_TABLE: Array<{ vendor: string; families: FamilyRule[] }> = [
+interface VendorRule {
+  vendor: string;
+  families: FamilyRule[];
+  /** Specialist lines deliberately not listed; they never trigger the drift warning. */
+  ignore?: RegExp[];
+}
+
+const OPENROUTER_FAMILY_TABLE: VendorRule[] = [
   {
     vendor: "google",
+    // Gemini 4 renamed the tiers (Carbon top, Argon balanced, Hydrogen fast).
+    // Carbon shares the flagship slot with the Gemini 3 Pro line; Hydrogen
+    // costs about twice 3.8 Flash, so Flash keeps its own slot.
     families: [
-      { key: "pro", re: /^gemini-(\d+(?:\.\d+)?)-pro(-preview)?$/ },
+      { key: "flagship", re: /^gemini-(\d+(?:\.\d+)?)-(?:carbon|pro)(-preview)?$/ },
+      { key: "argon", re: /^gemini-(\d+(?:\.\d+)?)-argon(-preview)?$/ },
+      { key: "hydrogen", re: /^gemini-(\d+(?:\.\d+)?)-hydrogen(-preview)?$/ },
       { key: "flash", re: /^gemini-(\d+(?:\.\d+)?)-flash(-preview)?$/ },
       { key: "flash-lite", re: /^gemini-(\d+(?:\.\d+)?)-flash-lite(-preview)?$/ },
     ],
@@ -180,6 +229,32 @@ const OPENROUTER_FAMILY_TABLE: Array<{ vendor: string; families: FamilyRule[] }>
     families: [
       { key: "pro", re: /^deepseek-v(\d+(?:\.\d+)?)-pro$/ },
       { key: "flash", re: /^deepseek-v(\d+(?:\.\d+)?)-flash$/ },
+    ],
+  },
+  {
+    vendor: "z-ai",
+    families: [
+      { key: "prime", re: /^glm-(\d+(?:\.\d+)?)-prime$/ },
+      { key: "plain", re: /^glm-(\d+(?:\.\d+)?)$/ },
+      { key: "flash", re: /^glm-(\d+(?:\.\d+)?)-flash$/ },
+    ],
+    ignore: [/-legal$/],
+  },
+  {
+    vendor: "qwen",
+    families: [
+      { key: "max", re: /^qwen(\d+(?:\.\d+)?)-max$/ },
+      { key: "plus", re: /^qwen(\d+(?:\.\d+)?)-plus$/ },
+      { key: "flash", re: /^qwen(\d+(?:\.\d+)?)-flash$/ },
+    ],
+  },
+  {
+    vendor: "mistralai",
+    // Mistral writes versions with a hyphen (mistral-large-4-0); dated ids
+    // such as mistral-large-2512 never reach here (isRankableText).
+    families: [
+      { key: "large", re: /^mistral-large-(\d+(?:[.-]\d+)?)$/ },
+      { key: "medium", re: /^mistral-medium-(\d+(?:[.-]\d+)?)$/ },
     ],
   },
 ];
@@ -228,6 +303,107 @@ export function rankOpenRouterText(feed: OpenRouterFeedModel[]): string[] {
   return VENDOR_ORDER.flatMap((v) => byVendor.get(v) ?? []);
 }
 
+function isoDay(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Naming drift: a vendor's newest listable model (by the feed's `created`)
+ * is more than a week newer than anything the rules picked for it. This is
+ * how a renamed generation (Gemini 3 to Gemini 4) reaches the logs instead
+ * of staying hidden.
+ */
+export function driftWarnings(feed: OpenRouterFeedModel[], ranked: string[]): string[] {
+  const createdById = new Map(feed.map((m) => [m.id, m.created]));
+  const out: string[] = [];
+  for (const rule of OPENROUTER_FAMILY_TABLE) {
+    const prefix = `${rule.vendor}/`;
+    const candidates = feed.filter(
+      (m) =>
+        m.id.startsWith(prefix) &&
+        isRankableText(m) &&
+        typeof m.created === "number" &&
+        !(rule.ignore ?? []).some((re) => re.test(m.id.slice(prefix.length))),
+    );
+    if (candidates.length === 0) continue;
+    const newest = candidates.reduce((a, b) => ((b.created ?? 0) > (a.created ?? 0) ? b : a));
+    const newestPick = Math.max(0, ...ranked.filter((id) => id.startsWith(prefix)).map((id) => createdById.get(id) ?? 0));
+    if ((newest.created ?? 0) - newestPick > DRIFT_GRACE_S) {
+      out.push(
+        `${rule.vendor}: newest model ${newest.id} (${isoDay(newest.created ?? 0)}) is not listed; check the ranking rules for naming drift`,
+      );
+    }
+  }
+  return out;
+}
+
+/** Listed OpenRouter models that the feed says are leaving. */
+function expiryWarnings(feedById: Map<string, OpenRouterFeedModel>, ids: string[]): string[] {
+  return ids.flatMap((id) => {
+    const exp = feedById.get(id)?.expiration_date;
+    return exp ? [`openrouter: ${id} is scheduled to leave OpenRouter on ${exp}`] : [];
+  });
+}
+
+// ─── Effort levels ───────────────────────────────────────────────────────────
+
+export interface EffortInfo {
+  levels: TextEffort[];
+  defaultEffort: TextEffort | null;
+}
+
+const NO_EFFORT: EffortInfo = { levels: [], defaultEffort: null };
+
+function withDefault(levels: TextEffort[], def: TextEffort | null | undefined): EffortInfo {
+  return { levels, defaultEffort: def && levels.includes(def) ? def : null };
+}
+
+/**
+ * Levels for a model in the OpenRouter feed. `reasoning.supported_efforts`
+ * is authoritative; a reasoning block without levels means reasoning can be
+ * toggled but not graded (no select); an entry without a reasoning block
+ * falls back to the old rule (`reasoning` in supported_parameters gets
+ * low/medium/high). Undefined when there is no such entry.
+ */
+export function feedEfforts(m: OpenRouterFeedModel | undefined): EffortInfo | undefined {
+  if (!m) return undefined;
+  const r = m.reasoning;
+  if (r && typeof r === "object") {
+    const levels = Array.isArray(r.supported_efforts) ? orderEfforts(r.supported_efforts) : [];
+    return withDefault(levels, parseEffort(r.default_effort));
+  }
+  if (m.supported_parameters) {
+    return { levels: m.supported_parameters.includes("reasoning") ? CLASSIC_EFFORTS : [], defaultEffort: null };
+  }
+  return undefined;
+}
+
+/**
+ * Levels for a direct Anthropic model. The Models API reports effort as
+ * `{ supported, low: { supported }, ..., max: { supported } }`; a model
+ * without effort (Claude Haiku 4.5) gets none. When the list carries no
+ * capabilities, the OpenRouter twin's levels are used, limited to what the
+ * Messages API takes. No default is reported: the list has none, and the
+ * twin's is OpenRouter's (it says "high" for Claude Opus 5.5, whose direct
+ * API default is "medium").
+ */
+export function anthropicEfforts(m: AnthropicListedModel, twin: OpenRouterFeedModel | undefined): EffortInfo {
+  const eff = m.capabilities?.effort;
+  if (eff && typeof eff === "object" && typeof eff.supported === "boolean") {
+    if (!eff.supported) return NO_EFFORT;
+    const levels = ANTHROPIC_API_EFFORTS.filter((level) => {
+      const leaf = (eff as Record<string, CapabilitySupport | boolean | undefined>)[level];
+      return typeof leaf === "object" && leaf !== null && leaf.supported === true;
+    });
+    return { levels, defaultEffort: null };
+  }
+  const fromTwin = feedEfforts(twin);
+  if (fromTwin) {
+    return { levels: fromTwin.levels.filter((level) => ANTHROPIC_API_EFFORTS.includes(level)), defaultEffort: null };
+  }
+  return { levels: CLASSIC_EFFORTS, defaultEffort: null };
+}
+
 // ─── Assembly ────────────────────────────────────────────────────────────────
 
 function round3(n: number): number {
@@ -245,14 +421,6 @@ function formatOpenAiName(vendorModel: string): string {
   if (!m) return vendorModel;
   const tier = m[2]!;
   return `GPT-${m[1]} ${tier.charAt(0).toUpperCase()}${tier.slice(1)}`;
-}
-
-function anthropicEffortLevels(m: AnthropicListedModel): TextEffort[] {
-  const eff = m.capabilities?.effort;
-  if (eff === undefined) return ALL_EFFORTS;
-  const supported = Array.isArray(eff) ? eff : eff.supported;
-  if (!Array.isArray(supported)) return ALL_EFFORTS;
-  return ALL_EFFORTS.filter((level) => supported.includes(level));
 }
 
 /** Feed key that carries a model's price: its OpenRouter slug, canonicalised for Anthropic ids. */
@@ -283,7 +451,7 @@ export function buildRegistry(inputs: RegistryInputs): RegistryBuild {
     return { input: 0, output: 0, live: false };
   };
 
-  const make = (id: string, kind: ModelKind, name: string, effortLevels: TextEffort[]): AIModel => {
+  const make = (id: string, kind: ModelKind, name: string, effort: EffortInfo): AIModel => {
     const { route, model } = parseModelId(id);
     const vendor = route === "openrouter" ? (model.split("/")[0] ?? "") : route;
     const snap = snapshotById.get(id);
@@ -299,17 +467,22 @@ export function buildRegistry(inputs: RegistryInputs): RegistryBuild {
       description: snap?.description ?? "",
       costPer1MInput: price.input,
       costPer1MOutput: price.output,
-      supportsEffort: effortLevels.length > 0,
-      effortLevels,
+      supportsEffort: effort.levels.length > 0,
+      effortLevels: effort.levels,
+      ...(effort.defaultEffort ? { defaultEffort: effort.defaultEffort } : {}),
       recommended: snap?.recommended === true,
       livePricing: price.live,
     };
   };
 
+  const snapshotEfforts = (id: string): EffortInfo => {
+    const snap = snapshotById.get(id);
+    if (!snap || !snap.supportsEffort) return NO_EFFORT;
+    return withDefault(snap.effortLevels ?? CLASSIC_EFFORTS, snap.defaultEffort);
+  };
+
   const fromSnapshot = (route: ModelRoute): AIModel[] =>
-    snapshot
-      .filter((m) => m.provider === route)
-      .map((m) => make(m.id, m.kind, m.name, m.supportsEffort ? ALL_EFFORTS : []));
+    snapshot.filter((m) => m.provider === route).map((m) => make(m.id, m.kind, m.name, snapshotEfforts(m.id)));
 
   const fallbackGroup = (route: ModelRoute): AIModel[] => {
     const prev = previous.filter((m) => m.provider === route);
@@ -319,19 +492,18 @@ export function buildRegistry(inputs: RegistryInputs): RegistryBuild {
   const openRouterName = (id: string): string =>
     cleanFeedName(feedById.get(id)?.name) ?? snapshotById.get(id)?.name ?? (id.split("/")[1] ?? id);
 
-  const openRouterEfforts = (id: string): TextEffort[] => {
-    const f = feedById.get(id);
-    if (f?.supported_parameters) return f.supported_parameters.includes("reasoning") ? ALL_EFFORTS : [];
-    return snapshotById.get(id)?.supportsEffort === false ? [] : ALL_EFFORTS;
-  };
+  /** Feed first; a pinned id the feed no longer lists keeps its snapshot levels. */
+  const openRouterEfforts = (id: string): EffortInfo => feedEfforts(feedById.get(id)) ?? snapshotEfforts(id);
 
   let openrouter: AIModel[];
   if (inputs.openrouter.ok) {
+    const ranked = rankOpenRouterText(feed);
+    warnings.push(...driftWarnings(feed, ranked), ...expiryWarnings(feedById, ranked));
     openrouter = [
-      ...rankOpenRouterText(feed).map((id) => make(id, "text", openRouterName(id), openRouterEfforts(id))),
+      ...ranked.map((id) => make(id, "text", openRouterName(id), openRouterEfforts(id))),
       ...snapshot
         .filter((m) => m.provider === "openrouter" && m.kind === "image")
-        .map((m) => make(m.id, "image", m.name, [])),
+        .map((m) => make(m.id, "image", m.name, NO_EFFORT)),
     ];
   } else {
     openrouter = fallbackGroup("openrouter");
@@ -343,7 +515,9 @@ export function buildRegistry(inputs: RegistryInputs): RegistryBuild {
       const id = `openai-api/${vendorModel}`;
       const name =
         snapshotById.get(id)?.name ?? cleanFeedName(feedById.get(`openai/${vendorModel}`)?.name) ?? formatOpenAiName(vendorModel);
-      return make(id, "text", name, ALL_EFFORTS);
+      // OpenAI's list carries no capabilities; the OpenRouter twin reports the
+      // same model's levels (GPT-6 Astra and GPT-6.1 Sol take no "none").
+      return make(id, "text", name, feedEfforts(feedById.get(`openai/${vendorModel}`)) ?? snapshotEfforts(id));
     });
   } else if (inputs.openai.reason === "fetch-failed") {
     openai = fallbackGroup("openai");
@@ -353,8 +527,10 @@ export function buildRegistry(inputs: RegistryInputs): RegistryBuild {
 
   let anthropic: AIModel[] = [];
   if (inputs.anthropic.ok) {
-    const listedById = new Map(inputs.anthropic.data.map((m) => [m.id, m]));
-    anthropic = rankAnthropicIds(inputs.anthropic.data.map((m) => m.id)).map((vendorModel) => {
+    // A retired model stays in Anthropic's catalogue, but every call to it fails.
+    const callable = inputs.anthropic.data.filter((m) => m.lifecycle !== "retired");
+    const listedById = new Map(callable.map((m) => [m.id, m]));
+    anthropic = rankAnthropicIds(callable.map((m) => m.id)).map((vendorModel) => {
       const listed = listedById.get(vendorModel);
       const id = `anthropic-api/${vendorModel}`;
       const name =
@@ -362,7 +538,7 @@ export function buildRegistry(inputs: RegistryInputs): RegistryBuild {
         snapshotById.get(id)?.name ||
         cleanFeedName(feedById.get(priceKeyFor(id))?.name) ||
         vendorModel;
-      return make(id, "text", name, listed ? anthropicEffortLevels(listed) : ALL_EFFORTS);
+      return make(id, "text", name, listed ? anthropicEfforts(listed, feedById.get(priceKeyFor(id))) : snapshotEfforts(id));
     });
   } else if (inputs.anthropic.reason === "fetch-failed") {
     anthropic = fallbackGroup("anthropic");
@@ -523,6 +699,26 @@ export function providerKeysFromEnv(env: {
   };
 }
 
+/** A known effort level (none to max), or undefined. Whether a model takes it is effortFor's job. */
 export function parseTextEffort(v: unknown): TextEffort | undefined {
-  return v === "low" || v === "medium" || v === "high" ? v : undefined;
+  return parseEffort(v);
+}
+
+/** Error text for an effort value that is not on the ladder. */
+export const EFFORT_VALUES_MESSAGE = "effort must be one of none, minimal, low, medium, high, xhigh, max";
+
+/**
+ * The effort to send for a listed model: the requested level when the model
+ * takes it, else undefined (the model's own default) plus the dropped level,
+ * so callers log and audit what will really run rather than a level the
+ * vendor would reject.
+ */
+export function effortFor(
+  model: Pick<AIModel, "effortLevels">,
+  requested: TextEffort | undefined,
+): { effort: TextEffort | undefined; dropped: TextEffort | null } {
+  if (!requested) return { effort: undefined, dropped: null };
+  return model.effortLevels.includes(requested)
+    ? { effort: requested, dropped: null }
+    : { effort: undefined, dropped: requested };
 }

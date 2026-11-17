@@ -1,6 +1,7 @@
 import type { Route } from "./ids";
+import type { Effort } from "./effort";
 
-export type Effort = "low" | "medium" | "high";
+export type { Effort };
 
 export interface ProviderKeys {
   openrouter?: string;

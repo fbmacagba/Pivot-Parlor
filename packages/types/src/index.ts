@@ -169,8 +169,8 @@ export interface BrandConfig {
   urgencyText: string;
 }
 
-/** Reasoning-effort level for models that support it. */
-export type TextEffort = "low" | "medium" | "high";
+/** Reasoning-effort level, lowest to highest (each model accepts a subset; see AIModel.effortLevels). */
+export type TextEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 /** Which API the platform calls for a model: OpenRouter's gateway or a vendor directly. */
 export type ModelRoute = "openrouter" | "openai" | "anthropic";
@@ -184,7 +184,7 @@ export interface AIModel {
   provider: ModelRoute;
   /** "OpenRouter", "OpenAI API" or "Anthropic API". */
   providerLabel: string;
-  /** Model maker: "google", "anthropic", "openai", "x-ai", "deepseek". */
+  /** Model maker: "google", "anthropic", "openai", "x-ai", "deepseek", "z-ai", "qwen", "mistralai". */
   vendor: string;
   vendorLabel: string;
   description: string;
@@ -193,8 +193,10 @@ export interface AIModel {
   /** USD per 1M output tokens. */
   costPer1MOutput: number;
   supportsEffort: boolean;
-  /** Effort levels the model accepts (subset of low/medium/high); empty when none. */
+  /** Effort levels the model accepts, lowest first; empty when none. */
   effortLevels: TextEffort[];
+  /** The level the model uses when none is sent, when the vendor reports it. */
+  defaultEffort?: TextEffort | null;
   recommended: boolean;
   /** True when pricing came from the live OpenRouter feed on the last refresh. */
   livePricing: boolean;

@@ -2,7 +2,15 @@
  * pivot-parlor-text — Consumes site-text-queue: OpenRouter copy → KV gen:{jobId}:text → site-assemble-queue.
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
-import { chatComplete, recordAiUsage, type ProviderKeys, type UsageCost } from "@repo/llm";
+import {
+  chatComplete,
+  outputBudgetForEffort,
+  parseEffort,
+  recordAiUsage,
+  type Effort,
+  type ProviderKeys,
+  type UsageCost,
+} from "@repo/llm";
 import {
   AuditWriteError,
   auditAiCall,
@@ -24,8 +32,8 @@ export interface Env {
   ENVIRONMENT: string;
 }
 
-/** Reasoning-effort level for models that support it (OpenRouter `reasoning`). */
-export type TextEffort = "low" | "medium" | "high";
+/** Reasoning-effort level, none to max (the API worker only queues a level the model takes). */
+export type TextEffort = Effort;
 
 export interface StageMessage {
   jobId: string;
@@ -33,6 +41,8 @@ export interface StageMessage {
   shopSlug: string;
   text_model?: string;
   text_effort?: TextEffort;
+  /** The text model's own default level when none was chosen: sizes the output budget only, never sent. */
+  text_effort_default?: TextEffort;
   /** Who clicked Regenerate (`subj_user_<id>`). Absent on messages from before the audit trail. */
   origin_actor_ref?: string | null;
 }
@@ -49,6 +59,8 @@ interface GenResearchKvPayload {
   template: string;
   text_model?: string;
   text_effort?: TextEffort;
+  /** The text model's own default level when none was chosen: sizes the output budget only, never sent. */
+  text_effort_default?: TextEffort;
   image_model?: string;
   /** Owner-chosen palette override (6-digit hex pair) — wins over the AI palette. */
   owner_color_primary?: string;
@@ -99,16 +111,15 @@ function parseStageMessage(body: unknown): StageMessage | null {
   if (typeof o.jobId !== "string" || typeof o.shopId !== "string" || typeof o.shopSlug !== "string") return null;
   const text_model =
     typeof o.text_model === "string" && o.text_model.trim() ? o.text_model.trim() : undefined;
-  const text_effort =
-    o.text_effort === "low" || o.text_effort === "medium" || o.text_effort === "high"
-      ? o.text_effort
-      : undefined;
+  const text_effort = parseEffort(o.text_effort);
+  const text_effort_default = text_effort ? undefined : parseEffort(o.text_effort_default);
   return {
     jobId: o.jobId,
     shopId: o.shopId,
     shopSlug: o.shopSlug,
     text_model,
     text_effort,
+    text_effort_default,
     origin_actor_ref: originActorRef(o.origin_actor_ref),
   };
 }
@@ -123,6 +134,8 @@ async function textJson(
   system: string,
   user: string,
   effort: TextEffort | undefined,
+  /** The level that will run (effort, else the model's default): sizes the budget. */
+  budgetEffort: TextEffort | undefined,
   costLog: { env: Pick<Env, "DB" | "KV">; shopId: string },
   audit: { rec: AuditRecorder; origin: string | null }
 ): Promise<string> {
@@ -139,7 +152,9 @@ async function textJson(
           system,
           messages: [{ role: "user", content: user }],
           effort,
-          maxTokens: 8000,
+          // Reasoning shares this budget; xhigh and max (chosen, or the model's
+          // own default, as on GLM) get room to finish the JSON.
+          maxTokens: outputBudgetForEffort(budgetEffort, 8000),
           jsonOnly: true,
           appTitle: "Pivot Parlor Text",
         },
@@ -322,6 +337,7 @@ Return JSON:
 
   const textModel = msg.text_model?.trim() || research.text_model?.trim() || DEFAULT_TEXT_MODEL;
   const textEffort = msg.text_effort ?? research.text_effort;
+  const textBudget = textEffort ?? msg.text_effort_default ?? research.text_effort_default;
   console.log(
     `[${jobId}] [pivot-parlor-text] calling model=${textModel}${textEffort ? ` effort=${textEffort}` : ""}`
   );
@@ -331,21 +347,21 @@ Return JSON:
   // research-derived copy.
   // No key: skip the model and publish research's own copy (still generated
   // for this shop) rather than leaving the job waiting on text.
-  const attempts: { model: string; effort?: TextEffort }[] = !apiKey
+  const attempts: { model: string; effort?: TextEffort; budget?: TextEffort }[] = !apiKey
     ? []
     : [
-        { model: textModel, effort: textEffort },
+        { model: textModel, effort: textEffort, budget: textBudget },
         ...(textModel !== DEFAULT_TEXT_MODEL ? [{ model: DEFAULT_TEXT_MODEL }] : []),
       ];
   if (!apiKey) console.error(`[${jobId}] [pivot-parlor-text] OPENROUTER_API_KEY missing; using research copy`);
 
   let payload: TextKvPayload | null = null;
-  for (const { model, effort } of attempts) {
+  for (const { model, effort, budget } of attempts) {
     if (model !== textModel) {
       console.warn(`[${jobId}] [pivot-parlor-text] ${textModel} failed, falling back to default model ${model}`);
     }
     try {
-      const raw = await textJson(jobId, keys, model, system, user, effort, { env, shopId: msg.shopId }, { rec, origin });
+      const raw = await textJson(jobId, keys, model, system, user, effort, budget, { env, shopId: msg.shopId }, { rec, origin });
       const parsed: unknown = JSON.parse(raw);
       if (validateTextOut(parsed)) {
         parsed.services = servicesFromSource(research, parsed.services);
