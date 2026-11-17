@@ -3,6 +3,7 @@
  */
 import type { D1Database, KVNamespace, MessageBatch, Queue } from "@cloudflare/workers-types";
 import {
+  billedUsageOf,
   chatComplete,
   outputBudgetForEffort,
   parseEffort,
@@ -146,20 +147,38 @@ async function textJson(
     audit.rec,
     { purpose: "site_text", model, shopId: costLog.shopId, origin: audit.origin },
     async () => {
-      const result = await chatComplete(
-        {
-          modelId: model,
-          system,
-          messages: [{ role: "user", content: user }],
-          effort,
-          // Reasoning shares this budget; xhigh and max (chosen, or the model's
-          // own default, as on GLM) get room to finish the JSON.
-          maxTokens: outputBudgetForEffort(budgetEffort, 8000),
-          jsonOnly: true,
-          appTitle: "Pivot Parlor Text",
-        },
-        keys
-      );
+      let result: Awaited<ReturnType<typeof chatComplete>>;
+      try {
+        result = await chatComplete(
+          {
+            modelId: model,
+            system,
+            messages: [{ role: "user", content: user }],
+            effort,
+            // Reasoning shares this budget; xhigh and max (chosen, or the model's
+            // own default, as on GLM) get room to finish the JSON.
+            maxTokens: outputBudgetForEffort(budgetEffort, 8000),
+            jsonOnly: true,
+            appTitle: "Pivot Parlor Text",
+          },
+          keys
+        );
+      } catch (err) {
+        // An empty reply (a reasoning model that spent its budget thinking)
+        // was still billed: log its tokens under this job before the attempt fails.
+        const billed = billedUsageOf(err);
+        if (billed) {
+          await recordAiUsage(costLog.env, {
+            shopId: costLog.shopId,
+            workerName: WORKER_NAME,
+            modelId: model,
+            usageType: "site_text",
+            usage: billed,
+            jobId,
+          });
+        }
+        throw err;
+      }
       console.log(
         `[${jobId}] [pivot-parlor-text] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
       );

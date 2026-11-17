@@ -5,16 +5,20 @@ interface OpenAiStyleBody {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
+/** Token counts from a chat/completions body (OpenRouter and OpenAI). */
+export function parseOpenAiStyleUsage(body: unknown): ChatUsage | null {
+  const o = (body ?? {}) as OpenAiStyleBody;
+  return typeof o.usage?.prompt_tokens === "number" && typeof o.usage?.completion_tokens === "number"
+    ? { inputTokens: o.usage.prompt_tokens, outputTokens: o.usage.completion_tokens }
+    : null;
+}
+
 /** Shared by OpenRouter and OpenAI: both speak the chat/completions shape. */
 export function parseOpenAiStyle(body: unknown): { text: string; usage: ChatUsage | null } | null {
   const o = (body ?? {}) as OpenAiStyleBody;
   const content = o.choices?.[0]?.message?.content;
   if (typeof content !== "string" || !content.trim()) return null;
-  const usage =
-    typeof o.usage?.prompt_tokens === "number" && typeof o.usage?.completion_tokens === "number"
-      ? { inputTokens: o.usage.prompt_tokens, outputTokens: o.usage.completion_tokens }
-      : null;
-  return { text: content, usage };
+  return { text: content, usage: parseOpenAiStyleUsage(body) };
 }
 
 export const openRouterAdapter: Adapter = {
@@ -45,6 +49,7 @@ export const openRouterAdapter: Adapter = {
     };
   },
   parseResponse: parseOpenAiStyle,
+  parseUsage: parseOpenAiStyleUsage,
   // Some OpenRouter providers reject the reasoning block with an unspecific
   // 400; the research and text workers always retried without it.
   isEffortRejection: () => true,

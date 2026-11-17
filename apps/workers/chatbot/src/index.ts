@@ -302,6 +302,19 @@ chat.post("/", async (c) => {
               history: priorMessages,
               userMessage: visitorMessage,
             });
+            // Failed attempts the provider plausibly billed go in the cost log
+            // under this request too, before a total failure ends it. A timed-out
+            // one has no counts: 0 tokens and no cost basis, read as unknown.
+            for (const w of result.wasted) {
+              await recordAiUsage(c.env, {
+                shopId: shop.id,
+                workerName: WORKER_NAME,
+                modelId: w.model,
+                usageType: "chatbot",
+                usage: w.usage,
+                jobId: `public-chat:${requestId}`,
+              });
+            }
             if (!result.ok) throw new ChatReplyFailedError();
             const cost = await recordAiUsage(c.env, {
               shopId: shop.id,

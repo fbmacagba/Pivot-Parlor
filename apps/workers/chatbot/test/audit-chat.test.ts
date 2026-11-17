@@ -196,3 +196,38 @@ describe("chatbot audit", () => {
     expect(details.cost_basis).toBe("live");
   });
 });
+
+describe("POST /chat cost log for failed attempts", () => {
+  const EMPTY = () =>
+    Response.json({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 150 } });
+  const usageRows = (fake: FakeAuditDb) =>
+    fake.statements
+      .filter((s) => s.sql.includes("INSERT INTO ai_usage_log"))
+      .map((s) => ({ model: s.args[3], usageType: s.args[4], input: s.args[5], output: s.args[6], jobId: String(s.args[10]) }));
+
+  it("logs the chosen model's empty reply with its billed tokens, then the default model's answer, under one request", async () => {
+    const { fake, env } = setup();
+    await env.KV.put("platform:chatbot:model", JSON.stringify({ model_id: "openai/gpt-6.1-terra" }));
+    fetchMock.mockImplementationOnce(async () => EMPTY());
+    const res = await chat(env, VISITOR_MESSAGE);
+    expect(((await res.json()) as { reply: string }).reply).toBe(MODEL_REPLY);
+    const rows = usageRows(fake);
+    expect(rows.map(({ model, usageType, input, output }) => [model, usageType, input, output])).toEqual([
+      ["openai/gpt-6.1-terra", "chatbot", 90, 150],
+      [DEFAULT_CHATBOT_MODEL, "chatbot", 100, 20],
+    ]);
+    // Same request: the historical import treats both as having a live ai.call.
+    expect(rows[0]!.jobId).toBe(rows[1]!.jobId);
+    expect(rows[0]!.jobId).toBe(`public-chat:${String(fake.rows[0]!.request_id)}`);
+  });
+
+  it("still logs every billed attempt when no model answers, and the visitor gets the fallback reply", async () => {
+    const { fake, env } = setup();
+    await env.KV.put("platform:chatbot:model", JSON.stringify({ model_id: "openai/gpt-6.1-terra" }));
+    fetchMock.mockImplementation(async () => EMPTY());
+    const res = await chat(env, VISITOR_MESSAGE);
+    expect(((await res.json()) as { reply: string }).reply).not.toBe(MODEL_REPLY);
+    expect(usageRows(fake).map((r) => r.model)).toEqual(["openai/gpt-6.1-terra", DEFAULT_CHATBOT_MODEL]);
+    expect(fake.rows[1]!.outcome).toBe("failed");
+  });
+});

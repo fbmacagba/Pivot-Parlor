@@ -77,6 +77,7 @@ describe("generateReply", () => {
       usage: { prompt_tokens: 40, completion_tokens: 5, total_tokens: 45 },
       route: "anthropic",
       rawUsage: { inputTokens: 40, outputTokens: 5 },
+      wasted: [],
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://api.anthropic.com/v1/messages");
@@ -95,7 +96,8 @@ describe("generateReply", () => {
       () => Response.json({ choices: [{ message: { content: "Sure." } }], usage: { prompt_tokens: 3, completion_tokens: 1 } }),
     ]);
     const res = await generateReply({ ...params, modelId: "openai-api/gpt-6-astra" }, { fetch: fetchImpl });
-    expect(res).toMatchObject({ ok: true, content: "Sure.", model: "google/gemini-3.1-flash-lite-preview" });
+    // A 401 is not billed: nothing for the cost log.
+    expect(res).toMatchObject({ ok: true, content: "Sure.", model: "google/gemini-3.1-flash-lite-preview", wasted: [] });
     expect(calls.map((c) => c.url)).toEqual([
       "https://api.openai.com/v1/chat/completions",
       "https://openrouter.ai/api/v1/chat/completions",
@@ -144,12 +146,26 @@ describe("generateReply", () => {
     const res = await generateReply({ ...params, modelId: "openai/gpt-6-luna", attemptTimeoutMs: 50 }, { fetch: fetchImpl });
     expect(res).toMatchObject({ ok: true, content: "Sure.", model: "google/gemini-3.1-flash-lite-preview" });
     expect(seen).toHaveLength(2);
+    // Abandoned, so its tokens (if any) are unknown.
+    expect(res.wasted).toEqual([{ model: "openai/gpt-6-luna", usage: null, reason: "timed_out" }]);
+  });
+
+  it("reports an empty reply's billed tokens as wasted, then lets the default model answer", async () => {
+    const { fetchImpl } = makeFetch([
+      () => Response.json({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 150 } }),
+      () => Response.json({ choices: [{ message: { content: "Sure." } }], usage: { prompt_tokens: 3, completion_tokens: 1 } }),
+    ]);
+    const res = await generateReply({ ...params, modelId: "openai/gpt-6.1-terra" }, { fetch: fetchImpl });
+    expect(res).toMatchObject({ ok: true, content: "Sure.", model: "google/gemini-3.1-flash-lite-preview" });
+    expect(res.wasted).toEqual([
+      { model: "openai/gpt-6.1-terra", usage: { inputTokens: 90, outputTokens: 150 }, reason: "no_content" },
+    ]);
   });
 
   it("does not retry the default model against itself and reports ok:false", async () => {
     const { fetchImpl, calls } = makeFetch([() => new Response("boom", { status: 500 })]);
     const res = await generateReply({ ...params, modelId: "google/gemini-3.1-flash-lite-preview" }, { fetch: fetchImpl });
-    expect(res).toEqual({ ok: false });
+    expect(res).toEqual({ ok: false, wasted: [] });
     expect(calls).toHaveLength(1);
   });
 

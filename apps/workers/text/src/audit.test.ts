@@ -182,3 +182,21 @@ describe("text audit", () => {
     expect(fallback!.args[3]).toBe("job-1");
   });
 });
+
+describe("text cost log for an empty reply", () => {
+  it("logs the billed tokens of an empty reply under the job, then falls back to the research copy as before", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 90, completion_tokens: 150 } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const h = harness();
+    await h.run(message());
+    const usage = h.fake.statements.filter((s) => s.sql.includes("INSERT INTO ai_usage_log"));
+    expect(usage.map((s) => [s.args[3], s.args[4], s.args[5], s.args[6], s.args[10]])).toEqual([[MODEL, "site_text", 90, 150, "job-1"]]);
+    expect(h.assemble).toHaveLength(1);
+  });
+});
