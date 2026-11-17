@@ -1,8 +1,9 @@
 import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 import { effortFor, getModel, type TextEffort } from "./model-registry.js";
-import { chatComplete, type ProviderKeys } from "@repo/llm";
+import { billedUsageOf, chatComplete, recordAiUsage, type ChatUsage, type ProviderKeys } from "@repo/llm";
 import { AuditWriteError, type AuditRecorder } from "@repo/audit";
 import { safeJsonParse } from "@repo/utils";
+import { WORKER_NAME } from "../audit/context.js";
 
 // ─── Brand config (full schema, with conversion-optimised copy fields) ────────
 
@@ -36,6 +37,22 @@ export interface ThemeGenerationOptions {
   persist?: boolean;
   /** When set, the vendor call and the persisted theme are audited. */
   audit?: AuditRecorder;
+  /**
+   * The request id `audit` records under (`c.get("requestId")`). With `audit`,
+   * each billed model call also gets a cost-log row under it, which is how
+   * the historical import pairs that row with its live ai.call. Never set
+   * without `audit`: a row with no live twin would later import as a false
+   * "historical" entry.
+   */
+  costLogJobId?: string;
+}
+
+/** Where an audited theme call's cost-log row goes. */
+interface ThemeCostLog {
+  db: D1Database;
+  kv: KVNamespace;
+  shopId: string;
+  jobId: string;
 }
 
 // ─── Prompt builder ───────────────────────────────────────────────────────────
@@ -134,31 +151,52 @@ function round6(n: number): number {
 const THEME_SYSTEM_PROMPT =
   "You are a brand designer and direct response copywriter. Return ONLY valid JSON, no markdown, no explanation, no code fences.";
 
+/** One cost-log row for a billed theme call. Never throws (recordAiUsage logs instead). */
+async function recordThemeUsage(costLog: ThemeCostLog, modelId: string, usage: ChatUsage | null): Promise<void> {
+  await recordAiUsage(
+    { DB: costLog.db, KV: costLog.kv },
+    { shopId: costLog.shopId, workerName: WORKER_NAME, modelId, usageType: "theme", usage, jobId: costLog.jobId }
+  );
+}
+
 async function callThemeModel(
   modelId: string,
   prompt: string,
   keys: ProviderKeys,
   effort: TextEffort | undefined,
   /** The level that will run (effort, else the model's default): sizes the budget. */
-  budgetEffort: TextEffort | undefined
+  budgetEffort: TextEffort | undefined,
+  /** Set when the call is audited: where its cost-log row goes. */
+  costLog: ThemeCostLog | null
 ): Promise<{ config: BrandConfig; route: string; model: string; inputTokens: number | null; outputTokens: number | null }> {
-  // A developer is waiting on this request: one retry, not three.
-  const result = await chatComplete(
-    {
-      modelId,
-      system: THEME_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
-      effort,
-      maxTokens: maxTokensForEffort(budgetEffort),
-      jsonOnly: true,
-      maxRetries: 1,
-      appTitle: "Pivot Parlor",
-    },
-    keys
-  );
+  let result: Awaited<ReturnType<typeof chatComplete>>;
+  try {
+    // A developer is waiting on this request: one retry, not three.
+    result = await chatComplete(
+      {
+        modelId,
+        system: THEME_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: prompt }],
+        effort,
+        maxTokens: maxTokensForEffort(budgetEffort),
+        jsonOnly: true,
+        maxRetries: 1,
+        appTitle: "Pivot Parlor",
+      },
+      keys
+    );
+  } catch (err) {
+    // An empty reply (a reasoning model that spent its budget thinking) was
+    // still billed: log its tokens before the attempt fails.
+    const billed = billedUsageOf(err);
+    if (billed && costLog) await recordThemeUsage(costLog, modelId, billed);
+    throw err;
+  }
   console.log(
     `[AI Generator] llm route=${result.route} model=${result.model} in=${result.usage?.inputTokens ?? "?"} out=${result.usage?.outputTokens ?? "?"}`
   );
+  // Before parsing: a reply that is not valid JSON was billed all the same.
+  if (costLog) await recordThemeUsage(costLog, modelId, result.usage);
   return {
     config: JSON.parse(result.text) as BrandConfig,
     route: result.route,
@@ -316,7 +354,9 @@ export async function generateShopTheme(
   const { effort: effectiveEffort, dropped } = effortFor(model, effort);
   if (dropped) console.warn(`[AI Generator] ${modelId} does not take effort ${dropped}; using the model's default`);
   const budgetEffort = effectiveEffort ?? model.defaultEffort ?? undefined;
-  const call = () => callThemeModel(modelId, prompt, keys, effectiveEffort, budgetEffort);
+  // Only an audited call is cost-logged: its row needs a live ai.call twin.
+  const costLog = options.audit && options.costLogJobId ? { db, kv, shopId, jobId: options.costLogJobId } : null;
+  const call = () => callThemeModel(modelId, prompt, keys, effectiveEffort, budgetEffort, costLog);
   try {
     const result = options.audit
       ? await options.audit.run(

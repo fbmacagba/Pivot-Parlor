@@ -257,3 +257,155 @@ describe("AI routes are audited", () => {
     expect(JSON.parse(entry.details_json as string)).toEqual({ model_a: "anthropic/claude-sonnet-5.5", model_b: null });
   });
 });
+
+describe("theme generation cost log", () => {
+  const CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+  const THEME = {
+    primaryColor: "#111111", accentColor: "#222222", fontHeading: "Playfair Display", fontBody: "DM Sans",
+    tagline: "t", heroHeadline: "h", heroSubheadline: "s", shortDescription: "d", ctaText: "c",
+    aestheticKeywords: [], servicesIntro: "i", trustStatement: "trust", urgencyText: "u",
+  };
+
+  /** Answers only the chat call, with a fresh Response each time; anything
+   *  else (the model feed) gets a 404, so the registry uses its snapshot. */
+  function mockChat(reply: () => Response) {
+    const chatCalls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url !== CHAT_URL) return new Response("not found", { status: 404 });
+      chatCalls.push(url);
+      return reply();
+    });
+    return chatCalls;
+  }
+
+  const answer = (content: string, inTok: number, outTok: number) => () =>
+    Response.json({ choices: [{ message: { content } }], usage: { prompt_tokens: inTok, completion_tokens: outTok } });
+
+  const usageRows = (shopId: string) =>
+    env.DB.prepare("SELECT * FROM ai_usage_log WHERE shop_id = ? ORDER BY created_at")
+      .bind(shopId)
+      .all<Record<string, unknown>>()
+      .then((r) => r.results ?? []);
+
+  const aiCalls = async (shopId: string) => (await byAction("ai.call")).filter((r) => r.shop_id === shopId);
+
+  it("logs a generated theme's tokens under the request, beside its live ai.call", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Cost Shop");
+    mockChat(answer(JSON.stringify(THEME), 120, 340));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true } });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const rows = await usageRows(shopId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      worker_name: "pivot-parlor-api",
+      model: "anthropic/claude-sonnet-5.5",
+      usage_type: "theme",
+      input_tokens: 120,
+      output_tokens: 340,
+      total_tokens: 460,
+    });
+    // The same id as the request and its ai.call, which is how the
+    // historical import knows this row already has a live entry.
+    const requestId = res.headers.get("X-Request-Id");
+    expect(requestId).toBeTruthy();
+    expect(rows[0]!.job_id).toBe(requestId);
+    const calls = await aiCalls(shopId);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call.request_id).toBe(requestId);
+  });
+
+  it("logs a preview too: it is billed even though nothing is saved", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Preview Cost Shop");
+    mockChat(answer(JSON.stringify(THEME), 50, 60));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true, preview: true } });
+    expect(res.status).toBe(200);
+    expect((await usageRows(shopId)).map((r) => [r.input_tokens, r.output_tokens])).toEqual([[50, 60]]);
+  });
+
+  it("logs an empty reply's billed tokens, then falls back to the default theme as before", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Empty Reply Shop");
+    const chatCalls = mockChat(answer("", 90, 150));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true } });
+    expect(res.status).toBe(200);
+    expect(chatCalls).toHaveLength(1); // an empty reply is not retried
+    const rows = await usageRows(shopId);
+    expect(rows.map((r) => [r.usage_type, r.input_tokens, r.output_tokens])).toEqual([["theme", 90, 150]]);
+    expect(rows[0]!.job_id).toBe(res.headers.get("X-Request-Id"));
+    expect((await aiCalls(shopId)).find((r) => r.phase === "outcome")).toMatchObject({ outcome: "failed" });
+    const applied = (await byAction("theme.apply")).find((r) => r.shop_id === shopId)!;
+    expect(JSON.parse(applied.details_json as string)).toMatchObject({ fallback: true });
+  });
+
+  it("logs a reply that is not valid JSON: it was billed all the same", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Bad JSON Shop");
+    mockChat(answer("Here is your theme, in words rather than JSON.", 30, 40));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true } });
+    expect(res.status).toBe(200);
+    expect((await usageRows(shopId)).map((r) => [r.input_tokens, r.output_tokens])).toEqual([[30, 40]]);
+    expect((await aiCalls(shopId)).find((r) => r.phase === "outcome")).toMatchObject({ outcome: "failed" });
+  });
+
+  it("logs nothing for a call the provider refused (not billed)", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Refused Shop");
+    mockChat(() => new Response("unauthorized", { status: 401 }));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true } });
+    expect(res.status).toBe(200);
+    expect(await usageRows(shopId)).toEqual([]);
+  });
+
+  it("logs nothing when the cached theme is served (no model call)", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Cached Shop");
+    await env.KV.put(`shop:theme:${shopId}`, JSON.stringify(THEME));
+    const chatCalls = mockChat(answer(JSON.stringify(THEME), 1, 1));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ cached: true });
+    expect(chatCalls).toHaveLength(0);
+    expect(await usageRows(shopId)).toEqual([]);
+  });
+
+  it("compare logs one row per model, both under the one request", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Compare Cost Shop");
+    mockChat(answer(JSON.stringify(THEME), 70, 80));
+    const res = await dispatch("POST", "/api/ai/compare", {
+      headers: authHeaders(token),
+      body: { shop_id: shopId, model_a_id: "anthropic/claude-sonnet-5.5", model_b_id: "anthropic/claude-haiku-5.5" },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    const rows = await usageRows(shopId);
+    expect(rows.map((r) => r.model).sort()).toEqual(["anthropic/claude-haiku-5.5", "anthropic/claude-sonnet-5.5"]);
+    const requestId = res.headers.get("X-Request-Id");
+    for (const r of rows) expect(r).toMatchObject({ worker_name: "pivot-parlor-api", usage_type: "theme", job_id: requestId });
+  });
+
+  it("the historical import never copies a theme row: it already has a live ai.call", async () => {
+    const token = await dev();
+    const shopId = await seedShop("Theme Import Shop");
+    mockChat(answer(JSON.stringify(THEME), 120, 340));
+    const res = await dispatch("POST", "/api/ai/generate-theme", { headers: authHeaders(token), body: { shop_id: shopId, regenerate: true } });
+    expect(res.status).toBe(200);
+    const [row] = await usageRows(shopId);
+    expect(row).toBeDefined();
+    // Control: an API-worker row with no live twin does import, so the check
+    // below would fail if the import simply skipped this worker's rows.
+    const control = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO ai_usage_log (id, shop_id, worker_name, model, usage_type, input_tokens, output_tokens, total_tokens, estimated_cost_usd, cost_basis, job_id)
+       VALUES (?, ?, 'pivot-parlor-api', 'anthropic/claude-sonnet-5.5', 'theme', 1, 1, 2, 0, NULL, ?)`
+    ).bind(control, shopId, crypto.randomUUID()).run();
+    const imported = await dispatch("POST", "/api/audit/import-historical", { headers: authHeaders(token) });
+    expect(imported.status, await imported.clone().text()).toBe(200);
+    const hist = (id: unknown) =>
+      env.DB.prepare("SELECT id FROM audit_log WHERE id = ?").bind(`hist_${String(id)}`).first();
+    expect(await hist(control)).not.toBeNull();
+    expect(await hist(row!.id)).toBeNull();
+  });
+});
