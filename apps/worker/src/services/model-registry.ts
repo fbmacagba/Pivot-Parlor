@@ -30,6 +30,7 @@ import {
   priceTwin,
   type ProviderKeys,
 } from "@repo/llm";
+import { MARKETING_CHAT_FALLBACK_MODEL, MARKETING_CHAT_PRIMARY_MODEL } from "./marketing-chat.js";
 
 export type { TextEffort };
 
@@ -58,6 +59,14 @@ const ANTHROPIC_API_EFFORTS: TextEffort[] = ["low", "medium", "high", "xhigh", "
 const DRIFT_GRACE_S = 7 * 24 * 3600;
 /** OpenRouter ids that stay listed even when the ranking would drop them. */
 const PINNED_OPENROUTER_TEXT_IDS = [DEFAULT_TEXT_MODEL_ID, DEFAULT_THEME_MODEL];
+/**
+ * OpenRouter ids the code calls on its own, outside any picker: Pip, the
+ * marketing chat (services/marketing-chat.ts). This list is also the cost
+ * log's price table (@repo/llm usage.ts), so they stay on it, after their
+ * vendor's ranked picks, or their calls would be logged as unknown. They show
+ * in the developer pickers like any listed model.
+ */
+const PRICED_OPENROUTER_TEXT_IDS = [MARKETING_CHAT_PRIMARY_MODEL, MARKETING_CHAT_FALLBACK_MODEL];
 
 export interface OpenRouterFeedModel {
   id: string;
@@ -280,7 +289,8 @@ function pickFamily(vendorModels: string[], re: RegExp): string | null {
   return best?.id ?? null;
 }
 
-/** Top tier per family per vendor, vendors in catalogue order, pinned defaults always kept. */
+/** Top tier per family per vendor, vendors in catalogue order, pinned defaults always kept
+ *  (first), and the ids the code calls on its own after them (last). */
 export function rankOpenRouterText(feed: OpenRouterFeedModel[]): string[] {
   const textIds = feed.filter(isRankableText).map((m) => m.id);
   const byVendor = new Map<string, string[]>();
@@ -298,6 +308,12 @@ export function rankOpenRouterText(feed: OpenRouterFeedModel[]): string[] {
     const vendor = pinned.split("/")[0] ?? "";
     const list = byVendor.get(vendor) ?? [];
     if (!list.includes(pinned)) list.unshift(pinned);
+    byVendor.set(vendor, list);
+  }
+  for (const priced of PRICED_OPENROUTER_TEXT_IDS) {
+    const vendor = priced.split("/")[0] ?? "";
+    const list = byVendor.get(vendor) ?? [];
+    if (!list.includes(priced)) list.push(priced);
     byVendor.set(vendor, list);
   }
   return VENDOR_ORDER.flatMap((v) => byVendor.get(v) ?? []);

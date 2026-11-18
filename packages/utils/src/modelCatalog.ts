@@ -8,8 +8,9 @@
  * recorded. Prices are USD per 1M tokens and effort levels are the feed's
  * `reasoning` block, recorded 2026-11-17 from the public OpenRouter feed
  * (direct ids through their OpenRouter twin; direct Anthropic levels follow
- * the Models API). The worker test `model-registry.test.ts` checks this list
- * against what the registry builds from the recorded feed fixture
+ * the Models API); Gemini 2.5 Flash Lite, the marketing chat's fallback, was
+ * added from the feed of 2026-11-18. The worker test `model-registry.test.ts`
+ * checks this list against what the registry builds from the recorded feed fixture
  * (apps/worker/test/fixtures/model-feeds.ts), so refresh both together.
  */
 
@@ -150,6 +151,7 @@ export const MODEL_SNAPSHOT: CatalogModel[] = [
   or("google", "google/gemini-4-hydrogen", "Gemini 4 Hydrogen", 1.5, 7.5, "Fast Gemini 4 tier; the step up from 3.8 Flash.", { effortLevels: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" }),
   or("google", "google/gemini-3.8-flash", "Gemini 3.8 Flash", 0.825, 4.125, "Latest Gemini 3 Flash; cheaper than Hydrogen.", { effortLevels: ["low", "medium", "high"], defaultEffort: "medium" }),
   or("google", "google/gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite", 0.3, 2.5, "Latest Flash Lite tier.", { effortLevels: ["minimal", "low", "medium", "high"], defaultEffort: "minimal" }),
+  or("google", "google/gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite", 0.1, 0.4, "Backup model for Pip, the marketing chat; listed so its calls are priced."),
   // OpenRouter, anthropic
   or("anthropic", "anthropic/claude-fable-5.2", "Claude Fable 5.2", 8, 40, "Anthropic's top tier.", { effortLevels: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" }),
   or("anthropic", "anthropic/claude-opus-5.5", "Claude Opus 5.5", 4, 20, "Premium Claude for flagship shops.", { effortLevels: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" }),

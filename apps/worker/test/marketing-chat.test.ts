@@ -70,7 +70,8 @@ let errors: ReturnType<typeof vi.spyOn>;
 beforeEach(async () => {
   warns = vi.spyOn(console, "warn").mockImplementation(() => {});
   errors = vi.spyOn(console, "error").mockImplementation(() => {});
-  // The primary is priced on the model list; the fallback is not listed.
+  // This test's own model list prices the primary only, so the fallback's rows
+  // read as unknown here. The served list prices both (model-registry.ts).
   await env.KV.put("ai:models:v3", JSON.stringify([{ id: PRIMARY, costPer1MInput: 0.25, costPer1MOutput: 1.5, livePricing: true }]));
 });
 afterEach(async () => {
@@ -144,7 +145,7 @@ describe("MarketingChat.reply", () => {
     ]);
     for (const r of calls) expectNoPersonalData(r, [VISITOR_TEXT, "upstream echoed"]);
 
-    // The refused call was not billed; the fallback is not on the model list.
+    // The refused call was not billed; the fallback is not on this test's list.
     const usage = await rowsFor(id, "ai_usage_log");
     expect(usage.map((r) => [r.model, r.input_tokens, r.output_tokens, r.estimated_cost_usd, r.cost_basis])).toEqual([
       [FALLBACK, 400, 50, 0, null],
