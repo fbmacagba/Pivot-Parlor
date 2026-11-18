@@ -109,7 +109,7 @@ describe("GET /api/ai/models", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[] };
     expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(39);
+    expect(body.data).toHaveLength(40);
 
     const sonnet = body.data.find((m) => m.id === "anthropic/claude-sonnet-5.5")!;
     expect(sonnet.provider).toBe("openrouter");
@@ -141,7 +141,7 @@ describe("GET /api/ai/models", () => {
     const res = await dispatch("GET", "/api/ai/models", { headers: authHeaders(await devToken()) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[] };
-    expect(body.data).toHaveLength(39);
+    expect(body.data).toHaveLength(40);
     expect(body.data.every((m) => m.livePricing === false)).toBe(true);
     for (const m of body.data) {
       expect(typeof m.costPer1MInput).toBe("number");
@@ -186,7 +186,7 @@ describe("GET /api/ai/models", () => {
     };
 
     const models = await getLiveModels(env.KV, { openrouter: "k", openai: "k", anthropic: "k" });
-    expect(models).toHaveLength(39);
+    expect(models).toHaveLength(40);
     expect(models.some((m) => m.livePricing)).toBe(true);
     expect(seen.filter((u) => listVendorOf(u) !== null)).toEqual([]);
   });

@@ -25,6 +25,7 @@ import {
   type RegistryInputs,
 } from "../src/services/model-registry";
 import { ANTHROPIC_MODELS, OPENAI_IDS, OPENROUTER_FEED, feedResponses } from "./fixtures/model-feeds";
+import { MARKETING_CHAT_FALLBACK_MODEL, MARKETING_CHAT_PRIMARY_MODEL } from "../src/services/marketing-chat";
 
 const allOk = (): RegistryInputs => ({
   openrouter: { ok: true, data: OPENROUTER_FEED },
@@ -84,6 +85,7 @@ describe("rankOpenRouterText", () => {
       "google/gemini-4-hydrogen",
       "google/gemini-3.8-flash",
       "google/gemini-3.5-flash-lite",
+      "google/gemini-2.5-flash-lite",
       "anthropic/claude-fable-5.2",
       "anthropic/claude-opus-5.5",
       "anthropic/claude-sonnet-5.5",
@@ -111,6 +113,20 @@ describe("rankOpenRouterText", () => {
     expect(rankOpenRouterText(OPENROUTER_FEED)).toEqual(
       MODEL_SNAPSHOT.filter((m) => m.provider === "openrouter" && m.kind === "text").map((m) => m.id),
     );
+  });
+
+  it("keeps the marketing chat's models listed, the fallback after the ranked picks, so their calls are priced", () => {
+    const ranked = rankOpenRouterText(OPENROUTER_FEED);
+    const google = ranked.filter((id) => id.startsWith("google/"));
+    expect(google[0]).toBe(MARKETING_CHAT_PRIMARY_MODEL);
+    expect(google.at(-1)).toBe(MARKETING_CHAT_FALLBACK_MODEL);
+    // Once each, though the primary is also the pinned default.
+    for (const id of [MARKETING_CHAT_PRIMARY_MODEL, MARKETING_CHAT_FALLBACK_MODEL]) {
+      expect(ranked.filter((r) => r === id), id).toHaveLength(1);
+    }
+    // Kept when the feed drops it, like a pinned default.
+    const without = OPENROUTER_FEED.filter((m) => m.id !== MARKETING_CHAT_FALLBACK_MODEL);
+    expect(rankOpenRouterText(without)).toContain(MARKETING_CHAT_FALLBACK_MODEL);
   });
 
   it("excludes :variants, -pro, -exp, dated ids, non-text models and legacy families", () => {
@@ -291,10 +307,26 @@ describe("cost log pricing from the served list", () => {
 });
 
 describe("buildRegistry", () => {
+  it("prices the marketing chat's fallback live from the feed, so its cost-log rows are priced", () => {
+    const { models } = buildRegistry(allOk());
+    const fallback = models.find((m) => m.id === MARKETING_CHAT_FALLBACK_MODEL);
+    expect(fallback).toBeDefined();
+    expect([fallback!.kind, round3(fallback!.costPer1MInput), round3(fallback!.costPer1MOutput), fallback!.livePricing]).toEqual([
+      "text",
+      0.1,
+      0.4,
+      true,
+    ]);
+    expect(costFromModelList(models, MARKETING_CHAT_FALLBACK_MODEL, { inputTokens: 400, outputTokens: 50 })).toEqual({
+      costUsd: 0.00006,
+      basis: "live",
+    });
+  });
+
   it("assembles the four groups in order with route, vendor, prices and effort levels", () => {
     const { models, warnings } = buildRegistry(allOk());
     expect(warnings).toEqual([]);
-    expect(models).toHaveLength(39);
+    expect(models).toHaveLength(40);
     expect(models.map((m) => m.id)).toEqual(MODEL_SNAPSHOT.map((m) => m.id));
 
     const astra = models.find((m) => m.id === "openai-api/gpt-6-astra")!;
@@ -424,7 +456,7 @@ describe("buildRegistry", () => {
       expect(m.fallbackInput, m.id).toBe(round3(Number(twin.pricing!.prompt) * 1e6));
       expect(m.fallbackOutput, m.id).toBe(round3(Number(twin.pricing!.completion) * 1e6));
     }
-    expect(checked).toBe(39);
+    expect(checked).toBe(40);
   });
 });
 

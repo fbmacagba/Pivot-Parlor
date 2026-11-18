@@ -4,7 +4,9 @@
  * rules must skip (`:batch` variants, `-pro` tiers, dated snapshots, `-exp`,
  * image and video models, specialist and legacy lines). Prices are USD per
  * token and `reasoning` is the feed's own block, both as served; only the
- * `supported_parameters` relevant to reasoning are kept.
+ * `supported_parameters` relevant to reasoning are kept. google/gemini-2.5-flash-lite
+ * (the marketing chat's fallback, kept for pricing) was added from the feed
+ * of 2026-11-18.
  *
  * OPENAI_IDS and ANTHROPIC_MODELS were not fetched (no vendor keys on this
  * machine): the ids are modelled on the OpenRouter slugs and Anthropic's
@@ -29,6 +31,7 @@ export const OPENROUTER_FEED: OpenRouterFeedModel[] = [
   { id: "google/gemini-3.1-flash-lite", name: "Google: Gemini 3.1 Flash Lite", created: 1778168828, pricing: { prompt: "0.00000025", completion: "0.0000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "medium", "low", "minimal", "none"], default_effort: "minimal"} },
   { id: "google/gemini-3.1-flash-lite-preview", name: "Google: Gemini 3.1 Flash Lite Preview", created: 1772512673, pricing: { prompt: "0.00000025", completion: "0.0000015" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false, supported_efforts: ["high", "medium", "low", "minimal", "none"], default_effort: "minimal"} },
   { id: "google/gemini-3.5-flash-lite", name: "Google: Gemini 3.5 Flash Lite", created: 1784646726, pricing: { prompt: "0.0000003", completion: "0.0000025" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low", "minimal"], default_effort: "minimal"} },
+  { id: "google/gemini-2.5-flash-lite", name: "Google: Gemini 2.5 Flash Lite", created: 1753200276, pricing: { prompt: "0.0000001", completion: "0.0000004" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: false} },
   { id: "google/gemini-4-carbon", name: "Google: Gemini 4 Carbon", created: 1794326871, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
   { id: "google/gemini-4-argon", name: "Google: Gemini 4 Argon", created: 1791907477, pricing: { prompt: "0.000002", completion: "0.00001" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["high", "medium", "low"], default_effort: "medium"} },
   { id: "google/gemini-4-hydrogen", name: "Google: Gemini 4 Hydrogen", created: 1794506460, pricing: { prompt: "0.0000015", completion: "0.0000075" }, supported_parameters: ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort"], architecture: { output_modalities: ["text"] }, reasoning: {mandatory: true, supported_efforts: ["xhigh", "high", "medium", "low"], default_effort: "medium"} },
