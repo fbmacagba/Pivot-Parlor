@@ -9,10 +9,10 @@ APP_DOMAIN = "pivotparlor.com"
 
 # Secrets (set via `wrangler secret put --config apps/web/wrangler.toml`):
 #   JWT_SECRET
-#   OPENROUTER_API_KEY   ← no longer read: the marketing chatbot (/api/chat) is
-#                          answered by the API (MARKETING_CHAT below). Keep it
-#                          until that is confirmed working: rolling the website
-#                          back to a build that calls OpenRouter itself needs it.
+#   (OPENROUTER_API_KEY was deleted on 2026-11-18: the marketing chatbot
+#   (/api/chat) is answered by the API, MARKETING_CHAT below. Only a rollback
+#   to a build from before then would need it back, or its chat says
+#   "Chat unavailable.")
 
 # The website's server code reaches the API over this binding, not the public
 # internet, so the API sees each visitor's IP (functions/_middleware.ts and
