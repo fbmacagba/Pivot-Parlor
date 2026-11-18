@@ -9,7 +9,10 @@ APP_DOMAIN = "pivotparlor.com"
 
 # Secrets (set via `wrangler secret put --config apps/web/wrangler.toml`):
 #   JWT_SECRET
-#   OPENROUTER_API_KEY   ← used by marketing chatbot (/api/chat) and worker AI routes
+#   OPENROUTER_API_KEY   ← no longer read: the marketing chatbot (/api/chat) is
+#                          answered by the API (MARKETING_CHAT below). Keep it
+#                          until that is confirmed working: rolling the website
+#                          back to a build that calls OpenRouter itself needs it.
 
 # The website's server code reaches the API over this binding, not the public
 # internet, so the API sees each visitor's IP (functions/_middleware.ts and
@@ -29,6 +32,16 @@ service = "pivot-parlor-api"
 binding = "WEB_ERRORS"
 service = "pivot-parlor-api"
 entrypoint = "WebErrors"
+
+# Pip, the marketing chatbot (/api/chat): the website keeps the per-visitor
+# limit and the body checks, and the API's MarketingChat entrypoint
+# (apps/worker/src/marketing-chat.ts) calls the model, so each reply is
+# audited and in the cost log. It is not reachable from the internet.
+# scripts/ci-set-web-staging-vars.mjs points it at the staging worker.
+[[services]]
+binding = "MARKETING_CHAT"
+service = "pivot-parlor-api"
+entrypoint = "MarketingChat"
 
 # KV binding — shared with worker for rate limiting the marketing chatbot
 [[kv_namespaces]]

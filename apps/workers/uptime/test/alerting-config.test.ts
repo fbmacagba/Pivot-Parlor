@@ -138,14 +138,37 @@ describe("production alerting configuration", () => {
     )).toBe(true);
   });
 
+  it("the website hands Pip's chat to the API's MarketingChat entrypoint", () => {
+    // app/routes/api.chat.tsx calls this binding; the API calls the model so
+    // each reply is audited and in the cost log (apps/worker/src/marketing-chat.ts).
+    const web = read("apps/web/wrangler.toml");
+    const services = web.split(/^\[\[services\]\]\s*$/m).slice(1);
+    expect(services.some((block) =>
+      /^binding\s*=\s*"MARKETING_CHAT"\s*$/m.test(block) &&
+      /^service\s*=\s*"pivot-parlor-api"\s*$/m.test(block) &&
+      /^entrypoint\s*=\s*"MarketingChat"\s*$/m.test(block),
+    )).toBe(true);
+  });
+
+  it("every entrypoint the website binds to is one the API exports", () => {
+    // A name that matches no export passes every other test and fails only
+    // in production, so the two files are checked against each other here.
+    const named = [...read("apps/web/wrangler.toml").matchAll(/^entrypoint[ \t]*=[ \t]*"([^"]+)"/gm)].map((m) => m[1]!);
+    expect(named.sort()).toEqual(["MarketingChat", "WebErrors"]);
+    const api = read("apps/worker/src/index.ts");
+    for (const name of named) {
+      expect(api, name).toMatch(new RegExp(`^export \\{ ${name} \\} from "\\./[a-z-]+\\.js";`, "m"));
+    }
+  });
+
   it("the staging website deploy moves every binding off the production API", () => {
     // A WEB_ERRORS binding left on production would email the owner about
     // every staging E2E failure (scripts/ci-set-web-staging-vars.mjs).
     const prod = read("apps/web/wrangler.toml");
     const staging = toStagingWebToml(prod);
     const services = (toml: string) => [...toml.matchAll(/^service[ \t]*=[ \t]*"([^"]+)"/gm)].map((m) => m[1]);
-    expect(services(prod)).toEqual(["pivot-parlor-api", "pivot-parlor-api"]);
-    expect(services(staging)).toEqual([STAGING_API_WORKER, STAGING_API_WORKER]);
+    expect(services(prod)).toEqual(["pivot-parlor-api", "pivot-parlor-api", "pivot-parlor-api"]);
+    expect(services(staging)).toEqual([STAGING_API_WORKER, STAGING_API_WORKER, STAGING_API_WORKER]);
     expect(tomlValue(staging, "vars", "API_URL")).toBe("\"https://pivot-parlor-api-staging.bmorris0565.workers.dev\"");
     expect(tomlValue(staging, "vars", "APP_DOMAIN")).toBe("\"localhost\"");
     // Only those values change: no line is lost and a rerun changes nothing.

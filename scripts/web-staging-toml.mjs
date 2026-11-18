@@ -30,6 +30,8 @@ function setVar(src, key, value) {
 //   WEB_ERRORS server-error reports (app/lib/serverErrors.ts). On the prod API
 //              they would email the owner about staging test runs; the staging
 //              API's Issues are off.
+//   MARKETING_CHAT  Pip's chat (app/routes/api.chat.tsx). On the prod API a
+//              staging chat would be audited and cost-logged in production.
 // [ \t] rather than \s: \s would run past the line end and eat the next one.
 function setApiServices(src, worker) {
   const re = /^([ \t]*service[ \t]*=[ \t]*)"pivot-parlor-api(?:-staging)?"[ \t]*$/gm;
