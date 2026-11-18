@@ -197,7 +197,7 @@ The Worker dev server runs on port `8787` (configured in `wrangler.toml`). The w
 
 - **Pages secrets**: `npx wrangler pages secret put SECRET_NAME --project-name pivot-parlor-web`
 - **Worker secrets**: `cd apps/worker && npx wrangler secret put SECRET_NAME`
-- **LLM vendor keys**: `OPENROUTER_API_KEY` (required), `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` (optional, direct routes) on the API worker (production and staging) and on the research, text and chatbot workers. Rollout steps: `docs/runbooks/multi-provider-llm-rollout.md`.
+- **LLM vendor keys**: `OPENROUTER_API_KEY` (required), `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` (optional, direct routes) on the API worker and on the research, text and chatbot workers. The staging API worker has the OpenAI and Anthropic keys but no `OPENROUTER_API_KEY` (checked 2026-11-18), so its OpenRouter calls, the marketing chat's included, answer as unavailable. The website (Pages) holds no vendor key. Rollout steps: `docs/runbooks/multi-provider-llm-rollout.md`.
 - Do NOT use `wrangler secret put` (without `pages`) for the web project — it only works for Workers.
 
 ### Component & Design Conventions
