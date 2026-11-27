@@ -21,6 +21,8 @@ export interface RefundRequest {
   has_evidence: boolean;
   evidence_name: string | null;
   status: "pending" | "approved" | "declined";
+  /** The user id of whoever filed it. */
+  requested_by?: string | null;
   requested_by_name: string | null;
   requested_at: string;
   reviewed_by_name: string | null;

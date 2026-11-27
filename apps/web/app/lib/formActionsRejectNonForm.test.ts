@@ -86,6 +86,7 @@ import * as adminServices from "~/routes/admin.services";
 import * as adminStaff from "~/routes/admin.staff";
 import * as adminWaitlist from "~/routes/admin.waitlist";
 import * as staffPos from "~/routes/staff.pos";
+import * as staffRefunds from "~/routes/staff.refunds";
 import * as devActivity from "~/routes/dev.activity";
 import * as devEnquiries from "~/routes/dev.enquiries";
 import * as devShops from "~/routes/dev.shops._index";
@@ -147,6 +148,7 @@ const ACTIONS: Array<[string, unknown, Role]> = [
   ["admin.staff", adminStaff, "admin"],
   ["admin.waitlist", adminWaitlist, "admin"],
   ["staff.pos", staffPos, "staff"],
+  ["staff.refunds", staffRefunds, "staff"],
   ["dev.activity", devActivity, "developer"],
   ["dev.enquiries", devEnquiries, "developer"],
   ["dev.shops._index", devShops, "developer"],

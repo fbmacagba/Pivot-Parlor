@@ -69,6 +69,7 @@ const STAFF_NAV: NavItem[] = [
   { href: "/staff", label: "Today", icon: LayoutDashboard },
   { href: "/staff/bookings", label: "My Bookings", short: "Bookings", icon: CalendarDays },
   { href: "/staff/pos", label: "Point of Sale", short: "POS", icon: ShoppingCart },
+  { href: "/staff/refunds", label: "Refunds", icon: Undo2 },
   // Availability is a tab of the bookings page, so it links straight to the
   // tab: /staff/availability only redirects there, and a link to it would
   // light "My Bookings" on arrival.

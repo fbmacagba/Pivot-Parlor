@@ -401,8 +401,13 @@ test.describe.serial("dashboard sweep", () => {
     expect(member, "the shop's staff are offered to view").toBeTruthy();
     const q = `?shopId=${encodeURIComponent(shopId)}&staffId=${encodeURIComponent(member!.id)}`;
 
-    // Read-only for a developer, so Staff View's till is Admin view's (lib/pos.ts).
-    const redirects: Record<string, string> = { ...REDIRECTS, "/staff/pos": "/admin/pos" };
+    // Read-only for a developer, so Staff View's till is Admin view's (lib/pos.ts),
+    // and asking for a refund is Admin view's Sales page (lib/salesRefunds.ts).
+    const redirects: Record<string, string> = {
+      ...REDIRECTS,
+      "/staff/pos": "/admin/pos",
+      "/staff/refunds": "/admin/sales",
+    };
     for (const mod of dashboardModules().filter((m) => roleFor(m) === "staff" && !(m in EXCLUDED))) {
       const url = `${pathFor(mod, { shopId })}${q}`;
       await test.step(`${mod} (${url})`, async () => {

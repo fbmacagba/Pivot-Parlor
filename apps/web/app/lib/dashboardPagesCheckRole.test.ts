@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 const routesDir = path.resolve(process.cwd(), "app/routes");
 
 /** A call that checks the role, or a helper that does so as its first step. */
-const GATE = /\b(requireRole|requireAuth|posLoader|posAction)\s*\(/;
+const GATE = /\b(requireRole|requireAuth|posLoader|posAction|salesRefundLoader|salesRefundAction)\s*\(/;
 /** The first point at which a handler can reach the API. */
 const API_CALL = /\b(createApiClient|fetch|proxyShopPost)\s*\(/;
 
