@@ -463,3 +463,30 @@ CREATE TABLE IF NOT EXISTS shop_site_candidates (
   payload_json TEXT NOT NULL,
   created_at   TEXT NOT NULL
 );
+
+-- Refund requests (migration 054): a refund is requested with a reason and
+-- approved by the owner or a developer before any money moves.
+CREATE TABLE IF NOT EXISTS refund_requests (
+  id             TEXT PRIMARY KEY,
+  shop_id        TEXT NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL CHECK (kind IN ('deposit','sale')),
+  booking_id     TEXT,
+  sale_id        TEXT,
+  lines_json     TEXT,
+  amount_pence   INTEGER NOT NULL CHECK (amount_pence >= 0),
+  reason         TEXT NOT NULL,
+  evidence_key   TEXT,
+  evidence_name  TEXT,
+  evidence_type  TEXT,
+  status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approving','approved','declined')),
+  requested_by   TEXT NOT NULL,
+  requested_at   TEXT NOT NULL,
+  reviewed_by    TEXT,
+  reviewed_at    TEXT,
+  review_note    TEXT,
+  refunded_pence INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_refund_requests_shop_status ON refund_requests(shop_id, status, requested_at);
+CREATE INDEX IF NOT EXISTS idx_refund_requests_booking ON refund_requests(booking_id);
+CREATE INDEX IF NOT EXISTS idx_refund_requests_sale ON refund_requests(sale_id);

@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { seedService, seedShop, seedStaff, tokenFor } from "./helpers";
+import { seedService, seedShop, seedStaff, tokenFor, depositRequest } from "./helpers";
 import { dispatch } from "./request";
 import { entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
 
@@ -476,7 +476,9 @@ describe("staff cancel audit", () => {
       depositPence: 1250,
       depositTx: "pending",
     });
-    const res = await cancel(s.shop, bookingId, { refundDeposit: true });
+    // A hold holds no captured money: voiding it is not a refund and needs
+    // no refund request, so a bare re-cancel releases it.
+    const res = await cancel(s.shop, bookingId, {});
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
     expect(outcome.outcome).toBe("succeeded");
@@ -499,11 +501,11 @@ describe("staff cancel audit", () => {
   it("maps a refunded charged deposit to details.deposit_action refunded", async () => {
     const s = await setup();
     const bookingId = await seedChargedDeposit(s);
-    const res = await cancel(s.shop, bookingId, { refundDeposit: true });
+    const res = await cancel(s.shop, bookingId, { refundDeposit: true, refund_request_id: await depositRequest(s.shop, bookingId) });
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("booking.cancel", s.shop, bookingId);
     expect(JSON.parse(outcome.changes_json as string)).toEqual({ status: ["confirmed", "cancelled"] });
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "refunded" });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({ deposit_action: "refunded", refund_request_id: expect.any(String) });
     expectNoPersonalData(outcome, ["pi_charged_1"]);
   });
 
@@ -591,7 +593,7 @@ describe("staff cancel audit", () => {
       { amount_pence: 1250, status: "pending", stripe_id: `re_idem_deposit-refund:${bookingId}` },
     ]);
 
-    const refund = await cancel(s.shop, bookingId, { refundDeposit: true });
+    const refund = await cancel(s.shop, bookingId, { refundDeposit: true, refund_request_id: await depositRequest(s.shop, bookingId) });
     expect(refund.status).toBe(400);
     expect(await refund.json()).toEqual({ success: false, error: "Deposit already refunded" });
   });

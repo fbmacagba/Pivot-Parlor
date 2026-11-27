@@ -57,7 +57,7 @@ bookings.put("/:bookingId/status", async (c) => {
     return c.json({ success: false, error: "Booking not found" }, 404);
   }
 
-  const body = await readJsonObject<{ status?: string; refund_deposit?: boolean }>(c.req);
+  const body = await readJsonObject<{ status?: string; refund_deposit?: boolean; refund_request_id?: string }>(c.req);
   if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
   }
@@ -117,11 +117,13 @@ bookings.put("/:bookingId/status", async (c) => {
               new Request(`https://booking/booking/shops/${shopId}/bookings/${bookingId}/cancel`, {
                 method: "POST",
                 headers: fwd,
-                // Forward refund_deposit only when the client actually sent it: the
-                // booking worker defaults fresh cancels to refund, but its recovery
-                // path acts only on an EXPLICIT true — a bare re-cancel must never
-                // silently refund a deposit staff chose to keep.
-                body: JSON.stringify(refundDeposit !== null ? { refundDeposit } : {}),
+                // The booking worker keeps the deposit unless refundDeposit is
+                // true AND names a pending refund request, which it checks and
+                // approves itself. Both are forwarded as sent.
+                body: JSON.stringify({
+                  ...(refundDeposit !== null ? { refundDeposit } : {}),
+                  ...(typeof body.refund_request_id === "string" ? { refund_request_id: body.refund_request_id } : {}),
+                }),
               })
             );
             payload = (await res.json().catch(() => null)) as

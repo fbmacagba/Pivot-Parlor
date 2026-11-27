@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { dispatch } from "./request";
 import { entriesFor } from "./audit-helpers";
-import { seedShop, seedStaff, seedScheduleDay, seedService, slugFor, tokenFor } from "./helpers";
+import { seedShop, seedStaff, seedScheduleDay, seedService, slugFor, tokenFor, depositRequest } from "./helpers";
 import { getAvailableSlots } from "../src/services/slots";
 import { reinstateCancelledIfFree } from "../src/db/queries";
 
@@ -134,7 +134,7 @@ describe("deposit-aware cancellation", () => {
     const piId = await settleDeposit(bookingId, shop);
     const token = await tokenFor("admin", shop);
 
-    const res = await cancel(shop, bookingId, token, { refundDeposit: true });
+    const res = await cancel(shop, bookingId, token, { refundDeposit: true, refund_request_id: await depositRequest(shop, bookingId) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { deposit_action: string; refund_pence: number } };
     expect(body.data.deposit_action).toBe("refunded");
@@ -250,7 +250,7 @@ describe("deposit-aware cancellation", () => {
     await settleDeposit(bookingId, shop, `pi_fail_${bookingId.slice(0, 8)}`);
     const token = await tokenFor("admin", shop);
 
-    const res = await cancel(shop, bookingId, token, { refundDeposit: true });
+    const res = await cancel(shop, bookingId, token, { refundDeposit: true, refund_request_id: await depositRequest(shop, bookingId) });
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toBe(NOT_CANCELLED);
     expect(await bookingStatus(bookingId)).toBe("confirmed"); // reverted
@@ -270,14 +270,14 @@ describe("deposit-aware cancellation", () => {
     await env.DB.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(bookingId).run();
     const token = await tokenFor("admin", shop);
 
-    const res = await cancel(shop, bookingId, token, { refundDeposit: true });
+    const res = await cancel(shop, bookingId, token, { refundDeposit: true, refund_request_id: await depositRequest(shop, bookingId) });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { deposit_action: string } };
     expect(body.data.deposit_action).toBe("refunded");
     expect((await refundTx(bookingId))?.status).toBe("pending");
 
     // Second attempt: nothing left to refund.
-    const again = await cancel(shop, bookingId, token, { refundDeposit: true });
+    const again = await cancel(shop, bookingId, token, { refundDeposit: true, refund_request_id: await depositRequest(shop, bookingId) });
     expect(again.status).toBe(400);
     const againBody = (await again.json()) as { error: string };
     expect(againBody.error).toBe("Deposit already refunded");
@@ -299,7 +299,7 @@ describe("deposit-aware cancellation", () => {
     expect((await depositTx(bookingId))?.status).toBe("captured");
   });
 
-  it("recovery voids a stranded hold on explicit request", async () => {
+  it("recovery voids a stranded hold on a bare re-cancel (no captured money, so no refund request)", async () => {
     const { shop, staff, service } = await setupDepositShop();
     const token = await tokenFor("admin", shop);
     const bookingId = crypto.randomUUID();
@@ -326,7 +326,7 @@ describe("deposit-aware cancellation", () => {
       .bind(crypto.randomUUID(), bookingId, shop)
       .run();
 
-    const res = await cancel(shop, bookingId, token, { refundDeposit: true });
+    const res = await cancel(shop, bookingId, token, {});
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { deposit_action: string } };
     expect(body.data.deposit_action).toBe("hold_voided");
@@ -403,7 +403,7 @@ describe("deposit-aware cancellation", () => {
     const piId = await settleDeposit(bookingId, shop);
     const token = await tokenFor("admin", shop);
 
-    const res = await cancel(shop, bookingId, token, { refundDeposit: true });
+    const res = await cancel(shop, bookingId, token, { refundDeposit: true, refund_request_id: await depositRequest(shop, bookingId) });
     expect(res.status).toBe(200);
 
     // Staff resurrect the booking and run it end to end.
@@ -524,7 +524,7 @@ describe("a failed refund never reinstates over a booking made meanwhile", () =>
       new Request(`https://booking.test/booking/shops/${shop}/bookings/${bookingId}/cancel`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ refundDeposit: true }),
+        body: JSON.stringify({ refundDeposit: true, refund_request_id: await depositRequest(shop, bookingId) }),
       }) as never,
       raceEnv as never,
       ctx as never,
@@ -621,7 +621,7 @@ describe("a failed refund never reinstates over a booking made meanwhile", () =>
     await env.DB.prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?").bind(bookingId).run();
     const token = await tokenFor("admin", s.shop);
 
-    const res = await cancel(s.shop, bookingId, token, { refundDeposit: true });
+    const res = await cancel(s.shop, bookingId, token, { refundDeposit: true, refund_request_id: await depositRequest(s.shop, bookingId) });
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toBe(KEPT_ALREADY_CANCELLED);
     expect(await bookingStatus(bookingId)).toBe("cancelled");
@@ -676,5 +676,127 @@ describe("reinstateCancelledIfFree", () => {
     const b = await seed(w.shop, w.staff, w.service, "completed", at("10:00"), at("10:30"));
     expect(await reinstateCancelledIfFree(env.DB, b, LONDON)).toBe("unchanged");
     expect(await statusOf(b.id)).toBe("completed");
+  });
+});
+
+describe("refund review: a deposit goes back only on an approved request", () => {
+  const requestRow = (id: string) =>
+    env.DB.prepare("SELECT * FROM refund_requests WHERE id = ?").bind(id).first<Record<string, unknown>>();
+  const file = (shop: string, token: string, body: Record<string, unknown>) =>
+    dispatch("POST", `/booking/shops/${shop}/refund-requests`, { headers: { Authorization: `Bearer ${token}` }, body });
+
+  it("a cancel that says nothing about the deposit keeps it", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop);
+    const token = await tokenFor("admin", shop);
+
+    const res = await cancel(shop, bookingId, token, {});
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: { deposit_action: string } }).data.deposit_action).toBe("kept");
+    expect(await bookingStatus(bookingId)).toBe("cancelled");
+    expect(await refundTx(bookingId)).toBeNull();
+    expect(await stateRow(bookingId)).toMatchObject({ deposit_amount_pence: 1250 });
+  });
+
+  it("refuses a refund with no request, and a refund asked for by staff", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop);
+    const admin = await tokenFor("admin", shop);
+    const staffToken = await tokenFor("staff", shop);
+
+    const bare = await cancel(shop, bookingId, admin, { refundDeposit: true });
+    expect(bare.status).toBe(400);
+    expect(((await bare.json()) as { error: string }).error).toMatch(/refund request/i);
+
+    const byStaff = await cancel(shop, bookingId, staffToken, {
+      refundDeposit: true,
+      refund_request_id: await depositRequest(shop, bookingId),
+    });
+    expect(byStaff.status).toBe(403);
+
+    // Neither attempt cancelled the booking or moved money.
+    expect(await bookingStatus(bookingId)).toBe("confirmed");
+    expect(await refundTx(bookingId)).toBeNull();
+  });
+
+  it("staff cancel and file; the owner approving refunds the stranded deposit", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop);
+    const admin = await tokenFor("admin", shop);
+    const staffToken = await tokenFor("staff", shop);
+
+    expect((await cancel(shop, bookingId, staffToken, {})).status).toBe(200);
+    const filed = await file(shop, staffToken, {
+      kind: "deposit",
+      booking_id: bookingId,
+      reason: "Customer rang three days ahead, text message on the shop phone",
+    });
+    expect(filed.status).toBe(201);
+    const { data } = (await filed.json()) as { data: { id: string; amount_pence: number } };
+    expect(data.amount_pence).toBe(1250);
+    expect(await refundTx(bookingId)).toBeNull();
+
+    const approved = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: data.id });
+    expect(approved.status).toBe(200);
+    expect(((await approved.json()) as { data: { deposit_action: string } }).data.deposit_action).toBe("refunded");
+    expect(await refundTx(bookingId)).toMatchObject({ amount_pence: 1250 });
+    expect(await requestRow(data.id)).toMatchObject({
+      status: "approved",
+      requested_by: "user-staff",
+      reviewed_by: "user-admin",
+      refunded_pence: 1250,
+    });
+
+    // Nothing left to request.
+    const second = await file(shop, staffToken, {
+      kind: "deposit",
+      booking_id: bookingId,
+      reason: "Trying to get the same deposit back twice",
+    });
+    expect(second.status).toBe(400);
+  });
+
+  it("a request for one booking cannot refund another", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const first = await bookDeposit(shop, staff, service, 0);
+    const second = await bookDeposit(shop, staff, service, 1);
+    await settleDeposit(first, shop);
+    await settleDeposit(second, shop);
+    const admin = await tokenFor("admin", shop);
+    const requestId = await depositRequest(shop, first);
+
+    const res = await cancel(shop, second, admin, { refundDeposit: true, refund_request_id: requestId });
+    expect(res.status).toBe(404);
+    expect(await bookingStatus(second)).toBe("confirmed");
+    expect(await refundTx(second)).toBeNull();
+    expect(await requestRow(requestId)).toMatchObject({ status: "pending" });
+  });
+
+  it("a refund Stripe fails leaves the request pending", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop, "pi_fail_review_dep");
+    const admin = await tokenFor("admin", shop);
+    const requestId = await depositRequest(shop, bookingId);
+
+    const res = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: requestId });
+    expect(res.status).toBe(502);
+    expect(await requestRow(requestId)).toMatchObject({ status: "pending", reviewed_by: null });
+    expect(await refundTx(bookingId)).toBeNull();
+  });
+
+  it("a booking with no captured deposit cannot have a request filed", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service); // deposit never settled
+    const admin = await tokenFor("admin", shop);
+    const filed = await file(shop, admin, {
+      kind: "deposit",
+      booking_id: bookingId,
+      reason: "There is no money here to give back",
+    });
+    expect(filed.status).toBe(400);
   });
 });

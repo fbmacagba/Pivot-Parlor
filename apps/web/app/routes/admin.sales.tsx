@@ -1,9 +1,9 @@
 /**
- * WS-3 Phase 2 — sales history + returns/refunds (admin only).
- * Refunds are per-line: pick quantities, choose whether product lines go back
- * into stock, add a reason. Cash/card-external refunds settle immediately
- * (the shop hands the money back); Stripe refunds go through the API and
- * complete when Stripe confirms (charge.refunded).
+ * WS-3 Phase 2: sales history and refund requests (admin only).
+ * A refund is requested per line: pick quantities, choose whether product
+ * lines go back into stock, say why, and attach evidence if there is any.
+ * That files a request; the money moves only when the owner approves it on
+ * the Refunds page (admin.refunds.tsx).
  */
 import {
   Form,
@@ -16,13 +16,12 @@ import {
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Receipt, Undo2 } from "lucide-react";
 import { useState } from "react";
-import { pageShopId } from "~/lib/pageShop";
+import { pageShopId, withShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { formatPence } from "@repo/utils";
 import { createApiClient } from "~/lib/api";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
-import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { LoadError } from "~/components/ui/LoadError";
 import { StatusBadge, statusLabel } from "~/components/ui/StatusBadge";
 import { ErrorScreen } from "~/components/ErrorScreen";
@@ -30,6 +29,14 @@ import { refundAmountPence, summariseSales, tenderLabel, type DaySummary } from 
 import { formatDateTime, formatDay, formatTime, ukToday } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { pageTitle } from "~/lib/pageTitle";
+import { RefundRequestFields } from "~/components/admin/RefundRequestFields";
+import {
+  evidenceFrom,
+  fileRefundRequest,
+  refundEvidenceProblem,
+  refundReasonProblem,
+  type RefundRequest,
+} from "~/lib/refundRequests";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 import { useFetcherResult } from "~/lib/useFetcherResult";
 
@@ -102,12 +109,20 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   let detail: SaleDetail | null = null;
   let loadError = false;
   let detailError = false;
+  // Sales that already have a refund request waiting: no second one is filed.
+  let pendingRefundSaleIds: string[] = [];
   if (shopId) {
     const wantsDetail = Boolean(saleId && /^[A-Za-z0-9_-]{1,100}$/.test(saleId));
-    const [salesRes, detailRes] = await Promise.allSettled([
+    const [salesRes, detailRes, pendingRes] = await Promise.allSettled([
       api.get<SaleRow[]>(`/api/shops/${shopId}/sales?date=${date}`),
       wantsDetail ? api.get<SaleDetail>(`/api/shops/${shopId}/sales/${saleId}`) : Promise.resolve(null),
+      wantsDetail
+        ? api.get<RefundRequest[]>(`/api/shops/${shopId}/refund-requests?status=pending`)
+        : Promise.resolve([]),
     ]);
+    if (pendingRes.status === "fulfilled") {
+      pendingRefundSaleIds = (pendingRes.value ?? []).flatMap((r) => (r.sale_id ? [r.sale_id] : []));
+    }
     if (salesRes.status === "fulfilled") sales = salesRes.value ?? [];
     else loadError = true;
     if (detailRes.status === "fulfilled") detail = detailRes.value;
@@ -122,6 +137,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     detail,
     loadError,
     detailError,
+    pendingRefundSaleIds,
   });
 }
 
@@ -145,26 +161,35 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
   if (lines.length === 0) return json<ActionData>({ error: "Select at least one item to refund." }, { status: 400 });
 
-  const api = createApiClient(env.API_URL, token);
+  const reason = String(form.get("reason") ?? "").trim();
+  const reasonProblem = refundReasonProblem(reason);
+  if (reasonProblem) return json<ActionData>({ error: reasonProblem }, { status: 400 });
+  const evidence = evidenceFrom(form);
+  const evidenceProblem = refundEvidenceProblem(evidence);
+  if (evidenceProblem) return json<ActionData>({ error: evidenceProblem }, { status: 400 });
+
+  // This files a request. The refund itself runs only when the owner
+  // approves it on the Refunds page.
   try {
-    const result = await api.post<{ refund_pence: number; status: string }>(
-      `/api/shops/${shopId}/sales/${saleId}/refund`,
-      { lines, reason: String(form.get("reason") ?? "").trim() || undefined }
+    const filed = await fileRefundRequest(
+      env.API_URL,
+      token,
+      shopId,
+      { kind: "sale", sale_id: saleId, lines, reason },
+      evidence
     );
     return json<ActionData>({
       ok: true,
-      message:
-        result.status === "completed"
-          ? `Refunded ${formatPence(result.refund_pence)}.`
-          : `Refund of ${formatPence(result.refund_pence)} sent to Stripe. It completes when Stripe confirms.`,
+      message: `Refund request for ${formatPence(filed.amount_pence)} filed. No money has moved: it waits for approval.`,
     });
   } catch (e) {
-    return json<ActionData>({ error: e instanceof Error ? e.message : "Refund failed" }, { status: 400 });
+    return json<ActionData>({ error: e instanceof Error ? e.message : "The request could not be filed" }, { status: 400 });
   }
 }
 
 export default function AdminSales() {
-  const { shopId, developerNeedsShop, date, sales, detail, loadError, detailError } = useLoaderData<typeof loader>();
+  const { shopId, developerNeedsShop, date, sales, detail, loadError, detailError, pendingRefundSaleIds } =
+    useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
 
   const baseParams = new URLSearchParams(searchParams);
@@ -177,7 +202,7 @@ export default function AdminSales() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Sales</h1>
-          <p className="mt-0.5 text-sm text-white/60">Till history and refunds.</p>
+          <p className="mt-0.5 text-sm text-white/60">Till history and refund requests.</p>
         </div>
         <Form method="get" className="flex items-end gap-2">
           {shopId && <input type="hidden" name="shopId" value={shopId} />}
@@ -193,7 +218,15 @@ export default function AdminSales() {
       )}
 
       {detailError && <LoadError what="that sale" />}
-      {detail && <RefundPanel key={detail.id} shopId={shopId} detail={detail} baseQuery={baseQuery} />}
+      {detail && (
+        <RefundPanel
+          key={detail.id}
+          shopId={shopId}
+          detail={detail}
+          baseQuery={baseQuery}
+          requestPending={pendingRefundSaleIds.includes(detail.id)}
+        />
+      )}
 
       {loadError ? (
         <LoadError what={`the sales for ${formatDay(date)}`} />
@@ -290,33 +323,29 @@ function DaySummaryCard({ summary, date, capped }: { summary: DaySummary; date: 
   );
 }
 
-/** Where the money goes back, in the words the confirmation uses. */
-function refundDestination(tender: string): string {
-  if (tender === "stripe") return "to the customer's card";
-  if (tender === "cash") return "in cash";
-  if (tender === "card_external") return "on your card machine";
-  return `by ${tenderLabel(tender).toLowerCase()}`;
-}
-
 function RefundPanel({
-  shopId, detail, baseQuery,
-}: { shopId: string | null; detail: SaleDetail; baseQuery: string }) {
+  shopId, detail, baseQuery, requestPending,
+}: { shopId: string | null; detail: SaleDetail; baseQuery: string; requestPending: boolean }) {
   const fetcher = useFetcher<ActionData>();
   const [qtys, setQtys] = useState<Record<string, string>>({});
   const [restock, setRestock] = useState<Record<string, boolean>>({});
   const [reason, setReason] = useState("");
-  const [confirming, setConfirming] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [tried, setTried] = useState(false);
+  const [formKey, setFormKey] = useState(0);
   const [result, setResult] = useState<ActionData | null>(null);
   const busy = fetcher.state !== "idle";
 
   useFetcherResult(fetcher, (data) => {
     setResult(data);
     if ("ok" in data) {
-      // The same refund must not be one tap from repeating.
+      // The same request must not be one tap from repeating.
       setQtys({});
       setRestock({});
       setReason("");
-      setConfirming(false);
+      setFile(null);
+      setTried(false);
+      setFormKey((k) => k + 1);
     }
   });
 
@@ -334,26 +363,28 @@ function RefundPanel({
 
   const refundable = detail.subtotal_pence - detail.discount_pence - detail.refunded_pence;
   const amount = refundAmountPence(detail, lines);
-  const destination = refundDestination(detail.tender_type);
-  const restocking = lines.filter(
-    (l) => l.restock && detail.items.find((i) => i.id === l.sale_item_id)?.item_type === "product",
-  ).length;
+  const reasonProblem = refundReasonProblem(reason);
+  const fileProblem = refundEvidenceProblem(file);
+  const filed = result !== null && "ok" in result;
 
   const submit = () => {
+    setTried(true);
+    if (lines.length === 0 || reasonProblem || fileProblem) return;
     setResult(null);
     const form = new FormData();
     if (shopId) form.append("shopId", shopId);
     form.append("saleId", detail.id);
     form.append("lines", JSON.stringify(lines));
-    form.append("reason", reason);
-    fetcher.submit(form, { method: "post" });
+    form.append("reason", reason.trim());
+    if (file) form.append("evidence", file, file.name);
+    fetcher.submit(form, { method: "post", encType: "multipart/form-data" });
   };
 
   return (
-    <section aria-label="Refund a sale" className="rounded-xl border border-gold/30 bg-gold/5 p-5">
+    <section aria-label="Request a refund on a sale" className="rounded-xl border border-gold/30 bg-gold/5 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold text-gold">
-          Refund sale · {formatPence(detail.total_pence)} {tenderLabel(detail.tender_type)}
+          Request a refund · {formatPence(detail.total_pence)} {tenderLabel(detail.tender_type)}
           <span className="ml-2 text-xs font-normal text-white/60">
             {detail.refunded_pence > 0 && `${formatPence(detail.refunded_pence)} already refunded · `}
             {formatPence(Math.max(0, refundable))} refundable
@@ -366,10 +397,13 @@ function RefundPanel({
 
       {result && "ok" in result && (
         <p role="status" className="mb-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-          {result.message}
+          {result.message}{" "}
+          <Link to={withShopId("/admin/refunds", shopId)} className="underline underline-offset-2">
+            Open Refunds
+          </Link>
         </p>
       )}
-      {result && "error" in result && !confirming && (
+      {result && "error" in result && (
         <p role="alert" className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {result.error}
         </p>
@@ -388,15 +422,23 @@ function RefundPanel({
 
       {refundable <= 0 ? (
         <p className="text-sm text-white/60">This sale is fully refunded.</p>
+      ) : requestPending || filed ? (
+        !filed && (
+          <p className="text-sm text-white/70">
+            A refund request for this sale is waiting for a decision.{" "}
+            <Link to={withShopId("/admin/refunds", shopId)} className="text-gold underline underline-offset-2">
+              Review it on Refunds
+            </Link>
+          </p>
+        )
       ) : (
         <form
+          key={formKey}
           className="space-y-3"
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
-            if (lines.length > 0) {
-              setResult(null);
-              setConfirming(true);
-            }
+            submit();
           }}
         >
           <div className="space-y-2">
@@ -442,45 +484,27 @@ function RefundPanel({
               );
             })}
           </div>
-          <Input
-            label="Reason"
-            name="reason"
-            placeholder="e.g. product returned unopened"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
+          <RefundRequestFields
+            reason={reason}
+            onReasonChange={setReason}
+            reasonError={tried ? reasonProblem : null}
+            file={file}
+            onFileChange={setFile}
+            disabled={busy}
           />
           <p className="text-xs text-white/60">
-            Tips are not refunded here. Back-bar products used during a service are not restocked.
-            {detail.tender_type !== "stripe" && " You hand the money back at the till. This records it."}
+            This files a request. No money moves and nothing is restocked until the owner approves it on the Refunds
+            page. Tips are not refunded. Back-bar products used during a service are not restocked.
           </p>
           <Button type="submit" size="sm" disabled={busy || lines.length === 0}>
-            {lines.length === 0 ? "Choose items to refund" : `Refund ${formatPence(amount)}`}
+            {busy
+              ? "Filing…"
+              : lines.length === 0
+                ? "Choose items to refund"
+                : `Request refund of ${formatPence(amount)}`}
           </Button>
         </form>
       )}
-
-      <ConfirmDialog
-        open={confirming}
-        onCancel={() => setConfirming(false)}
-        onConfirm={submit}
-        title={`Refund ${formatPence(amount)} ${destination}?`}
-        confirmLabel={`Refund ${formatPence(amount)}`}
-        destructive
-        pending={busy}
-        pendingLabel="Refunding…"
-        error={result && "error" in result ? result.error : null}
-      >
-        <p>
-          {detail.tender_type === "stripe"
-            ? `${formatPence(amount)} goes back to the card the customer paid with. It completes when Stripe confirms.`
-            : `This records that you handed ${formatPence(amount)} back ${destination}. No money moves by itself.`}
-        </p>
-        {restocking > 0 && (
-          <p>{restocking === 1 ? "1 product line goes" : `${restocking} product lines go`} back into stock.</p>
-        )}
-        <p>If the customer paid a service fee on top, their share of it is returned as well.</p>
-        <p>This cannot be undone.</p>
-      </ConfirmDialog>
     </section>
   );
 }

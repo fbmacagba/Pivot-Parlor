@@ -197,6 +197,8 @@ describe("bookings page", () => {
     const data = await load<{ window: unknown; truncated: boolean; loadError: boolean }>(bookingsPage, "/admin/bookings");
     expect(calls.map((c) => c.path)).toEqual([
       "/api/shops/shop-1/bookings?date_from=2026-10-28&date_to=2027-02-25&limit=1000",
+      // Which deposits already have a refund request waiting.
+      "/api/shops/shop-1/refund-requests?status=pending",
     ]);
     expect(data.window).toEqual({ from: "2026-10-28", to: "2027-02-25", isDefault: true });
     expect(data.truncated).toBe(false);
@@ -207,7 +209,7 @@ describe("bookings page", () => {
     at("2026-11-27T12:00:00Z");
     stubApi();
     await load(bookingsPage, "/admin/bookings?from=2026-01-01&to=2026-01-31&status=confirmed");
-    expect(calls.map((c) => c.path)).toEqual([
+    expect(calls.map((c) => c.path).filter((path) => path.includes("/bookings"))).toEqual([
       "/api/shops/shop-1/bookings?status=confirmed&date_from=2026-01-01&date_to=2026-01-31&limit=1000",
     ]);
   });

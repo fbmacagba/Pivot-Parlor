@@ -402,6 +402,30 @@
       "constraints": [],
       "options": ""
     },
+    "refund_requests": {
+      "columns": {
+        "amount_pence": "integer not null check(amount_pence >= 0)",
+        "booking_id": "text",
+        "evidence_key": "text",
+        "evidence_name": "text",
+        "evidence_type": "text",
+        "id": "text primary key",
+        "kind": "text not null check(kind in('deposit','sale'))",
+        "lines_json": "text",
+        "reason": "text not null",
+        "refunded_pence": "integer",
+        "requested_at": "text not null",
+        "requested_by": "text not null",
+        "review_note": "text",
+        "reviewed_at": "text",
+        "reviewed_by": "text",
+        "sale_id": "text",
+        "shop_id": "text not null references shops(id)on delete cascade",
+        "status": "text not null default 'pending' check(status in('pending','approving','approved','declined'))"
+      },
+      "constraints": [],
+      "options": ""
+    },
     "reviews": {
       "columns": {
         "body": "text not null",
@@ -854,6 +878,9 @@
     "idx_products_shop": "create index idx_products_shop on products(shop_id)",
     "idx_products_shop_sku": "create unique index idx_products_shop_sku on products(shop_id,sku)where sku is not null",
     "idx_purchase_orders_shop": "create index idx_purchase_orders_shop on purchase_orders(shop_id,status)",
+    "idx_refund_requests_booking": "create index idx_refund_requests_booking on refund_requests(booking_id)",
+    "idx_refund_requests_sale": "create index idx_refund_requests_sale on refund_requests(sale_id)",
+    "idx_refund_requests_shop_status": "create index idx_refund_requests_shop_status on refund_requests(shop_id,status,requested_at)",
     "idx_reviews_booking_id": "create unique index idx_reviews_booking_id on reviews(booking_id)where booking_id is not null",
     "idx_reviews_shop_created": "create index idx_reviews_shop_created on reviews(shop_id,created_at desc)",
     "idx_sale_items_sale": "create index idx_sale_items_sale on sale_items(sale_id)",

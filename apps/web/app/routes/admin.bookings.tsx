@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
-import { useLoaderData, useFetcher, useNavigation, useSearchParams, data as json } from "react-router";
+import { Link, useLoaderData, useFetcher, useNavigation, useSearchParams, data as json } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
@@ -22,8 +22,16 @@ import { ErrorScreen } from "~/components/ErrorScreen";
 import { useModalA11y } from "~/lib/useModalA11y";
 import { useFetcherResult } from "~/lib/useFetcherResult";
 import { clockOf, formatCount, formatDate as formatUkDate, formatDay, ukToday } from "~/lib/dateFormat";
-import { pageShopId } from "~/lib/pageShop";
+import { pageShopId, withShopId } from "~/lib/pageShop";
 import { pageTitle } from "~/lib/pageTitle";
+import { RefundRequestFields } from "~/components/admin/RefundRequestFields";
+import {
+  evidenceFrom,
+  fileRefundRequest,
+  refundEvidenceProblem,
+  refundReasonProblem,
+  type RefundRequest,
+} from "~/lib/refundRequests";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
@@ -67,7 +75,8 @@ const FILTER_STATUSES: BookingStatus[] = ["pending", "confirmed", "completed", "
 const TARGET_STATUSES: BookingStatus[] = ["confirmed", "completed", "cancelled", "no_show"];
 
 /** A captured customer deposit that has not been refunded or credited to a
- *  sale: cancelling this booking must ask refund-or-keep. */
+ *  sale: cancelling this booking keeps it, and it goes back only through a
+ *  refund request the owner approves. */
 function hasCapturedDeposit(b: Booking): boolean {
   return (
     Boolean(b.deposit_paid_at) &&
@@ -92,11 +101,17 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
   let bookings: Booking[] = [];
   let loadError = false;
+  // Bookings whose deposit already has a refund request waiting.
+  let pendingRefundBookingIds: string[] = [];
   if (shopId) {
-    try {
-      bookings = await api.get<Booking[]>(`/api/shops/${shopId}/bookings${bookingsQuery(range, statusFilter)}`);
-    } catch {
-      loadError = true;
+    const [bookingsRes, pendingRes] = await Promise.allSettled([
+      api.get<Booking[]>(`/api/shops/${shopId}/bookings${bookingsQuery(range, statusFilter)}`),
+      api.get<RefundRequest[]>(`/api/shops/${shopId}/refund-requests?status=pending`),
+    ]);
+    if (bookingsRes.status === "fulfilled") bookings = bookingsRes.value ?? [];
+    else loadError = true;
+    if (pendingRes.status === "fulfilled") {
+      pendingRefundBookingIds = (pendingRes.value ?? []).flatMap((r) => (r.booking_id ? [r.booking_id] : []));
     }
   }
 
@@ -110,6 +125,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     bookings,
     shopId,
     loadError,
+    pendingRefundBookingIds,
     window: range,
     today,
     // The API stops at the limit, oldest first: the latest days asked for are missing.
@@ -128,14 +144,45 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "") || null);
   if (!shopId) return json({ ok: false, error: "Choose a shop first." }, { status: 400 });
   const bookingId = form.get("bookingId") as string;
+
+  // A deposit refund is requested here, never issued: the reason and any
+  // evidence go on the Refunds page, where the owner approves or declines.
+  if (form.get("intent") === "request_refund") {
+    if (!token) return json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    const reason = String(form.get("reason") ?? "").trim();
+    const reasonProblem = refundReasonProblem(reason);
+    if (reasonProblem) return json({ ok: false, error: reasonProblem }, { status: 400 });
+    const evidence = evidenceFrom(form);
+    const evidenceProblem = refundEvidenceProblem(evidence);
+    if (evidenceProblem) return json({ ok: false, error: evidenceProblem }, { status: 400 });
+    try {
+      // Filed first: if it is refused, the booking is left exactly as it was.
+      await fileRefundRequest(env.API_URL, token, shopId, { kind: "deposit", booking_id: bookingId, reason }, evidence);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "The request could not be filed";
+      return json({ ok: false, error: message }, { status: 400 });
+    }
+    if (form.get("cancel") === "1") {
+      try {
+        await api.put(`/api/shops/${shopId}/bookings/${bookingId}/status`, { status: "cancelled", refund_deposit: false });
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Something went wrong";
+        return json(
+          { ok: false, error: `The refund request was filed, but the booking was not cancelled: ${message}` },
+          { status: 502 },
+        );
+      }
+    }
+    return json({ ok: true });
+  }
+
   const newStatus = form.get("status") as BookingStatus;
-  const refundDeposit = form.get("refund_deposit");
   try {
     await api.put(`/api/shops/${shopId}/bookings/${bookingId}/status`, {
       status: newStatus,
-      // Only sent for deposit-aware cancellations (the confirm dialog / the
-      // refund button); plain status changes keep the original body shape.
-      ...(refundDeposit !== null ? { refund_deposit: refundDeposit === "1" } : {}),
+      // Sent only by the deposit dialog's "keep" choice. This form can never
+      // ask for a refund: that takes a request and the owner's approval.
+      ...(form.get("refund_deposit") === "0" ? { refund_deposit: false } : {}),
     });
     return json({ ok: true });
   } catch (e: unknown) {
@@ -204,7 +251,7 @@ function StatusSelect({
         options={options}
         onBeforeChange={(next) => {
           // A captured deposit makes cancellation a money decision: hand off
-          // to the refund-or-keep dialog instead of submitting.
+          // to the keep-or-request-a-refund dialog instead of submitting.
           if (next === "cancelled" && hasCapturedDeposit(booking)) {
             onRequestCancelWithDeposit();
             return true;
@@ -276,22 +323,42 @@ function CancelDepositDialog({
 }) {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const busy = fetcher.state !== "idle";
-  // A refund in flight must not be dismissible (backdrop/Escape) or the
+  // The second step: say why the deposit should go back, and attach evidence.
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [tried, setTried] = useState(false);
+  // A request in flight must not be dismissible (backdrop/Escape) or the
   // outcome is lost on the admin.
   const guardedClose = () => {
     if (!busy) onClose();
   };
   const dialogRef = useModalA11y<HTMLDivElement>({ active: true, onClose: guardedClose, lockScroll: false });
+  const reasonProblem = refundReasonProblem(reason);
+  const fileProblem = refundEvidenceProblem(file);
+  const deposit = formatPence(booking.deposit_amount_pence ?? 0);
 
-  function submit(refund: boolean) {
+  function keepDeposit() {
     const fd = new FormData();
     fd.set("bookingId", booking.id);
     fd.set("status", "cancelled");
-    fd.set("refund_deposit", refund ? "1" : "0");
+    fd.set("refund_deposit", "0");
     fetcher.submit(fd, { method: "post" });
   }
 
-  // Close once the cancellation lands; stay open to show a refund error.
+  function requestRefund() {
+    setTried(true);
+    if (reasonProblem || fileProblem) return;
+    const fd = new FormData();
+    fd.set("intent", "request_refund");
+    fd.set("bookingId", booking.id);
+    fd.set("cancel", "1");
+    fd.set("reason", reason.trim());
+    if (file) fd.set("evidence", file, file.name);
+    fetcher.submit(fd, { method: "post", encType: "multipart/form-data" });
+  }
+
+  // Close once the cancellation lands; stay open to show an error.
   const done = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
   useEffect(() => {
     if (done) onClose();
@@ -307,44 +374,60 @@ function CancelDepositDialog({
         aria-modal="true"
         aria-labelledby="cancel-deposit-title"
         tabIndex={-1}
-        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] w-[calc(100%-2rem)] max-w-sm rounded-2xl border border-white/10 bg-dark-100 p-6 shadow-2xl"
+        className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] w-[calc(100%-2rem)] max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-white/10 bg-dark-100 p-6 shadow-2xl"
       >
         <h3 id="cancel-deposit-title" className="font-heading text-lg font-semibold text-white">
-          Cancel this booking?
+          {asking ? "Cancel and ask for a refund?" : "Cancel this booking?"}
         </h3>
         <p className="mt-2 text-sm text-white/60">
-          The customer paid a {formatPence(booking.deposit_amount_pence ?? 0)} deposit. Refunding
-          returns it in full, including our commission. Keeping it means standard commission
-          applies to the amount kept.
+          {asking
+            ? `The booking is cancelled now and the ${deposit} deposit stays held. It goes back to the customer only when the owner approves your request on the Refunds page.`
+            : `The customer paid a ${deposit} deposit. Cancelling keeps it: standard commission applies to the amount kept. To give it back, file a refund request with the reason.`}
         </p>
         {fetcher.data && !fetcher.data.ok && fetcher.data.error && (
           <p role="alert" className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
             {fetcher.data.error}
           </p>
         )}
-        <div className="mt-5 flex flex-col gap-2">
-          <button
-            onClick={() => submit(true)}
-            disabled={busy}
-            className="rounded-lg bg-gold px-4 py-2.5 text-sm font-semibold text-dark hover:bg-gold-light disabled:opacity-50 transition-colors"
+        {asking ? (
+          <form
+            className="mt-4 space-y-4"
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              requestRefund();
+            }}
           >
-            {busy ? "Working…" : "Cancel and refund deposit"}
-          </button>
-          <button
-            onClick={() => submit(false)}
-            disabled={busy}
-            className="rounded-lg border border-white/20 px-4 py-2.5 text-sm font-medium text-white/80 hover:bg-white/5 disabled:opacity-50 transition-colors"
-          >
-            Cancel and keep deposit
-          </button>
-          <button
-            onClick={onClose}
-            disabled={busy}
-            className="rounded-lg px-4 py-2.5 text-sm text-white/60 hover:text-white hover:bg-white/5 disabled:opacity-50 transition-colors"
-          >
-            Go back
-          </button>
-        </div>
+            <RefundRequestFields
+              reason={reason}
+              onReasonChange={setReason}
+              reasonError={tried ? reasonProblem : null}
+              file={file}
+              onFileChange={setFile}
+              disabled={busy}
+            />
+            <div className="flex flex-col gap-2">
+              <Button type="submit" disabled={busy} className="w-full">
+                {busy ? "Working…" : "Cancel booking and file request"}
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setAsking(false)} disabled={busy} className="w-full text-white/70">
+                Go back
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="mt-5 flex flex-col gap-2">
+            <Button type="button" onClick={keepDeposit} disabled={busy} className="w-full">
+              {busy ? "Working…" : "Cancel and keep deposit"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setAsking(true)} disabled={busy} className="w-full">
+              Cancel and ask for a refund
+            </Button>
+            <Button type="button" variant="ghost" onClick={onClose} disabled={busy} className="w-full text-white/70">
+              Go back
+            </Button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -364,7 +447,16 @@ function SummaryCard({ label, value, icon }: { label: string; value: string | nu
 
 const SECTION_HEADING = "text-xs font-semibold text-white/60 uppercase tracking-wide";
 
-function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => void }) {
+function BookingDrawer({
+  booking,
+  onClose,
+  pendingRefund,
+}: {
+  booking: Booking;
+  onClose: () => void;
+  /** A refund request for this booking's deposit is waiting for a decision. */
+  pendingRefund: boolean;
+}) {
   const [confirmCancel, setConfirmCancel] = useState(false);
   // Focus trap, focus-in, Escape-to-close, scroll-lock and focus-restore.
   // Kept in-place (not a Radix portal) so the fetcher-driven StatusSelect
@@ -457,7 +549,11 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
                 ) : null)}
               <div className="border-t border-white/10 pt-2 flex justify-between"><span className="text-sm text-white/60">Net to shop</span><span className="text-sm font-semibold text-white">{formatPence(booking.amount_pence - booking.commission_pence)}</span></div>
               {booking.status === "cancelled" && hasCapturedDeposit(booking) && (
-                <RefundDepositButton bookingId={booking.id} amountPence={booking.deposit_amount_pence ?? 0} />
+                <RequestDepositRefund
+                  bookingId={booking.id}
+                  amountPence={booking.deposit_amount_pence ?? 0}
+                  pending={pendingRefund}
+                />
               )}
             </div>
           </div>
@@ -477,29 +573,87 @@ function BookingDrawer({ booking, onClose }: { booking: Booking; onClose: () => 
   );
 }
 
-/** Recovery path: a booking cancelled by the deposit-blind customer
- *  self-cancel keeps its captured deposit; this refunds it after the fact. */
-function RefundDepositButton({ bookingId, amountPence }: { bookingId: string; amountPence: number }) {
+/** A cancelled booking still holding its captured deposit (the customer
+ *  cancelled online, or the shop cancelled and kept it): the deposit goes
+ *  back only through a refund request the owner approves. */
+function RequestDepositRefund({
+  bookingId,
+  amountPence,
+  pending,
+}: {
+  bookingId: string;
+  amountPence: number;
+  pending: boolean;
+}) {
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [tried, setTried] = useState(false);
+  const { shopId } = useLoaderData<typeof loader>();
   const busy = fetcher.state !== "idle";
   const done = fetcher.state === "idle" && Boolean(fetcher.data?.ok);
-  if (done) {
-    return <p role="status" className="pt-2 text-xs text-emerald-400">Deposit refund started.</p>;
+  const reasonProblem = refundReasonProblem(reason);
+  const fileProblem = refundEvidenceProblem(file);
+
+  if (done || pending) {
+    return (
+      <p role={done ? "status" : undefined} className="pt-2 text-xs text-white/70">
+        {done ? "Refund request filed. " : "A refund request for this deposit is waiting for a decision. "}
+        <Link to={withShopId("/admin/refunds", shopId)} className="text-gold underline underline-offset-2">
+          Open Refunds
+        </Link>
+      </p>
+    );
+  }
+  if (!open) {
+    return (
+      <div className="pt-2">
+        <Button type="button" variant="outline" onClick={() => setOpen(true)} className="w-full">
+          Request refund of {formatPence(amountPence)} deposit
+        </Button>
+      </div>
+    );
   }
   return (
-    <div className="pt-2">
-      <fetcher.Form method="post">
-        <input type="hidden" name="bookingId" value={bookingId} />
-        <input type="hidden" name="status" value="cancelled" />
-        <input type="hidden" name="refund_deposit" value="1" />
-        <Button type="submit" variant="outline" disabled={busy} className="w-full">
-          {busy ? "Refunding…" : `Refund ${formatPence(amountPence)} deposit`}
-        </Button>
-      </fetcher.Form>
+    <form
+      className="space-y-3 pt-3"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        setTried(true);
+        if (reasonProblem || fileProblem) return;
+        const fd = new FormData();
+        fd.set("intent", "request_refund");
+        fd.set("bookingId", bookingId);
+        fd.set("reason", reason.trim());
+        if (file) fd.set("evidence", file, file.name);
+        fetcher.submit(fd, { method: "post", encType: "multipart/form-data" });
+      }}
+    >
+      <RefundRequestFields
+        reason={reason}
+        onReasonChange={setReason}
+        reasonError={tried ? reasonProblem : null}
+        file={file}
+        onFileChange={setFile}
+        disabled={busy}
+      />
+      <p className="text-xs text-white/60">
+        The {formatPence(amountPence)} deposit stays held until the owner approves this on the Refunds page.
+      </p>
       {fetcher.data && !fetcher.data.ok && fetcher.data.error && (
-        <p role="alert" className="mt-2 text-xs text-red-400">{fetcher.data.error}</p>
+        <p role="alert" className="text-xs text-red-400">{fetcher.data.error}</p>
       )}
-    </div>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={busy}>
+          {busy ? "Filing…" : "File refund request"}
+        </Button>
+        <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={busy} className="text-white/70">
+          Not now
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -558,7 +712,8 @@ function BookingsList({ bookings, onSelect }: { bookings: Booking[]; onSelect: (
 }
 
 export default function AdminBookings() {
-  const { bookings, stats, loadError, window: loaded, today, truncated } = useLoaderData<typeof loader>();
+  const { bookings, stats, loadError, window: loaded, today, truncated, pendingRefundBookingIds } =
+    useLoaderData<typeof loader>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
   const [view, setView] = useState<"list" | "calendar">("list");
@@ -727,7 +882,14 @@ export default function AdminBookings() {
         </>
       )}
 
-      {selectedBooking && <BookingDrawer key={selectedBooking.id} booking={selectedBooking} onClose={() => setSelectedId(null)} />}
+      {selectedBooking && (
+        <BookingDrawer
+          key={selectedBooking.id}
+          booking={selectedBooking}
+          onClose={() => setSelectedId(null)}
+          pendingRefund={pendingRefundBookingIds.includes(selectedBooking.id)}
+        />
+      )}
     </div>
   );
 }

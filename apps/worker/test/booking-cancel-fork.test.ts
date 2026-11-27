@@ -61,7 +61,7 @@ async function statusOf(id: string): Promise<string | undefined> {
 }
 
 describe("deposit-aware cancellation fork", () => {
-  it("proxies a captured-deposit cancel to the booking worker with refundDeposit", async () => {
+  it("proxies a captured-deposit cancel to the booking worker with refundDeposit and the refund request", async () => {
     const shop = await seedShop("Fork Shop");
     const admin = await tokenFor(await seedUser("admin", shop), "admin", shop);
     const bookingId = await seedBooking(shop);
@@ -69,7 +69,7 @@ describe("deposit-aware cancellation fork", () => {
 
     const res = await dispatch("PUT", `/api/shops/${shop}/bookings/${bookingId}/status`, {
       headers: authHeaders(admin),
-      body: { status: "cancelled", refund_deposit: true },
+      body: { status: "cancelled", refund_deposit: true, refund_request_id: "rr-9" },
     });
     expect(res.status).toBe(201); // echo stub answers 201 for POST
     const body = (await res.json()) as {
@@ -78,7 +78,7 @@ describe("deposit-aware cancellation fork", () => {
     expect(body.data.stub).toBe("BOOKING");
     expect(body.data.method).toBe("POST");
     expect(body.data.url).toContain(`/booking/shops/${shop}/bookings/${bookingId}/cancel`);
-    expect(JSON.parse(body.data.body)).toEqual({ refundDeposit: true });
+    expect(JSON.parse(body.data.body)).toEqual({ refundDeposit: true, refund_request_id: "rr-9" });
 
     // The stub, not this worker, owns the flip: local status untouched.
     expect(await statusOf(bookingId)).toBe("confirmed");

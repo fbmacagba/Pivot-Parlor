@@ -80,6 +80,7 @@ import * as adminInventory from "~/routes/admin.inventory";
 import * as adminPos from "~/routes/admin.pos";
 import * as adminProducts from "~/routes/admin.products";
 import * as adminQueue from "~/routes/admin.queue";
+import * as adminRefunds from "~/routes/admin.refunds";
 import * as adminSales from "~/routes/admin.sales";
 import * as adminServices from "~/routes/admin.services";
 import * as adminStaff from "~/routes/admin.staff";
@@ -140,6 +141,7 @@ const ACTIONS: Array<[string, unknown, Role]> = [
   ["admin.pos", adminPos, "admin"],
   ["admin.products", adminProducts, "admin"],
   ["admin.queue", adminQueue, "admin"],
+  ["admin.refunds", adminRefunds, "admin"],
   ["admin.sales", adminSales, "admin"],
   ["admin.services", adminServices, "admin"],
   ["admin.staff", adminStaff, "admin"],

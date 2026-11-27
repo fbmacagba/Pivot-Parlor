@@ -1,7 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { seedProduct, seedService, seedShop, seedStaff, tokenFor } from "./helpers";
+import { seedProduct, seedService, seedShop, seedStaff, tokenFor, saleRefundBody } from "./helpers";
 import { dispatch } from "./request";
 import { entriesFor, expectNoPersonalData, gapRowsFor, withAuditOff } from "./audit-helpers";
 
@@ -116,7 +116,7 @@ const REASON = "customer said the pomade smelled odd";
 const refund = async (t: Till, saleId: string, itemId: string, quantity: number) =>
   dispatch("POST", `/booking/shops/${t.shop}/sales/${saleId}/refund`, {
     headers: await authed("admin", t.shop),
-    body: { lines: [{ sale_item_id: itemId, quantity }], reason: REASON },
+    body: await saleRefundBody(t.shop, saleId, [{ sale_item_id: itemId, quantity }], REASON),
   });
 
 /** A Stripe sale made refundable: completed, with a settled PaymentIntent. */
@@ -227,7 +227,12 @@ describe("refund audit", () => {
       entity_id: saleId,
     });
     expect(outcome.changes_json).toBeNull();
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ lines: 1, refund_pence: 1000, via_stripe: false });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({
+      lines: 1,
+      refund_pence: 1000,
+      refund_request_id: expect.any(String),
+      via_stripe: false,
+    });
     expectNoPersonalData(outcome, [SHOP_NAME, "Pomade", REASON]);
     expect(await gapRowsFor(res.headers.get("X-Request-Id")!)).toBe(0);
   });
@@ -239,7 +244,12 @@ describe("refund audit", () => {
     const res = await refund(t, saleId, await productItem(saleId), 1);
     expect(res.status).toBe(200);
     const outcome = await outcomeOf("payment.refund.issue", t.shop, saleId);
-    expect(JSON.parse(outcome.details_json as string)).toEqual({ lines: 1, refund_pence: 1000, via_stripe: true });
+    expect(JSON.parse(outcome.details_json as string)).toEqual({
+      lines: 1,
+      refund_pence: 1000,
+      refund_request_id: expect.any(String),
+      via_stripe: true,
+    });
     const ret = await env.DB.prepare("SELECT stripe_refund_id AS id FROM sale_returns WHERE sale_id = ?")
       .bind(saleId)
       .first<{ id: string }>();
@@ -289,7 +299,7 @@ describe("refund audit", () => {
       { ...env, DB: db },
       "POST",
       `/booking/shops/${t.shop}/sales/${saleId}/refund`,
-      { headers: await authed("admin", t.shop), body: { lines: [{ sale_item_id: item, quantity: 1 }], reason: REASON } }
+      { headers: await authed("admin", t.shop), body: await saleRefundBody(t.shop, saleId, [{ sale_item_id: item, quantity: 1 }], REASON) }
     );
     expect(fired, "the second batch never ran, so the race was never staged").toBe(true);
     expect(res.status).toBe(409);
