@@ -948,8 +948,18 @@ describe("refund review: a sale refund needs a filed, pending request", () => {
     expect(await stockQty(shop, product)).toBe(3);
     expect(await requestRow(bareId)).toMatchObject({ status: "pending", reviewed_by: null });
 
-    // They may still decline it, and file again with evidence.
+    // They may still decline it, and file again with evidence. A key that
+    // names no stored file is refused: it would be evidence in name only.
     expect((await post(`/booking/shops/${shop}/refund-requests/${bareId}/decline`, token, {})).status).toBe(200);
+    const madeUp = await file(shop, token, {
+      kind: "sale",
+      sale_id: saleId,
+      lines,
+      reason: "Customer said it was faulty, photo attached",
+      evidence_key: `refund-evidence/${shop}/photo.png`,
+    });
+    expect(madeUp.status).toBe(400);
+    await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/photo.png`, "png");
     const backed = await file(shop, token, {
       kind: "sale",
       sale_id: saleId,
@@ -1057,6 +1067,10 @@ describe("refund review: a sale refund needs a filed, pending request", () => {
       lines: [{ sale_item_id: productItem, quantity: 1 }],
       reason: "Photo shows the seal was already broken",
     };
+    // Real files, so it is the folder rule that refuses them, not their absence.
+    await env.AUDIT_ARCHIVE.put("anchors/2026-01-01.json", "{}");
+    await env.AUDIT_ARCHIVE.put("refund-evidence/another-shop/x.png", "png");
+    await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/abc.png`, "png");
     const foreign = await file(shop, token, { ...base, evidence_key: "anchors/2026-01-01.json" });
     expect(foreign.status).toBe(400);
     const otherShop = await file(shop, token, { ...base, evidence_key: "refund-evidence/another-shop/x.png" });

@@ -581,6 +581,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
     kind: "sale",
     targetId: saleId,
     approverId: user.sub,
+    evidence: c.env.AUDIT_ARCHIVE,
   });
   if (!claimed.ok) {
     return c.json({ success: false, error: claimed.error }, claimed.status);

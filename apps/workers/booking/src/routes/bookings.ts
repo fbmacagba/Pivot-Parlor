@@ -1040,6 +1040,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
       kind: "deposit",
       targetId: bookingId,
       approverId: getUser(c).sub,
+      evidence: c.env.AUDIT_ARCHIVE,
     });
     if (!claimed.ok) {
       return c.json({ success: false, error: claimed.error }, claimed.status);

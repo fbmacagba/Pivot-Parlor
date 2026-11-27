@@ -110,12 +110,33 @@ export function selfApprovalBlocked(
  */
 export async function claimRefundRequest(
   db: D1Database,
-  args: { shopId: string; requestId: string; kind: RefundRequestKind; targetId: string; approverId: string; now?: Date }
+  args: {
+    shopId: string;
+    requestId: string;
+    kind: RefundRequestKind;
+    targetId: string;
+    approverId: string;
+    /** Where evidence files live: an approver's own request must have a real one. */
+    evidence: R2Bucket;
+    now?: Date;
+  }
 ): Promise<ClaimResult> {
   const now = args.now ?? new Date();
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_CLAIM_MS).toISOString();
   const column = args.kind === "deposit" ? "booking_id" : "sale_id";
+  // An approver's own request counts as backed only while its evidence file
+  // is really there, not merely named on the row.
+  const own = await getRefundRequest(db, args.shopId, args.requestId);
+  if (
+    own &&
+    own.requested_by === args.approverId &&
+    own.evidence_key &&
+    (own.status === "pending" || own.status === "approving") &&
+    !(await args.evidence.head(own.evidence_key))
+  ) {
+    return { ok: false, status: 403, error: SELF_APPROVAL_MESSAGE };
+  }
   const claim = await db
     .prepare(
       `UPDATE refund_requests SET status = 'approving', reviewed_at = ?1

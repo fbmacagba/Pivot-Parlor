@@ -775,10 +775,17 @@ describe("refund review: a deposit goes back only on an approved request", () =>
     expect(await refundTx(bookingId)).toBeNull();
     expect(await requestRow(bareId)).toMatchObject({ status: "pending" });
 
+    // A key that names no real file is not evidence.
     await env.DB
       .prepare("UPDATE refund_requests SET evidence_key = ? WHERE id = ?")
       .bind(`refund-evidence/${shop}/text.png`, bareId)
       .run();
+    const madeUp = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: bareId });
+    expect(madeUp.status).toBe(403);
+    expect(await refundTx(bookingId)).toBeNull();
+    expect(await requestRow(bareId)).toMatchObject({ status: "pending" });
+
+    await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/text.png`, "png");
     const approved = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: bareId });
     expect(approved.status).toBe(200);
     expect(await refundTx(bookingId)).toMatchObject({ amount_pence: 1250 });
