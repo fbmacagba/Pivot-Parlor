@@ -86,6 +86,7 @@ describe("DashboardLayout: server markup", () => {
     expect(bar).toContain('href="/staff" aria-current="page"');
     expect(bar).toContain('href="/staff/bookings"');
     expect(bar).toContain('href="/staff/pos"');
+    expect(bar).toContain('href="/staff/refunds"');
     expect(bar).toContain('href="/staff/bookings?tab=availability"');
     expect(bar).toContain(">POS<");
     expect(bar).not.toContain("More");
