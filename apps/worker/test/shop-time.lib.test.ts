@@ -1,6 +1,26 @@
 /** The shop's calendar and clock (src/lib/shopTime.ts). Workers run in UTC. */
 import { describe, expect, it } from "vitest";
-import { peakHoursInShopTime, scheduleDayOf, shopMonthStart, shopToday } from "../src/lib/shopTime";
+import { bookingStartMs, peakHoursInShopTime, scheduleDayOf, shopMonthStart, shopToday } from "../src/lib/shopTime";
+
+describe("bookingStartMs", () => {
+  it("reads an instant as it is", () => {
+    expect(bookingStartMs("2026-07-01", "2026-07-01T09:00:00.000Z", "Europe/London")).toBe(
+      Date.parse("2026-07-01T09:00:00.000Z"),
+    );
+  });
+
+  it("reads a clock time on the shop's own clock, summer and winter", () => {
+    // 09:30 London in July is 08:30 UTC; in December it is 09:30 UTC.
+    expect(bookingStartMs("2026-07-01", "09:30", "Europe/London")).toBe(Date.parse("2026-07-01T08:30:00Z"));
+    expect(bookingStartMs("2026-12-01", "09:30", "Europe/London")).toBe(Date.parse("2026-12-01T09:30:00Z"));
+    expect(bookingStartMs("2026-07-01", "09:30:00", null)).toBe(Date.parse("2026-07-01T08:30:00Z"));
+  });
+
+  it("is NaN for a value that is neither", () => {
+    expect(bookingStartMs("2026-07-01", "soon", "Europe/London")).toBeNaN();
+    expect(bookingStartMs("not-a-date", "09:30", "Europe/London")).toBeNaN();
+  });
+});
 
 describe("shopToday", () => {
   it("starts the London day at midnight London time, an hour before UTC in summer", () => {

@@ -149,14 +149,61 @@ const adminWalkin = new Hono<{ Bindings: Bindings }>();
 // Operational: admins and staff of the shop (developers bypass). Excludes customers.
 adminWalkin.use("*", authMiddleware, requireShopRole("admin", "staff"));
 
-// GET /api/shops/:shopId/walkin — full queue for admin
+// POST /api/shops/:shopId/walkin — staff add a walk-in by hand (someone at the
+// counter with no phone). The same row and the same entry as the public join,
+// under the signed-in actor instead of an anonymous one.
+adminWalkin.post("/", async (c) => {
+  const shopId = c.req.param("shopId")!;
+  const body: { name?: string; phone?: string; service?: string; notes?: string } =
+    (await readJsonObject(c.req)) ?? {};
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  const service = typeof body.service === "string" ? body.service.trim() : "";
+  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
+  if (!name) return c.json({ success: false, error: "Name is required" }, 400);
+  if (name.length > 120) return c.json({ success: false, error: "Name is too long" }, 400);
+  if (phone.length > 40) return c.json({ success: false, error: "Phone number is too long" }, 400);
+  if (service.length > 120) return c.json({ success: false, error: "Service is too long" }, 400);
+  if (notes.length > 500) return c.json({ success: false, error: "Notes are too long" }, 400);
+
+  const position = await getNextPosition(c.env.DB, shopId);
+  const id = crypto.randomUUID();
+  // Pattern B, as the public join: no name, phone, service or notes in the entry.
+  const refused = await batchWithAudit(
+    c,
+    [
+      c.env.DB.prepare(
+        `INSERT INTO walkin_queue (id, shop_id, name, phone, service, status, position, notes)
+         VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?)`
+      ).bind(id, shopId, name, phone || null, service || null, position, notes || null),
+    ],
+    {
+      action: "walkin.join",
+      outcome: "succeeded",
+      shopId,
+      entityType: "walkin_entry",
+      entityId: id,
+      changes: fieldChanges(null, { status: "waiting" }).changes,
+    },
+  );
+  if (refused) return refused;
+  await c.env.KV.delete(`walkin:queue:${shopId}`);
+  return c.json({ success: true, data: { id, position } }, 201);
+});
+
+// GET /api/shops/:shopId/walkin — full queue for admin.
+// ?include_skipped=1 adds entries skipped in the last 12 hours, so a skipped
+// customer who comes back can be returned to the queue after a reload.
 adminWalkin.get("/", async (c) => {
   const shopId = c.req.param("shopId")!;
+  const withSkipped = c.req.query("include_skipped") === "1";
   const { results } = await c.env.DB
     .prepare(
       `SELECT id, name, phone, service, position, status, notes, created_at, updated_at
        FROM walkin_queue WHERE shop_id = ?
-       AND status IN ('waiting','serving')
+       AND (status IN ('waiting','serving')${
+         withSkipped ? " OR (status = 'skipped' AND updated_at >= datetime('now', '-12 hours'))" : ""
+       })
        ORDER BY position ASC`
     )
     .bind(shopId)
@@ -227,7 +274,7 @@ adminWalkin.delete("/", async (c) => {
       { action: "walkin.remove", shopId: resolvedShopId, entityType: "walkin_entry", entityId: null },
       async (): Promise<Response> => {
         const res = await c.env.DB
-          .prepare("UPDATE walkin_queue SET status = 'removed', updated_at = datetime('now') WHERE shop_id = ? AND status IN ('waiting','serving')")
+          .prepare("UPDATE walkin_queue SET status = 'removed', updated_at = datetime('now') WHERE shop_id = ? AND status IN ('waiting','serving','skipped')")
           .bind(shopId)
           .run();
         cleared = res.meta?.changes ?? 0;

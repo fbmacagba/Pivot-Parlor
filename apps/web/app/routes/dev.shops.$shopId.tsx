@@ -1,5 +1,6 @@
 import { Link, Outlet, useLoaderData, data as json } from "react-router";
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, ShouldRevalidateFunction } from "react-router";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { apiE2eHeadersFromCookieHeader } from "~/lib/e2e-api-headers";
 import { createApiClient } from "~/lib/api";
@@ -37,74 +38,70 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
   if (!token) throw new Response("Unauthorized", { status: 401 });
   const api = createApiClient(env.API_URL, token, apiE2eHeadersFromCookieHeader(request.headers.get("Cookie")));
 
-  // The public GET /api/shops/:id returns a minimal shape; the regenerate hub
-  // needs the developer-scoped fields (has_site, website_status, hero/logo
-  // urls), so pull the full row from the developer shops list and match by id.
-  let shop: Shop;
-  try {
-    const shops = await api.get<Shop[]>("/api/shops");
-    const found = shops.find((s) => s.id === shopId || s.slug === shopId);
-    if (!found) throw new Error("not found");
-    shop = found;
-  } catch {
-    throw new Response("Shop not found", { status: 404 });
-  }
+  // The public GET /api/shops/:id returns a minimal shape (no has_site,
+  // website_status or hero/logo urls), so the full row still comes from the
+  // developer shops list, matched by id. The other four reads take the same
+  // id or slug and do not depend on it, so all five go out together.
+  const key = encodeURIComponent(shopId);
+  const [shopsR, prefsR, ownerR, visualsR, modelsR] = await Promise.allSettled([
+    api.get<Shop[]>("/api/shops"),
+    api.get<DevGenerationPrefs>(`/api/shops/${key}/generation-prefs`),
+    api.get<DevShopOwnerDetails>(`/api/shops/${key}/owner-details`),
+    api.get<VisualsData>(`/api/shops/${key}/visuals`),
+    api.get<AIModel[]>("/api/ai/models"),
+  ]);
 
-  let generationPrefs: DevGenerationPrefs = {
-    template: "minimal",
-    design_notes: null,
-    color_primary: null,
-    color_accent: null,
-  };
-  try {
-    generationPrefs = await api.get<DevGenerationPrefs>(`/api/shops/${shop.id}/generation-prefs`);
-  } catch {
-    /* defaults */
+  // "The list could not be read" and "this shop is not in it" are different
+  // answers: only the second is a 404.
+  if (shopsR.status === "rejected" || !Array.isArray(shopsR.value)) {
+    throw new Response("The shop could not be loaded", { status: 502 });
   }
+  const shop = shopsR.value.find((s) => s.id === shopId || s.slug === shopId);
+  if (!shop) throw new Response("Shop not found", { status: 404 });
 
-  let ownerDetails: DevShopOwnerDetails | null = null;
-  try {
-    ownerDetails = await api.get<DevShopOwnerDetails>(`/api/shops/${shop.id}/owner-details`);
-  } catch {
-    ownerDetails = null;
-  }
+  return json({
+    shop,
+    apiUrl: env.API_URL,
+    // The public site's origin: shop sites and this dashboard share it.
+    publicOrigin: new URL(request.url).origin,
+    // null when the read failed. The design notes are saved back on every
+    // regeneration, so the page must not offer a blank form over real notes.
+    generationPrefs: prefsR.status === "fulfilled" ? prefsR.value : null,
+    ownerDetails: ownerR.status === "fulfilled" ? ownerR.value : null,
+    visuals: visualsR.status === "fulfilled" ? visualsR.value : null,
+    // Live-priced model list for the generation pickers; null falls back to
+    // the snapshot in the page (the API worker caches this for an hour).
+    models: modelsR.status === "fulfilled" && Array.isArray(modelsR.value) ? modelsR.value : null,
+  });
+}
 
-  let visuals: VisualsData | null = null;
-  try {
-    visuals = await api.get<VisualsData>(`/api/shops/${shop.id}/visuals`);
-  } catch {
-    visuals = null;
-  }
+// Deleting this shop from its own page must not reload this loader: the shop
+// is gone, the reload would answer 404, and the page would show an error
+// instead of going back to the list.
+export const shouldRevalidate: ShouldRevalidateFunction = ({ formAction, defaultShouldRevalidate }) =>
+  formAction && /\/api\/shops\/[^/]+\/delete\/?$/.test(formAction) ? false : defaultShouldRevalidate;
 
-  // Live-priced model list for the generation pickers; null falls back to the
-  // snapshot in the route (the API worker caches this for an hour).
-  let models: AIModel[] | null = null;
-  try {
-    models = await api.get<AIModel[]>("/api/ai/models");
-  } catch {
-    models = null;
-  }
-
-  return json({ shop, apiUrl: env.API_URL, generationPrefs, ownerDetails, visuals, models });
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/dev/shops" homeLabel="Back to shops" />;
 }
 
 export default function DevShopLayout() {
-  const { shop, apiUrl, generationPrefs, ownerDetails, visuals, models } = useLoaderData<typeof loader>();
+  const { shop, apiUrl, publicOrigin, generationPrefs, ownerDetails, visuals, models } = useLoaderData<typeof loader>();
 
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/dev/shops" className="text-sm text-gold hover:underline">
-          ← Shops
+        <Link to="/dev/shops" className="tap-target inline-flex items-center text-sm text-gold hover:underline">
+          <span aria-hidden>←&nbsp;</span>Shops
         </Link>
       </div>
       <div>
         <h1 className="font-heading text-2xl font-bold text-white">{shop.name}</h1>
-        <p className="mt-1 text-sm text-white/50">
+        <p className="mt-1 text-sm text-white/60">
           /{shop.slug} · #{shop.shop_number}
         </p>
       </div>
-      <Outlet context={{ shop, apiUrl, generationPrefs, ownerDetails, visuals, models }} />
+      <Outlet context={{ shop, apiUrl, publicOrigin, generationPrefs, ownerDetails, visuals, models }} />
     </div>
   );
 }

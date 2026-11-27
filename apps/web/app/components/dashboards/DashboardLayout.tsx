@@ -64,11 +64,18 @@ export function DashboardLayout({
   }, [menuOpen]);
 
   const drawerRef = useModalA11y<HTMLDivElement>({ active: menuOpen, onClose: closeMenu });
-  const title = topBarTitle ?? shopName ?? "Pivot Parlor Platform";
+  const title = topBarTitle ?? shopName ?? "Pivot Parlor";
   const sidebarProps = { role, shopName, userName, showDeveloperViewSwitcher };
 
   return (
     <div className="pp-dashboard bg-dark text-white md:flex md:h-screen md:overflow-hidden md:supports-[height:100dvh]:h-dvh">
+      {/* First stop for a keyboard: past the whole navigation rail. */}
+      <a
+        href="#pp-dash-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-lg focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-dark focus:outline-none"
+      >
+        Skip to content
+      </a>
       {/* Desktop rail */}
       <div className="hidden md:flex md:h-full md:w-60 md:shrink-0 md:border-r md:border-white/10">
         <Sidebar {...sidebarProps} />
@@ -105,7 +112,7 @@ export function DashboardLayout({
         </header>
         {topBanner && <div className="px-4 md:px-6">{topBanner}</div>}
         {/* Main content: the bottom padding clears the fixed tab bar on phones */}
-        <main className="flex-1 px-4 py-4 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:overflow-y-auto md:px-6 md:py-6 md:pb-6">
+        <main id="pp-dash-main" tabIndex={-1} className="flex-1 px-4 py-4 focus:outline-none pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:overflow-y-auto md:px-6 md:py-6 md:pb-6">
           <Outlet />
         </main>
       </div>

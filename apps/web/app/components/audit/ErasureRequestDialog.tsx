@@ -113,26 +113,21 @@ export function ErasureRequestDialog({
               undone.
             </p>
             {error && (
-              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
                 {error}
               </div>
             )}
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={busy}>
+              <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={busy}>
                 Cancel
               </Button>
               <Form method="post">
                 <input type="hidden" name="intent" value="erase" />
                 <input type="hidden" name="user_id" value={target.userId} />
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="bg-red-600 hover:bg-red-500"
-                  disabled={busy}
-                >
+                <Button type="submit" variant="destructive" size="sm" disabled={busy}>
                   {busy ? (
                     <>
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                       Recording…
                     </>
                   ) : (

@@ -50,7 +50,14 @@ export function createApiClient(
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
 
-    const json = (await res.json()) as { success?: boolean; data?: T; error?: string } & T;
+    // A gateway error page or an empty body is not JSON. Report it as the
+    // refusal it is, with its status, instead of a parse error with none.
+    let json: { success?: boolean; data?: T; error?: string } & T;
+    try {
+      json = (await res.json()) as typeof json;
+    } catch {
+      throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.ok ? 502 : res.status });
+    }
 
     if (!res.ok) {
       // A plain Error (website alerts group by its name) carrying the

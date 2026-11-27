@@ -1,15 +1,31 @@
 // apps/web/app/routes/admin.queue.tsx
-import { useLoaderData, useFetcher, data as json } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator, data as json } from "react-router";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import QRCode from "react-qr-code";
+import { QrCode, UserPlus } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { pageShopId } from "~/lib/pageShop";
-import { readFormData } from "~/lib/formBody";
+import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+import { pageTitle } from "~/lib/pageTitle";
+import { useFetcherResult } from "~/lib/useFetcherResult";
+import { usePolling } from "~/lib/usePolling";
+import { Button } from "~/components/ui/Button";
+import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
+import { Input } from "~/components/ui/Input";
+import { LoadError } from "~/components/ui/LoadError";
+import { ErrorScreen } from "~/components/ErrorScreen";
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
+
+export const meta = () => pageTitle("Walk-in queue");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 interface QueueEntry {
   id: string;
@@ -22,6 +38,14 @@ interface QueueEntry {
   created_at: string;
 }
 
+type ActionResult =
+  | { ok: true; intent: "updateStatus"; entryId: string; status: string }
+  | { ok: true; intent: "clearQueue" }
+  | { ok: true; intent: "addWalkin"; name: string; position: number | null }
+  | { ok: false; error: string; intent?: string; entryId?: string };
+
+const ENTRY_STATUSES = ["waiting", "serving", "served", "skipped", "removed"];
+
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
@@ -31,15 +55,25 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
   let queue: QueueEntry[] = [];
   let shopSlug = "";
+  let loadError = false;
   if (shopId) {
-    try {
-      queue = await api.get<QueueEntry[]>(`/api/shops/${shopId}/walkin`);
-      const shop = await api.get<{ slug: string }>(`/api/shops/${shopId}`);
-      shopSlug = shop.slug ?? "";
-    } catch { /* empty */ }
+    const [queueRes, shopRes] = await Promise.allSettled([
+      // With the entries skipped in the last 12 hours, so a skipped customer
+      // who comes back can still be returned to the queue after a reload.
+      api.get<QueueEntry[]>(`/api/shops/${shopId}/walkin?include_skipped=1`),
+      api.get<{ slug: string }>(`/api/shops/${shopId}`),
+    ]);
+    if (queueRes.status === "fulfilled") queue = queueRes.value ?? [];
+    else loadError = true;
+    if (shopRes.status === "fulfilled") shopSlug = shopRes.value?.slug ?? "";
   }
 
-  return json({ queue, shopId, shopSlug });
+  // The public address customers scan, built from the address this page was
+  // asked at, so staging, a preview and production each print their own.
+  const walkinUrl = shopSlug ? `${new URL(request.url).origin}/${shopSlug}/walkin` : "";
+
+  // shopSlug stays in the loader data: the E2E dashboard sweep reads it.
+  return json({ queue, shopId, shopSlug, walkinUrl, loadError });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -48,22 +82,80 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
   const form = await readFormData(request);
-  if (!form) return json({ ok: false }, 400);
+  if (!form) return json<ActionResult>({ ok: false, error: UNREADABLE_FORM }, 400);
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "") || null);
-  if (!shopId) return json({ ok: false }, 400);
-  const intent = form.get("intent") as string;
+  if (!shopId) return json<ActionResult>({ ok: false, error: "No shop is selected for this page." }, 400);
+  const intent = String(form.get("intent") ?? "");
 
   if (intent === "updateStatus") {
-    const entryId = form.get("entryId") as string;
-    const status = form.get("status") as string;
-    await api.patch(`/api/shops/${shopId}/walkin/${entryId}`, { status });
-    return json({ ok: true });
+    const entryId = String(form.get("entryId") ?? "");
+    const status = String(form.get("status") ?? "");
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(entryId) || !ENTRY_STATUSES.includes(status)) {
+      return json<ActionResult>({ ok: false, error: "That queue change was not understood. Refresh and try again.", intent, entryId }, 400);
+    }
+    try {
+      await api.patch(`/api/shops/${shopId}/walkin/${entryId}`, { status });
+      return json<ActionResult>({ ok: true, intent, entryId, status });
+    } catch (e) {
+      return json<ActionResult>(
+        {
+          ok: false,
+          intent,
+          entryId,
+          error: `The queue was not updated: ${e instanceof Error ? e.message : "the request failed"}. Try again.`,
+        },
+        400,
+      );
+    }
+  }
+  if (intent === "addWalkin") {
+    const name = String(form.get("name") ?? "").trim();
+    const service = String(form.get("service") ?? "").trim();
+    if (!name) return json<ActionResult>({ ok: false, intent, error: "Enter the customer's name." }, 400);
+    if (name.length > 120) {
+      return json<ActionResult>({ ok: false, intent, error: "That name is too long. Keep it to 120 characters." }, 400);
+    }
+    if (service.length > 120) {
+      return json<ActionResult>({ ok: false, intent, error: "That service is too long. Keep it to 120 characters." }, 400);
+    }
+    try {
+      const added = await api.post<{ id: string; position: number }>(`/api/shops/${shopId}/walkin`, {
+        name,
+        ...(service ? { service } : {}),
+      });
+      return json<ActionResult>({
+        ok: true,
+        intent,
+        name,
+        position: typeof added?.position === "number" ? added.position : null,
+      });
+    } catch (e) {
+      return json<ActionResult>(
+        {
+          ok: false,
+          intent,
+          error: `${name} was not added to the queue: ${e instanceof Error ? e.message : "the request failed"}. Try again.`,
+        },
+        400,
+      );
+    }
   }
   if (intent === "clearQueue") {
-    await api.del(`/api/shops/${shopId}/walkin`);
-    return json({ ok: true });
+    try {
+      await api.del(`/api/shops/${shopId}/walkin`);
+      return json<ActionResult>({ ok: true, intent });
+    } catch (e) {
+      return json<ActionResult>(
+        {
+          ok: false,
+          intent,
+          error: `The queue was not cleared: ${e instanceof Error ? e.message : "the request failed"}. Try again.`,
+        },
+        400,
+      );
+    }
   }
-  return json({ ok: false }, 400);
+  return json<ActionResult>({ ok: false, error: "That action was not understood." }, 400);
 }
 
 function timeAgo(iso: string): string {
@@ -73,182 +165,361 @@ function timeAgo(iso: string): string {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-function QRCode({ url }: { url: string }) {
-  // Use QR Server API — no npm package needed
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}&bgcolor=111111&color=C9A84C&margin=10`;
+/**
+ * The list the page shows: what the server last sent, with the change still
+ * in flight laid over it. Dropping the overlay (the request failed) is the
+ * rollback; nothing else has to be undone.
+ */
+function applyPendingStatuses(queue: QueueEntry[], pending: Record<string, string>): QueueEntry[] {
+  return queue.map((e) => (pending[e.id] ? { ...e, status: pending[e.id] } : e));
+}
+
+/** Drawn in the browser: the shop's address never leaves for a QR service.
+ *  Dark modules on a white tile with a quiet zone, which every scanner reads. */
+function WalkinQr({ url }: { url: string }) {
   return (
-    <div className="flex flex-col items-center gap-3">
-      <img src={qrUrl} alt="Walk-in QR code" className="w-40 h-40 rounded-xl border border-white/10" />
-      <p className="text-xs text-white/60 text-center break-all max-w-[180px]">{url}</p>
+    <div className="shrink-0 rounded-xl bg-white p-4">
+      <QRCode value={url} size={168} bgColor="#ffffff" fgColor="#000000" title="QR code to join the walk-in queue" />
     </div>
   );
 }
 
-export default function AdminQueue() {
-  const { queue: initialQueue, shopId, shopSlug } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<{ ok: boolean }>();
-  const [queue, setQueue] = useState<QueueEntry[]>(initialQueue);
-  const [showQR, setShowQR] = useState(false);
+/** Adds someone who walked in and has no phone to scan with. */
+function AddWalkinForm({ shopId }: { shopId: string | null }) {
+  const fetcher = useFetcher<ActionResult>();
+  const [name, setName] = useState("");
+  const [service, setService] = useState("");
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const busy = fetcher.state !== "idle";
 
-  const walkinUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/${shopSlug}/walkin`
-    : `https://pivot-parlor-web.pages.dev/${shopSlug}/walkin`;
-
-  // Poll queue every 30s
-  useEffect(() => {
-    if (!shopId) return;
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/shops/${shopId}/walkin-poll`);
-        if (res.ok) {
-          const data = await res.json() as { data?: QueueEntry[] };
-          if (data.data) setQueue(data.data);
-        }
-      } catch { /* non-fatal */ }
-    };
-    const interval = setInterval(poll, 30_000);
-    return () => clearInterval(interval);
-  }, [shopId]);
-
-  // Optimistic update from fetcher
-  useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data?.ok) {
-      // Revalidate via loader
+  useFetcherResult(fetcher, (data) => {
+    setResult(data);
+    if (data.ok) {
+      setName("");
+      setService("");
     }
-  }, [fetcher.state, fetcher.data]);
+  });
 
-  function updateStatus(entryId: string, status: string) {
-    // Optimistic
-    setQueue(prev => prev.filter(e => !(status === "served" || status === "removed" || status === "skipped") || e.id !== entryId)
-      .map(e => e.id === entryId ? { ...e, status } : e));
+  return (
+    <section aria-labelledby="queue-add" className="rounded-xl border border-white/10 bg-dark-100 p-5">
+      <h2 id="queue-add" className="mb-3 text-sm font-semibold text-white">Add a walk-in</h2>
+      <fetcher.Form method="post" className="flex flex-wrap items-end gap-3" onSubmit={() => setResult(null)}>
+        <input type="hidden" name="intent" value="addWalkin" />
+        {shopId && <input type="hidden" name="shopId" value={shopId} />}
+        <div className="min-w-[10rem] flex-1">
+          <Input
+            label="Name"
+            name="name"
+            required
+            maxLength={120}
+            autoComplete="off"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div className="min-w-[10rem] flex-1">
+          <Input
+            label="Service (optional)"
+            name="service"
+            maxLength={120}
+            autoComplete="off"
+            placeholder="e.g. skin fade"
+            value={service}
+            onChange={(e) => setService(e.target.value)}
+          />
+        </div>
+        <Button type="submit" disabled={busy || !shopId || name.trim() === ""}>
+          <UserPlus className="h-4 w-4" aria-hidden />
+          {busy ? "Adding…" : "Add to queue"}
+        </Button>
+      </fetcher.Form>
+      {result?.ok && result.intent === "addWalkin" && (
+        <p role="status" className="mt-3 text-sm text-emerald-300">
+          {result.name} added to the queue{result.position ? ` at position ${result.position}` : ""}.
+        </p>
+      )}
+      {result && !result.ok && (
+        <p role="alert" className="mt-3 text-sm text-red-400">
+          {result.error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+export default function AdminQueue() {
+  const { queue: loaded, shopId, walkinUrl, loadError } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<ActionResult>();
+  const revalidator = useRevalidator();
+  const [showQR, setShowQR] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Changes sent but not yet answered, by entry id.
+  const [pending, setPending] = useState<Record<string, string>>({});
+
+  const busy = fetcher.state !== "idle";
+
+  usePolling(() => revalidator.revalidate(), { intervalMs: 30_000, enabled: Boolean(shopId) && !busy });
+
+  useFetcherResult(fetcher, (result) => {
+    // The loader has reloaded by now, so the overlay is no longer needed
+    // (success) or must be dropped (failure: the entry returns as it was).
+    setPending({});
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setError(null);
+    if (result.intent === "clearQueue") setConfirmClear(false);
+  });
+
+  function updateStatus(entry: QueueEntry, status: string) {
+    setError(null);
+    setPending((p) => ({ ...p, [entry.id]: status }));
     const form = new FormData();
     form.append("intent", "updateStatus");
-    form.append("entryId", entryId);
+    form.append("entryId", entry.id);
     form.append("status", status);
     fetcher.submit(form, { method: "post" });
   }
 
-  const waiting = queue.filter(e => e.status === "waiting");
-  const serving = queue.filter(e => e.status === "serving");
+  function clearQueue() {
+    setError(null);
+    const form = new FormData();
+    form.append("intent", "clearQueue");
+    fetcher.submit(form, { method: "post" });
+  }
+
+  const queue = applyPendingStatuses(loaded as QueueEntry[], pending);
+  const waiting = queue.filter((e) => e.status === "waiting");
+  const serving = queue.filter((e) => e.status === "serving");
+  // From the loader (the last 12 hours), so the group survives a reload.
+  const skippedShown = queue.filter((e) => e.status === "skipped");
+  const liveCount = waiting.length + serving.length;
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-white">Walk-in Queue</h1>
+          <h1 className="font-heading text-2xl font-bold text-white">Walk-in queue</h1>
           <p className="mt-0.5 text-sm text-white/60">
-            {waiting.length} waiting · {serving.length} being served · refreshes every 30s
+            {loadError
+              ? "Refreshes every 30 seconds"
+              : `${waiting.length} waiting · ${serving.length} being served · refreshes every 30 seconds`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowQR(v => !v)}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/20 text-sm text-white/70 hover:bg-white/5 transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-            </svg>
-            {showQR ? "Hide QR" : "Show QR"}
-          </button>
-          <fetcher.Form method="post" onSubmit={e => { if (!confirm("Clear the entire queue?")) e.preventDefault(); }}>
-            <input type="hidden" name="intent" value="clearQueue" />
-            <button type="submit"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/30 text-sm text-red-400 hover:bg-red-500/10 transition-colors">
-              Clear queue
-            </button>
-          </fetcher.Form>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowQR((v) => !v)}
+            aria-expanded={showQR}
+            disabled={!walkinUrl}
+          >
+            <QrCode className="h-4 w-4" aria-hidden />
+            {showQR ? "Hide QR code" : "Show QR code"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setConfirmClear(true)}
+            disabled={loadError || liveCount === 0}
+          >
+            Clear queue
+          </Button>
         </div>
       </div>
 
-      {/* QR Code panel */}
-      {showQR && (
-        <div className="rounded-xl border border-white/10 bg-dark-100 p-6 flex flex-col sm:flex-row items-center gap-6">
-          <QRCode url={walkinUrl} />
-          <div>
-            <h3 className="font-semibold text-white mb-1">Walk-in QR Code</h3>
-            <p className="text-sm text-white/50 mb-3">Customers scan this to join the queue from their phone.</p>
-            <a href={walkinUrl} target="_blank" rel="noopener noreferrer"
-              className="text-xs text-gold hover:underline break-all">{walkinUrl}</a>
-            <p className="text-xs text-white/50 mt-3">Print and display at your entrance or counter.</p>
+      {error && !confirmClear && (
+        <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
+      <ConfirmDialog
+        open={confirmClear}
+        onCancel={() => {
+          setConfirmClear(false);
+          setError(null);
+        }}
+        onConfirm={clearQueue}
+        title="Clear the whole queue?"
+        confirmLabel="Clear queue"
+        destructive
+        pending={busy}
+        pendingLabel="Clearing…"
+        error={confirmClear ? error : null}
+      >
+        <p>
+          {liveCount === 1 ? "1 person" : `${liveCount} people`} will be removed from the queue, including anyone being
+          served. Customers watching their place on their phone will see they have been removed.
+        </p>
+        <p>This cannot be undone.</p>
+      </ConfirmDialog>
+
+      {/* QR code panel */}
+      {showQR && walkinUrl && (
+        <div className="flex flex-col items-center gap-6 rounded-xl border border-white/10 bg-dark-100 p-6 sm:flex-row">
+          <WalkinQr url={walkinUrl} />
+          <div className="min-w-0">
+            <h2 className="mb-1 font-semibold text-white">Walk-in QR code</h2>
+            <p className="mb-3 text-sm text-white/70">Customers scan this to join the queue from their phone.</p>
+            <a
+              href={walkinUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="tap-target inline-flex items-center break-all text-sm text-gold hover:underline"
+            >
+              {walkinUrl}
+            </a>
+            <p className="mt-3 text-xs text-white/60">Print and display at your entrance or counter.</p>
           </div>
         </div>
       )}
 
-      {/* Currently serving */}
-      {serving.length > 0 && (
-        <div>
-          <h2 className="text-xs font-semibold text-gold/70 uppercase tracking-wider mb-3">Now serving</h2>
-          <div className="space-y-2">
-            {serving.map(entry => (
-              <div key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gold/25 bg-gold/5 px-5 py-4">
-                <div className="w-8 h-8 rounded-full bg-gold/20 flex items-center justify-center font-bold text-gold text-sm shrink-0">
-                  {entry.name.charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-[9rem] flex-1">
-                  <p className="font-semibold text-white">{entry.name}</p>
-                  {entry.service && <p className="text-xs text-white/50">{entry.service}</p>}
-                </div>
-                <button onClick={() => updateStatus(entry.id, "served")}
-                  className="tap-target ml-auto px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs font-semibold hover:bg-emerald-500/30 transition-colors">
-                  Mark served ✓
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <AddWalkinForm shopId={shopId} />
 
-      {/* Waiting queue */}
-      <div>
-        <h2 className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-3">
-          Waiting {waiting.length > 0 ? `(${waiting.length})` : ""}
-        </h2>
-        {waiting.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50 text-sm">
-            Queue is empty. Show the QR code to customers to get started.
-          </div>
-        ) : (
-          <div className="rounded-xl border border-white/10 bg-dark-100 divide-y divide-white/5 overflow-hidden">
-            {waiting.map((entry, i) => (
-              <div key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 hover:bg-white/[0.02] transition-colors">
-                {/* Position */}
-                <div className="w-8 shrink-0 text-center">
-                  <span className="text-lg font-bold text-white/50">{entry.position}</span>
-                </div>
-                {/* Avatar */}
-                <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center font-semibold text-white/60 text-sm shrink-0">
-                  {entry.name.charAt(0).toUpperCase()}
-                </div>
-                {/* Info */}
-                <div className="min-w-[9rem] flex-1">
-                  <p className="font-medium text-white">{entry.name}</p>
-                  <p className="text-xs text-white/60">
-                    {entry.service ? `${entry.service} · ` : ""}{timeAgo(entry.created_at)}
-                    {entry.phone ? ` · ${entry.phone}` : ""}
-                  </p>
-                </div>
-                {/* Actions */}
-                <div className="ml-auto flex shrink-0 items-center gap-2">
-                  {i === 0 && (
-                    <button onClick={() => updateStatus(entry.id, "serving")}
-                      className="tap-target px-3 py-1.5 rounded-lg bg-gold/20 text-gold text-xs font-semibold hover:bg-gold/30 transition-colors">
-                      Call next
-                    </button>
-                  )}
-                  <button onClick={() => updateStatus(entry.id, "skipped")}
-                    className="tap-target px-2 py-1.5 rounded-lg text-white/50 hover:text-white/60 hover:bg-white/5 text-xs transition-colors">
-                    Skip
-                  </button>
-                  <button onClick={() => updateStatus(entry.id, "removed")}
-                    className="tap-target px-2 py-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-red-500/10 text-xs transition-colors">
-                    Remove
-                  </button>
-                </div>
+      {loadError ? (
+        <LoadError what="the walk-in queue" />
+      ) : (
+        <>
+          {/* Currently serving */}
+          {serving.length > 0 && (
+            <section aria-labelledby="queue-serving">
+              <h2 id="queue-serving" className="mb-3 text-xs font-semibold uppercase tracking-wider text-gold">
+                Now serving
+              </h2>
+              <ul className="space-y-2">
+                {serving.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gold/25 bg-gold/5 px-5 py-4"
+                  >
+                    <div aria-hidden className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gold/20 text-sm font-bold text-gold">
+                      {entry.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-[9rem] flex-1">
+                      <p className="font-semibold text-white">{entry.name}</p>
+                      {entry.service && <p className="text-xs text-white/60">{entry.service}</p>}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="ml-auto"
+                      onClick={() => updateStatus(entry, "served")}
+                      disabled={busy}
+                    >
+                      Mark served
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Waiting queue */}
+          <section aria-labelledby="queue-waiting">
+            <h2 id="queue-waiting" className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/60">
+              Waiting {waiting.length > 0 ? `(${waiting.length})` : ""}
+            </h2>
+            {waiting.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-sm text-white/60">
+                Nobody is waiting. Show the QR code so customers can join the queue.
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            ) : (
+              <ul className="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10 bg-dark-100">
+                {waiting.map((entry, i) => (
+                  <li key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-white/[0.02]">
+                    {/* Position */}
+                    <div className="w-8 shrink-0 text-center">
+                      <span className="text-lg font-bold text-white/60">
+                        <span className="sr-only">Position </span>
+                        {entry.position}
+                      </span>
+                    </div>
+                    {/* Info */}
+                    <div className="min-w-[9rem] flex-1">
+                      <p className="font-medium text-white">{entry.name}</p>
+                      <p className="text-xs text-white/60">
+                        {entry.service ? `${entry.service} · ` : ""}
+                        {timeAgo(entry.created_at)}
+                        {entry.phone ? ` · ${entry.phone}` : ""}
+                      </p>
+                    </div>
+                    {/* Actions */}
+                    <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+                      {i === 0 && (
+                        <Button type="button" size="sm" onClick={() => updateStatus(entry, "serving")} disabled={busy}>
+                          Call next
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => updateStatus(entry, "skipped")}
+                        disabled={busy}
+                        aria-label={`Skip ${entry.name}`}
+                      >
+                        Skip
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => updateStatus(entry, "removed")}
+                        disabled={busy}
+                        aria-label={`Remove ${entry.name} from the queue`}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Skipped in the last 12 hours */}
+          {skippedShown.length > 0 && (
+            <section aria-labelledby="queue-skipped">
+              <h2 id="queue-skipped" className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/60">
+                Skipped ({skippedShown.length})
+              </h2>
+              <p className="mb-3 text-xs text-white/60">
+                People skipped in the last 12 hours. Return someone when they are back in the shop.
+              </p>
+              <ul className="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10 bg-dark-100">
+                {skippedShown.map((entry) => (
+                  <li key={entry.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
+                    <div className="min-w-[9rem] flex-1">
+                      <p className="font-medium text-white/80">{entry.name}</p>
+                      <p className="text-xs text-white/60">
+                        {entry.service ? `${entry.service} · ` : ""}
+                        joined {timeAgo(entry.created_at)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="ml-auto"
+                      onClick={() => updateStatus(entry, "waiting")}
+                      disabled={busy}
+                      aria-label={`Return ${entry.name} to the queue`}
+                    >
+                      Return to queue
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
+      )}
     </div>
   );
 }

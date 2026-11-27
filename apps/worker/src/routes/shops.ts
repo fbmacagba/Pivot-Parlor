@@ -24,6 +24,7 @@ import {
   insertGenerationJob,
   updateGenerationJob,
   getStaffByShop,
+  getRunningGenerationJob,
   getServicesByShop,
   getServiceById,
   getShopSiteImages,
@@ -1534,6 +1535,27 @@ shops.post("/:shopId/generate-site", authMiddleware, async (c) => {
     typeof body.template === "string" && KNOWN_TEMPLATES.includes(body.template.trim().toLowerCase())
       ? body.template.trim().toLowerCase()
       : undefined;
+
+  // One run per shop at a time. The buttons guard this in the browser, but a
+  // reload or a second tab loses that state, and every run is paid for. A job
+  // untouched for 30 minutes has stalled and no longer blocks a new one. The
+  // running job's id goes back so the caller can follow it instead.
+  const running = await getRunningGenerationJob(
+    c.env.DB,
+    shop.id,
+    new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+  );
+  if (running) {
+    return c.json(
+      {
+        success: false,
+        error: "A site generation is already running for this shop.",
+        code: "generation_in_progress",
+        data: { job_id: running.id },
+      },
+      409,
+    );
+  }
 
   let jobId: string | null = null;
   const nowKv = () =>

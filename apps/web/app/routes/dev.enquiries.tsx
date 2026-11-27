@@ -1,12 +1,16 @@
-import { useFetcher, useLoaderData, useRevalidator, data as json } from "react-router";
+import { Link, useFetcher, useLoaderData, useNavigation, data as json } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useEffect, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { Copy, ExternalLink } from "lucide-react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { LoadError } from "~/components/ui/LoadError";
+import { Select } from "~/components/ui/Select";
+import { StatusBadge } from "~/components/ui/StatusBadge";
 import { formatDateTime } from "~/lib/dateFormat";
 import {
   Dialog,
@@ -15,10 +19,18 @@ import {
   DialogTitle,
 } from "~/components/ui/Dialog";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { pageTitle } from "~/lib/pageTitle";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+import { useFetcherResult } from "~/lib/useFetcherResult";
+
+export const meta = () => pageTitle("Enquiries");
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/dev" homeLabel="Back to overview" />;
+}
 
 interface Enquiry {
   id: string;
@@ -33,6 +45,11 @@ interface Enquiry {
   shop_id?: string | null;
 }
 
+/** The API hands enquiries back newest first, this many to a page. */
+const PAGE_SIZE = 100;
+/** The most this page will hold at once (ten pages). */
+const MAX_SHOWN = 1000;
+
 function slugBaseFromShopName(name: string): string {
   return name
     .toLowerCase()
@@ -42,19 +59,49 @@ function slugBaseFromShopName(name: string): string {
     .replace(/-+/g, "-");
 }
 
+/** How many enquiries `?show=` asks for: whole pages, between one page and the cap. */
+function shownFromParam(raw: string | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= PAGE_SIZE) return PAGE_SIZE;
+  return Math.min(Math.ceil(n / PAGE_SIZE) * PAGE_SIZE, MAX_SHOWN);
+}
+
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
   await requireRole(request, "developer", env.API_URL);
   const token = getSessionToken(request);
   const api = createApiClient(env.API_URL, token);
 
-  let enquiries: Enquiry[] = [];
-  try {
-    enquiries = await api.get<Enquiry[]>("/api/contact");
-  } catch {
-    /* empty */
+  const shown = shownFromParam(new URL(request.url).searchParams.get("show"));
+  const offsets = Array.from({ length: shown / PAGE_SIZE }, (_, i) => i * PAGE_SIZE);
+  const pages = await Promise.allSettled(
+    offsets.map((offset) => api.get<Enquiry[]>(`/api/contact?limit=${PAGE_SIZE}&offset=${offset}`)),
+  );
+
+  const enquiries: Enquiry[] = [];
+  let loadError = false;
+  // True when a later page failed: what is shown is real but not everything asked for.
+  let olderMissing = false;
+  let lastPageFull = false;
+  for (const [i, page] of pages.entries()) {
+    if (page.status === "rejected" || !Array.isArray(page.value)) {
+      if (i === 0) loadError = true;
+      else olderMissing = true;
+      break;
+    }
+    enquiries.push(...page.value);
+    lastPageFull = page.value.length === PAGE_SIZE;
+    if (!lastPageFull) break;
   }
-  return json({ enquiries });
+
+  return json({
+    enquiries,
+    loadError,
+    olderMissing,
+    shown,
+    // A full last page means there may be older ones the page has not asked for.
+    hasMore: !loadError && !olderMissing && lastPageFull,
+  });
 }
 
 type OnboardSuccess = {
@@ -122,13 +169,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 }
 
+type OnboardedFilter = "all" | "open" | "onboarded";
+
 export default function DevEnquiries() {
-  const { enquiries } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher<typeof action>();
-  const revalidator = useRevalidator();
+  const { enquiries, loadError, olderMissing, shown, hasMore } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<OnboardSuccess | OnboardFail>();
+  const navigation = useNavigation();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [successOpen, setSuccessOpen] = useState(false);
   const [selected, setSelected] = useState<Enquiry | null>(null);
   const [formShopName, setFormShopName] = useState("");
   const [formOwnerEmail, setFormOwnerEmail] = useState("");
@@ -136,27 +184,39 @@ export default function DevEnquiries() {
   const [formSlug, setFormSlug] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const [successPayload, setSuccessPayload] = useState<OnboardSuccess | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [messageOpen, setMessageOpen] = useState(false);
+  const [copied, setCopied] = useState<"payment" | "invite" | null>(null);
   const [messageEnquiry, setMessageEnquiry] = useState<Enquiry | null>(null);
 
-  const prevFetcherState = useRef(fetcher.state);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<OnboardedFilter>("all");
 
-  useEffect(() => {
-    if (prevFetcherState.current === "submitting" && fetcher.state === "idle" && fetcher.data) {
-      const d = fetcher.data;
-      if ("success" in d && d.success) {
-        setConfirmOpen(false);
-        setActionError(null);
-        setSuccessPayload(d);
-        setSuccessOpen(true);
-        revalidator.revalidate();
-      } else if ("success" in d && !d.success && "error" in d) {
-        setActionError(d.error);
-      }
+  // Once per finished submission. A fetcher goes submitting, loading, idle,
+  // and keeps its last answer, so neither "was submitting, now idle" nor
+  // "idle with data" is a safe test (app/lib/useFetcherResult.ts).
+  useFetcherResult(fetcher, (answer) => {
+    if (answer.success) {
+      setConfirmOpen(false);
+      setActionError(null);
+      setSuccessPayload(answer);
+    } else {
+      setActionError(answer.error || "The shop could not be created. Please try again.");
     }
-    prevFetcherState.current = fetcher.state;
-  }, [fetcher.state, fetcher.data, revalidator]);
+  });
+  const busy = fetcher.state !== "idle";
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return enquiries.filter((e) => {
+      const onboarded = Boolean(e.onboarded_at);
+      if (filter === "open" && onboarded) return false;
+      if (filter === "onboarded" && !onboarded) return false;
+      if (!needle) return true;
+      return [e.full_name, e.shop_name, e.email, e.phone ?? "", e.message ?? ""].some((field) =>
+        field.toLowerCase().includes(needle),
+      );
+    });
+  }, [enquiries, query, filter]);
+  const openCount = useMemo(() => enquiries.filter((e) => !e.onboarded_at).length, [enquiries]);
 
   function openOnboard(e: Enquiry) {
     setSelected(e);
@@ -169,105 +229,191 @@ export default function DevEnquiries() {
   }
 
   function closeSuccess() {
-    setSuccessOpen(false);
     setSuccessPayload(null);
-    setCopied(false);
-    revalidator.revalidate();
+    setCopied(null);
   }
 
-  async function copyCheckoutUrl() {
-    const url = successPayload?.checkout_url;
-    if (!url || typeof navigator === "undefined" || !navigator.clipboard) return;
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function copy(text: string | undefined, what: "payment" | "invite") {
+    if (!text || typeof navigator === "undefined" || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(what);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      /* clipboard refused: the link is on screen to copy by hand */
+    }
   }
+
+  const inviteUrl =
+    successPayload?.invite_token && typeof window !== "undefined"
+      ? `${window.location.origin}/invite/${successPayload.invite_token}`
+      : null;
+  const loadingMore = navigation.state === "loading" && navigation.location?.pathname === "/dev/enquiries";
 
   return (
     <div>
-      <h1 className="font-heading text-2xl font-bold text-white mb-6">
-        Enquiries <Badge variant="gold">{enquiries.length}</Badge>
+      <h1 className="mb-6 flex flex-wrap items-center gap-2 font-heading text-2xl font-bold text-white">
+        Enquiries
+        {!loadError && (
+          <Badge variant="default" aria-label={`${enquiries.length}${hasMore ? " or more" : ""} loaded`}>
+            {enquiries.length}
+            {hasMore ? "+" : ""}
+          </Badge>
+        )}
       </h1>
 
-      <div className="rounded-xl border border-white/10 bg-dark-100 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-white/10">
-              {["Name", "Shop", "Type", "Email", "Phone", "Message", "Date", "Actions"].map((h) => (
-                <th
-                  key={h}
-                  className={
-                    h === "Actions"
-                      ? "px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider whitespace-nowrap min-w-[8.5rem]"
-                      : "px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider"
-                  }
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {enquiries.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-white/60">
-                  No enquiries yet.
-                </td>
-              </tr>
-            ) : (
-              enquiries.map((e) => {
+      {loadError ? (
+        <LoadError what="the enquiries" />
+      ) : enquiries.length === 0 ? (
+        <p className="rounded-xl border border-white/10 bg-dark-100 px-4 py-8 text-center text-sm text-white/60">
+          No enquiries yet. Contact form submissions appear here.
+        </p>
+      ) : (
+        <>
+          <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_14rem] sm:items-end">
+            <Input
+              type="search"
+              label="Search enquiries"
+              hideLabel
+              placeholder="Search by name, shop, email, phone or message…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <Select label="Show" value={filter} onChange={(e) => setFilter(e.target.value as OnboardedFilter)}>
+              <option value="all">All enquiries</option>
+              <option value="open">Not yet onboarded ({openCount})</option>
+              <option value="onboarded">Onboarded ({enquiries.length - openCount})</option>
+            </Select>
+          </div>
+
+          <p className="mb-2 text-sm text-white/60" role="status">
+            Showing {visible.length} of the {enquiries.length} newest enquiries loaded
+            {hasMore ? ". Search and the filter cover only what is loaded; older ones are below." : "."}
+          </p>
+
+          {visible.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-dark-100 px-4 py-8 text-center text-sm text-white/60">
+              <p>No loaded enquiries match.</p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                onClick={() => {
+                  setQuery("");
+                  setFilter("all");
+                }}
+              >
+                Clear search and filter
+              </Button>
+            </div>
+          ) : (
+            <ul aria-label="Enquiries" className="divide-y divide-white/5 rounded-xl border border-white/10 bg-dark-100">
+              {visible.map((e) => {
                 const onboarded = Boolean(e.onboarded_at);
                 return (
-                  <tr key={e.id} className="hover:bg-white/2">
-                    <td className="px-4 py-3 font-medium text-white">{e.full_name}</td>
-                    <td className="px-4 py-3 text-white/70">{e.shop_name}</td>
-                    <td className="px-4 py-3 text-white/60 capitalize">{e.shop_type.replace(/_/g, " ")}</td>
-                    <td className="px-4 py-3 text-white/60">{e.email}</td>
-                    <td className="px-4 py-3 text-white/50 text-xs max-w-[120px] truncate" title={e.phone ?? ""}>
-                      {e.phone || "Not given"}
-                    </td>
-                    <td className="px-4 py-3 text-white/50 text-xs max-w-[200px]">
+                  <li
+                    key={e.id}
+                    className="grid gap-x-4 gap-y-2 px-4 py-4 hover:bg-white/[0.02] sm:px-5 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.3fr)_minmax(0,1.6fr)_auto] md:items-start"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-white">{e.full_name}</p>
+                      <p className="text-sm text-white/70">
+                        {e.shop_name}
+                        <span className="capitalize text-white/60"> · {e.shop_type.replace(/_/g, " ")}</span>
+                      </p>
+                      <p className="mt-1 text-xs text-white/60">{formatDateTime(e.created_at)}</p>
+                    </div>
+                    <div className="min-w-0 text-sm">
+                      <a href={`mailto:${e.email}`} className="tap-target inline-flex items-center break-all text-gold hover:underline">
+                        {e.email}
+                      </a>
+                      <p>
+                        {e.phone ? (
+                          <a href={`tel:${e.phone}`} className="tap-target inline-flex items-center text-white/80 hover:text-white">
+                            {e.phone}
+                          </a>
+                        ) : (
+                          <span className="text-white/60">No phone given</span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="min-w-0 text-sm">
                       {e.message ? (
-                        <button
-                          type="button"
-                          onClick={() => { setMessageEnquiry(e); setMessageOpen(true); }}
-                          className="truncate block max-w-[200px] text-left hover:text-gold transition-colors underline decoration-dotted"
-                          title="Click to read full message"
-                        >
-                          {e.message}
-                        </button>
-                      ) : "No message"}
-                    </td>
-                    <td className="px-4 py-3 text-white/60 text-xs whitespace-nowrap">
-                      {formatDateTime(e.created_at)}
-                    </td>
-                    {/* Always render Actions cell — onboarded_at only toggles button vs disabled state */}
-                    <td className="px-4 py-3 whitespace-nowrap align-middle">
+                        <>
+                          <p className="line-clamp-2 break-words text-white/80">{e.message}</p>
+                          <button
+                            type="button"
+                            onClick={() => setMessageEnquiry(e)}
+                            className="tap-target inline-flex items-center rounded text-sm text-gold hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                          >
+                            Read message<span className="sr-only"> from {e.full_name}</span>
+                          </button>
+                        </>
+                      ) : (
+                        <p className="text-white/60">No message</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 md:justify-end">
                       {onboarded ? (
-                        <Button type="button" size="sm" variant="outline" disabled className="opacity-70 cursor-not-allowed">
-                          Onboarded
-                        </Button>
+                        <>
+                          <StatusBadge status="active" label="Onboarded" />
+                          {e.shop_id && (
+                            <Button asChild variant="ghost" size="sm">
+                              <Link to={`/dev/shops/${e.shop_id}`}>
+                                Open shop<span className="sr-only"> for {e.shop_name}</span>
+                              </Link>
+                            </Button>
+                          )}
+                        </>
                       ) : (
                         <Button type="button" size="sm" variant="outline" onClick={() => openOnboard(e)}>
-                          Onboard
+                          Onboard<span className="sr-only"> {e.shop_name}</span>
                         </Button>
                       )}
-                    </td>
-                  </tr>
+                    </div>
+                  </li>
                 );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+              })}
+            </ul>
+          )}
 
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          {olderMissing && (
+            <p role="alert" className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              Older enquiries could not be loaded. The {enquiries.length} above are complete; reload to try again.
+            </p>
+          )}
+          {hasMore && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {shown < MAX_SHOWN ? (
+                <Button asChild variant="secondary">
+                  <Link to={`?show=${shown + PAGE_SIZE}`} replace preventScrollReset aria-disabled={loadingMore}>
+                    {loadingMore ? "Loading…" : `Load ${PAGE_SIZE} older enquiries`}
+                  </Link>
+                </Button>
+              ) : (
+                <p className="text-sm text-white/70">
+                  This page shows the newest {MAX_SHOWN} enquiries. Older ones are not listed here.
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Onboard: closed only by its own outcome, Cancel, or the close button while idle. */}
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          if (!open && !busy) setConfirmOpen(false);
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Onboard shop from enquiry</DialogTitle>
           </DialogHeader>
           {selected && (
-            <fetcher.Form method="post" className="space-y-4">
+            <fetcher.Form method="post" className="space-y-4" onSubmit={() => setActionError(null)}>
               <input type="hidden" name="intent" value="onboard" />
               <input type="hidden" name="contact_email" value={selected.email} />
 
@@ -278,26 +424,17 @@ export default function DevEnquiries() {
                 onChange={(ev) => setFormShopName(ev.target.value)}
                 required
               />
-              <div>
-                <label className="block text-sm font-medium text-white/80 mb-1.5">Shop type</label>
-                <select
-                  name="shop_type"
-                  value={formShopType}
-                  onChange={(ev) => setFormShopType(ev.target.value)}
-                  required
-                  className="flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
-                >
-                  <option value="beauty_parlor" className="bg-dark">
-                    Beauty parlour
-                  </option>
-                  <option value="barber_shop" className="bg-dark">
-                    Barber shop
-                  </option>
-                  <option value="both" className="bg-dark">
-                    Both
-                  </option>
-                </select>
-              </div>
+              <Select
+                label="Shop type"
+                name="shop_type"
+                value={formShopType}
+                onChange={(ev) => setFormShopType(ev.target.value)}
+                required
+              >
+                <option value="beauty_parlor">Beauty parlour</option>
+                <option value="barber_shop">Barber shop</option>
+                <option value="both">Both</option>
+              </Select>
               <Input
                 label="Owner email"
                 name="owner_email"
@@ -306,30 +443,34 @@ export default function DevEnquiries() {
                 onChange={(ev) => setFormOwnerEmail(ev.target.value)}
                 required
               />
-              <Input
-                label="URL slug (base)"
-                name="slug"
-                value={formSlug}
-                onChange={(ev) => setFormSlug(ev.target.value)}
-                placeholder="auto from shop name"
-              />
-              <p className="text-xs text-white/60">
-                A unique number suffix is added automatically (e.g. <span className="text-white/60">my-shop-012</span>
-                ).
-              </p>
+              <div>
+                <Input
+                  label="URL slug (base)"
+                  name="slug"
+                  value={formSlug}
+                  onChange={(ev) => setFormSlug(ev.target.value)}
+                  placeholder="auto from shop name"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  aria-describedby="enquiry-slug-hint"
+                />
+                <p id="enquiry-slug-hint" className="mt-1 text-xs text-white/60">
+                  A unique number is added for you, for example my-shop-012.
+                </p>
+              </div>
 
               {actionError && (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                   {actionError}
                 </div>
               )}
 
-              <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="ghost" onClick={() => setConfirmOpen(false)}>
+              <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+                <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)} disabled={busy}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={fetcher.state === "submitting"}>
-                  {fetcher.state === "submitting" ? "Creating…" : "Confirm onboard"}
+                <Button type="submit" disabled={busy}>
+                  {busy ? "Creating…" : "Create shop"}
                 </Button>
               </div>
             </fetcher.Form>
@@ -337,42 +478,62 @@ export default function DevEnquiries() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={successOpen} onOpenChange={(o) => !o && closeSuccess()}>
+      <Dialog open={successPayload !== null} onOpenChange={(o) => !o && closeSuccess()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Shop created</DialogTitle>
           </DialogHeader>
           {successPayload && (
             <div className="space-y-4">
-              <p className="text-sm text-white/70">
-                <span className="text-white font-medium">{successPayload.shop.name}</span>, slug{" "}
-                <code className="text-gold text-xs">{successPayload.shop.slug}</code>
+              <p role="status" className="text-sm text-white/70">
+                <span className="font-medium text-white">{successPayload.shop.name}</span> was created with the slug{" "}
+                <code className="text-white">{successPayload.shop.slug}</code>.
               </p>
 
               {successPayload.checkout_url ? (
                 <>
-                  <p className="text-sm text-white/60">Send the owner this Stripe payment link:</p>
-                  <div className="rounded-lg border border-white/10 bg-dark p-3 break-all text-xs text-white/80">
+                  <p className="text-sm text-white/70">
+                    Send the owner this Stripe payment link. Their invite activates once it is paid.
+                  </p>
+                  <div className="break-all rounded-lg border border-white/10 bg-dark p-3 font-mono text-sm text-white/80">
                     {successPayload.checkout_url}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => void copyCheckoutUrl()}>
-                      <Copy className="h-4 w-4 mr-2" />
-                      {copied ? "Copied!" : "Copy payment link"}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void copy(successPayload.checkout_url, "payment")}
+                    >
+                      <Copy className="h-4 w-4" aria-hidden />
+                      {copied === "payment" ? "Copied!" : "Copy payment link"}
                     </Button>
                     <Button asChild variant="ghost" size="sm">
                       <a href={successPayload.checkout_url} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Open link
+                        <ExternalLink className="h-4 w-4" aria-hidden />
+                        Open link<span className="sr-only"> (opens in a new tab)</span>
                       </a>
                     </Button>
                   </div>
                 </>
-              ) : successPayload.invite_token ? (
-                <p className="text-sm text-white/60">
-                  Legacy flow: invite created (no Stripe checkout). Check dev shops for the invite link.
+              ) : inviteUrl ? (
+                <>
+                  <p className="text-sm text-white/70">
+                    No payment is needed here. Send the owner this invite link so they can set a password.
+                  </p>
+                  <div className="break-all rounded-lg border border-white/10 bg-dark p-3 font-mono text-sm text-white/80">
+                    {inviteUrl}
+                  </div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void copy(inviteUrl, "invite")}>
+                    <Copy className="h-4 w-4" aria-hidden />
+                    {copied === "invite" ? "Copied!" : "Copy invite link"}
+                  </Button>
+                </>
+              ) : (
+                <p className="text-sm text-white/70">
+                  No payment or invite link came back. Open the shop from the Shops list to continue.
                 </p>
-              ) : null}
+              )}
 
               <Button type="button" className="w-full" onClick={closeSuccess}>
                 Done
@@ -382,47 +543,56 @@ export default function DevEnquiries() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+      <Dialog open={messageEnquiry !== null} onOpenChange={(o) => !o && setMessageEnquiry(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Message from {messageEnquiry?.full_name}</DialogTitle>
           </DialogHeader>
           {messageEnquiry && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 <div>
-                  <p className="text-xs text-white/60 mb-0.5">Shop</p>
-                  <p className="text-white">{messageEnquiry.shop_name}</p>
+                  <dt className="mb-0.5 text-xs text-white/60">Shop</dt>
+                  <dd className="text-white">{messageEnquiry.shop_name}</dd>
                 </div>
                 <div>
-                  <p className="text-xs text-white/60 mb-0.5">Email</p>
-                  <a href={`mailto:${messageEnquiry.email}`} className="text-gold hover:underline">{messageEnquiry.email}</a>
+                  <dt className="mb-0.5 text-xs text-white/60">Email</dt>
+                  <dd>
+                    <a href={`mailto:${messageEnquiry.email}`} className="break-all text-gold hover:underline">
+                      {messageEnquiry.email}
+                    </a>
+                  </dd>
                 </div>
                 {messageEnquiry.phone && (
                   <div>
-                    <p className="text-xs text-white/60 mb-0.5">Phone</p>
-                    <a href={`tel:${messageEnquiry.phone}`} className="text-white/70 hover:text-white">{messageEnquiry.phone}</a>
+                    <dt className="mb-0.5 text-xs text-white/60">Phone</dt>
+                    <dd>
+                      <a href={`tel:${messageEnquiry.phone}`} className="text-white/80 hover:text-white">
+                        {messageEnquiry.phone}
+                      </a>
+                    </dd>
                   </div>
                 )}
                 <div>
-                  <p className="text-xs text-white/60 mb-0.5">Received</p>
-                  <p className="text-white/60">{formatDateTime(messageEnquiry.created_at)}</p>
+                  <dt className="mb-0.5 text-xs text-white/60">Received</dt>
+                  <dd className="text-white/70">{formatDateTime(messageEnquiry.created_at)}</dd>
                 </div>
-              </div>
-              <div className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap leading-relaxed">
+              </dl>
+              <div className="whitespace-pre-wrap break-words rounded-lg border border-white/10 bg-white/5 p-4 text-sm leading-relaxed text-white/80">
                 {messageEnquiry.message}
               </div>
-              <div className="flex gap-2 justify-end">
-                <Button asChild variant="outline" size="sm">
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button asChild variant="outline">
                   <a href={`mailto:${messageEnquiry.email}`}>Reply by email</a>
                 </Button>
-                <Button type="button" onClick={() => setMessageOpen(false)}>Close</Button>
+                <Button type="button" variant="secondary" onClick={() => setMessageEnquiry(null)}>
+                  Close
+                </Button>
               </div>
             </div>
           )}
         </DialogContent>
       </Dialog>
-
     </div>
   );
 }

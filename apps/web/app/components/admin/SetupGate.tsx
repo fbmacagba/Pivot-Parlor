@@ -19,7 +19,7 @@ const STEPS = [
     link: "/admin/staff",
     linkLabel: "Go to Staff",
     icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg aria-hidden className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
           d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
@@ -32,7 +32,7 @@ const STEPS = [
     link: "/admin/services",
     linkLabel: "Go to Services",
     icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg aria-hidden className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
           d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
       </svg>
@@ -45,7 +45,7 @@ const STEPS = [
     link: "/admin/settings",
     linkLabel: "Go to Settings",
     icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg aria-hidden className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
           d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -58,9 +58,9 @@ const STEPS = [
     label: "Complete Stripe setup",
     desc: "Pay the £100 one-time setup fee to activate bookings",
     link: "/setup/stripe",
-    linkLabel: "Complete Payment",
+    linkLabel: "Pay setup fee",
     icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg aria-hidden className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
           d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
       </svg>
@@ -87,27 +87,27 @@ function StepRow({
 }) {
   const shopHref = useShopHref();
   return (
-    <div className={`flex items-center gap-4 rounded-xl border px-5 py-4 transition-all ${
+    <li className={`flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border px-5 py-4 transition-all ${
       done
         ? "border-emerald-500/20 bg-emerald-500/5"
         : active
         ? "border-gold/30 bg-gold/5"
-        : "border-white/8 bg-dark-100"
+        : "border-white/10 bg-dark-100"
     }`}>
       {/* Icon / tick */}
       <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${
-        done ? "bg-emerald-500/15 text-emerald-400" : active ? "bg-gold/15 text-gold" : "bg-white/5 text-white/50"
+        done ? "bg-emerald-500/15 text-emerald-400" : active ? "bg-gold/15 text-gold" : "bg-white/5 text-white/60"
       }`}>
         {done ? (
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg aria-hidden className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
         ) : icon}
       </div>
 
       {/* Text */}
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm font-semibold ${done ? "text-white/50 line-through" : "text-white"}`}>
+      <div className="min-w-[9rem] flex-1">
+        <p className={`text-sm font-semibold ${done ? "text-white/60 line-through" : "text-white"}`}>
           {label}
         </p>
         <p className="text-xs text-white/60 mt-0.5">{desc}</p>
@@ -117,21 +117,21 @@ function StepRow({
       {!done && active && (
         <Link
           to={shopHref(link)}
-          className="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-dark bg-gold hover:bg-gold/90 px-3 py-2 rounded-lg transition-colors"
+          className="tap-target ml-auto shrink-0 flex items-center gap-1.5 text-xs font-semibold text-dark bg-gold hover:bg-gold/90 px-3 py-2 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-dark"
         >
           {linkLabel}
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg aria-hidden className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         </Link>
       )}
       {!done && !active && (
-        <span className="shrink-0 text-xs text-white/60 font-medium">Locked</span>
+        <span className="ml-auto shrink-0 text-xs text-white/60 font-medium">Locked</span>
       )}
       {done && (
-        <span className="shrink-0 text-xs font-semibold text-emerald-400">Done</span>
+        <span className="ml-auto shrink-0 text-xs font-semibold text-emerald-400">Done</span>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -156,15 +156,23 @@ export function SetupGate({ status }: { status: SetupStatus }) {
       <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-semibold text-white">Setup progress</span>
-          <span className="text-sm font-bold text-gold">{completedCount} / 4</span>
+          <span className="text-sm font-bold text-gold">{completedCount} of 4</span>
         </div>
-        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+        <div
+          role="progressbar"
+          aria-label="Setup progress"
+          aria-valuemin={0}
+          aria-valuemax={4}
+          aria-valuenow={completedCount}
+          aria-valuetext={`${completedCount} of 4 steps complete`}
+          className="h-2 rounded-full bg-white/10 overflow-hidden"
+        >
           <div
             className="h-full rounded-full bg-gold transition-all duration-500"
             style={{ width: `${(completedCount / 4) * 100}%` }}
           />
         </div>
-        <p className="text-xs text-white/50 mt-2">
+        <p className="text-xs text-white/60 mt-2">
           {completedCount === 4
             ? "All steps complete. Your shop is ready to go live."
             : `${4 - completedCount} step${4 - completedCount !== 1 ? "s" : ""} remaining`}
@@ -172,7 +180,7 @@ export function SetupGate({ status }: { status: SetupStatus }) {
       </div>
 
       {/* Steps */}
-      <div className="space-y-3">
+      <ol className="space-y-3">
         {STEPS.map((step, i) => {
           const { key: stepKey, ...stepProps } = step;
           return (
@@ -184,12 +192,12 @@ export function SetupGate({ status }: { status: SetupStatus }) {
             />
           );
         })}
-      </div>
+      </ol>
 
       {/* Help text */}
       <p className="text-xs text-white/60 text-center">
         Need help? Contact{" "}
-        <a href="mailto:support@pivotparlor.com" className="text-gold/60 hover:text-gold underline">
+        <a href="mailto:support@pivotparlor.com" className="tap-target inline-flex items-center text-gold hover:text-gold-light underline">
           support@pivotparlor.com
         </a>
       </p>

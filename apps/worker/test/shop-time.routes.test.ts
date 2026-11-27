@@ -123,6 +123,35 @@ describe("customer's own bookings", () => {
     expect(data.upcoming).toEqual([]);
     expect(data.past.map((b) => b.id)).toEqual([id]);
   });
+
+  // The account page's "Show more": each list is 20 long unless ?limit= asks
+  // for more, and never longer than 100.
+  it("each list holds 20 unless ?limit= asks for more, up to 100", async () => {
+    at("2026-07-10T10:00:00Z");
+    const { shopId, staffId, serviceId } = await shopWithStaff("Customer Long History");
+    const userId = await seedUser("customer", null);
+    await env.DB.prepare("UPDATE platform_users SET email_verified = 1 WHERE id = ?").bind(userId).run();
+    const email = (await env.DB.prepare("SELECT email FROM platform_users WHERE id = ?").bind(userId).first<{ email: string }>())!.email;
+    for (let i = 0; i < 25; i++) {
+      const hour = String(i).padStart(2, "0");
+      await seedBooking(shopId, staffId, serviceId, { date: "2026-07-01", start: `2026-07-01T${hour}:00:00.000Z`, email });
+    }
+    const token = await tokenFor(userId, "customer", null);
+    const pastCount = async (query: string) => {
+      const res = await dispatch("GET", `/api/me/bookings${query}`, { headers: authHeaders(token) });
+      expect(res.status).toBe(200);
+      const { data } = await res.json<{ data: { past: unknown[] } }>();
+      return data.past.length;
+    };
+    expect(await pastCount("")).toBe(20);
+    expect(await pastCount("?limit=40")).toBe(25);
+    expect(await pastCount("?limit=5")).toBe(5);
+    // Not a whole number from 1 up: the default, never an error or the whole table.
+    expect(await pastCount("?limit=abc")).toBe(20);
+    expect(await pastCount("?limit=-1")).toBe(20);
+    expect(await pastCount("?limit=0")).toBe(20);
+    expect(await pastCount("?limit=99999")).toBe(25);
+  });
 });
 
 describe("reviews", () => {

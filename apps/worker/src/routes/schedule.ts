@@ -92,6 +92,21 @@ schedule.put("/", requireShopRole("admin"), async (c) => {
     }
   }
 
+  // A working day must end after it starts ("HH:MM" compares as text). One bad
+  // day refuses the whole save, so nothing is half-written.
+  const backwards = body.entries.some(
+    (e) =>
+      !e.off &&
+      typeof e.start_time === "string" &&
+      typeof e.end_time === "string" &&
+      e.start_time &&
+      e.end_time &&
+      e.end_time <= e.start_time,
+  );
+  if (backwards) {
+    return c.json({ success: false, error: "A working day must end after it starts." }, 400);
+  }
+
   const stmts: D1PreparedStatement[] = [];
   let upserts = 0;
   let daysOff = 0;

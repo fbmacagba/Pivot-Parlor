@@ -165,13 +165,51 @@ describe("Bookings and availability, for a developer", () => {
 
   it("reads the chosen person's bookings, schedule and time off, read-only", async () => {
     stubApi("developer");
+    // Each tab reads only what it shows: the bookings tab the list (one page
+    // of it), the availability tab the schedule and the time off.
     const data = await load<Bookings>(bookings, "/staff/bookings?shopId=shop-1&staffId=staff-9&filter=past");
     expect(staffMeCalls().map((c) => c.path).sort()).toEqual([
-      "/api/staff/me/bookings?filter=past&staffId=staff-9",
+      "/api/staff/me/bookings?filter=past&limit=20&staffId=staff-9",
+    ]);
+    expect(data).toMatchObject({ readOnly: true, needsStaff: false });
+
+    calls = [];
+    const tab = await load<Bookings>(bookings, "/staff/bookings?shopId=shop-1&staffId=staff-9&tab=availability");
+    expect(staffMeCalls().map((c) => c.path).sort()).toEqual([
       "/api/staff/me/schedule?staffId=staff-9",
       "/api/staff/me/time-off?staffId=staff-9",
     ]);
-    expect(data).toMatchObject({ readOnly: true, needsStaff: false });
+    expect(tab).toMatchObject({ readOnly: true, needsStaff: false });
+  });
+
+  it("a list that fails to load says so, instead of reading as no bookings or a week off", async () => {
+    stubApi("staff", "shop-own");
+    const working = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) =>
+        new URL(input).pathname.startsWith("/api/staff/me/")
+          ? new Response("down", { status: 503 })
+          : working(input, init),
+      ),
+    );
+    type Flags = { bookingsError: boolean; scheduleError: boolean; timeOffError: boolean };
+    expect(await load<Flags>(bookings, "/staff/bookings")).toMatchObject({ bookingsError: true });
+    expect(await load<Flags>(bookings, "/staff/bookings?tab=availability")).toMatchObject({
+      scheduleError: true,
+      timeOffError: true,
+    });
+    expect(await load<{ loadError: boolean }>(today, "/staff")).toMatchObject({ loadError: true });
+  });
+
+  it("a longer list is asked for in whole pages, never past the cap", async () => {
+    stubApi("staff", "shop-own");
+    await load<Bookings>(bookings, "/staff/bookings?filter=today&limit=45");
+    await load<Bookings>(bookings, "/staff/bookings?limit=9999");
+    expect(staffMeCalls().map((c) => c.path)).toEqual([
+      "/api/staff/me/bookings?filter=today&limit=60",
+      "/api/staff/me/bookings?filter=upcoming&limit=100",
+    ]);
   });
 
   it("will not request time off for them", async () => {

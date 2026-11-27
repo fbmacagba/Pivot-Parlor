@@ -19,7 +19,7 @@ export function StatCard({ label, value, icon: Icon, trend, className }: StatCar
     >
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm text-white/50">{label}</p>
+          <p className="text-sm text-white/60">{label}</p>
           <p className="mt-1 font-heading text-3xl font-bold text-white">{value}</p>
         </div>
         {Icon && (

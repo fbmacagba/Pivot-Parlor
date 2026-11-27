@@ -1,12 +1,16 @@
 import { redirect } from "react-router";
 import type { UserRole } from "@repo/types";
-import { createApiClient } from "~/lib/api";
+import { apiErrorStatus, createApiClient } from "~/lib/api";
 
 export interface SessionPayload {
   sub: string;
   role: UserRole;
   shop_id?: string;
   shop_slug?: string;
+  /** The person's own name, for the dashboard shell (never the id). */
+  name?: string;
+  /** Their shop's name (admins and staff). */
+  shop_name?: string;
   exp: number;
 }
 
@@ -94,9 +98,12 @@ export async function requireAuth(
   apiUrl: string
 ): Promise<SessionPayload> {
   const token = getSessionToken(request);
+  const url = new URL(request.url);
+  // Where to come back to after signing in: the page asked for, query included
+  // (a developer's ?shopId=, a list's filters).
+  const loginUrl = `/login?redirect=${encodeURIComponent(url.pathname + url.search)}`;
   if (!token) {
-    const url = new URL(request.url);
-    throw redirect(`/login?redirect=${encodeURIComponent(url.pathname)}`);
+    throw redirect(loginUrl);
   }
 
   try {
@@ -108,6 +115,8 @@ export async function requireAuth(
       id: string;
       role: string;
       shop_id: string | null;
+      name?: string | null;
+      shop_name?: string | null;
     }>("/auth/me");
 
     const decoded = decodeToken(token);
@@ -117,10 +126,17 @@ export async function requireAuth(
       sub: me.id,
       role: me.role as UserRole,
       shop_id: me.shop_id ?? undefined,
+      name: me.name?.trim() || undefined,
+      shop_name: me.shop_name?.trim() || undefined,
       exp,
     };
-  } catch {
-    throw redirect("/login");
+  } catch (error) {
+    // Only a refused session sends the visitor to sign in. When the API itself
+    // is failing, signing in again cannot help: answer 503 so the page's error
+    // screen says "try again in a moment" and the session is left alone.
+    const status = apiErrorStatus(error);
+    if (status === 401 || status === 403 || status === 404) throw redirect(loginUrl);
+    throw new Response(null, { status: 503, statusText: "Service unavailable" });
   }
 }
 

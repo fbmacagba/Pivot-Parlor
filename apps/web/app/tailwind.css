@@ -26,6 +26,32 @@
   }
 }
 
+/* Dialogs fade in, the panel growing from 95 percent (DESIGN.md, Dialog).
+   `scale` and `opacity` only, so the panel's centring transform is untouched. */
+@keyframes pp-dialog-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pp-dialog-zoom {
+  from {
+    opacity: 0;
+    scale: 0.95;
+  }
+}
+.pp-dialog-overlay[data-state="open"] {
+  animation: pp-dialog-fade 150ms ease-out;
+}
+.pp-dialog-panel[data-state="open"] {
+  animation: pp-dialog-zoom 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pp-dialog-overlay[data-state="open"],
+  .pp-dialog-panel[data-state="open"] {
+    animation: none;
+  }
+}
+
 @keyframes pp-notice-rise {
   from {
     opacity: 0.5;
@@ -34,6 +60,12 @@
 }
 
 @layer base {
+  /* Anchor jumps glide, except for a visitor who has asked for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto !important;
+    }
+  }
   html {
     scroll-behavior: smooth;
     /* The app is dark-themed: without this, native form controls (the date

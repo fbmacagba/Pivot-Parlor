@@ -8,7 +8,7 @@ afterAll(() => {
   vi.unstubAllEnvs();
 });
 
-const { clockOf, formatCount, formatDate, formatDateTime, formatDay, formatTime, shopToday, toInstant, ukParts, ukToday } =
+const { bookingInstantMs, clockOf, formatCount, formatDate, formatDateTime, formatDay, formatTime, shopToday, toInstant, ukParts, ukToday } =
   await import("./dateFormat");
 
 describe("control: this file runs in Tokyo time", () => {
@@ -152,5 +152,32 @@ describe("wall-clock times", () => {
   it("ukParts never throws on a value it cannot read (it is called while rendering)", () => {
     expect(() => ukParts("09:30")).not.toThrow();
     expect(() => ukParts("nope")).not.toThrow();
+  });
+});
+
+// new Date("09:30") is not a date: the account page hid Cancel and the staff
+// countdown read NaN for every walk-in and deposit booking.
+describe("bookingInstantMs", () => {
+  it("reads a clock-only time on the booking's day, on the London clock", () => {
+    // Winter: London is UTC. Summer: London is an hour ahead of UTC.
+    expect(bookingInstantMs("2026-01-15", "09:30")).toBe(Date.UTC(2026, 0, 15, 9, 30));
+    expect(bookingInstantMs("2026-07-01", "09:30")).toBe(Date.UTC(2026, 6, 1, 8, 30));
+    expect(bookingInstantMs("2026-07-01", "9:05")).toBe(Date.UTC(2026, 6, 1, 8, 5));
+  });
+
+  it("reads an instant as it is, and an offset-less one as UTC", () => {
+    expect(bookingInstantMs("2026-07-01", "2026-07-01T09:00:00.000Z")).toBe(Date.UTC(2026, 6, 1, 9));
+    expect(bookingInstantMs(null, "2026-07-01 09:00:00")).toBe(Date.UTC(2026, 6, 1, 9));
+  });
+
+  it("gives null, never NaN, for a time it cannot place", () => {
+    expect(bookingInstantMs(null, "09:30")).toBeNull();
+    expect(bookingInstantMs("not a day", "09:30")).toBeNull();
+    expect(bookingInstantMs("2026-07-01", "soon")).toBeNull();
+    expect(bookingInstantMs("2026-07-01", null)).toBeNull();
+  });
+
+  it("falls back to London for a zone this machine does not know", () => {
+    expect(bookingInstantMs("2026-07-01", "09:30", "Mars/Olympus")).toBe(Date.UTC(2026, 6, 1, 8, 30));
   });
 });

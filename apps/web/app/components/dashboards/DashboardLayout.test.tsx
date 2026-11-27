@@ -85,10 +85,48 @@ describe("DashboardLayout: server markup", () => {
     expect(bar).toContain('href="/staff" aria-current="page"');
     expect(bar).toContain('href="/staff/bookings"');
     expect(bar).toContain('href="/staff/pos"');
-    expect(bar).toContain('href="/staff/availability"');
+    expect(bar).toContain('href="/staff/bookings?tab=availability"');
     expect(bar).toContain(">POS<");
     expect(bar).not.toContain("More");
     expect(bar.match(/aria-current="page"/g)).toHaveLength(1);
+  });
+
+  // Availability is a tab of the bookings page. Linked as /staff/availability
+  // (a redirect), arriving there lit "Bookings" and never "Availability".
+  it("staff: the Availability tab of the bookings page marks Availability, not Bookings", () => {
+    pathname = "/staff/bookings";
+    search = "?tab=availability";
+    try {
+      const html = ssr({ role: "staff", userName: "sam" });
+      const bar = tabBar(html);
+      expect(bar).toContain('href="/staff/bookings?tab=availability" aria-current="page"');
+      expect(bar).not.toContain('href="/staff/bookings" aria-current="page"');
+      expect(bar.match(/aria-current="page"/g)).toHaveLength(1);
+      // The rail follows the same rule.
+      const rail = html.slice(0, html.indexOf('aria-label="Primary"'));
+      expect(rail).toContain('href="/staff/bookings?tab=availability" aria-current="page"');
+      expect(rail.match(/aria-current="page"/g)).toHaveLength(1);
+    } finally {
+      search = "";
+    }
+  });
+
+  it("staff: the bookings page, its other tab and a booking's own page all mark Bookings", () => {
+    try {
+      for (const [path, query] of [
+        ["/staff/bookings", ""],
+        ["/staff/bookings", "?tab=bookings&filter=today"],
+        ["/staff/bookings/b-1", ""],
+      ] as const) {
+        pathname = path;
+        search = query;
+        const bar = tabBar(ssr({ role: "staff", userName: "sam" }));
+        expect(bar).toContain('href="/staff/bookings" aria-current="page"');
+        expect(bar.match(/aria-current="page"/g)).toHaveLength(1);
+      }
+    } finally {
+      search = "";
+    }
   });
 
   it("admin: the four priority tabs plus More; a drawer-only page marks no tab", () => {
@@ -123,7 +161,8 @@ describe("DashboardLayout: server markup", () => {
       const html = ssr({ role: "staff", showDeveloperViewSwitcher: true, userName: "dev" });
       const hrefs = [...html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]).filter((h) => h.startsWith("/staff"));
       expect(hrefs.length).toBeGreaterThan(5);
-      for (const href of hrefs) expect(href).toContain("?shopId=shop-1&amp;staffId=staff-9");
+      // After "?" or, on the Availability tab's link, after its own ?tab=.
+      for (const href of hrefs) expect(href).toMatch(/(\?|&amp;)shopId=shop-1&amp;staffId=staff-9/);
     } finally {
       search = "";
     }

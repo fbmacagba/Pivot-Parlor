@@ -25,8 +25,19 @@ bookings.use("*", authMiddleware, requireShopRole("admin", "staff"));
 
 bookings.get("/", async (c) => {
   const shopId = c.req.param("shopId")!;
-  const { date, staffId, status } = c.req.query();
-  const list = await getBookingsByShop(c.env.DB, shopId, { date, staffId, status });
+  const { date, date_from, date_to, staffId, status, limit, offset } = c.req.query();
+  // A date bound that is not YYYY-MM-DD is ignored rather than compared as text.
+  const isDay = (v: string | undefined): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const list = await getBookingsByShop(c.env.DB, shopId, {
+    date,
+    dateFrom: isDay(date_from) ? date_from : undefined,
+    dateTo: isDay(date_to) ? date_to : undefined,
+    staffId,
+    status,
+    // Bounded and coerced inside the helper; absent keeps its default.
+    limit: limit !== undefined ? Number(limit) : undefined,
+    offset: offset !== undefined ? Number(offset) : undefined,
+  });
   return c.json({ success: true, data: list });
 });
 

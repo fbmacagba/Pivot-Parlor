@@ -1,20 +1,39 @@
 import { useFetcher, useLoaderData, data as json } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { pageShopId } from "~/lib/pageShop";
+import { pageTitle } from "~/lib/pageTitle";
+import { useFetcherResult } from "~/lib/useFetcherResult";
 import { Button } from "~/components/ui/Button";
+import { LoadError } from "~/components/ui/LoadError";
+import { Select } from "~/components/ui/Select";
+import { ErrorScreen } from "~/components/ErrorScreen";
+import {
+  buildGrid,
+  dayKey,
+  DAY_LABELS,
+  DEFAULT_CELL,
+  gridEntries,
+  scheduleErrors,
+  type CellState,
+  type Grid,
+  type ScheduleRow,
+} from "~/components/admin/scheduleGrid";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
 
-const DAY_LABELS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+export const meta = () => pageTitle("Schedule");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 interface StaffMember { id: string; display_name: string; user_email: string }
-interface ScheduleRow { staff_id: string; day_of_week: number; start_time: string; end_time: string; is_active: number }
 
 function buildTimeOptions() {
   const out: string[] = [];
@@ -28,27 +47,9 @@ function buildTimeOptions() {
 }
 const TIME_OPTIONS = buildTimeOptions();
 
-type CellState = { open: boolean; start: string; end: string };
-type Grid = Record<string, Record<number, CellState>>; // staffId → dayOfWeek → cell
-
-function buildGrid(staff: StaffMember[], schedules: ScheduleRow[]): Grid {
-  const g: Grid = {};
-  for (const s of staff) {
-    g[s.id] = {};
-    for (let d = 0; d < 7; d++) {
-      g[s.id][d] = { open: false, start: "09:00", end: "17:00" };
-    }
-  }
-  for (const row of schedules) {
-    if (g[row.staff_id]) {
-      g[row.staff_id][row.day_of_week] = {
-        open: row.is_active === 1,
-        start: row.start_time,
-        end: row.end_time,
-      };
-    }
-  }
-  return g;
+/** The half-hour list, plus the saved time when it is not on a half hour. */
+function optionsWith(value: string): string[] {
+  return TIME_OPTIONS.includes(value) ? TIME_OPTIONS : [...TIME_OPTIONS, value].sort();
 }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -60,16 +61,20 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 
   let staff: StaffMember[] = [];
   let schedules: ScheduleRow[] = [];
+  let loadError = false;
 
   if (shopId) {
-    try { staff = await api.get<StaffMember[]>(`/api/shops/${shopId}/staff`); } catch { /* empty */ }
-    try {
-      const res = await api.get<{ schedules: ScheduleRow[] }>(`/api/shops/${shopId}/schedule`);
-      schedules = res?.schedules ?? [];
-    } catch { /* empty */ }
+    const [staffRes, scheduleRes] = await Promise.allSettled([
+      api.get<StaffMember[]>(`/api/shops/${shopId}/staff`),
+      api.get<{ schedules: ScheduleRow[] }>(`/api/shops/${shopId}/schedule`),
+    ]);
+    if (staffRes.status === "fulfilled") staff = staffRes.value ?? [];
+    else loadError = true;
+    if (scheduleRes.status === "fulfilled") schedules = scheduleRes.value?.schedules ?? [];
+    else loadError = true;
   }
 
-  return json({ staff, schedules, shopId });
+  return json({ staff, schedules, shopId, loadError });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -93,58 +98,101 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export default function AdminSchedule() {
-  const { staff, schedules } = useLoaderData<typeof loader>();
+  const { staff, schedules, loadError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
   const [grid, setGrid] = useState<Grid>(() => buildGrid(staff, schedules));
-  const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // Read by the effects below without making them re-run on every edit.
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  const editedSinceSave = useRef(false);
+  const saving = fetcher.state !== "idle";
 
+  // Fresh server data replaces the grid only when there is nothing unsaved
+  // in it: a failed save reloads the page's data, and must not take the
+  // owner's edits with it.
   useEffect(() => {
-    setGrid(buildGrid(staff, schedules));
+    if (!dirtyRef.current) setGrid(buildGrid(staff, schedules));
   }, [staff, schedules]);
 
+  useFetcherResult(fetcher, (result) => {
+    if (!result.ok) {
+      setNotice({
+        type: "error",
+        text: `The schedule was not saved: ${result.error ?? "the request failed."} Your changes are still here.`,
+      });
+      return;
+    }
+    setNotice({ type: "success", text: "Schedule saved." });
+    if (!editedSinceSave.current) {
+      setDirty(false);
+      setShowErrors(false);
+      setGrid(buildGrid(staff, schedules));
+    }
+  });
+
+  // Leaving with unsaved hours asks first.
   useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    setToast(fetcher.data.ok
-      ? { type: "success", text: "Schedule saved." }
-      : { type: "error",   text: fetcher.data.error ?? "Save failed." }
-    );
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [fetcher.state, fetcher.data]);
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const errors = scheduleErrors(grid);
+  const errorCount = Object.keys(errors).length;
 
   const save = () => {
-    const entries: object[] = [];
-    for (const staffId of Object.keys(grid)) {
-      for (let d = 0; d < 7; d++) {
-        const cell = grid[staffId][d];
-        entries.push({
-          staff_id: staffId,
-          day_of_week: d,
-          start_time: cell.start,
-          end_time: cell.end,
-          off: !cell.open,
-        });
-      }
+    if (errorCount > 0) {
+      setShowErrors(true);
+      setNotice({
+        type: "error",
+        text:
+          errorCount === 1
+            ? "One working day finishes before it starts. Fix it, then save."
+            : `${errorCount} working days finish before they start. Fix them, then save.`,
+      });
+      return;
     }
+    setNotice(null);
+    editedSinceSave.current = false;
     fetcher.submit(
-      { entries } as unknown as Record<string, string>,
+      { entries: gridEntries(grid) } as unknown as Record<string, string>,
       { method: "POST", encType: "application/json" }
     );
   };
 
   const setCell = (staffId: string, day: number, patch: Partial<CellState>) => {
+    editedSinceSave.current = true;
+    setDirty(true);
+    setNotice((n) => (n?.type === "success" ? null : n));
     setGrid(prev => ({
       ...prev,
-      [staffId]: { ...prev[staffId], [day]: { ...prev[staffId][day], ...patch } },
+      [staffId]: { ...prev[staffId], [day]: { ...(prev[staffId]?.[day] ?? DEFAULT_CELL), ...patch } },
     }));
   };
+
+  if (loadError) {
+    // No editable grid: blank hours must never be saved over the real ones.
+    return (
+      <div className="space-y-4">
+        <h1 className="font-heading text-2xl font-bold text-white">Schedule</h1>
+        <LoadError what="your staff and their working hours" />
+      </div>
+    );
+  }
 
   if (staff.length === 0) {
     return (
       <div className="space-y-4">
         <h1 className="font-heading text-2xl font-bold text-white">Schedule</h1>
-        <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50">
-          No staff members yet. Add staff first.
+        <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-sm text-white/60">
+          No staff members yet. Add staff first, then set their working hours here.
         </div>
       </div>
     );
@@ -152,88 +200,113 @@ export default function AdminSchedule() {
 
   return (
     <div className="space-y-6">
-      {toast && (
-        <div className={`fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg md:bottom-6 md:right-6 ${
-          toast.type === "success"
-            ? "border-emerald-500/40 bg-emerald-950/90 text-emerald-100"
-            : "border-red-500/40 bg-red-950/90 text-red-100"
-        }`} role="status">{toast.text}</div>
-      )}
-
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Schedule</h1>
           <p className="mt-0.5 text-sm text-white/60">Set weekly working hours per staff member</p>
         </div>
-        <Button size="sm" className="shrink-0" onClick={save} disabled={fetcher.state !== "idle"}>
-          {fetcher.state !== "idle" ? "Saving…" : "Save schedule"}
-        </Button>
+        <div className="flex shrink-0 items-center gap-3">
+          {dirty && !saving && <p className="text-sm font-medium text-amber-300">Unsaved changes</p>}
+          <Button onClick={save} disabled={saving || !dirty}>
+            {saving ? "Saving…" : "Save schedule"}
+          </Button>
+        </div>
       </div>
 
-      {/* Below md the table reads as one card per staff member (day label in each cell);
-          from md up it is the staff x day grid. One DOM, so the controlled inputs stay in sync. */}
-      <div className="rounded-xl border border-white/10 bg-dark-100 overflow-x-auto">
-        <table className="block w-full text-sm md:table">
-          <thead className="hidden md:table-header-group">
-            <tr className="border-b border-white/10">
-              <th className="px-4 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider w-36">Staff</th>
-              {DAY_LABELS.map(d => (
-                <th key={d} className="px-2 py-3 text-left text-xs font-semibold text-white/60 uppercase tracking-wider">{d.slice(0,3)}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="block divide-y divide-white/5 md:table-row-group">
-            {staff.map(member => (
-              <tr key={member.id} className="block pb-2 md:table-row md:pb-0 hover:bg-white/[0.02]">
-                <td className="block px-4 pt-3 pb-1 md:table-cell md:py-3">
-                  <p className="font-medium text-white truncate md:max-w-[8rem]">{member.display_name}</p>
-                </td>
-                {Array.from({ length: 7 }, (_, d) => {
-                  const cell = grid[member.id]?.[d] ?? { open: false, start: "09:00", end: "17:00" };
+      {notice?.type === "success" && (
+        <p role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          {notice.text}
+        </p>
+      )}
+      {notice?.type === "error" && (
+        <p role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {notice.text}
+        </p>
+      )}
+
+      {/* Below md each staff member is a card with one row per day; from md up
+          the same cells sit in a staff by day grid. One DOM, so the controlled
+          inputs stay in sync. */}
+      <div className="overflow-x-auto rounded-xl border border-white/10 bg-dark-100">
+        <div className="divide-y divide-white/5 md:min-w-[62rem]">
+          <div
+            aria-hidden
+            className="hidden border-b border-white/10 md:grid md:grid-cols-[9rem_repeat(7,minmax(0,1fr))]"
+          >
+            <p className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-white/60">Staff</p>
+            {DAY_LABELS.map((d) => (
+              <p key={d} className="px-2 py-3 text-xs font-semibold uppercase tracking-wider text-white/60">
+                {d.slice(0, 3)}
+              </p>
+            ))}
+          </div>
+          {staff.map((member) => {
+            const headingId = `schedule-staff-${member.id}`;
+            return (
+              <div
+                key={member.id}
+                role="group"
+                aria-labelledby={headingId}
+                className="pb-2 md:grid md:grid-cols-[9rem_repeat(7,minmax(0,1fr))] md:pb-0"
+              >
+                <h2 id={headingId} className="truncate px-4 pb-1 pt-3 text-sm font-medium text-white md:py-3">
+                  {member.display_name}
+                </h2>
+                {DAY_LABELS.map((dayName, d) => {
+                  const cell = grid[member.id]?.[d] ?? DEFAULT_CELL;
+                  const error = showErrors ? errors[dayKey(member.id, d)] : undefined;
                   return (
-                    <td key={d} className="flex items-center gap-3 px-4 py-1 md:table-cell md:px-2 md:py-2">
-                      <span className="w-9 shrink-0 text-xs font-semibold uppercase tracking-wider text-white/60 md:hidden">
-                        {DAY_LABELS[d].slice(0, 3)}
+                    <div key={d} className="flex items-start gap-3 px-4 py-1 md:block md:px-2 md:py-2">
+                      <span aria-hidden className="w-9 shrink-0 pt-3 text-xs font-semibold uppercase tracking-wider text-white/60 md:hidden">
+                        {dayName.slice(0, 3)}
                       </span>
-                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 md:min-w-[7rem] md:flex-col md:items-stretch md:gap-1">
-                        <label className="tap-target flex items-center gap-1.5 text-xs cursor-pointer">
+                      <div className="flex min-w-0 flex-1 flex-wrap items-start gap-x-3 gap-y-1 md:flex-col md:items-stretch md:gap-1">
+                        <label className="tap-target flex cursor-pointer items-center gap-2 text-xs">
                           <input
                             type="checkbox"
                             checked={cell.open}
                             onChange={e => setCell(member.id, d, { open: e.target.checked })}
-                            className="h-4 w-4 rounded border-white/30 bg-white/5 text-gold focus:ring-gold md:h-3.5 md:w-3.5"
+                            aria-label={`${member.display_name} works ${dayName}`}
+                            className="h-4 w-4 rounded border-white/40 bg-white/5 text-gold focus:ring-gold"
                           />
-                          <span className={cell.open ? "text-white/80" : "text-white/50"}>
+                          <span aria-hidden className={cell.open ? "font-semibold text-white" : "text-white/60"}>
                             {cell.open ? "Open" : "Off"}
                           </span>
                         </label>
                         {cell.open && (
-                          <div className="flex min-w-[10rem] flex-1 items-center gap-1">
-                            <select
-                              value={cell.start}
-                              onChange={e => setCell(member.id, d, { start: e.target.value })}
-                              className="tap-target flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
-                            >
-                              {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
-                            </select>
-                            <span className="text-white/50 text-xs">to</span>
-                            <select
-                              value={cell.end}
-                              onChange={e => setCell(member.id, d, { end: e.target.value })}
-                              className="tap-target flex-1 rounded border border-white/10 bg-white/5 px-1.5 py-1.5 text-xs text-white focus:border-gold focus:outline-none md:py-0.5"
-                            >
-                              {TIME_OPTIONS.map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
-                            </select>
+                          <div className="flex min-w-[11rem] flex-1 items-start gap-1 md:min-w-0 md:flex-col md:items-stretch">
+                            <div className="min-w-0 flex-1">
+                              <Select
+                                label={`${member.display_name}, ${dayName}, starts`}
+                                hideLabel
+                                value={cell.start}
+                                onChange={e => setCell(member.id, d, { start: e.target.value })}
+                              >
+                                {optionsWith(cell.start).map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
+                              </Select>
+                            </div>
+                            <span aria-hidden className="pt-3 text-xs text-white/60 md:hidden">to</span>
+                            <div className="min-w-0 flex-1">
+                              <Select
+                                label={`${member.display_name}, ${dayName}, finishes`}
+                                hideLabel
+                                value={cell.end}
+                                onChange={e => setCell(member.id, d, { end: e.target.value })}
+                                error={error}
+                              >
+                                {optionsWith(cell.end).map(t => <option key={t} value={t} className="bg-dark">{t}</option>)}
+                              </Select>
+                            </div>
                           </div>
                         )}
                       </div>
-                    </td>
+                    </div>
                   );
                 })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

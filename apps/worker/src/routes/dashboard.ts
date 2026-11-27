@@ -24,6 +24,7 @@ import {
 import {
   PLATFORM_TIME_ZONE,
   START_HOUR_BUCKET_SQL,
+  bookingStartMs,
   peakHoursInShopTime,
   scheduleDayOf,
   shopMonthStart,
@@ -49,7 +50,8 @@ devRouter.get("/stats", async (c) => {
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth() + 1;
 
-  const [shopRow, bookingRow, enquiryRow] = await Promise.all([
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const [shopRow, bookingRow, enquiryRow, aiRow] = await Promise.all([
     c.env.DB
       .prepare("SELECT COUNT(*) AS total FROM shops WHERE status = 'active'")
       .first<{ total: number }>(),
@@ -69,6 +71,15 @@ devRouter.get("/stats", async (c) => {
     c.env.DB
       .prepare("SELECT COUNT(*) AS total FROM contacts WHERE onboarded_at IS NULL")
       .first<{ total: number }>(),
+    // What the platform's AI calls cost this month, from the cost log every
+    // caller writes. An estimate in US dollars, as the vendors price it.
+    c.env.DB
+      .prepare(
+        `SELECT COUNT(*) AS calls, COALESCE(SUM(estimated_cost_usd), 0) AS cost_usd
+         FROM ai_usage_log WHERE created_at >= ?`
+      )
+      .bind(monthStart)
+      .first<{ calls: number; cost_usd: number }>(),
   ]);
 
   return c.json({
@@ -78,6 +89,8 @@ devRouter.get("/stats", async (c) => {
       bookings_this_month: bookingRow?.bookings_count ?? 0,
       platform_commission_pence: bookingRow?.commission_total_pence ?? 0,
       pending_enquiries: enquiryRow?.total ?? 0,
+      ai_calls_this_month: aiRow?.calls ?? 0,
+      ai_cost_usd_this_month: aiRow?.cost_usd ?? 0,
     },
   });
 });
@@ -402,7 +415,7 @@ staffMeRouter.get("/today", async (c) => {
 });
 
 /**
- * GET /api/staff/me/bookings?filter=upcoming|past&limit=20&offset=0
+ * GET /api/staff/me/bookings?filter=upcoming|today|past&limit=20&offset=0
  * Staff member's own booking list.
  * GDPR note: customer email/phone NOT returned in list — available only in detail endpoint.
  */
@@ -419,7 +432,13 @@ staffMeRouter.get("/bookings", async (c) => {
   const today = shopToday(await getShopTimezone(c.env.DB, shopId));
 
   // The operator is fixed SQL; the date is bound below, never interpolated.
-  const dateCond = filter === "past" ? "b.booking_date < ?" : "b.booking_date >= ?";
+  // "today" is the shop's own day only; anything unrecognised reads as upcoming.
+  const dateCond =
+    filter === "past"
+      ? "b.booking_date < ?"
+      : filter === "today"
+        ? "b.booking_date = ?"
+        : "b.booking_date >= ?";
 
   const orderDir = filter === "past" ? "DESC" : "ASC";
 
@@ -707,9 +726,10 @@ export const meRouter = new Hono<{ Bindings: Bindings }>();
 meRouter.use("*", authMiddleware);
 
 /**
- * GET /api/me/bookings
+ * GET /api/me/bookings?limit=20
  * All bookings for the authenticated customer, identified by their user_id from JWT.
  * Returns upcoming (ASC) and past (DESC), joined with shop + service + staff names.
+ * `limit` caps each of the two lists (default 20, at most 100).
  * GDPR: returns only this user's bookings — identified by customer_email matched
  * to their platform_users.email (since public booking doesn't require account).
  */
@@ -744,6 +764,11 @@ meRouter.get("/bookings", async (c) => {
   // shop is on London time (shops.timezone is never written; src/lib/shopTime.ts).
   const today = shopToday(PLATFORM_TIME_ZONE);
 
+  // Each list's length: 20 unless the page asks for more ("Show more"), never
+  // above 100. Anything that is not a whole number from 1 up reads as 20.
+  const asked = Number(c.req.query("limit") ?? 20);
+  const limit = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, 100) : 20;
+
   const [upcoming, past] = await Promise.all([
     c.env.DB
       .prepare(
@@ -759,9 +784,9 @@ meRouter.get("/bookings", async (c) => {
          WHERE b.customer_email = ? AND b.booking_date >= ?
            AND b.status NOT IN ('cancelled', 'no_show')
          ORDER BY b.booking_date ASC, b.start_time ASC
-         LIMIT 20`
+         LIMIT ?`
       )
-      .bind(userRow.email, today)
+      .bind(userRow.email, today, limit)
       .all<{
         id: string;
         booking_date: string;
@@ -791,9 +816,9 @@ meRouter.get("/bookings", async (c) => {
          JOIN shops sh ON sh.id = b.shop_id
          WHERE b.customer_email = ? AND b.booking_date < ?
          ORDER BY b.booking_date DESC, b.start_time DESC
-         LIMIT 20`
+         LIMIT ?`
       )
-      .bind(userRow.email, today)
+      .bind(userRow.email, today, limit)
       .all<{
         id: string;
         booking_date: string;
@@ -866,7 +891,13 @@ meRouter.post("/bookings/:bookingId/cancel", async (c) => {
     return c.json({ success: false, error: "This booking is already closed" }, 400);
   }
 
-  const startMs = new Date(booking.start_time).getTime();
+  // start_time is an instant for online bookings and the shop's clock reading
+  // ("09:30") for walk-in and deposit bookings; both must be cancellable.
+  const startMs = bookingStartMs(
+    booking.booking_date,
+    booking.start_time,
+    await getShopTimezone(c.env.DB, booking.shop_id),
+  );
   if (Number.isNaN(startMs)) {
     return c.json({ success: false, error: "Invalid booking time" }, 400);
   }

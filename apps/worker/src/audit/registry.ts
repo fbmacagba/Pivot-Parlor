@@ -61,6 +61,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /api/shops/:shopId/stock-takes/:stockTakeId/complete": "inventory.stock_take.complete",
   "POST /api/shops/:shopId/suppliers": "inventory.supplier.create",
   "POST /api/shops/:shopId/upload-image": "site.edit",
+  "POST /api/shops/:shopId/walkin": "walkin.join",
   "POST /api/staff/me/time-off": "staff.time_off.request",
   "POST /api/waitlist": "waitlist.join",
   "POST /api/waitlist/:id/notify": "waitlist.notify",

@@ -1,18 +1,29 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useFetcher, useLoaderData, data as json } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { readJsonObject } from "@repo/utils";
 import { clsx } from "clsx";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { LoadError } from "~/components/ui/LoadError";
+import { Select } from "~/components/ui/Select";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { pageShopId } from "~/lib/pageShop";
+import { pageTitle } from "~/lib/pageTitle";
+import { useFetcherResult } from "~/lib/useFetcherResult";
 import { parsePoundsToPence } from "@repo/utils";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
+
+export const meta = () => pageTitle("Settings");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type DayKey = (typeof DAY_KEYS)[number];
@@ -40,13 +51,11 @@ function buildTimeOptions(): string[] {
 
 const TIME_OPTIONS = buildTimeOptions();
 
-const HOURS_SELECT_CLASS = clsx(
-  "flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white",
-  "focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold",
-  "disabled:cursor-not-allowed disabled:opacity-40"
-);
-
-const TOGGLE_SELECT_CLASS = clsx(HOURS_SELECT_CLASS, "max-w-[10rem]");
+/** The half-hour choices, plus the saved time when it is not one of them
+ *  (so a stored "09:15" shows as itself, not as the first option). */
+function timeOptionsWith(value: string): string[] {
+  return TIME_OPTIONS.includes(value) ? TIME_OPTIONS : [...TIME_OPTIONS, value].sort();
+}
 
 type DayState = { open: boolean; start: string; end: string };
 
@@ -123,16 +132,25 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const token = getSessionToken(request);
   const shopId = pageShopId(request, user);
   if (!shopId || !token) {
-    return json({ shopId: null as string | null, settings: {} as ShopSettingsPayload, error: "no_shop" as const });
+    return json({
+      shopId: null as string | null,
+      settings: {} as ShopSettingsPayload,
+      error: "no_shop" as const,
+      loadError: false,
+    });
   }
   const api = createApiClient(env.API_URL, token);
   let settings: ShopSettingsPayload = {};
+  // A failed load must not become a blank form: saving one would write empty
+  // opening hours and contact details over the real ones. The page shows the
+  // failure and no form at all.
+  let loadError = false;
   try {
     settings = (await api.get(`/api/shops/${shopId}/settings`)) as ShopSettingsPayload;
   } catch {
-    settings = {};
+    loadError = true;
   }
-  return json({ shopId, settings, error: null as null });
+  return json({ shopId, settings, error: null as null, loadError });
 }
 
 type ActionData = { ok: boolean; message?: string; error?: string; ts: number };
@@ -160,34 +178,106 @@ export async function action({ request, context }: ActionFunctionArgs) {
   }
 }
 
-export default function AdminSettings() {
-  const { shopId, settings, error } = useLoaderData<typeof loader>();
+type Patch = Record<string, string | number | boolean | null>;
+type Toast = { type: "success" | "error"; text: string };
+type Notify = (toast: Toast) => void;
+
+/** One section's Save: its own fetcher, so only its button reads "Saving…". */
+function useSectionSave(what: string, notify: Notify, onSaved?: () => void) {
   const fetcher = useFetcher<ActionData>();
-  const lastHandledTs = useRef(0);
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) {
+      onSaved?.();
+      notify({ type: "success", text: `${what} saved.` });
+    } else {
+      notify({ type: "error", text: `${what} not saved: ${data.error ?? "the save failed"}. Try again.` });
+    }
+  });
+  return {
+    busy: fetcher.state !== "idle",
+    save: (patch: Patch) => fetcher.submit(patch, { method: "POST", encType: "application/json" }),
+  };
+}
 
-  const [toast, setToast] = useState<{ type: "success" | "error"; text: string } | null>(null);
+/**
+ * A setting that saves the moment it changes (the email switches and the
+ * reminder timing). The control shows the new value at once, and goes back
+ * to the last saved one if the save fails.
+ */
+function useInstantSetting<T extends string | number | boolean>(key: string, initial: T, what: string, notify: Notify) {
+  const fetcher = useFetcher<ActionData>();
+  const [value, setValue] = useState<T>(initial);
+  const saved = useRef<T>(initial);
+  const attempted = useRef<T>(initial);
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) {
+      saved.current = attempted.current;
+      notify({ type: "success", text: `${what} saved.` });
+    } else {
+      setValue(saved.current);
+      notify({
+        type: "error",
+        text: `${what} not saved, so it has been put back: ${data.error ?? "the save failed"}. Try again.`,
+      });
+    }
+  });
+  return {
+    value,
+    busy: fetcher.state !== "idle",
+    change: (next: T) => {
+      attempted.current = next;
+      setValue(next);
+      fetcher.submit({ [key]: next }, { method: "POST", encType: "application/json" });
+    },
+  };
+}
 
+export default function AdminSettings() {
+  const { shopId, settings, error, loadError } = useLoaderData<typeof loader>();
+
+  if (error === "no_shop" || !shopId) {
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        <h1 className="font-heading text-2xl font-bold text-white">Shop settings</h1>
+        <p className="text-sm text-white/60">
+          No shop is linked to your account. Contact support if you need help.
+        </p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    // No form: a blank one could be saved over the real settings.
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <h1 className="font-heading text-2xl font-bold text-white">Shop settings</h1>
+        <LoadError what="your shop settings" />
+      </div>
+    );
+  }
+
+  // Mounted only with loaded settings, so every field starts from a real value.
+  return <SettingsForms settings={settings} />;
+}
+
+function SettingsForms({ settings }: { settings: ShopSettingsPayload }) {
+  const [toast, setToast] = useState<Toast | null>(null);
+
+  // A success message clears itself. An error stays until dismissed or replaced.
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.type === "error") return;
     const t = window.setTimeout(() => setToast(null), 4500);
     return () => window.clearTimeout(t);
   }, [toast]);
-
-  useEffect(() => {
-    if (fetcher.state !== "idle" || !fetcher.data) return;
-    const { ts, ok, message, error: err } = fetcher.data;
-    if (ts <= lastHandledTs.current) return;
-    lastHandledTs.current = ts;
-    if (ok) setToast({ type: "success", text: message ?? "Saved." });
-    else setToast({ type: "error", text: err ?? "Save failed." });
-  }, [fetcher.state, fetcher.data]);
 
   const [phone, setPhone] = useState(settings.phone ?? "");
   const [address, setAddress] = useState(settings.address ?? "");
   const [lat, setLat] = useState(settings.lat != null ? String(settings.lat) : "");
   const [lng, setLng] = useState(settings.lng != null ? String(settings.lng) : "");
+  const [coordErrors, setCoordErrors] = useState<{ lat?: string; lng?: string }>({});
 
   const [hoursState, setHoursState] = useState(() => parseHoursJson(settings.hours_json));
+  const [hoursError, setHoursError] = useState<string | null>(null);
 
   const [ig, setIg] = useState(settings.instagram_url ?? "");
   const [fb, setFb] = useState(settings.facebook_url ?? "");
@@ -196,16 +286,6 @@ export default function AdminSettings() {
   const [yt, setYt] = useState(settings.youtube_url ?? "");
   const [wa, setWa] = useState(settings.whatsapp_url ?? "");
   const [li, setLi] = useState(settings.linkedin_url ?? "");
-  const [confirmEmail, setConfirmEmail] = useState(settings.booking_confirmation_email !== false);
-  const [reminderEmail, setReminderEmail] = useState(settings.booking_reminder_email !== false);
-  const [reminderHours, setReminderHours] = useState(settings.reminder_hours_before ?? 24);
-  const [reviewEmail, setReviewEmail] = useState(settings.review_request_email !== false);
-
-  const [depositsEnabled, setDepositsEnabled] = useState(settings.deposits_enabled === true);
-  const [depositPercent, setDepositPercent] = useState(settings.deposit_percent ?? 50);
-  const [depositMin, setDepositMin] = useState(
-    settings.deposit_min_pence != null ? (settings.deposit_min_pence / 100).toFixed(2) : "5.00"
-  );
 
   const [showIg, setShowIg] = useState(settings.show_instagram === true);
   const [showFb, setShowFb] = useState(settings.show_facebook === true);
@@ -215,37 +295,85 @@ export default function AdminSettings() {
   const [showWa, setShowWa] = useState(settings.show_whatsapp === true);
   const [showLi, setShowLi] = useState(settings.show_linkedin === true);
 
-  const submitPatch = (patch: Record<string, string | number | boolean | null>) => {
-    fetcher.submit(patch, { method: "POST", encType: "application/json" });
-  };
+  // Email settings save the moment they change, and go back if the save fails.
+  const confirmEmail = useInstantSetting("booking_confirmation_email", settings.booking_confirmation_email !== false, "Booking confirmation email", setToast);
+  const reminderEmail = useInstantSetting("booking_reminder_email", settings.booking_reminder_email !== false, "Booking reminder email", setToast);
+  const reminderHours = useInstantSetting("reminder_hours_before", settings.reminder_hours_before ?? 24, "Reminder timing", setToast);
+  const reviewEmail = useInstantSetting("review_request_email", settings.review_request_email !== false, "Review request email", setToast);
+
+  // Deposits are money, so the whole section saves together with one button:
+  // the switch, the percentage and the minimum. What is saved is kept here so
+  // the section can say when it has unsaved changes.
+  const [savedDeposits, setSavedDeposits] = useState(() => ({
+    enabled: settings.deposits_enabled === true,
+    percent: settings.deposit_percent ?? 50,
+    min: settings.deposit_min_pence != null ? (settings.deposit_min_pence / 100).toFixed(2) : "5.00",
+  }));
+  const [depositsEnabled, setDepositsEnabled] = useState(savedDeposits.enabled);
+  const [depositPercent, setDepositPercent] = useState(savedDeposits.percent);
+  const [depositMin, setDepositMin] = useState(savedDeposits.min);
+  const [depositMinError, setDepositMinError] = useState<string | null>(null);
+  const depositsAttempt = useRef(savedDeposits);
+  const depositsDirty =
+    depositsEnabled !== savedDeposits.enabled ||
+    (depositsEnabled && (depositPercent !== savedDeposits.percent || depositMin.trim() !== savedDeposits.min));
+
+  const contact = useSectionSave("Contact details", setToast);
+  const hours = useSectionSave("Opening hours", setToast);
+  const social = useSectionSave("Social media links", setToast);
+  const deposits = useSectionSave("Deposit settings", setToast, () => setSavedDeposits(depositsAttempt.current));
 
   const saveContact = () => {
-    const patch: Record<string, string | number | boolean | null> = {
-      phone: phone.trim(),
-      address: address.trim(),
-    };
+    const errors: { lat?: string; lng?: string } = {};
     const latN = lat.trim() === "" ? null : Number(lat);
     const lngN = lng.trim() === "" ? null : Number(lng);
-    patch.lat = lat.trim() === "" || Number.isNaN(latN) ? null : latN;
-    patch.lng = lng.trim() === "" || Number.isNaN(lngN) ? null : lngN;
-    submitPatch(patch);
+    if (latN !== null && (!Number.isFinite(latN) || latN < -90 || latN > 90)) {
+      errors.lat = "Enter a latitude between -90 and 90, or leave it empty.";
+    }
+    if (lngN !== null && (!Number.isFinite(lngN) || lngN < -180 || lngN > 180)) {
+      errors.lng = "Enter a longitude between -180 and 180, or leave it empty.";
+    }
+    setCoordErrors(errors);
+    if (errors.lat || errors.lng) return;
+    contact.save({ phone: phone.trim(), address: address.trim(), lat: latN, lng: lngN });
   };
 
   const saveHours = () => {
-    submitPatch({ hours_json: serializeHoursJson(hoursState) });
+    const backwards = DAY_KEYS.find((k) => hoursState[k].open && hoursState[k].end <= hoursState[k].start);
+    if (backwards) {
+      setHoursError(`${DAY_LABELS[backwards]} must close after it opens. Nothing has been saved.`);
+      return;
+    }
+    setHoursError(null);
+    hours.save({ hours_json: serializeHoursJson(hoursState) });
   };
 
   const saveDeposits = () => {
-    // Form-input boundary (WS-4): pounds text -> integer pence.
-    const minPence = parsePoundsToPence(depositMin) ?? 500;
-    submitPatch({
+    if (!depositsEnabled) {
+      // The percentage and minimum are hidden while deposits are off, so only the switch is sent.
+      setDepositMinError(null);
+      depositsAttempt.current = { ...savedDeposits, enabled: false };
+      deposits.save({ deposits_enabled: false });
+      return;
+    }
+    // Form-input boundary (WS-4): pounds text -> integer pence. An amount
+    // that cannot be read is an error on the field, never a silent default.
+    const minPence = parsePoundsToPence(depositMin);
+    if (minPence === null) {
+      setDepositMinError("Enter the minimum deposit in pounds, for example 5 or 5.00. Nothing has been saved.");
+      return;
+    }
+    setDepositMinError(null);
+    depositsAttempt.current = { enabled: true, percent: depositPercent, min: depositMin.trim() };
+    deposits.save({
+      deposits_enabled: true,
       deposit_percent: depositPercent,
       deposit_min_pence: minPence,
     });
   };
 
   const saveSocial = () => {
-    submitPatch({
+    social.save({
       instagram_url: ig.trim(),
       facebook_url: fb.trim(),
       tiktok_url: tt.trim(),
@@ -263,30 +391,29 @@ export default function AdminSettings() {
     });
   };
 
-  if (error === "no_shop" || !shopId) {
-    return (
-      <div className="mx-auto max-w-2xl space-y-4">
-        <h1 className="font-heading text-2xl font-bold text-white">Settings</h1>
-        <p className="text-sm text-white/60">
-          No shop is linked to your account. Contact support if you need help.
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="mx-auto max-w-3xl space-y-10 pb-12">
       {toast ? (
         <div
           className={clsx(
-            "fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 max-w-sm rounded-lg border px-4 py-3 text-sm shadow-lg md:bottom-6 md:right-6",
+            "fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 flex max-w-sm items-start gap-3 rounded-lg border px-4 py-3 text-sm md:bottom-6 md:right-6",
             toast.type === "success"
-              ? "border-emerald-500/40 bg-emerald-950/90 text-emerald-100"
-              : "border-red-500/40 bg-red-950/90 text-red-100"
+              ? "border-emerald-500/40 bg-emerald-950 text-emerald-100"
+              : "border-red-500/40 bg-red-950 text-red-100"
           )}
-          role="status"
+          // A failure interrupts; a success is announced politely.
+          role={toast.type === "error" ? "alert" : "status"}
         >
-          {toast.text}
+          <span className="flex-1">{toast.text}</span>
+          {toast.type === "error" && (
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="tap-target -my-2 -mr-2 rounded-lg px-2 text-sm font-medium text-red-100 underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            >
+              Dismiss
+            </button>
+          )}
         </div>
       ) : null}
 
@@ -294,25 +421,20 @@ export default function AdminSettings() {
 
       {/* Contact */}
       <section className="space-y-4 rounded-xl border border-white/10 bg-dark-100 p-6">
-        <h2 className="font-heading text-lg font-semibold text-white">Contact &amp; location</h2>
+        <h2 className="font-heading text-lg font-semibold text-white">Contact and location</h2>
         <div className="space-y-4">
-          <Input label="Phone number" name="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <Input label="Address" name="address" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <Input label="Phone number" name="phone" type="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input label="Address" name="address" autoComplete="street-address" value={address} onChange={(e) => setAddress(e.target.value)} />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Input label="Latitude (optional)" name="lat" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="e.g. 51.5074" />
-            <Input label="Longitude (optional)" name="lng" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="e.g. -0.1278" />
+            <Input label="Latitude (optional)" name="lat" inputMode="decimal" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="e.g. 51.5074" error={coordErrors.lat} />
+            <Input label="Longitude (optional)" name="lng" inputMode="decimal" value={lng} onChange={(e) => setLng(e.target.value)} placeholder="e.g. -0.1278" error={coordErrors.lng} />
           </div>
-          {address.trim() ? (
-            <div className="rounded-lg border border-white/10 bg-white/5 p-4">
-              <p className="text-xs font-medium uppercase tracking-wide text-white/50">Map preview</p>
-              <p className="mt-2 text-sm text-white/80">{address.trim()}</p>
-            </div>
-          ) : (
-            <p className="text-sm text-white/60">Add an address to see it previewed here.</p>
-          )}
+          <p className="text-xs text-white/60">
+            The address is shown on your site. Latitude and longitude place the pin on your map; leave them empty if you are not sure.
+          </p>
         </div>
-        <Button type="button" size="sm" onClick={saveContact} disabled={fetcher.state !== "idle"}>
-          {fetcher.state !== "idle" ? "Saving…" : "Save"}
+        <Button type="button" size="sm" onClick={saveContact} disabled={contact.busy}>
+          {contact.busy ? "Saving…" : "Save contact details"}
         </Button>
       </section>
 
@@ -322,16 +444,17 @@ export default function AdminSettings() {
         <div className="space-y-3">
           {DAY_KEYS.map((k) => {
             const row = hoursState[k];
+            const day = DAY_LABELS[k];
             return (
               <div
                 key={k}
                 className="flex flex-col gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 sm:flex-row sm:items-center sm:gap-4"
               >
-                <div className="w-28 shrink-0 text-sm font-medium text-white/90">{DAY_LABELS[k]}</div>
-                <label className="flex cursor-pointer items-center gap-2 text-sm text-white/80">
+                <div className="w-28 shrink-0 text-sm font-medium text-white/90" aria-hidden>{day}</div>
+                <label className="tap-target flex cursor-pointer items-center gap-2 text-sm text-white/80">
                   <input
                     type="checkbox"
-                    className="h-4 w-4 rounded border-white/30 bg-white/5 text-gold focus:ring-gold"
+                    className="h-4 w-4 rounded accent-gold"
                     checked={row.open}
                     onChange={(e) =>
                       setHoursState((prev) => ({
@@ -340,51 +463,58 @@ export default function AdminSettings() {
                       }))
                     }
                   />
-                  Open
+                  <span><span className="sr-only">{day}: </span>Open</span>
                 </label>
-                <div className="flex flex-1 flex-wrap items-center gap-2 sm:justify-end">
-                  <select
-                    className={HOURS_SELECT_CLASS}
-                    disabled={!row.open}
-                    value={row.start}
-                    onChange={(e) =>
-                      setHoursState((prev) => ({
-                        ...prev,
-                        [k]: { ...prev[k], start: e.target.value },
-                      }))
-                    }
-                  >
-                    {TIME_OPTIONS.map((t) => (
-                      <option key={t} className="bg-dark text-white" value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-white/50">to</span>
-                  <select
-                    className={HOURS_SELECT_CLASS}
-                    disabled={!row.open}
-                    value={row.end}
-                    onChange={(e) =>
-                      setHoursState((prev) => ({
-                        ...prev,
-                        [k]: { ...prev[k], end: e.target.value },
-                      }))
-                    }
-                  >
-                    {TIME_OPTIONS.map((t) => (
-                      <option key={`e-${t}`} className="bg-dark text-white" value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex flex-1 items-center gap-2 sm:justify-end">
+                  <div className="min-w-0 flex-1 sm:max-w-[9rem]">
+                    <Select
+                      label={`${day} opens at`}
+                      hideLabel
+                      disabled={!row.open}
+                      value={row.start}
+                      onChange={(e) =>
+                        setHoursState((prev) => ({
+                          ...prev,
+                          [k]: { ...prev[k], start: e.target.value },
+                        }))
+                      }
+                    >
+                      {timeOptionsWith(row.start).map((t) => (
+                        <option key={t} className="bg-dark text-white" value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                  <span className="text-sm text-white/60" aria-hidden>to</span>
+                  <div className="min-w-0 flex-1 sm:max-w-[9rem]">
+                    <Select
+                      label={`${day} closes at`}
+                      hideLabel
+                      disabled={!row.open}
+                      value={row.end}
+                      onChange={(e) =>
+                        setHoursState((prev) => ({
+                          ...prev,
+                          [k]: { ...prev[k], end: e.target.value },
+                        }))
+                      }
+                    >
+                      {timeOptionsWith(row.end).map((t) => (
+                        <option key={t} className="bg-dark text-white" value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
-        <Button type="button" size="sm" onClick={saveHours} disabled={fetcher.state !== "idle"}>
-          {fetcher.state !== "idle" ? "Saving…" : "Save"}
+        {hoursError && <p role="alert" className="text-sm text-red-400">{hoursError}</p>}
+        <Button type="button" size="sm" onClick={saveHours} disabled={hours.busy}>
+          {hours.busy ? "Saving…" : "Save opening hours"}
         </Button>
       </section>
 
@@ -392,190 +522,180 @@ export default function AdminSettings() {
       <section className="space-y-4 rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-lg font-semibold text-white">Social media</h2>
         <div className="space-y-5">
-          <SocialRow
-            label="Instagram"
-            url={ig}
-            onUrlChange={setIg}
-            show={showIg}
-            onShowChange={setShowIg}
-          />
-          <SocialRow
-            label="Facebook"
-            url={fb}
-            onUrlChange={setFb}
-            show={showFb}
-            onShowChange={setShowFb}
-          />
-          <SocialRow
-            label="TikTok"
-            url={tt}
-            onUrlChange={setTt}
-            show={showTt}
-            onShowChange={setShowTt}
-          />
-          <SocialRow
-            label="Twitter / X"
-            url={tw}
-            onUrlChange={setTw}
-            show={showTw}
-            onShowChange={setShowTw}
-          />
-          <SocialRow
-            label="YouTube"
-            url={yt}
-            onUrlChange={setYt}
-            show={showYt}
-            onShowChange={setShowYt}
-          />
-          <SocialRow
-            label="WhatsApp"
-            url={wa}
-            onUrlChange={setWa}
-            show={showWa}
-            onShowChange={setShowWa}
-          />
-          <SocialRow
-            label="LinkedIn"
-            url={li}
-            onUrlChange={setLi}
-            show={showLi}
-            onShowChange={setShowLi}
-          />
+          <SocialRow label="Instagram" url={ig} onUrlChange={setIg} show={showIg} onShowChange={setShowIg} />
+          <SocialRow label="Facebook" url={fb} onUrlChange={setFb} show={showFb} onShowChange={setShowFb} />
+          <SocialRow label="TikTok" url={tt} onUrlChange={setTt} show={showTt} onShowChange={setShowTt} />
+          <SocialRow label="Twitter / X" url={tw} onUrlChange={setTw} show={showTw} onShowChange={setShowTw} />
+          <SocialRow label="YouTube" url={yt} onUrlChange={setYt} show={showYt} onShowChange={setShowYt} />
+          <SocialRow label="WhatsApp" url={wa} onUrlChange={setWa} show={showWa} onShowChange={setShowWa} />
+          <SocialRow label="LinkedIn" url={li} onUrlChange={setLi} show={showLi} onShowChange={setShowLi} />
         </div>
-        <Button type="button" size="sm" onClick={saveSocial} disabled={fetcher.state !== "idle"}>
-          {fetcher.state !== "idle" ? "Saving…" : "Save"}
+        <Button type="button" size="sm" onClick={saveSocial} disabled={social.busy}>
+          {social.busy ? "Saving…" : "Save social media links"}
         </Button>
       </section>
 
       {/* Notification preferences */}
       <section className="space-y-5 rounded-xl border border-white/10 bg-dark-100 p-6">
-        <h2 className="font-heading text-lg font-semibold text-white">Email notifications</h2>
-        <p className="text-sm text-white/60 -mt-2">Control which automated emails are sent to customers.</p>
-
-        {/* Confirmation email */}
-        <div className="flex items-center justify-between gap-4 py-1">
-          <div>
-            <p className="text-sm font-medium text-white">Booking confirmation</p>
-            <p className="text-xs text-white/60 mt-0.5">Sent immediately when a booking is made</p>
-          </div>
-          <Toggle
-            value={confirmEmail}
-            onChange={(v) => { setConfirmEmail(v); submitPatch({ booking_confirmation_email: v }); }}
-          />
+        <div>
+          <h2 className="font-heading text-lg font-semibold text-white">Email notifications</h2>
+          <p className="mt-1 text-sm text-white/60">
+            Choose which automatic emails your customers get. Each change here is saved straight away.
+          </p>
         </div>
 
-        {/* Reminder email + timing */}
+        <ToggleRow
+          label="Booking confirmation"
+          hint="Sent immediately when a booking is made"
+          value={confirmEmail.value}
+          busy={confirmEmail.busy}
+          onChange={confirmEmail.change}
+        />
+
         <div className="space-y-3 border-t border-white/10 pt-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-white">Booking reminder</p>
-              <p className="text-xs text-white/60 mt-0.5">Sent before the appointment</p>
-            </div>
-            <Toggle
-              value={reminderEmail}
-              onChange={(v) => { setReminderEmail(v); submitPatch({ booking_reminder_email: v }); }}
-            />
-          </div>
-          {reminderEmail && (
-            <div className="flex items-center gap-3 pl-1">
-              <span className="text-sm text-white/50">Send</span>
-              <select
-                value={reminderHours}
-                onChange={e => {
-                  const h = Number(e.target.value);
-                  setReminderHours(h);
-                  submitPatch({ reminder_hours_before: h });
-                }}
-                className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
+          <ToggleRow
+            label="Booking reminder"
+            hint="Sent before the appointment"
+            value={reminderEmail.value}
+            busy={reminderEmail.busy}
+            onChange={reminderEmail.change}
+          />
+          {reminderEmail.value && (
+            <div className="max-w-xs">
+              <Select
+                label="Send the reminder"
+                value={reminderHours.value}
+                disabled={reminderHours.busy}
+                onChange={(e) => reminderHours.change(Number(e.target.value))}
               >
-                {[2, 4, 6, 12, 24, 48, 72].map(h => (
-                  <option key={h} value={h} className="bg-dark">{h}h before</option>
+                {[2, 4, 6, 12, 24, 48, 72].map((h) => (
+                  <option key={h} value={h} className="bg-dark">{h} hours before the appointment</option>
                 ))}
-              </select>
-              <span className="text-sm text-white/50">the appointment</span>
+              </Select>
             </div>
           )}
         </div>
 
-        {/* Review request */}
-        <div className="flex items-center justify-between gap-4 border-t border-white/10 pt-4">
-          <div>
-            <p className="text-sm font-medium text-white">Review request</p>
-            <p className="text-xs text-white/60 mt-0.5">Sent when a booking is marked completed</p>
-          </div>
-          <Toggle
-            value={reviewEmail}
-            onChange={(v) => { setReviewEmail(v); submitPatch({ review_request_email: v }); }}
+        <div className="border-t border-white/10 pt-4">
+          <ToggleRow
+            label="Review request"
+            hint="Sent when a booking is marked completed"
+            value={reviewEmail.value}
+            busy={reviewEmail.busy}
+            onChange={reviewEmail.change}
           />
         </div>
       </section>
 
       {/* Booking deposits */}
       <section className="space-y-5 rounded-xl border border-white/10 bg-dark-100 p-6">
-        <h2 className="font-heading text-lg font-semibold text-white">Booking deposits</h2>
-        <p className="text-sm text-white/60 -mt-2">
-          Take a card deposit when customers book online. Requires Stripe payments to be set up
-          (Settings → Payments). The remaining balance is settled at the appointment.
-        </p>
-
-        <div className="flex items-center justify-between gap-4 py-1">
-          <div>
-            <p className="text-sm font-medium text-white">Require a deposit at online booking</p>
-            <p className="text-xs text-white/60 mt-0.5">
-              The slot is only confirmed once the deposit is paid; abandoned payments free the slot
-              after 30 minutes
-            </p>
-          </div>
-          <Toggle
-            value={depositsEnabled}
-            onChange={(v) => { setDepositsEnabled(v); submitPatch({ deposits_enabled: v }); }}
-          />
+        <div>
+          <h2 className="font-heading text-lg font-semibold text-white">Booking deposits</h2>
+          <p className="mt-1 text-sm text-white/60">
+            Take a card deposit when customers book online. Requires Stripe payments to be set up
+            (Settings → Payments). The remaining balance is settled at the appointment.
+          </p>
+          <p className="mt-1 text-sm text-white/60">
+            Nothing in this section changes until you press Save deposit settings.
+          </p>
         </div>
+
+        <ToggleRow
+          label="Require a deposit at online booking"
+          hint="The slot is only confirmed once the deposit is paid; abandoned payments free the slot after 30 minutes"
+          value={depositsEnabled}
+          busy={deposits.busy}
+          onChange={setDepositsEnabled}
+        />
 
         {depositsEnabled && (
           <div className="space-y-4 border-t border-white/10 pt-4">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-white/50">Deposit is</span>
-              <select
+            <div className="max-w-xs">
+              <Select
+                label="Deposit, as a share of the service price"
                 value={depositPercent}
                 onChange={(e) => setDepositPercent(Number(e.target.value))}
-                className="rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold"
               >
                 {[10, 20, 25, 30, 40, 50, 75, 100].map((p) => (
                   <option key={p} value={p} className="bg-dark">{p}%</option>
                 ))}
-              </select>
-              <span className="text-sm text-white/50">of the service price</span>
+              </Select>
             </div>
             <div className="max-w-xs">
               <Input
                 label="Minimum deposit (£)"
+                inputMode="decimal"
                 value={depositMin}
-                onChange={(e) => setDepositMin(e.target.value)}
+                onChange={(e) => {
+                  setDepositMin(e.target.value);
+                  setDepositMinError(null);
+                }}
                 placeholder="5.00"
+                error={depositMinError ?? undefined}
               />
               <p className="mt-1 text-xs text-white/60">
                 Never more than the service price. A high minimum becomes full prepayment.
               </p>
             </div>
-            <Button type="button" size="sm" onClick={saveDeposits} disabled={fetcher.state !== "idle"}>
-              {fetcher.state !== "idle" ? "Saving…" : "Save"}
-            </Button>
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" size="sm" onClick={saveDeposits} disabled={deposits.busy}>
+            {deposits.busy ? "Saving…" : "Save deposit settings"}
+          </Button>
+          {depositsDirty && !deposits.busy && (
+            <p role="status" className="text-sm text-amber-200">You have unsaved changes to deposits.</p>
+          )}
+        </div>
       </section>
 
     </div>
   );
 }
 
-
-function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+/** A labelled on/off switch. The whole control is at least 44px tall, and its
+ *  name and description are the visible text beside it. */
+function ToggleRow({
+  label,
+  hint,
+  value,
+  busy = false,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: boolean;
+  busy?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const id = useId();
+  const labelId = `${id}-label`;
+  const hintId = `${id}-hint`;
   return (
-    <button type="button" role="switch" aria-checked={value} onClick={() => onChange(!value)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${value ? "bg-gold" : "bg-white/20"}`}>
-      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${value ? "translate-x-6" : "translate-x-1"}`} />
-    </button>
+    <div className="flex items-center justify-between gap-4">
+      <div>
+        <p id={labelId} className="text-sm font-medium text-white">{label}</p>
+        {hint && <p id={hintId} className="mt-0.5 text-xs text-white/60">{hint}</p>}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        aria-labelledby={labelId}
+        aria-describedby={hint ? hintId : undefined}
+        disabled={busy}
+        onClick={() => onChange(!value)}
+        className="group inline-flex h-11 w-14 shrink-0 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold disabled:cursor-wait disabled:opacity-60"
+      >
+        <span
+          aria-hidden
+          className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${value ? "border-gold bg-gold" : "border-white/40 bg-white/20"}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${value ? "translate-x-6" : "translate-x-1"}`} />
+        </span>
+      </button>
+    </div>
   );
 }
 
@@ -586,7 +706,6 @@ function SocialRow({
   show,
   onShowChange,
   placeholder = "https://…",
-  hint,
 }: {
   label: string;
   url: string;
@@ -594,28 +713,21 @@ function SocialRow({
   show: boolean;
   onShowChange: (v: boolean) => void;
   placeholder?: string;
-  hint?: string;
 }) {
   const hasUrl = url.trim().length > 0;
   return (
     <div className="space-y-2">
-      <Input label={label} type="url" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder={placeholder} />
-      {hint && !hasUrl && <p className="text-xs text-white/50">{hint}</p>}
+      <Input label={label} type="url" inputMode="url" value={url} onChange={(e) => onUrlChange(e.target.value)} placeholder={placeholder} />
       {hasUrl ? (
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-white/50">Show on site</span>
-          <select
-            className={TOGGLE_SELECT_CLASS}
+        <div className="max-w-[14rem]">
+          <Select
+            label={`${label} link on your site`}
             value={show ? "show" : "hide"}
             onChange={(e) => onShowChange(e.target.value === "show")}
           >
-            <option className="bg-dark text-white" value="show">
-              Show
-            </option>
-            <option className="bg-dark text-white" value="hide">
-              Hide
-            </option>
-          </select>
+            <option className="bg-dark text-white" value="show">Shown</option>
+            <option className="bg-dark text-white" value="hide">Hidden</option>
+          </Select>
         </div>
       ) : null}
     </div>
