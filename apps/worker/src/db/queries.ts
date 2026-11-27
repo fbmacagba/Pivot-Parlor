@@ -2984,3 +2984,15 @@ export async function pruneAiUsageLog(
     .run();
   return r.meta.changes ?? 0;
 }
+
+/** The evidence file attached to a shop's refund request, if any. */
+export async function getRefundRequestEvidence(
+  db: D1Database,
+  shopId: string,
+  requestId: string
+): Promise<{ evidence_key: string | null; evidence_name: string | null; evidence_type: string | null } | null> {
+  return db
+    .prepare("SELECT evidence_key, evidence_name, evidence_type FROM refund_requests WHERE id = ? AND shop_id = ? LIMIT 1")
+    .bind(requestId, shopId)
+    .first<{ evidence_key: string | null; evidence_name: string | null; evidence_type: string | null }>();
+}

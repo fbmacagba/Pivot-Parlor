@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { calculateCommissionPence } from "@repo/utils";
 import worker from "../src/index";
 import { dispatch } from "./request";
-import { seedShop, seedStaff, seedService, seedProduct, tokenFor } from "./helpers";
+import { seedShop, seedStaff, seedService, seedProduct, tokenFor, saleRefundBody } from "./helpers";
 
 /** `dispatch` with a substituted env (e.g. a Proxy over DB). */
 async function dispatchWith(
@@ -110,7 +110,7 @@ describe("record-only refunds (cash/card_external)", () => {
     // Return 1 of 2 pomades, restocked.
     const partial = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }], reason: "unopened" },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }], "unopened"),
     });
     expect(partial.status).toBe(200);
     const partialBody = (await partial.json()) as { data: Record<string, unknown> };
@@ -148,12 +148,10 @@ describe("record-only refunds (cash/card_external)", () => {
     // Refund everything left → the sale flips to refunded.
     const rest = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: {
-        lines: [
-          { sale_item_id: serviceItem, quantity: 1 },
-          { sale_item_id: productItem, quantity: 1, restock: false },
-        ],
-      },
+      body: await saleRefundBody(shop, saleId, [
+        { sale_item_id: serviceItem, quantity: 1 },
+        { sale_item_id: productItem, quantity: 1, restock: false },
+      ]),
     });
     expect(rest.status).toBe(200);
     expect(((await rest.json()) as { data: { fully_refunded: boolean } }).data.fully_refunded).toBe(true);
@@ -174,14 +172,14 @@ describe("record-only refunds (cash/card_external)", () => {
 
     const over = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 3 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 3 }]),
     });
     expect(over.status).toBe(400);
 
     const staffToken = await tokenFor("staff", shop);
     const denied = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${staffToken}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]),
     });
     expect(denied.status).toBe(403);
   });
@@ -207,7 +205,7 @@ describe("record-only refunds (cash/card_external)", () => {
 
     const refund = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 2 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 2 }]),
     });
     expect(refund.status).toBe(200);
     // (2000 - 400) for both units.
@@ -251,7 +249,7 @@ describe("Stripe refunds", () => {
 
     const refund = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]),
     });
     expect(refund.status).toBe(200);
     const body = (await refund.json()) as { data: { id: string; status: string; refund_pence: number } };
@@ -423,7 +421,7 @@ describe("Stripe refunds", () => {
     // API-initiated return of one product unit (1000), settled by webhook.
     const refund = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]),
     });
     expect(refund.status).toBe(200);
     await postWebhook({
@@ -465,7 +463,7 @@ describe("Stripe refunds", () => {
 
     const failed = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]),
     });
     expect(failed.status).toBe(502);
 
@@ -488,7 +486,7 @@ describe("Stripe refunds", () => {
       .run();
     const retry = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]),
     });
     expect(retry.status).toBe(200);
   });
@@ -508,10 +506,10 @@ describe("Stripe refunds", () => {
       .first<Record<string, number | string>>();
   }
 
-  const refundOne = (shop: string, saleId: string, item: string, token: string, db?: typeof env.DB) =>
+  const refundOne = async (shop: string, saleId: string, item: string, token: string, db?: typeof env.DB) =>
     dispatchWith(db ? { ...env, DB: db } : env, "POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: item, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: item, quantity: 1 }]),
     });
 
   /** A DB whose `n`th batch call first runs `before` (or fails, when `fail`). */
@@ -823,14 +821,212 @@ describe("Stripe refunds", () => {
 
     const first = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 2 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 2 }]),
     });
     expect(first.status).toBe(200);
 
     const second = await dispatch("POST", `/booking/shops/${shop}/sales/${saleId}/refund`, {
       headers: { Authorization: `Bearer ${token}` },
-      body: { lines: [{ sale_item_id: productItem, quantity: 1 }] },
+      body: await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]),
     });
     expect(second.status).toBe(400);
+  });
+});
+
+describe("refund review: a sale refund needs a filed, pending request", () => {
+  const post = (path: string, token: string, body: unknown) =>
+    dispatch("POST", path, { headers: { Authorization: `Bearer ${token}` }, body: body as Record<string, unknown> });
+  const requestRow = (id: string) =>
+    env.DB.prepare("SELECT * FROM refund_requests WHERE id = ?").bind(id).first<Record<string, unknown>>();
+  const returnCount = async (saleId: string) =>
+    Number(
+      (await env.DB.prepare("SELECT COUNT(*) AS n FROM sale_returns WHERE sale_id = ?").bind(saleId).first<{ n: number }>())
+        ?.n ?? 0
+    );
+  async function file(shop: string, token: string, body: Record<string, unknown>) {
+    return post(`/booking/shops/${shop}/refund-requests`, token, body);
+  }
+
+  it("refuses a refund that names no request, even with lines and a reason", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+
+    const bare = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, {
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "just refund it",
+    });
+    expect(bare.status).toBe(400);
+    expect(((await bare.json()) as { error: string }).error).toMatch(/refund request/i);
+    expect(await returnCount(saleId)).toBe(0);
+    expect(await stockQty(shop, product)).toBe(3);
+  });
+
+  it("staff file a request with a reason; only the owner approves it, once", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const staffToken = await tokenFor("staff", shop);
+
+    const short = await file(shop, staffToken, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "broken",
+    });
+    expect(short.status).toBe(400);
+
+    const filed = await file(shop, staffToken, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Lid was cracked when the customer opened it at home",
+    });
+    expect(filed.status).toBe(201);
+    const { data } = (await filed.json()) as { data: { id: string; amount_pence: number; status: string } };
+    expect(data).toMatchObject({ status: "pending", amount_pence: 1000 });
+    // Filing moves no money and no stock.
+    expect(await returnCount(saleId)).toBe(0);
+    expect(await stockQty(shop, product)).toBe(3);
+
+    // A second request for the same sale waits for the first.
+    const dup = await file(shop, staffToken, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Filing the same thing a second time",
+    });
+    expect(dup.status).toBe(409);
+
+    // Staff cannot approve their own request.
+    const byStaff = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, staffToken, {
+      refund_request_id: data.id,
+    });
+    expect(byStaff.status).toBe(403);
+    expect(await returnCount(saleId)).toBe(0);
+
+    const approved = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, { refund_request_id: data.id });
+    expect(approved.status).toBe(200);
+    expect(await returnCount(saleId)).toBe(1);
+    expect(await requestRow(data.id)).toMatchObject({
+      status: "approved",
+      reviewed_by: "user-admin",
+      requested_by: "user-staff",
+      refunded_pence: 1000,
+    });
+    const ret = await env.DB
+      .prepare("SELECT reason FROM sale_returns WHERE sale_id = ?")
+      .bind(saleId)
+      .first<{ reason: string }>();
+    expect(ret?.reason).toBe("Lid was cracked when the customer opened it at home");
+
+    // The same request cannot pay twice.
+    const again = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, { refund_request_id: data.id });
+    expect(again.status).toBe(409);
+    expect(await returnCount(saleId)).toBe(1);
+
+    const list = await dispatch("GET", `/booking/shops/${shop}/refund-requests?status=decided`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const rows = ((await list.json()) as { data: Array<Record<string, unknown>> }).data;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: data.id, kind: "sale", status: "approved", has_evidence: false });
+  });
+
+  it("a declined request can never be approved, and staff cannot decline", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const staffToken = await tokenFor("staff", shop);
+    const filed = await file(shop, staffToken, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 2 }],
+      reason: "Customer changed their mind a month later",
+    });
+    const id = ((await filed.json()) as { data: { id: string } }).data.id;
+
+    const staffDecline = await post(`/booking/shops/${shop}/refund-requests/${id}/decline`, staffToken, {});
+    expect(staffDecline.status).toBe(403);
+
+    const declined = await post(`/booking/shops/${shop}/refund-requests/${id}/decline`, token, {
+      note: "Outside the 14 day window",
+    });
+    expect(declined.status).toBe(200);
+    expect(await requestRow(id)).toMatchObject({
+      status: "declined",
+      reviewed_by: "user-admin",
+      review_note: "Outside the 14 day window",
+    });
+
+    const approve = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, { refund_request_id: id });
+    expect(approve.status).toBe(409);
+    expect(await returnCount(saleId)).toBe(0);
+    const declineAgain = await post(`/booking/shops/${shop}/refund-requests/${id}/decline`, token, {});
+    expect(declineAgain.status).toBe(409);
+  });
+
+  it("a request approves only the sale and shop it was filed for", async () => {
+    const a = await seedRefundShop();
+    const saleA = await ringCashSale(a.shop, a.staff, a.service, a.product, a.token);
+    const saleA2 = await ringCashSale(a.shop, a.staff, a.service, a.product, a.token);
+    const b = await seedRefundShop();
+    const saleB = await ringCashSale(b.shop, b.staff, b.service, b.product, b.token);
+    const { refund_request_id } = await saleRefundBody(a.shop, saleA.saleId, [
+      { sale_item_id: saleA.productItem, quantity: 1 },
+    ]);
+
+    const otherSale = await post(`/booking/shops/${a.shop}/sales/${saleA2.saleId}/refund`, a.token, { refund_request_id });
+    expect(otherSale.status).toBe(404);
+    const otherShop = await post(`/booking/shops/${b.shop}/sales/${saleB.saleId}/refund`, b.token, { refund_request_id });
+    expect(otherShop.status).toBe(404);
+    expect(await requestRow(refund_request_id)).toMatchObject({ status: "pending" });
+    expect(await returnCount(saleA2.saleId)).toBe(0);
+    expect(await returnCount(saleB.saleId)).toBe(0);
+  });
+
+  it("an evidence file must sit in the shop's own evidence folder", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const base = {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Photo shows the seal was already broken",
+    };
+    const foreign = await file(shop, token, { ...base, evidence_key: "anchors/2026-01-01.json" });
+    expect(foreign.status).toBe(400);
+    const otherShop = await file(shop, token, { ...base, evidence_key: "refund-evidence/another-shop/x.png" });
+    expect(otherShop.status).toBe(400);
+
+    const ok = await file(shop, token, {
+      ...base,
+      evidence_key: `refund-evidence/${shop}/abc.png`,
+      evidence_name: "seal.png",
+      evidence_type: "image/png",
+    });
+    expect(ok.status).toBe(201);
+    const id = ((await ok.json()) as { data: { id: string } }).data.id;
+    expect(await requestRow(id)).toMatchObject({
+      evidence_key: `refund-evidence/${shop}/abc.png`,
+      evidence_name: "seal.png",
+    });
+  });
+
+  it("a refund Stripe refuses gives the request back for another try", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    // Make the cash sale a settled Stripe sale whose refund the fake Stripe fails.
+    await env.DB
+      .prepare("UPDATE sales SET tender_type = 'stripe', stripe_payment_intent_id = 'pi_fail_review' WHERE id = ?")
+      .bind(saleId)
+      .run();
+    const { refund_request_id } = await saleRefundBody(shop, saleId, [{ sale_item_id: productItem, quantity: 1 }]);
+
+    const failed = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, { refund_request_id });
+    expect(failed.status).toBe(502);
+    expect(await requestRow(refund_request_id)).toMatchObject({ status: "pending", reviewed_by: null, reviewed_at: null });
+
+    await env.DB.prepare("UPDATE sales SET stripe_payment_intent_id = 'pi_ok_review' WHERE id = ?").bind(saleId).run();
+    const retry = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, { refund_request_id });
+    expect(retry.status).toBe(200);
+    expect(await requestRow(refund_request_id)).toMatchObject({ status: "approved", reviewed_by: "user-admin" });
   });
 });

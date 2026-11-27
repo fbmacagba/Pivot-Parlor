@@ -122,6 +122,8 @@ const LABELS: Record<string, string> = {
   "waitlist.notify": "Waitlist notified",
   "pos.sale": "Till sale recorded",
   "payment.refund.issue": "Refund issued",
+  "payment.refund.request": "Refund requested",
+  "payment.refund.decline": "Refund request declined",
   "payment.payout": "Payout recorded",
   "payment.stripe.webhook": "Stripe event received",
   "account.create": "Account created",

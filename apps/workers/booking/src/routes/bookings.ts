@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../types.js";
 import { shopExists } from "../middleware/shop-access.js";
+import { getUser } from "../middleware/auth.js";
+import { REQUEST_REQUIRED_MESSAGE, claimRefundRequest, settleRefundRequest } from "../lib/refund-requests.js";
 import { addMinutesToHm, shopToday } from "../lib/time.js";
 import { createPaymentIntentAutoCapture, createPaymentIntentManualCapture, capturePaymentIntent, cancelPaymentIntent, createRefund } from "../lib/stripe.js";
 import { expireSessionBestEffort } from "../lib/checkout-expiry.js";
@@ -956,12 +958,21 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  const body: { refundDeposit?: boolean } = (await readJsonObject(c.req)) ?? {};
-  // Fresh cancels default to refund; the RECOVERY path (already-cancelled
-  // booking) acts only on an EXPLICIT true, so a bare re-cancel can never
-  // silently refund a deposit staff deliberately chose to keep.
-  const refundExplicit = body.refundDeposit === true;
-  const refundDeposit = body.refundDeposit !== false;
+  const body: { refundDeposit?: boolean; refund_request_id?: string } = (await readJsonObject(c.req)) ?? {};
+  // A deposit is refunded only on an explicit true that names a pending
+  // refund request, and only by the owner or a developer. Every other cancel
+  // keeps the deposit: no cancel refunds by default.
+  const refundDeposit = body.refundDeposit === true;
+  const requestId = typeof body.refund_request_id === "string" ? body.refund_request_id.trim() : "";
+  if (refundDeposit) {
+    const role = getUser(c).role;
+    if (role !== "admin" && role !== "developer") {
+      return c.json({ success: false, error: "Admin role required" }, 403);
+    }
+    if (!requestId) {
+      return c.json({ success: false, error: REQUEST_REQUIRED_MESSAGE }, 400);
+    }
+  }
 
   const booking = await db
     .prepare("SELECT * FROM bookings WHERE id = ? AND shop_id = ? LIMIT 1")
@@ -1009,11 +1020,35 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
     depositPence > 0;
   const holdDeposit = !depositPaid && piId !== null && depositTx?.status === "pending";
 
+  // Claim the refund request before the booking or any money is touched: two
+  // approvals of one request cannot both reach the refund below.
+  if (refundDeposit) {
+    if (!chargedDeposit) {
+      return c.json(
+        {
+          success: false,
+          error: alreadyRefunded ? "Deposit already refunded" : "This booking has no deposit that can be refunded",
+        },
+        400
+      );
+    }
+    const claimed = await claimRefundRequest(db, { shopId, requestId, kind: "deposit", targetId: bookingId });
+    if (!claimed.ok) {
+      return c.json({ success: false, error: claimed.error }, claimed.status);
+    }
+  }
+  const releaseRequest = async (refundedPence: number | null): Promise<void> => {
+    if (!refundDeposit) return;
+    await settleRefundRequest(db, { requestId, reviewerId: getUser(c).sub, refundedPence }).catch((e) =>
+      reportError("booking.refund_request_settle", e, { shopId, bookingId, requestId })
+    );
+  };
+
   // Atomic claim (idiom of the checkout claim above): flip open → cancelled
   // exactly once; concurrent duplicate cancels lose the UPDATE. An already-
   // cancelled booking skips the flip — that is the recovery path for deposits
-  // stranded by the customer self-cancel, and it acts only on an explicit
-  // refund request (or a stranded hold, which can only be voided).
+  // stranded by the customer self-cancel, and it acts only on an approved
+  // refund (above) or a stranded hold, which can only be voided.
   //
   // Audit (Plan 3, pattern T, decision 10): from the flip to the response runs
   // inside `run`, so the early 4xx answers record refused. The body below is
@@ -1026,7 +1061,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   let auditBeforeStatus = priorStatus;
   let auditDeposit: "refunded" | "voided" | "kept" | "none" = "none";
   try {
-    return await auditFor(c).run(
+    const res = await auditFor(c).run(
       { action: "booking.cancel", shopId, entityType: "booking", entityId: bookingId },
       async (): Promise<Response> => {
   if (priorStatus !== "cancelled") {
@@ -1047,7 +1082,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
     const found = (beforeRead?.results?.[0] as { status?: string } | undefined)?.status;
     if (typeof found === "string") auditBeforeStatus = found;
     flipped = true;
-  } else if (!refundExplicit || !(chargedDeposit || holdDeposit)) {
+  } else if (!(refundDeposit && chargedDeposit) && !holdDeposit) {
     const reason = alreadyRefunded ? "Deposit already refunded" : "Booking is already cancelled";
     return c.json({ success: false, error: reason }, 400);
   }
@@ -1200,7 +1235,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
               ...(flipped ? { changes: { status: [auditBeforeStatus, "cancelled"] as [unknown, unknown] } } : {}),
               // `deposit_action`, not `deposit`: the API worker's own
               // deposit-cancel hop entry uses `deposit` as a boolean.
-              details: { deposit_action: auditDeposit },
+              details: { deposit_action: auditDeposit, ...(refundDeposit ? { refund_request_id: requestId } : {}) },
             }
           : keptCancelled
             ? {
@@ -1211,7 +1246,12 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
             : {}
       )
     );
+    // Approved only when the deposit actually went back; otherwise the
+    // request returns to pending for another try.
+    await releaseRequest(res.status < 400 && (auditDeposit as string) === "refunded" ? depositPence : null);
+    return res;
   } catch (e) {
+    await releaseRequest(null);
     if (e instanceof AuditWriteError) return auditRefused(c);
     throw e;
   }

@@ -10,7 +10,7 @@
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatch } from "./request";
-import { seedShop, seedStaff, seedScheduleDay, seedService, slugFor, tokenFor } from "./helpers";
+import { seedShop, seedStaff, seedScheduleDay, seedService, slugFor, tokenFor, depositRequest } from "./helpers";
 import { getAvailableSlots } from "../src/services/slots";
 import { entriesFor } from "./audit-helpers";
 
@@ -168,7 +168,7 @@ describe("a deposit that settles after the booking was cancelled", () => {
     expect(await creditOf(id)).toEqual({ deposit_amount_pence: 0, deposit_application_fee_pence: 0 });
 
     // The staff recovery path sees it as already refunded, so no second refund.
-    const again = await staffCancel(s.shop, id, { refundDeposit: true });
+    const again = await staffCancel(s.shop, id, { refundDeposit: true, refund_request_id: await depositRequest(s.shop, id) });
     expect(again.status).toBe(400);
     expect(await again.json()).toEqual({ success: false, error: "Deposit already refunded" });
 

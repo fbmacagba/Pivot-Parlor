@@ -25,6 +25,9 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "POST /booking/shops/:shopId/sales": "pos.sale",
   "POST /booking/shops/:shopId/sales/:saleId/refund": "payment.refund.issue",
   "POST /booking/shops/:shopId/sales/:saleId/void": "pos.void",
+  // Refund review
+  "POST /booking/shops/:shopId/refund-requests": "payment.refund.request",
+  "POST /booking/shops/:shopId/refund-requests/:requestId/decline": "payment.refund.decline",
   // Task 7
   "POST /webhooks/stripe": "payment.stripe.webhook",
 };

@@ -31,6 +31,9 @@ export const AUDIT_ACTIONS = [
   "booking.check_in", "booking.checkout", "pos.void",
   "payment.connect.onboard", "payment.connect.sync",
   "platform.alert.resolve",
+  // Refund review: a refund is requested with a reason, then approved
+  // (payment.refund.issue or booking.cancel) or declined.
+  "payment.refund.request", "payment.refund.decline",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

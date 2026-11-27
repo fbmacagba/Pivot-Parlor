@@ -41,6 +41,7 @@ vi.mock("lucide-react", () => {
     MessageSquare: Icon,
     Package: Icon,
     Receipt: Icon,
+    Undo2: Icon,
     Scissors: Icon,
     ScrollText: Icon,
     Settings: Icon,

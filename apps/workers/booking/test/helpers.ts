@@ -102,3 +102,40 @@ export async function seedProduct(
   }
   return id;
 }
+
+/**
+ * A pending refund request for a sale, as filed and waiting for approval.
+ * Returns the body the refund route takes: the request's id. Written straight
+ * to the table so a test can stage any number of them.
+ */
+export async function saleRefundBody(
+  shopId: string,
+  saleId: string,
+  lines: Array<{ sale_item_id: string; quantity: number; restock?: boolean }>,
+  reason = "customer brought it back unopened"
+): Promise<{ refund_request_id: string }> {
+  const id = uid("rr");
+  await env.DB.prepare(
+    `INSERT INTO refund_requests (id, shop_id, kind, sale_id, lines_json, amount_pence, reason, status, requested_by, requested_at)
+     VALUES (?, ?, 'sale', ?, ?, 0, ?, 'pending', 'user-staff', ?)`
+  )
+    .bind(id, shopId, saleId, JSON.stringify(lines), reason, new Date().toISOString())
+    .run();
+  return { refund_request_id: id };
+}
+
+/** A pending refund request for a booking's deposit; returns its id. */
+export async function depositRequest(shopId: string, bookingId: string): Promise<string> {
+  const id = uid("rr");
+  await env.DB.prepare(
+    `INSERT INTO refund_requests (id, shop_id, kind, booking_id, amount_pence, reason, status, requested_by, requested_at)
+     VALUES (?, ?, 'deposit', ?, 0, 'customer cancelled with a week of notice', 'pending', 'user-staff', ?)`
+  )
+    .bind(id, shopId, bookingId, new Date().toISOString())
+    .run();
+  return id;
+}
+
+export async function refundRequestRow(id: string): Promise<Record<string, unknown> | null> {
+  return env.DB.prepare("SELECT * FROM refund_requests WHERE id = ?").bind(id).first<Record<string, unknown>>();
+}

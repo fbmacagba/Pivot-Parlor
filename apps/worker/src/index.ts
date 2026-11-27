@@ -19,6 +19,7 @@ import scheduleRouter from "./routes/schedule.js";
 import slotsRouter from "./routes/slots.js";
 import connectProxyRouter from "./routes/connect-proxy.js";
 import salesProxyRouter from "./routes/sales-proxy.js";
+import refundRequestsRouter from "./routes/refund-requests.js";
 import waitlistRouter from "./routes/waitlist.js";
 import aiRouter from "./routes/ai.js";
 import jobsRouter from "./routes/jobs.js";
@@ -198,6 +199,7 @@ app.route("/api/invites", invitesRouter);
 // Shop sub-resources  (auth + requireShop applied inside each router)
 app.route("/api/shops/:shopId/connect", connectProxyRouter);
 app.route("/api/shops/:shopId/sales", salesProxyRouter);
+app.route("/api/shops/:shopId/refund-requests", refundRequestsRouter);
 app.route("/api/shops/:shopId/staff", staffRouter);
 app.route("/api/shops/:shopId/services", servicesRouter);
 app.route("/api/shops/:shopId/schedule", scheduleRouter);

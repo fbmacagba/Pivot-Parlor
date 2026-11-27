@@ -42,6 +42,13 @@ import {
   type SaleLineInput,
 } from "../lib/sales-core.js";
 import { reportError } from "../services/report-error.js";
+import {
+  REQUEST_REQUIRED_MESSAGE,
+  claimRefundRequest,
+  getRefundRequest,
+  parseRefundLines,
+  settleRefundRequest,
+} from "../lib/refund-requests.js";
 import { AuditWriteError } from "@repo/audit";
 import { auditFor, auditRefused, statusOutcome } from "../audit/context.js";
 
@@ -359,26 +366,46 @@ r.get("/:shopId/sales/:saleId", async (c) => {
 // back proportionally; charge.refunded completes the return (WS-2 honesty:
 // nothing is marked settled before Stripe confirms).
 
-r.post("/:shopId/sales/:saleId/refund", async (c) => {
-  const shopId = c.req.param("shopId");
-  const saleId = c.req.param("saleId");
-  const db = c.env.DB;
-  const user = getUser(c);
-  if (user.role !== "admin" && user.role !== "developer") {
-    return c.json({ success: false, error: "Admin role required" }, 403);
-  }
+type RefundSaleRow = {
+  id: string; shop_id: string; subtotal_pence: number; discount_pence: number;
+  refunded_pence: number; tender_type: string; status: string;
+  stripe_payment_intent_id: string | null; business_day_id: string | null;
+};
+type RefundSaleItemRow = {
+  id: string; item_type: string; product_id: string | null; variant_id: string | null;
+  quantity: number; returned_quantity: number; unit_price_pence: number;
+  line_total_pence: number; staff_id: string | null;
+};
+export type PricedSaleRefund =
+  | {
+      ok: true;
+      sale: RefundSaleRow;
+      priced: Array<{ item: RefundSaleItemRow; qty: number; restock: boolean; refundPence: number }>;
+      refundPence: number;
+      refundServicesPence: number;
+      refundRetailPence: number;
+      commissionReversalPence: number;
+      customerRefundPence: number;
+      commissionRate: number;
+      retailCommissionRate: number;
+      commissionBearer: string;
+    }
+  | { ok: false; error: string; status: 400 | 404 };
 
-  const body = await readJsonObject<{
-    lines?: Array<{ sale_item_id?: string; quantity?: number; restock?: boolean }>;
-    reason?: string;
-  }>(c.req);
-  if (!body) {
-    return c.json({ success: false, error: "Invalid JSON" }, 400);
+/**
+ * Validate and price a refund of `linesIn` on a sale, changing nothing. One
+ * formula for both the refund request (what it would return when filed) and
+ * the refund itself (what approval returns).
+ */
+export async function priceSaleRefund(
+  db: D1Database,
+  shopId: string,
+  saleId: string,
+  linesIn: Array<{ sale_item_id?: string; quantity?: number; restock?: boolean }>
+): Promise<PricedSaleRefund> {
+  if (!Array.isArray(linesIn) || linesIn.length === 0) {
+    return { ok: false, error: "lines is required", status: 400 };
   }
-  if (!Array.isArray(body.lines) || body.lines.length === 0) {
-    return c.json({ success: false, error: "lines is required" }, 400);
-  }
-
   const sale = await db
     .prepare(
       `SELECT id, shop_id, subtotal_pence, discount_pence, refunded_pence, tender_type, status,
@@ -391,12 +418,12 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       refunded_pence: number; tender_type: string; status: string;
       stripe_payment_intent_id: string | null; business_day_id: string | null;
     }>();
-  if (!sale) return c.json({ success: false, error: "Sale not found" }, 404);
+  if (!sale) return { ok: false, error: "Sale not found", status: 404 };
   if (sale.status !== "completed") {
-    return c.json({ success: false, error: "Only completed sales can be refunded (void pending sales instead)" }, 400);
+    return { ok: false, error: "Only completed sales can be refunded (void pending sales instead)", status: 400 };
   }
   if (sale.tender_type === "stripe" && !sale.stripe_payment_intent_id) {
-    return c.json({ success: false, error: "This Stripe sale has no settled payment to refund" }, 400);
+    return { ok: false, error: "This Stripe sale has no settled payment to refund", status: 400 };
   }
 
   const itemRows = await db
@@ -433,17 +460,14 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   }> = [];
   let refundServicesPence = 0;
   let refundRetailPence = 0;
-  for (const line of body.lines) {
+  for (const line of linesIn) {
     const item = line.sale_item_id ? itemById.get(line.sale_item_id) : undefined;
-    if (!item) return c.json({ success: false, error: "Unknown sale item" }, 400);
-    if (seen.has(item.id)) return c.json({ success: false, error: "Duplicate line for the same item" }, 400);
+    if (!item) return { ok: false, error: "Unknown sale item", status: 400 };
+    if (seen.has(item.id)) return { ok: false, error: "Duplicate line for the same item", status: 400 };
     seen.add(item.id);
     const qty = line.quantity ?? 0;
     if (!Number.isInteger(qty) || qty < 1 || qty > item.quantity - item.returned_quantity) {
-      return c.json(
-        { success: false, error: `Invalid quantity: ${item.quantity - item.returned_quantity} returnable on that line` },
-        400
-      );
+      return { ok: false, error: `Invalid quantity: ${item.quantity - item.returned_quantity} returnable on that line`, status: 400 };
     }
     const discountShare =
       sale.subtotal_pence > 0
@@ -464,7 +488,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   const refundable = sale.subtotal_pence - sale.discount_pence - sale.refunded_pence;
   refundPence = Math.min(refundPence, Math.max(0, refundable));
   if (refundPence <= 0) {
-    return c.json({ success: false, error: "Nothing left to refund on this sale" }, 400);
+    return { ok: false, error: "Nothing left to refund on this sale", status: 400 };
   }
   const commissionReversalPence =
     calculateCommissionPence(refundServicesPence, commissionRate).commission_pence +
@@ -474,6 +498,83 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   const customerRefundPence =
     refundPence + (commissionBearer === "customer" ? commissionReversalPence : 0);
 
+  return {
+    ok: true,
+    sale,
+    priced,
+    refundPence,
+    refundServicesPence,
+    refundRetailPence,
+    commissionReversalPence,
+    customerRefundPence,
+    commissionRate,
+    retailCommissionRate,
+    commissionBearer,
+  };
+}
+
+r.post("/:shopId/sales/:saleId/refund", async (c) => {
+  const shopId = c.req.param("shopId");
+  const saleId = c.req.param("saleId");
+  const db = c.env.DB;
+  const user = getUser(c);
+  if (user.role !== "admin" && user.role !== "developer") {
+    return c.json({ success: false, error: "Admin role required" }, 403);
+  }
+
+  // A refund acts only on a pending refund request for THIS sale: the lines
+  // and the reason are the request's, never ones sent with the approval.
+  const body = await readJsonObject<{ refund_request_id?: string }>(c.req);
+  if (!body) {
+    return c.json({ success: false, error: "Invalid JSON" }, 400);
+  }
+  const requestId = typeof body.refund_request_id === "string" ? body.refund_request_id.trim() : "";
+  if (!requestId) {
+    return c.json({ success: false, error: REQUEST_REQUIRED_MESSAGE }, 400);
+  }
+  const refundRequest = await getRefundRequest(db, shopId, requestId);
+  if (!refundRequest || refundRequest.kind !== "sale" || refundRequest.sale_id !== saleId) {
+    return c.json({ success: false, error: "Refund request not found" }, 404);
+  }
+  // Said first, so a decided request reads as decided rather than as a
+  // complaint about quantities that its own approval already returned.
+  if (refundRequest.status === "approved" || refundRequest.status === "declined") {
+    return c.json(
+      {
+        success: false,
+        error:
+          refundRequest.status === "approved"
+            ? "This refund request was already approved"
+            : "This refund request was declined",
+      },
+      409
+    );
+  }
+
+  const pricedRefund = await priceSaleRefund(db, shopId, saleId, parseRefundLines(refundRequest.lines_json));
+  if (!pricedRefund.ok) {
+    return c.json({ success: false, error: pricedRefund.error }, pricedRefund.status);
+  }
+  const {
+    sale,
+    priced,
+    refundPence,
+    refundServicesPence,
+    refundRetailPence,
+    commissionReversalPence,
+    customerRefundPence,
+    commissionRate,
+    retailCommissionRate,
+    commissionBearer,
+  } = pricedRefund;
+
+  // Claim the request before any money moves: two approvals of one request
+  // cannot both reach the refund below.
+  const claimed = await claimRefundRequest(db, { shopId, requestId, kind: "sale", targetId: saleId });
+  if (!claimed.ok) {
+    return c.json({ success: false, error: claimed.error }, claimed.status);
+  }
+
   // Audit (Plan 3, pattern T): everything from the return claim to the
   // response runs inside `run`, so a lost claim (409) records refused and a
   // Stripe failure (502) records failed. The body below is the original, not
@@ -482,7 +583,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
   // refund id and restock could not be saved (details only).
   let finalizeFailed = false;
   try {
-    return await auditFor(c).run(
+    const res = await auditFor(c).run(
       { action: "payment.refund.issue", shopId: sale.shop_id, entityType: "sale", entityId: saleId },
       async (): Promise<Response> => {
   // Atomic claim on the returnable quantities: a concurrent refund of the
@@ -575,7 +676,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
         commissionReversalPence,
         sale.tender_type,
         isStripe ? "pending" : "completed",
-        typeof body.reason === "string" && body.reason.trim() ? body.reason.trim().slice(0, 500) : null,
+        refundRequest.reason.slice(0, 500),
         user.sub,
         isStripe ? null : new Date().toISOString()
       ),
@@ -743,6 +844,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
               details: {
                 lines: priced.length,
                 refund_pence: refundPence,
+                refund_request_id: requestId,
                 via_stripe: sale.tender_type === "stripe",
                 ...(finalizeFailed ? { finalized: false } : {}),
               },
@@ -750,7 +852,16 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
           : {}
       )
     );
+    // The refund went through: the request is approved by whoever ran it.
+    // Anything else gives the request back for another try.
+    await settleRefundRequest(db, {
+      requestId,
+      reviewerId: user.sub,
+      refundedPence: res.status < 400 ? customerRefundPence : null,
+    }).catch((e) => reportError("sale.refund_request_settle", e, { shopId, saleId, requestId }));
+    return res;
   } catch (e) {
+    await settleRefundRequest(db, { requestId, reviewerId: user.sub, refundedPence: null }).catch(() => {});
     if (e instanceof AuditWriteError) return auditRefused(c);
     throw e;
   }
