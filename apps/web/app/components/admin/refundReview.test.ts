@@ -43,7 +43,7 @@ import * as bookingsPage from "~/routes/admin.bookings";
 import * as refundsPage from "~/routes/admin.refunds";
 import * as salesPage from "~/routes/admin.sales";
 import { asResponse } from "~/lib/testing/asResponse";
-import { refundEvidenceProblem, refundReasonProblem } from "~/lib/refundRequests";
+import { refundEvidenceProblem, refundReasonProblem, selfApprovalBlocked } from "~/lib/refundRequests";
 
 type Call = { method: string; path: string; body: unknown; auth: string | null };
 let calls: Call[] = [];
@@ -128,6 +128,37 @@ describe("what a refund request must carry", () => {
     expect(refundEvidenceProblem({ size: 1000, type: "application/pdf" })).toBeNull();
     expect(refundEvidenceProblem({ size: 1000, type: "text/html" })).toMatch(/PNG, JPEG or WebP image, or a PDF/);
     expect(refundEvidenceProblem({ size: 5 * 1024 * 1024 + 1, type: "image/png" })).toMatch(/over 5MB/);
+  });
+});
+
+describe("approving your own request", () => {
+  it("is blocked only for the person who filed it, and only without evidence", () => {
+    expect(selfApprovalBlocked({ requested_by: "u-1", has_evidence: false }, "u-1")).toBe(true);
+    expect(selfApprovalBlocked({ requested_by: "u-1", has_evidence: true }, "u-1")).toBe(false);
+    expect(selfApprovalBlocked({ requested_by: "u-2", has_evidence: false }, "u-1")).toBe(false);
+    expect(selfApprovalBlocked({ requested_by: null, has_evidence: false }, "u-1")).toBe(false);
+  });
+
+  it("the Refunds page is told who is looking", async () => {
+    stubApi();
+    const res = asResponse(
+      await refundsPage.loader({
+        request: new Request("https://pivotparlor.com/admin/refunds", { headers: COOKIE }),
+        params: {},
+        context: { env: { API_URL: "https://api.test" } },
+      } as never),
+    );
+    expect(((await res.json()) as { userId: string }).userId).toBe("u-1");
+  });
+
+  it("shows the API's refusal of a self-approval", async () => {
+    stubApi({
+      "/api/shops/shop-1/refund-requests": [{ id: "rr-1", kind: "sale", sale_id: "sale-1", status: "pending" }],
+      "/api/shops/shop-1/sales/sale-1/refund": 403,
+    });
+    const res = await post(refundsPage, "/admin/refunds", { intent: "approve", requestId: "rr-1" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("The API said no");
   });
 });
 

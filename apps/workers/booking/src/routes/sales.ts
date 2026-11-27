@@ -44,6 +44,8 @@ import {
 import { reportError } from "../services/report-error.js";
 import {
   REQUEST_REQUIRED_MESSAGE,
+  SELF_APPROVAL_MESSAGE,
+  selfApprovalBlocked,
   claimRefundRequest,
   getRefundRequest,
   parseRefundLines,
@@ -550,6 +552,9 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
       409
     );
   }
+  if (selfApprovalBlocked(refundRequest, user.sub)) {
+    return c.json({ success: false, error: SELF_APPROVAL_MESSAGE }, 403);
+  }
 
   const pricedRefund = await priceSaleRefund(db, shopId, saleId, parseRefundLines(refundRequest.lines_json));
   if (!pricedRefund.ok) {
@@ -570,7 +575,13 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
 
   // Claim the request before any money moves: two approvals of one request
   // cannot both reach the refund below.
-  const claimed = await claimRefundRequest(db, { shopId, requestId, kind: "sale", targetId: saleId });
+  const claimed = await claimRefundRequest(db, {
+    shopId,
+    requestId,
+    kind: "sale",
+    targetId: saleId,
+    approverId: user.sub,
+  });
   if (!claimed.ok) {
     return c.json({ success: false, error: claimed.error }, claimed.status);
   }
@@ -845,6 +856,7 @@ r.post("/:shopId/sales/:saleId/refund", async (c) => {
                 lines: priced.length,
                 refund_pence: refundPence,
                 refund_request_id: requestId,
+                ...(claimed.selfApproved ? { self_approved: true } : {}),
                 via_stripe: sale.tender_type === "stripe",
                 ...(finalizeFailed ? { finalized: false } : {}),
               },

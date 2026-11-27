@@ -22,7 +22,7 @@ import { tenderLabel } from "~/components/admin/salesSummary";
 import { formatDateTime, formatDay } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { pageTitle } from "~/lib/pageTitle";
-import type { RefundRequest } from "~/lib/refundRequests";
+import { selfApprovalBlocked, type RefundRequest } from "~/lib/refundRequests";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 import { useFetcherResult } from "~/lib/useFetcherResult";
 
@@ -57,6 +57,8 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   return json({
     shopId,
     developerNeedsShop: user.role === "developer" && !shopId,
+    // Who is looking: their own requests need evidence before they approve.
+    userId: user.sub,
     requests,
     loadError,
   });
@@ -146,7 +148,7 @@ function destinationOf(r: RefundRequest): string {
 }
 
 export default function AdminRefunds() {
-  const { shopId, developerNeedsShop, requests, loadError } = useLoaderData<typeof loader>();
+  const { shopId, developerNeedsShop, userId, requests, loadError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
   const [approving, setApproving] = useState<RefundRequest | null>(null);
   const [declining, setDeclining] = useState<RefundRequest | null>(null);
@@ -233,7 +235,10 @@ export default function AdminRefunds() {
               </div>
             ) : (
               <ul className="space-y-3">
-                {pending.map((r) => (
+                {pending.map((r) => {
+                  const own = r.requested_by === userId;
+                  const blocked = selfApprovalBlocked(r, userId);
+                  return (
                   <li key={r.id} className="rounded-xl border border-white/10 bg-dark-100 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                       <p className="min-w-0 text-sm font-medium text-white">{subjectOf(r)}</p>
@@ -257,18 +262,32 @@ export default function AdminRefunds() {
                     ) : (
                       <p className="mt-2 text-xs text-amber-200">No evidence file was attached.</p>
                     )}
+                    {blocked ? (
+                      <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+                        You filed this request without evidence, so you cannot approve it yourself. Decline it and file
+                        it again with evidence, or have another owner approve it.
+                      </p>
+                    ) : (
+                      own && (
+                        <p className="mt-3 text-xs text-white/60">
+                          You filed this request. If you approve it, the audit trail records it as self-approved.
+                        </p>
+                      )
+                    )}
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => {
-                          setResult(null);
-                          setApproving(r);
-                        }}
-                        disabled={busy}
-                      >
-                        Approve refund
-                      </Button>
+                      {!blocked && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => {
+                            setResult(null);
+                            setApproving(r);
+                          }}
+                          disabled={busy}
+                        >
+                          Approve refund
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         size="sm"
@@ -284,7 +303,8 @@ export default function AdminRefunds() {
                       </Button>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </section>

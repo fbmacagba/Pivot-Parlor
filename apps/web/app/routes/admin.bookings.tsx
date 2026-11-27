@@ -405,6 +405,7 @@ function CancelDepositDialog({
               file={file}
               onFileChange={setFile}
               disabled={busy}
+              canApprove
             />
             <div className="flex flex-col gap-2">
               <Button type="submit" disabled={busy} className="w-full">
@@ -638,6 +639,7 @@ function RequestDepositRefund({
         file={file}
         onFileChange={setFile}
         disabled={busy}
+        canApprove
       />
       <p className="text-xs text-white/60">
         The {formatPence(amountPence)} deposit stays held until the owner approves this on the Refunds page.

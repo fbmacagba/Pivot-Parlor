@@ -759,6 +759,32 @@ describe("refund review: a deposit goes back only on an approved request", () =>
     expect(second.status).toBe(400);
   });
 
+  it("the owner cannot approve their own deposit request without evidence; with evidence they can", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop);
+    const admin = await tokenFor("admin", shop);
+
+    const bare = await file(shop, admin, { kind: "deposit", booking_id: bookingId, reason: "Customer rang to cancel" });
+    const bareId = ((await bare.json()) as { data: { id: string } }).data.id;
+    const refused = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: bareId });
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/You filed this request/);
+    // Nothing happened: not cancelled, no money, the request still waits.
+    expect(await bookingStatus(bookingId)).toBe("confirmed");
+    expect(await refundTx(bookingId)).toBeNull();
+    expect(await requestRow(bareId)).toMatchObject({ status: "pending" });
+
+    await env.DB
+      .prepare("UPDATE refund_requests SET evidence_key = ? WHERE id = ?")
+      .bind(`refund-evidence/${shop}/text.png`, bareId)
+      .run();
+    const approved = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: bareId });
+    expect(approved.status).toBe(200);
+    expect(await refundTx(bookingId)).toMatchObject({ amount_pence: 1250 });
+    expect(await requestRow(bareId)).toMatchObject({ status: "approved", requested_by: "user-admin", reviewed_by: "user-admin" });
+  });
+
   it("a request for one booking cannot refund another", async () => {
     const { shop, staff, service } = await setupDepositShop();
     const first = await bookDeposit(shop, staff, service, 0);

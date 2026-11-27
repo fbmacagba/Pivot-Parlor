@@ -203,6 +203,7 @@ export function RefundPanel({ shopId, detail, closeHref, reviewHref, requestPend
             file={file}
             onFileChange={setFile}
             disabled={busy}
+            canApprove={reviewHref !== null}
           />
           <p className="text-xs text-white/60">
             This files a request. No money moves and nothing is restocked until the owner approves it
