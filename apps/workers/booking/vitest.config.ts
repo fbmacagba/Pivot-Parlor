@@ -9,6 +9,7 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         d1Databases: ["DB"],
         kvNamespaces: ["KV"],
+        r2Buckets: ["AUDIT_ARCHIVE"],
         bindings: {
           JWT_SECRET: "test-secret",
           STRIPE_SECRET_KEY: "sk_test_dummy",

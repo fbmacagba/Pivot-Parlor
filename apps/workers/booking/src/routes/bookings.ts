@@ -964,6 +964,8 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   // keeps the deposit: no cancel refunds by default.
   const refundDeposit = body.refundDeposit === true;
   const requestId = typeof body.refund_request_id === "string" ? body.refund_request_id.trim() : "";
+  // The approver filed the request themselves (allowed only with evidence).
+  let selfApproved = false;
   if (refundDeposit) {
     const role = getUser(c).role;
     if (role !== "admin" && role !== "developer") {
@@ -1032,10 +1034,18 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
         400
       );
     }
-    const claimed = await claimRefundRequest(db, { shopId, requestId, kind: "deposit", targetId: bookingId });
+    const claimed = await claimRefundRequest(db, {
+      shopId,
+      requestId,
+      kind: "deposit",
+      targetId: bookingId,
+      approverId: getUser(c).sub,
+      evidence: c.env.AUDIT_ARCHIVE,
+    });
     if (!claimed.ok) {
       return c.json({ success: false, error: claimed.error }, claimed.status);
     }
+    selfApproved = claimed.selfApproved;
   }
   const releaseRequest = async (refundedPence: number | null): Promise<void> => {
     if (!refundDeposit) return;
@@ -1235,7 +1245,11 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
               ...(flipped ? { changes: { status: [auditBeforeStatus, "cancelled"] as [unknown, unknown] } } : {}),
               // `deposit_action`, not `deposit`: the API worker's own
               // deposit-cancel hop entry uses `deposit` as a boolean.
-              details: { deposit_action: auditDeposit, ...(refundDeposit ? { refund_request_id: requestId } : {}) },
+              details: {
+                deposit_action: auditDeposit,
+                ...(refundDeposit ? { refund_request_id: requestId } : {}),
+                ...(selfApproved ? { self_approved: true } : {}),
+              },
             }
           : keptCancelled
             ? {

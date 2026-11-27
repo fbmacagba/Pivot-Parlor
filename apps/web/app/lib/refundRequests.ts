@@ -36,6 +36,18 @@ export interface RefundRequest {
   sale_tender_type: string | null;
 }
 
+/**
+ * Nobody approves their own request on their word alone: whoever filed a
+ * request may approve it only when it carries evidence. The booking worker
+ * enforces this; the page uses it to say so before the tap.
+ */
+export function selfApprovalBlocked(
+  request: Pick<RefundRequest, "requested_by" | "has_evidence">,
+  userId: string
+): boolean {
+  return request.requested_by === userId && !request.has_evidence;
+}
+
 /** Why a reason cannot be sent yet, or null when it can. */
 export function refundReasonProblem(reason: string): string | null {
   const length = reason.trim().length;

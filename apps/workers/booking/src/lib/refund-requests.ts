@@ -48,6 +48,9 @@ export const REASON_MAX = 1000;
 export const NOTE_MAX = 500;
 const STALE_CLAIM_MS = 10 * 60 * 1000;
 
+export const SELF_APPROVAL_MESSAGE =
+  "You filed this request, and it has no evidence attached. Someone else must approve it, or decline it and file it again with evidence.";
+
 export const REQUEST_REQUIRED_MESSAGE =
   "A refund needs an approved refund request. File a request with the reason, then have the owner approve it.";
 
@@ -84,32 +87,69 @@ export async function getRefundRequest(
 }
 
 export type ClaimResult =
-  | { ok: true; request: RefundRequestRow }
-  | { ok: false; status: 400 | 404 | 409; error: string };
+  | { ok: true; request: RefundRequestRow; selfApproved: boolean }
+  | { ok: false; status: 400 | 403 | 404 | 409; error: string };
+
+/**
+ * Nobody approves their own request on their word alone: the person who
+ * filed a request may approve it only when it carries an evidence file.
+ */
+export function selfApprovalBlocked(
+  request: Pick<RefundRequestRow, "requested_by" | "evidence_key">,
+  approverId: string
+): boolean {
+  return request.requested_by === approverId && !request.evidence_key;
+}
 
 /**
  * Claim a pending request for the refund about to run. `targetId` is the
  * booking (deposit) or sale the route is acting on: a request filed for one
- * thing can never approve a refund of another.
+ * thing can never approve a refund of another. `approverId` is whoever is
+ * approving: their own request is claimed only when it has evidence, and the
+ * guard sits in the same UPDATE as the claim.
  */
 export async function claimRefundRequest(
   db: D1Database,
-  args: { shopId: string; requestId: string; kind: RefundRequestKind; targetId: string; now?: Date }
+  args: {
+    shopId: string;
+    requestId: string;
+    kind: RefundRequestKind;
+    targetId: string;
+    approverId: string;
+    /** Where evidence files live: an approver's own request must have a real one. */
+    evidence: R2Bucket;
+    now?: Date;
+  }
 ): Promise<ClaimResult> {
   const now = args.now ?? new Date();
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - STALE_CLAIM_MS).toISOString();
   const column = args.kind === "deposit" ? "booking_id" : "sale_id";
+  // An approver's own request counts as backed only while its evidence file
+  // is really there, not merely named on the row.
+  const own = await getRefundRequest(db, args.shopId, args.requestId);
+  if (
+    own &&
+    own.requested_by === args.approverId &&
+    own.evidence_key &&
+    (own.status === "pending" || own.status === "approving") &&
+    !(await args.evidence.head(own.evidence_key))
+  ) {
+    return { ok: false, status: 403, error: SELF_APPROVAL_MESSAGE };
+  }
   const claim = await db
     .prepare(
       `UPDATE refund_requests SET status = 'approving', reviewed_at = ?1
        WHERE id = ?2 AND shop_id = ?3 AND kind = ?4 AND ${column} = ?5
-         AND (status = 'pending' OR (status = 'approving' AND reviewed_at < ?6))`
+         AND (status = 'pending' OR (status = 'approving' AND reviewed_at < ?6))
+         AND (requested_by <> ?7 OR evidence_key IS NOT NULL)`
     )
-    .bind(nowIso, args.requestId, args.shopId, args.kind, args.targetId, staleBefore)
+    .bind(nowIso, args.requestId, args.shopId, args.kind, args.targetId, staleBefore, args.approverId)
     .run();
   const request = await getRefundRequest(db, args.shopId, args.requestId);
-  if ((claim.meta?.changes ?? 0) === 1 && request) return { ok: true, request };
+  if ((claim.meta?.changes ?? 0) === 1 && request) {
+    return { ok: true, request, selfApproved: request.requested_by === args.approverId };
+  }
   if (!request || request.kind !== args.kind || request[column] !== args.targetId) {
     return { ok: false, status: 404, error: "Refund request not found" };
   }
@@ -118,6 +158,9 @@ export async function claimRefundRequest(
   }
   if (request.status === "declined") {
     return { ok: false, status: 409, error: "This refund request was declined" };
+  }
+  if (selfApprovalBlocked(request, args.approverId)) {
+    return { ok: false, status: 403, error: SELF_APPROVAL_MESSAGE };
   }
   return { ok: false, status: 409, error: "This refund request is being approved by someone else. Reload and check." };
 }

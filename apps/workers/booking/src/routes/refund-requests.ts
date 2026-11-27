@@ -118,6 +118,12 @@ r.post("/:shopId/refund-requests", async (c) => {
     if (!body.evidence_key.startsWith(evidencePrefix(shopId)) || body.evidence_key.includes("..")) {
       return c.json({ success: false, error: "Invalid evidence file" }, 400);
     }
+    // The key alone proves nothing: this worker can be called directly, so
+    // the file it names must really be in the bucket. Evidence that is not
+    // there would let someone approve their own request on a made-up name.
+    if (!(await c.env.AUDIT_ARCHIVE.head(body.evidence_key))) {
+      return c.json({ success: false, error: "Invalid evidence file" }, 400);
+    }
     evidenceKey = body.evidence_key;
   }
   const evidenceName = evidenceKey && typeof body.evidence_name === "string" ? body.evidence_name.slice(0, 200) : null;

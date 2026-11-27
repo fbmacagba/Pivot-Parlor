@@ -15,6 +15,8 @@ interface RefundRequestFieldsProps {
   file: File | null;
   onFileChange: (file: File | null) => void;
   disabled?: boolean;
+  /** The person filing can also approve (an owner): say what evidence buys. */
+  canApprove?: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export function RefundRequestFields({
   file,
   onFileChange,
   disabled,
+  canApprove,
 }: RefundRequestFieldsProps) {
   const fileId = useId();
   const fileHintId = `${fileId}-hint`;
@@ -64,7 +67,10 @@ export function RefundRequestFields({
           className="tap-target block w-full text-sm text-white/70 file:mr-3 file:rounded-lg file:border file:border-white/10 file:bg-dark-200 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-dark-300"
         />
         <p id={fileHintId} className={fileProblem ? "text-xs text-red-400" : "text-xs text-white/60"}>
-          {fileProblem ?? "A photo, a screenshot of the message, or a receipt. Image or PDF, up to 5MB."}
+          {fileProblem ??
+            `A photo, a screenshot of the message, or a receipt. Image or PDF, up to 5MB.${
+              canApprove ? " Without one, you cannot approve this request yourself." : ""
+            }`}
         </p>
       </div>
     </div>

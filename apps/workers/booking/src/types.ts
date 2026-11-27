@@ -3,6 +3,8 @@ import type { D1Database, KVNamespace, Queue } from "@cloudflare/workers-types";
 export type Env = {
   DB: D1Database;
   KV: KVNamespace;
+  /** The private audit bucket: read here only to check an evidence file exists. */
+  AUDIT_ARCHIVE: R2Bucket;
   JWT_SECRET: string;
   STRIPE_SECRET_KEY: string;
   ENVIRONMENT: string;

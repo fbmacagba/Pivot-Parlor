@@ -931,6 +931,82 @@ describe("refund review: a sale refund needs a filed, pending request", () => {
     expect(rows[0]).toMatchObject({ id: data.id, kind: "sale", status: "approved", has_evidence: false });
   });
 
+  it("the owner cannot approve their own request without evidence; with evidence they can", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const lines = [{ sale_item_id: productItem, quantity: 1 }];
+    const approve = (id: string, as = token) =>
+      post(`/booking/shops/${shop}/sales/${saleId}/refund`, as, { refund_request_id: id });
+
+    // Filed by the owner, on their word alone.
+    const bare = await file(shop, token, { kind: "sale", sale_id: saleId, lines, reason: "Customer said it was faulty" });
+    const bareId = ((await bare.json()) as { data: { id: string } }).data.id;
+    const refused = await approve(bareId);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/You filed this request/);
+    expect(await returnCount(saleId)).toBe(0);
+    expect(await stockQty(shop, product)).toBe(3);
+    expect(await requestRow(bareId)).toMatchObject({ status: "pending", reviewed_by: null });
+
+    // They may still decline it, and file again with evidence. A key that
+    // names no stored file is refused: it would be evidence in name only.
+    expect((await post(`/booking/shops/${shop}/refund-requests/${bareId}/decline`, token, {})).status).toBe(200);
+    const madeUp = await file(shop, token, {
+      kind: "sale",
+      sale_id: saleId,
+      lines,
+      reason: "Customer said it was faulty, photo attached",
+      evidence_key: `refund-evidence/${shop}/photo.png`,
+    });
+    expect(madeUp.status).toBe(400);
+    await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/photo.png`, "png");
+    const backed = await file(shop, token, {
+      kind: "sale",
+      sale_id: saleId,
+      lines,
+      reason: "Customer said it was faulty, photo attached",
+      evidence_key: `refund-evidence/${shop}/photo.png`,
+      evidence_name: "photo.png",
+      evidence_type: "image/png",
+    });
+    expect(backed.status).toBe(201);
+    const backedId = ((await backed.json()) as { data: { id: string } }).data.id;
+    expect((await approve(backedId)).status).toBe(200);
+    expect(await returnCount(saleId)).toBe(1);
+    expect(await requestRow(backedId)).toMatchObject({
+      status: "approved",
+      requested_by: "user-admin",
+      reviewed_by: "user-admin",
+    });
+    const entry = await env.DB
+      .prepare("SELECT details_json FROM audit_log WHERE action = 'payment.refund.issue' AND shop_id = ? AND phase = 'outcome' ORDER BY rowid DESC LIMIT 1")
+      .bind(shop)
+      .first<{ details_json: string }>();
+    expect(entry?.details_json).toContain('"self_approved":true');
+  });
+
+  it("someone else can approve the owner's request without evidence, and it is not marked self-approved", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const filed = await file(shop, token, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Customer said it was faulty",
+    });
+    const id = ((await filed.json()) as { data: { id: string } }).data.id;
+    const developer = await tokenFor("developer", shop);
+    const approved = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, developer, { refund_request_id: id });
+    expect(approved.status).toBe(200);
+    expect(await requestRow(id)).toMatchObject({ status: "approved", requested_by: "user-admin", reviewed_by: "user-developer" });
+    const entry = await env.DB
+      .prepare("SELECT details_json FROM audit_log WHERE action = 'payment.refund.issue' AND shop_id = ? AND phase = 'outcome' ORDER BY rowid DESC LIMIT 1")
+      .bind(shop)
+      .first<{ details_json: string }>();
+    expect(entry?.details_json).toContain('"refund_request_id"');
+    expect(entry?.details_json).not.toContain("self_approved");
+  });
+
   it("a declined request can never be approved, and staff cannot decline", async () => {
     const { shop, staff, service, product, token } = await seedRefundShop();
     const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
@@ -991,6 +1067,10 @@ describe("refund review: a sale refund needs a filed, pending request", () => {
       lines: [{ sale_item_id: productItem, quantity: 1 }],
       reason: "Photo shows the seal was already broken",
     };
+    // Real files, so it is the folder rule that refuses them, not their absence.
+    await env.AUDIT_ARCHIVE.put("anchors/2026-01-01.json", "{}");
+    await env.AUDIT_ARCHIVE.put("refund-evidence/another-shop/x.png", "png");
+    await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/abc.png`, "png");
     const foreign = await file(shop, token, { ...base, evidence_key: "anchors/2026-01-01.json" });
     expect(foreign.status).toBe(400);
     const otherShop = await file(shop, token, { ...base, evidence_key: "refund-evidence/another-shop/x.png" });
