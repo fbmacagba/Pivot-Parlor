@@ -86,8 +86,8 @@ refundRequests.post("/", requireShopRole("admin", "staff"), async (c) => {
     if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
     // A key sent by the caller is never trusted: only a file stored below
     // can be attached.
-    const { evidence_key: _k, evidence_name: _n, evidence_type: _t, ...rest } = body;
-    fields = rest;
+    fields = { ...body };
+    for (const key of ["evidence_key", "evidence_name", "evidence_type"]) delete fields[key];
   }
 
   let evidenceKey: string | null = null;
