@@ -10,10 +10,14 @@ import {
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { LoadError } from "~/components/ui/LoadError";
+import { Select } from "~/components/ui/Select";
 import { ErasureRequestDialog, type ErasureTarget } from "~/components/audit/ErasureRequestDialog";
+import { parseChanges, parseDetails } from "~/components/audit/entryJson";
 import {
   ACTION_GROUPS,
   actionLabel,
@@ -28,10 +32,23 @@ import {
   type VerifyResult,
 } from "~/lib/audit";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { pageTitle } from "~/lib/pageTitle";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+
+export const meta = () => pageTitle("Activity");
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/dev" homeLabel="Back to overview" />;
+}
+
+/** Just enough of a shop to name it in the filter and on each entry. */
+interface ShopName {
+  id: string;
+  name: string;
+}
 
 interface Entry {
   id: string;
@@ -68,12 +85,35 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   await requireRole(request, "developer", env.API_URL);
   const api = createApiClient(env.API_URL, getSessionToken(request));
   const qs = auditQuery(new URL(request.url).searchParams);
-  try {
-    const data = await api.get<{ entries: Entry[]; next_cursor: string | null }>(`/api/audit${qs ? `?${qs}` : ""}`);
-    return json({ ...data, error: null as string | null });
-  } catch (e) {
-    return json({ entries: [] as Entry[], next_cursor: null, error: e instanceof Error ? e.message : "Could not load activity" });
+  // The shops list only puts names on ids (the filter's picker, each entry's
+  // shop). The trail does not depend on it, so the two go out together and a
+  // failed shops read just leaves ids showing.
+  const [trail, shopList] = await Promise.allSettled([
+    api.get<{ entries: Entry[]; next_cursor: string | null }>(`/api/audit${qs ? `?${qs}` : ""}`),
+    api.get<ShopName[]>("/api/shops"),
+  ]);
+  const shops: ShopName[] =
+    shopList.status === "fulfilled" && Array.isArray(shopList.value)
+      ? shopList.value.map((s) => ({ id: s.id, name: s.name }))
+      : [];
+  const shopsLoaded = shopList.status === "fulfilled" && Array.isArray(shopList.value);
+  if (trail.status === "fulfilled" && Array.isArray(trail.value?.entries)) {
+    return json({
+      entries: trail.value.entries,
+      next_cursor: trail.value.next_cursor ?? null,
+      error: null as string | null,
+      shops,
+      shopsLoaded,
+    });
   }
+  const reason = trail.status === "rejected" ? trail.reason : null;
+  return json({
+    entries: [] as Entry[],
+    next_cursor: null,
+    error: reason instanceof Error ? reason.message : "Could not load activity",
+    shops,
+    shopsLoaded,
+  });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -110,22 +150,40 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 function Changes({ json: raw }: { json: string | null }) {
-  if (!raw) return null;
-  const changes = JSON.parse(raw) as Record<string, [unknown, unknown]>;
+  const changes = parseChanges(raw);
+  if (!changes) return null;
+  // One unreadable entry costs its own detail, never the page.
+  if (!changes.ok) return <p className="mt-2 text-sm text-white/70">Changes: details unavailable for this entry.</p>;
   return (
     <ul className="mt-2 space-y-1 text-sm">
-      {Object.entries(changes).map(([k, [before, after]]) => (
-        <li key={k} className="break-words">
-          <span className="text-white/50">{k}:</span> <span className="text-white/60 line-through">{String(before ?? "none")}</span>{" "}
-          <span className="text-white">{String(after ?? "none")}</span>
+      {changes.rows.map((row) => (
+        <li key={row.field} className="break-words">
+          <span className="text-white/60">{row.field}:</span>{" "}
+          {row.before !== "" && (
+            <>
+              <span className="sr-only">was </span>
+              <span className="text-white/60 line-through">{row.before}</span> <span className="sr-only">now </span>
+            </>
+          )}
+          <span className="text-white">{row.after}</span>
         </li>
       ))}
     </ul>
   );
 }
 
+function Details({ json: raw }: { json: string | null }) {
+  const details = parseDetails(raw);
+  if (!details) return null;
+  if (!details.ok) return <p className="text-sm text-white/70">Details unavailable for this entry.</p>;
+  return (
+    <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-black/30 p-2 text-xs">{details.pretty}</pre>
+  );
+}
+
 export default function DevActivity() {
-  const { entries, next_cursor, error } = useLoaderData<typeof loader>();
+  const { entries, next_cursor, error, shops, shopsLoaded } = useLoaderData<typeof loader>();
+  const shopNames = new Map(shops.map((s) => [s.id, s.name]));
   const result = useActionData<typeof action>();
   const [params] = useSearchParams();
   const nav = useNavigation();
@@ -197,6 +255,9 @@ export default function DevActivity() {
     setConfirmErase(null);
     setEraseError(null);
   };
+  // Which of this page's own posts is in flight, so its button can say so.
+  const pendingIntent = nav.state !== "idle" ? (nav.formData?.get("intent") ?? null) : null;
+  const filterShopId = params.get("shop_id") ?? "";
   const sealed = entries.filter((e) => e.seq !== null).map((e) => e.seq as number);
   // After a check that stopped at its read limit, the next click picks up
   // from the entry after the last one it checked.
@@ -216,19 +277,22 @@ export default function DevActivity() {
           <p className="text-sm text-white/60">Every recorded change, AI call and data access. Entries can be added, never edited.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <a className="tap-target inline-flex items-center rounded-md border border-white/20 px-3 py-2 text-sm text-white/80" href={`/dev/activity/export?part=csv${qs ? `&${qs}` : ""}`}>
-            Export CSV
-          </a>
-          <a className="tap-target inline-flex items-center rounded-md border border-white/20 px-3 py-2 text-sm text-white/80" href={`/dev/activity/export?part=proof${qs ? `&${qs}` : ""}`}>
-            Export proof
-          </a>
+          {/* Plain links, not router links: each answers with a file download. */}
+          <Button asChild variant="outline">
+            <a href={`/dev/activity/export?part=csv${qs ? `&${qs}` : ""}`}>Export CSV</a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href={`/dev/activity/export?part=proof${qs ? `&${qs}` : ""}`}>Export proof</a>
+          </Button>
           <Form method="post">
             <input type="hidden" name="intent" value="verify" />
             {(continueFrom !== null || sealed.length > 0) && (
               <input type="hidden" name="from_seq" value={continueFrom ?? Math.min(...sealed)} />
             )}
             {sealed.length > 0 && <input type="hidden" name="to_seq" value={Math.max(...sealed)} />}
-            <Button type="submit" className="tap-target" disabled={nav.state !== "idle"}>Check now</Button>
+            <Button type="submit" disabled={nav.state !== "idle"}>
+              {pendingIntent === "verify" ? "Checking…" : "Check now"}
+            </Button>
           </Form>
         </div>
       </header>
@@ -253,25 +317,64 @@ export default function DevActivity() {
             : "Erasure recorded. This person's details are already scheduled to be blanked."}
         </p>
       )}
-      {(error || (result && result.error)) && <p role="alert" className="text-red-400">{error ?? result?.error}</p>}
+      {result && result.error && <p role="alert" className="text-red-400">{result.error}</p>}
 
-      <Form method="get" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Input name="shop_id" placeholder="Shop id" defaultValue={params.get("shop_id") ?? ""} aria-label="Shop id" />
-        <Input name="actor" placeholder="Person (user id)" defaultValue={params.get("actor") ?? ""} aria-label="Person" />
+      {/* key: the fields are uncontrolled, so a new address (a link on an
+          entry, Back) must rebuild them or they keep showing the old filter. */}
+      <Form
+        key={params.toString()}
+        method="get"
+        className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2 lg:grid-cols-4"
+      >
+        {shopsLoaded ? (
+          <Select label="Shop" name="shop_id" defaultValue={filterShopId}>
+            <option value="">All shops</option>
+            {shops.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+            {filterShopId && !shopNames.has(filterShopId) && (
+              <option value={filterShopId}>{filterShopId} (not in the shops list)</option>
+            )}
+          </Select>
+        ) : (
+          // The shops list could not be read, so the picker has no names to
+          // offer; the filter still works by id.
+          <Input name="shop_id" label="Shop id (shop names could not be loaded)" defaultValue={filterShopId} />
+        )}
+        <Input
+          name="actor"
+          label="Person reference"
+          placeholder="subj_user_…"
+          autoCapitalize="off"
+          spellCheck={false}
+          defaultValue={params.get("actor") ?? ""}
+        />
         <Input type="date" name="from" label="From" defaultValue={params.get("from") ?? ""} />
         <Input type="date" name="to" label="To" defaultValue={params.get("to") ?? ""} />
-        <select name="action" defaultValue={params.get("action") ?? ""} aria-label="Action" className="tap-target rounded-md border border-white/20 bg-transparent px-3 py-2 text-white">
-          {ACTION_GROUPS.map((g) => <option key={g.value} value={g.value} className="bg-[#0D0D0D]">{g.label}</option>)}
-        </select>
-        <select name="outcome" defaultValue={params.get("outcome") ?? ""} aria-label="Outcome" className="tap-target rounded-md border border-white/20 bg-transparent px-3 py-2 text-white">
-          <option value="" className="bg-[#0D0D0D]">Any outcome</option>
-          <option value="succeeded" className="bg-[#0D0D0D]">Succeeded</option>
-          <option value="failed" className="bg-[#0D0D0D]">Failed</option>
-          <option value="refused" className="bg-[#0D0D0D]">Refused</option>
-          <option value="unknown" className="bg-[#0D0D0D]">Unknown</option>
-        </select>
-        <Button type="submit" className="tap-target">Filter</Button>
+        <Select label="Action" name="action" defaultValue={params.get("action") ?? ""}>
+          {ACTION_GROUPS.map((g) => (
+            <option key={g.value} value={g.value}>
+              {g.label}
+            </option>
+          ))}
+        </Select>
+        <Select label="Outcome" name="outcome" defaultValue={params.get("outcome") ?? ""}>
+          <option value="">Any outcome</option>
+          <option value="succeeded">Succeeded</option>
+          <option value="failed">Failed</option>
+          <option value="refused">Refused</option>
+          <option value="unknown">Unknown</option>
+        </Select>
+        <Button type="submit">Filter</Button>
+        <p className="text-xs text-white/60 sm:col-span-2 lg:col-span-4">
+          To see one person&apos;s activity, open any of their entries and choose &quot;All activity by this
+          person&quot;: it fills in their reference.
+        </p>
       </Form>
+
+      {error && <LoadError what="the activity trail" />}
 
       <ol className="space-y-2">
         {entries.length === 0 && !error && <li className="text-white/60">No activity matches these filters.</li>}
@@ -282,19 +385,34 @@ export default function DevActivity() {
             <li key={e.id} className="rounded-lg border border-white/10 bg-white/[0.02]">
               <details>
                 <summary className="tap-target flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
-                  <time className="text-xs text-white/50" dateTime={e.occurred_at}>{formatAuditDateTime(e.occurred_at)}</time>
+                  <time className="text-xs text-white/60" dateTime={e.occurred_at}>{formatAuditDateTime(e.occurred_at)}</time>
                   <span className="min-w-[9rem] flex-1 font-medium text-white">{actionLabel(e.action)}{e.phase === "started" ? " (started)" : ""}</span>
                   <span className="text-sm text-white/70">{who}</span>
+                  {e.shop_id && shopNames.has(e.shop_id) && (
+                    <span className="text-sm text-white/60">{shopNames.get(e.shop_id)}</span>
+                  )}
                   {e.outcome && <Badge variant={e.outcome === "succeeded" ? "success" : e.outcome === "unknown" ? "warning" : "error"}>{e.outcome}</Badge>}
                   <Badge variant={status.variant} className="ml-auto">{status.label}</Badge>
                   {e.historical === 1 && <Badge variant="outline">Historical</Badge>}
                 </summary>
                 <div className="space-y-2 border-t border-white/10 px-4 py-3 text-sm text-white/70">
                   {e.reason && <p>Reason: {e.reason}</p>}
-                  {e.shop_id && <p>Shop: <a className="tap-target inline-flex items-center underline" href={`/dev/activity?shop_id=${encodeURIComponent(e.shop_id)}`}>{e.shop_id}</a></p>}
+                  {e.shop_id && (
+                    <p>
+                      Shop:{" "}
+                      <a
+                        className="tap-target inline-flex items-center underline"
+                        href={`/dev/activity?shop_id=${encodeURIComponent(e.shop_id)}`}
+                        title="Show only this shop's activity"
+                      >
+                        {shopNames.get(e.shop_id) ?? e.shop_id}
+                      </a>
+                      {shopNames.has(e.shop_id) && <span className="text-white/60"> ({e.shop_id})</span>}
+                    </p>
+                  )}
                   {e.entity_type && <p>Item: {e.entity_type} {e.entity_id}</p>}
                   <Changes json={e.changes_json} />
-                  {e.details_json && <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded bg-black/30 p-2 text-xs">{JSON.stringify(JSON.parse(e.details_json), null, 2)}</pre>}
+                  <Details json={e.details_json} />
                   {e.request_id && <p><a className="tap-target inline-flex items-center underline" href={`/dev/activity?request_id=${encodeURIComponent(e.request_id)}`}>Everything from this request</a></p>}
                   {e.ip && !e.redacted && <p>IP: {e.ip}</p>}
                   {e.seq !== null && <p>Entry number {e.seq}</p>}
@@ -341,7 +459,9 @@ export default function DevActivity() {
         ) : <span />}
         <Form method="post">
           <input type="hidden" name="intent" value="import" />
-          <Button type="submit" variant="ghost" className="tap-target">Import AI usage history</Button>
+          <Button type="submit" variant="secondary" disabled={nav.state !== "idle"}>
+            {pendingIntent === "import" ? "Importing…" : "Import AI usage history"}
+          </Button>
         </Form>
       </div>
 

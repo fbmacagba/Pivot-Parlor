@@ -50,6 +50,9 @@ const CLIENT_ERRORS_PATH = "/client-errors";
 /** Dashboard route modules that are never swept, with the reason. */
 const EXCLUDED: Record<string, string> = {
   "dev.activity.export": "a CSV download with its own enforced policy, not a screen",
+  "staff.bookings_.$bookingId":
+    "one booking's page: the sweep's fresh shop has no booking to open, and making one is not load-only. " +
+    "Its loader and action are covered by apps/web/app/components/staff/bookingStatusAction.test.ts.",
 };
 
 /**
@@ -260,7 +263,8 @@ test.describe.serial("dashboard sweep", () => {
     await page.getByLabel("Shop name").fill(`E2E Dashboards ${uniqueId}`);
     await page.getByLabel(/owner email/i).fill(admin.email);
     await page.getByRole("button", { name: /create shop/i }).click();
-    const inviteLink = page.locator("text=pivotparlor.com/invite/");
+    // Built on the origin the dashboard is served from: match the path, not a host.
+    const inviteLink = page.getByText(/\/invite\/[a-f0-9]{64}/);
     await expect(inviteLink).toBeVisible({ timeout: 15_000 });
     const inviteText = await inviteLink.textContent();
     const invitePath = inviteText?.match(/\/invite\/[a-f0-9]{64}/)?.[0];
@@ -341,7 +345,7 @@ test.describe.serial("dashboard sweep", () => {
       // no action keeps ?shopId=. React Router posts it to the page's `.data`
       // URL (/admin/schedule.data?shopId=...).
       await page.goto(`/admin/schedule${q}`, { waitUntil: "networkidle" });
-      const firstDay = page.locator("tr", { hasText: "E2E Dashboard Staff" }).locator("label").first();
+      const firstDay = page.getByRole("group", { name: "E2E Dashboard Staff" }).locator("label").first();
       // Until the page has hydrated a tick does not reach React; the label
       // reads "Open" only once it has, so tick until it does.
       await expect(async () => {
@@ -427,12 +431,15 @@ test.describe.serial("dashboard sweep", () => {
       const data = (await loaderDataOf(page, "routes/staff.bookings")) as {
         readOnly?: boolean;
         needsStaff?: boolean;
-        schedule?: Array<{ is_active: number }>;
       };
       expect.soft(data.readOnly).toBe(true);
       expect.soft(data.needsStaff).toBe(false);
-      expect.soft(data.schedule?.filter((s) => s.is_active === 1).length ?? 0, "the staff member's working days").toBe(1);
       await page.goto(`/staff/bookings${q}&tab=availability`);
+      // The schedule is read only on the tab that shows it.
+      const availability = (await loaderDataOf(page, "routes/staff.bookings")) as {
+        schedule?: Array<{ is_active: number }>;
+      };
+      expect.soft(availability.schedule?.filter((s) => s.is_active === 1).length ?? 0, "the staff member's working days").toBe(1);
       await expect(page.getByText("Time off is requested by the staff member from their own screens.")).toBeVisible();
       await expect(page.getByRole("button", { name: "Submit request" })).toHaveCount(0);
     });

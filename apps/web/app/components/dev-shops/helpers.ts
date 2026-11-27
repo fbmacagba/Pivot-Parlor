@@ -189,3 +189,116 @@ export function withImageCacheBust(url: string, bust: number): string {
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}t=${bust}`;
 }
+
+// ─── Shops list: where each shop is, filtering and sorting ───────────────────
+
+/** Where a shop is on its way from enquiry to a live site. One value per shop,
+ *  so the list can filter on it. */
+export type ShopStage = "awaiting_payment" | "pending" | "suspended" | "no_site" | "draft" | "live" | "paused";
+
+export const SHOP_STAGES: { value: ShopStage; label: string }[] = [
+  // Not "Awaiting payment": that is the row badge's wording, and the Stripe
+  // e2e spec finds the badge by that text on the whole page.
+  { value: "awaiting_payment", label: "Not yet paid" },
+  { value: "pending", label: "Invite not accepted" },
+  { value: "no_site", label: "No site yet" },
+  { value: "draft", label: "Site in draft" },
+  { value: "live", label: "Site live" },
+  { value: "paused", label: "Site paused" },
+  { value: "suspended", label: "Suspended" },
+];
+
+type StageFields = {
+  status: string;
+  stripe_payment_status?: string;
+  has_site?: number | null;
+  website_status?: string | null;
+};
+
+export function shopStage(shop: StageFields): ShopStage {
+  if (shop.status === "suspended") return "suspended";
+  if (shop.status !== "active") {
+    return shop.status === "awaiting_payment" || shop.stripe_payment_status === "unpaid" ? "awaiting_payment" : "pending";
+  }
+  if (!shop.has_site) return "no_site";
+  const ws = (shop.website_status ?? "draft").toLowerCase();
+  return ws === "live" ? "live" : ws === "paused" ? "paused" : "draft";
+}
+
+export type ShopSort = "number" | "name" | "newest";
+
+type ListFields = StageFields & {
+  name: string;
+  slug: string;
+  owner_email?: string | null;
+  shop_number: number;
+  created_at?: string;
+};
+
+/** The shops that match the search text and the chosen stage, in the chosen
+ *  order. Pure: the list filters in memory and never asks the server again. */
+export function filterAndSortShops<T extends ListFields>(
+  shops: readonly T[],
+  opts: { query: string; stage: ShopStage | ""; sort: ShopSort },
+): T[] {
+  const needle = opts.query.trim().toLowerCase();
+  const kept = shops.filter((s) => {
+    if (opts.stage && shopStage(s) !== opts.stage) return false;
+    if (!needle) return true;
+    return (
+      s.name.toLowerCase().includes(needle) ||
+      s.slug.toLowerCase().includes(needle) ||
+      (s.owner_email ?? "").toLowerCase().includes(needle)
+    );
+  });
+  if (opts.sort === "name") {
+    return [...kept].sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+  }
+  if (opts.sort === "newest") {
+    // created_at is an ISO or SQLite UTC stamp: both sort as text. A shop
+    // without one falls back to its number, which is issued in order.
+    return [...kept].sort(
+      (a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? "") || b.shop_number - a.shop_number,
+    );
+  }
+  return [...kept].sort((a, b) => a.shop_number - b.shop_number);
+}
+
+/** The brand badge for a model id: Claude is Anthropic's, Gemini is Google's,
+ *  and anything else gets the neutral outline (never the Google blue). */
+export function modelBadgeVariant(modelId: string): "anthropic" | "google" | "outline" {
+  const id = modelId.toLowerCase();
+  if (id.includes("claude") || id.includes("anthropic")) return "anthropic";
+  if (id.includes("gemini") || /(^|[/-])google([/-]|$)/.test(id)) return "google";
+  return "outline";
+}
+
+// ─── Starting a generation ───────────────────────────────────────────────────
+
+/** What the server said to "generate this shop's site". A run that is already
+ *  going (409, code generation_in_progress) is not an error: its job id comes
+ *  back so the page follows that run instead of starting, and paying for, a
+ *  second one. */
+export function readGenerateSiteReply(
+  httpStatus: number,
+  body: unknown,
+): { jobId: string; adopted: boolean } | { error: string } {
+  const b = (body && typeof body === "object" ? body : {}) as {
+    success?: boolean;
+    error?: unknown;
+    code?: unknown;
+    jobId?: unknown;
+    data?: { jobId?: unknown; job_id?: unknown } | null;
+  };
+  const text = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
+  if (httpStatus === 409 && b.code === "generation_in_progress") {
+    const running = text(b.data?.job_id);
+    if (running) return { jobId: running, adopted: true };
+  }
+  const started = text(b.data?.jobId) || text(b.jobId);
+  if (httpStatus >= 200 && httpStatus < 300 && started) return { jobId: started, adopted: false };
+  if (httpStatus === 409) {
+    return { error: text(b.error) || "A site generation is already running for this shop. Reload the page to follow it." };
+  }
+  return { error: text(b.error) || "Could not start generation. Please try again." };
+}

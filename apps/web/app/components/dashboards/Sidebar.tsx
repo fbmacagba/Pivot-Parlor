@@ -67,7 +67,10 @@ const STAFF_NAV: NavItem[] = [
   { href: "/staff", label: "Today", icon: LayoutDashboard },
   { href: "/staff/bookings", label: "My Bookings", short: "Bookings", icon: CalendarDays },
   { href: "/staff/pos", label: "Point of Sale", short: "POS", icon: ShoppingCart },
-  { href: "/staff/availability", label: "Availability", icon: Clock },
+  // Availability is a tab of the bookings page, so it links straight to the
+  // tab: /staff/availability only redirects there, and a link to it would
+  // light "My Bookings" on arrival.
+  { href: "/staff/bookings?tab=availability", label: "Availability", icon: Clock },
 ];
 
 export const NAV_MAP: Record<UserRole, NavItem[]> = {
@@ -80,8 +83,27 @@ export const NAV_MAP: Record<UserRole, NavItem[]> = {
 /** Dashboard roots match exactly; every other destination matches by prefix. */
 const ROOT_HREFS = new Set(["/dev", "/admin", "/staff"]);
 
-export function isNavActive(href: string, pathname: string): boolean {
-  return href === pathname || (!ROOT_HREFS.has(href) && pathname.startsWith(href));
+/** Destinations that are one tab of a page ("/staff/bookings?tab=availability"). */
+const TAB_HREFS = new Set(
+  Object.values(NAV_MAP)
+    .flat()
+    .map((item) => item.href)
+    .filter((href) => href.includes("?tab=")),
+);
+
+/**
+ * Whether a destination is the one on screen. A destination that names a tab
+ * is current only on that tab; the page's own destination is current on every
+ * tab except one another destination names. `search` is the location's query
+ * string.
+ */
+export function isNavActive(href: string, pathname: string, search = ""): boolean {
+  const [path = "", query = ""] = href.split("?");
+  const tab = new URLSearchParams(search).get("tab");
+  const wantedTab = new URLSearchParams(query).get("tab");
+  if (wantedTab !== null) return path === pathname && tab === wantedTab;
+  const onPage = path === pathname || (!ROOT_HREFS.has(path) && pathname.startsWith(path));
+  return onPage && !(tab !== null && TAB_HREFS.has(`${pathname}?tab=${tab}`));
 }
 
 /** Current "Switch View" target for developers (SPA path). */
@@ -117,7 +139,7 @@ export function Sidebar({
   onNavigate,
   onClose,
 }: SidebarProps) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const navItems = NAV_MAP[role] ?? [];
   const shopHref = useShopHref();
@@ -131,7 +153,7 @@ export function Sidebar({
             Pivot <span className="text-gold">Parlor</span>
           </p>
           {shopName && (
-            <p className="mt-0.5 truncate text-xs text-white/50">{shopName}</p>
+            <p className="mt-0.5 truncate text-xs text-white/60">{shopName}</p>
           )}
         </div>
         {onClose && (
@@ -176,7 +198,7 @@ export function Sidebar({
         ) : null}
         <ul className="space-y-0.5">
           {navItems.map(({ href, label, icon: Icon }) => {
-            const active = isNavActive(href, pathname);
+            const active = isNavActive(href, pathname, search);
             return (
               <li key={href}>
                 <Link

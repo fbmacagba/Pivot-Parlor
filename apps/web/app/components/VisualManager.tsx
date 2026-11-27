@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
 import { useRevalidator } from "react-router";
 import { Check, Loader2, Sparkles, Trash2, Upload } from "lucide-react";
+import { Badge } from "~/components/ui/Badge";
 import { Button } from "~/components/ui/Button";
+import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
 import { resolvePublicAssetImageUrl, withImageCacheBust } from "~/components/dev-shops/helpers";
 
 export interface VisualsData {
@@ -104,8 +106,9 @@ export function VisualManager({ shopId, apiUrl, role, hero, logo, catalog, servi
     }
   }
 
-  async function handleRegenerate(type: string) {
-    if (busy) return;
+  /** Runs the confirmed action. True when it worked, so the dialog can close. */
+  async function handleRegenerate(type: string): Promise<boolean> {
+    if (busy) return false;
     setError(null);
     setBusy(type);
     try {
@@ -116,50 +119,100 @@ export function VisualManager({ shopId, apiUrl, role, hero, logo, catalog, servi
       });
       const json = (await res.json().catch(() => ({}))) as { imageUrl?: string; error?: string };
       if (!res.ok || !json.imageUrl) {
-        setError(json.error?.trim() || "Could not regenerate the image.");
-        return;
+        setError(json.error?.trim() || "Could not regenerate the image. The current one is unchanged.");
+        return false;
       }
       setBust(Date.now());
       revalidator.revalidate();
+      return true;
     } catch {
-      setError("Could not regenerate the image. Please try again.");
+      setError("Could not regenerate the image. The current one is unchanged. Please try again.");
+      return false;
     } finally {
       setBusy(null);
     }
   }
 
-  async function handleRemove(type: string) {
-    if (busy) return;
+  async function handleRemove(type: string): Promise<boolean> {
+    if (busy) return false;
     setError(null);
     setBusy(type);
     try {
       const removed = await post("remove-image", { type });
       if (!removed.ok) {
-        setError((removed.json.error as string)?.trim() || "Could not remove the image.");
-        return;
+        setError((removed.json.error as string)?.trim() || "Could not remove the image. It is still in place.");
+        return false;
       }
       setBust(Date.now());
       revalidator.revalidate();
+      return true;
     } catch {
-      setError("Could not remove the image. Please try again.");
+      setError("Could not remove the image. It is still in place. Please try again.");
+      return false;
     } finally {
       setBusy(null);
     }
   }
 
+  // Regenerate costs a paid image call and Remove deletes an image: both are
+  // confirmed first. One action runs at a time, so every tile's buttons lock
+  // (visibly) while one is busy.
+  const [confirm, setConfirm] = useState<{ kind: "regenerate" | "remove"; tile: Tile } | null>(null);
+  const anyBusy = busy !== null;
+
+  async function runConfirmed() {
+    if (!confirm) return;
+    const ok =
+      confirm.kind === "regenerate" ? await handleRegenerate(confirm.tile.type) : await handleRemove(confirm.tile.type);
+    if (ok) setConfirm(null);
+  }
+
   return (
     <section className="rounded-xl border border-white/10 bg-dark-100 p-6">
       <h2 className="font-heading text-lg font-semibold text-white">Visuals</h2>
-      <p className="mt-1 text-sm text-white/50">
+      <p className="mt-1 text-sm text-white/60">
         {role === "developer"
           ? "Upload, regenerate or remove any single image. Uploaded and regenerated images are kept when the site is regenerated."
           : "Upload your own image for any visual. Uploaded images are kept when the site is regenerated."}
       </p>
-      {error ? (
-        <div className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+      {error && !confirm ? (
+        <div role="alert" className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
           {error}
         </div>
       ) : null}
+      <ConfirmDialog
+        open={confirm !== null}
+        onCancel={() => {
+          setConfirm(null);
+          setError(null);
+        }}
+        onConfirm={() => void runConfirmed()}
+        title={
+          confirm?.kind === "remove"
+            ? `Remove the ${confirm.tile.label} image?`
+            : `Regenerate the ${confirm?.tile.label ?? ""} image?`
+        }
+        confirmLabel={confirm?.kind === "remove" ? "Remove image" : "Regenerate image"}
+        pendingLabel={confirm?.kind === "remove" ? "Removing…" : "Generating…"}
+        destructive={confirm?.kind === "remove"}
+        pending={anyBusy}
+        error={confirm ? error : null}
+      >
+        {confirm?.kind === "remove" ? (
+          <p>
+            This clears the {confirm.tile.locked ? "custom " : ""}image from the site.{" "}
+            {confirm.tile.type.startsWith("service:")
+              ? "The service goes back to its catalogue photo."
+              : "The site shows none until you upload or generate another."}{" "}
+            The removed image cannot be brought back.
+          </p>
+        ) : (
+          <p>
+            This makes one paid AI image call and replaces the current image when it finishes. The current image
+            cannot be brought back.
+          </p>
+        )}
+      </ConfirmDialog>
       <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {tiles.map((tile) => {
           const src = tile.url
@@ -175,9 +228,9 @@ export function VisualManager({ shopId, apiUrl, role, hero, logo, catalog, servi
               <div className="mb-2 flex items-center justify-between">
                 <span className="truncate text-sm font-medium text-white/80">{tile.label}</span>
                 {tile.locked ? (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-xs text-gold">
-                    <Check className="h-3 w-3" /> Custom
-                  </span>
+                  <Badge variant="gold">
+                    <Check className="h-3 w-3" aria-hidden /> Custom
+                  </Badge>
                 ) : null}
               </div>
               <div className="flex aspect-video items-center justify-center overflow-hidden rounded-md border border-white/10 bg-black/30">
@@ -203,22 +256,51 @@ export function VisualManager({ shopId, apiUrl, role, hero, logo, catalog, servi
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="secondary"
                   size="sm"
-                  disabled={tileBusy}
+                  disabled={anyBusy}
                   onClick={() => fileInputs.current[tile.type]?.click()}
                 >
-                  {tileBusy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1 h-3.5 w-3.5" />}
-                  Upload
+                  {tileBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : (
+                    <Upload className="h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {tileBusy ? "Working…" : "Upload"}
+                  <span className="sr-only"> {tile.label} image</span>
                 </Button>
                 {role === "developer" ? (
                   <>
-                    <Button type="button" variant="ghost" size="sm" disabled={tileBusy} onClick={() => void handleRegenerate(tile.type)}>
-                      <Sparkles className="mr-1 h-3.5 w-3.5" /> Regenerate
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={anyBusy}
+                      onClick={() => {
+                        setError(null);
+                        setConfirm({ kind: "regenerate", tile });
+                      }}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden /> Regenerate
+                      <span className="sr-only"> {tile.label} image</span>
                     </Button>
-                    <Button type="button" variant="ghost" size="sm" disabled={tileBusy} onClick={() => void handleRemove(tile.type)}>
-                      <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
-                    </Button>
+                    {/* Only where there is an image of its own to clear: a service
+                        showing its catalogue photo has nothing to remove. */}
+                    {(tile.type.startsWith("service:") ? tile.locked : Boolean(tile.url)) ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={anyBusy}
+                        onClick={() => {
+                          setError(null);
+                          setConfirm({ kind: "remove", tile });
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden /> Remove
+                        <span className="sr-only"> {tile.label} image</span>
+                      </Button>
+                    ) : null}
                   </>
                 ) : null}
               </div>

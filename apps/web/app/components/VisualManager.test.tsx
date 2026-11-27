@@ -21,10 +21,19 @@ vi.mock("react-router", () => ({
 // so the fix has to be at the test boundary. None of the assertions below
 // depend on icon markup (they check button/badge text), so stubbing every
 // icon as a no-op component costs no coverage.
-vi.mock("lucide-react", () => {
-  const Icon = () => null;
-  return { Check: Icon, Loader2: Icon, Sparkles: Icon, Trash2: Icon, Upload: Icon };
-});
+// Every icon, not a fixed list: the confirmation dialog the tiles now open
+// brings its own (the close button's), and a list would need each one named.
+vi.mock(
+  "lucide-react",
+  () =>
+    new Proxy(
+      {},
+      {
+        get: (_t, key) => (key === "then" ? undefined : () => null),
+        has: (_t, key) => key !== "then",
+      },
+    ),
+);
 
 const DATA: VisualsData = {
   hero: { url: "https://x/hero.png", locked: true },

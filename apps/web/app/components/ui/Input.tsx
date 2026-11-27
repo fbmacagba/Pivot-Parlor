@@ -1,18 +1,25 @@
 import { clsx } from "clsx";
 import * as React from "react";
+import { FIELD_BASE, FIELD_ERROR, FIELD_ERROR_TEXT, FIELD_LABEL } from "./fieldStyles";
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
+  /** Names the field for assistive tech while showing no visible label. */
+  hideLabel?: boolean;
 }
 
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, type, label, error, id, ...props }, ref) => {
-    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
+  ({ className, type, label, error, id, hideLabel = false, ...props }, ref) => {
+    // A generated id, so two fields with the same label on one page (a list
+    // of rows, a dialog over a form) never share one.
+    const generatedId = React.useId();
+    const inputId = id ?? generatedId;
+    const errorId = `${inputId}-error`;
     return (
       <div className="flex flex-col gap-1.5">
         {label && (
-          <label htmlFor={inputId} className="text-sm font-medium text-white/80">
+          <label htmlFor={inputId} className={hideLabel ? "sr-only" : FIELD_LABEL}>
             {label}
           </label>
         )}
@@ -20,18 +27,16 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           id={inputId}
           type={type}
           ref={ref}
-          className={clsx(
-            // [color-scheme:dark] keeps native control chrome (date/time
-            // pickers) dark even where an ancestor switches to a light scheme.
-            "flex h-10 w-full rounded-lg border border-white/40 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/60 [color-scheme:dark]",
-            "focus:outline-none focus:ring-2 focus:ring-gold focus:border-gold",
-            "disabled:cursor-not-allowed disabled:opacity-50",
-            error && "border-red-500 focus:ring-red-500",
-            className
-          )}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          className={clsx("flex h-10", FIELD_BASE, error && FIELD_ERROR, className)}
           {...props}
         />
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && (
+          <p id={errorId} className={FIELD_ERROR_TEXT}>
+            {error}
+          </p>
+        )}
       </div>
     );
   }

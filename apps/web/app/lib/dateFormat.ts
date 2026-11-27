@@ -17,6 +17,8 @@
  * dateFormatGuard.test.ts keeps date formatting out of every other file.
  */
 
+import { zonedTimeToUtc } from "@repo/utils";
+
 export const UK_LOCALE = "en-GB";
 export const UK_TIME_ZONE = "Europe/London";
 
@@ -186,4 +188,36 @@ export function shopToday(timeZone: string | null | undefined, now: Date = new D
   }
   const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/**
+ * When a booking starts or ends, as epoch milliseconds, or null when it
+ * cannot be read. bookings.start_time and end_time hold either an instant
+ * (online bookings) or the shop's own clock reading ("09:30": walk-in and
+ * deposit bookings), which only means something beside the booking's day.
+ * new Date("09:30") is not a date, so nothing may read these fields directly.
+ */
+export function bookingInstantMs(
+  day: string | null | undefined,
+  time: DateInput | null | undefined,
+  timeZone: string = UK_TIME_ZONE,
+): number | null {
+  if (time === null || time === undefined) return null;
+  const wall = wallClock(time);
+  if (!wall) {
+    const ms = toInstant(time).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (!day || !DAY.test(day)) return null;
+  const clock = `${String(wall.hour).padStart(2, "0")}:${String(wall.minute).padStart(2, "0")}`;
+  let at: Date;
+  try {
+    at = zonedTimeToUtc(day, clock, timeZone);
+  } catch (error) {
+    // A zone this machine does not know: read the clock as London's, as format() does.
+    if (!(error instanceof RangeError)) throw error;
+    at = zonedTimeToUtc(day, clock, UK_TIME_ZONE);
+  }
+  const ms = at.getTime();
+  return Number.isNaN(ms) ? null : ms;
 }

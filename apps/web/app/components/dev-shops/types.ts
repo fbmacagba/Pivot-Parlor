@@ -9,9 +9,11 @@ export interface Shop {
   type: string;
   owner_name: string;
   owner_email: string;
-  bookings_count?: number;
-  revenue_pence?: number;
-  commission_pence?: number;
+  /** Every booking the shop has ever taken (GET /api/shops, getAllShops). */
+  booking_count?: number;
+  /** Platform commission on the shop's completed bookings, in pence. */
+  commission_total_pence?: number;
+  created_at?: string;
   ai_model?: string;
   is_active: number;
   status: string;
@@ -29,6 +31,8 @@ export interface Shop {
 export interface GenerateSiteActionResult {
   success: boolean;
   generateJobId?: string;
+  /** True when the server was already running a job for this shop and we follow that one. */
+  adopted?: boolean;
   generateShopSlug?: string;
   generateShopId?: string;
   generateSite?: { template: string; slug: string } | null;

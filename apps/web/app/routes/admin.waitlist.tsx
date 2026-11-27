@@ -1,15 +1,30 @@
 // apps/web/app/routes/admin.waitlist.tsx
 import { useFetcher, useLoaderData, data as json } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import { useState } from "react";
 import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { formatDay } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { pageTitle } from "~/lib/pageTitle";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+import { Button, type ButtonProps } from "~/components/ui/Button";
+import { LoadError } from "~/components/ui/LoadError";
+import { StatusBadge } from "~/components/ui/StatusBadge";
+import { ErrorScreen } from "~/components/ErrorScreen";
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
+
+export const meta = () => pageTitle("Waitlist");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
+
+/** Closed entries are shown this many at a time. */
+const CLOSED_PAGE = 20;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -107,13 +122,6 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
 // ─── UI ───────────────────────────────────────────────────────────────────────
 
-const STATUS_META: Record<string, { label: string; classes: string }> = {
-  waiting: { label: "Waiting", classes: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
-  notified: { label: "Notified", classes: "bg-gold/15 text-gold border-gold/30" },
-  booked: { label: "Booked", classes: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
-  expired: { label: "Expired", classes: "bg-white/5 text-white/60 border-white/15" },
-};
-
 function timeAgo(iso: string): string {
   const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
   if (mins < 1) return "just now";
@@ -130,13 +138,12 @@ function formatDate(iso: string | null): string {
 function EntryRow({ entry, shopId }: { entry: WaitlistEntry; shopId: string | null }) {
   const fetcher = useFetcher<ActionData>();
   const busy = fetcher.state !== "idle";
-  const meta = STATUS_META[entry.status] ?? STATUS_META.waiting;
   const error = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
 
   const actionButton = (
     intent: string,
     label: string,
-    classes: string,
+    variant: ButtonProps["variant"],
     status?: string
   ) => (
     <fetcher.Form method="post" className="inline">
@@ -144,13 +151,9 @@ function EntryRow({ entry, shopId }: { entry: WaitlistEntry; shopId: string | nu
       <input type="hidden" name="entryId" value={entry.id} />
       {shopId && <input type="hidden" name="shopId" value={shopId} />}
       {status && <input type="hidden" name="status" value={status} />}
-      <button
-        type="submit"
-        disabled={busy}
-        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${classes}`}
-      >
+      <Button type="submit" size="sm" variant={variant} disabled={busy} aria-label={`${label}: ${entry.customer_name}`}>
         {label}
-      </button>
+      </Button>
     </fetcher.Form>
   );
 
@@ -158,49 +161,47 @@ function EntryRow({ entry, shopId }: { entry: WaitlistEntry; shopId: string | nu
     <div className="px-5 py-4 hover:bg-white/[0.02] transition-colors">
       <div className="flex flex-wrap items-center gap-4">
         {/* Avatar */}
-        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center font-semibold text-white/60 text-sm shrink-0">
+        <div aria-hidden className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center font-semibold text-white/60 text-sm shrink-0">
           {entry.customer_name.charAt(0).toUpperCase()}
         </div>
         {/* Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+        <div className="min-w-[9rem] flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <p className="font-medium text-white truncate">{entry.customer_name}</p>
-            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${meta.classes}`}>
-              {meta.label}
-            </span>
+            <StatusBadge status={entry.status} />
           </div>
           <p className="text-xs text-white/60 truncate">
             {entry.customer_email}
             {entry.customer_phone ? ` · ${entry.customer_phone}` : ""}
           </p>
-          <p className="text-xs text-white/50 mt-0.5">
+          <p className="text-xs text-white/60 mt-0.5">
             {formatDate(entry.preferred_date)}
             {entry.service_name ? ` · ${entry.service_name}` : ""}
             {` · joined ${timeAgo(entry.created_at)}`}
           </p>
         </div>
         {/* Actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {entry.status === "waiting" && (
             <>
-              {actionButton("notify", busy ? "Sending…" : "Notify", "bg-gold/20 text-gold hover:bg-gold/30")}
-              {actionButton("setStatus", "Mark booked", "text-white/60 hover:text-emerald-400 hover:bg-emerald-500/10", "booked")}
-              {actionButton("setStatus", "Expire", "text-white/50 hover:text-white/70 hover:bg-white/5", "expired")}
+              {actionButton("notify", busy ? "Sending…" : "Notify", "default")}
+              {actionButton("setStatus", "Mark booked", "secondary", "booked")}
+              {actionButton("setStatus", "Expire", "ghost", "expired")}
             </>
           )}
           {entry.status === "notified" && (
             <>
-              {actionButton("setStatus", "Mark booked", "bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30", "booked")}
-              {actionButton("setStatus", "Back to waiting", "text-white/60 hover:text-white/80 hover:bg-white/5", "waiting")}
-              {actionButton("setStatus", "Expire", "text-white/50 hover:text-white/70 hover:bg-white/5", "expired")}
+              {actionButton("setStatus", "Mark booked", "default", "booked")}
+              {actionButton("setStatus", "Back to waiting", "secondary", "waiting")}
+              {actionButton("setStatus", "Expire", "ghost", "expired")}
             </>
           )}
           {(entry.status === "booked" || entry.status === "expired") &&
-            actionButton("setStatus", "Back to waiting", "text-white/60 hover:text-white/80 hover:bg-white/5", "waiting")}
+            actionButton("setStatus", "Back to waiting", "secondary", "waiting")}
         </div>
       </div>
       {error && (
-        <p className="mt-2 ml-12 text-xs text-red-400">{error}</p>
+        <p role="alert" className="mt-2 text-sm text-red-400 sm:ml-12">{error}</p>
       )}
     </div>
   );
@@ -212,6 +213,7 @@ export default function AdminWaitlist() {
   const waiting = entries.filter((e) => e.status === "waiting");
   const notified = entries.filter((e) => e.status === "notified");
   const closed = entries.filter((e) => e.status === "booked" || e.status === "expired");
+  const [closedShown, setClosedShown] = useState(CLOSED_PAGE);
 
   if (developerNeedsShop) {
     return (
@@ -231,16 +233,12 @@ export default function AdminWaitlist() {
       <div>
         <h1 className="font-heading text-2xl font-bold text-white">Waitlist</h1>
         <p className="mt-0.5 text-sm text-white/60">
-          {waiting.length} waiting · {notified.length} notified. Customers are also notified
+          {loadError ? "" : `${waiting.length} waiting · ${notified.length} notified. `}Customers are also notified
           automatically when a matching booking is cancelled.
         </p>
       </div>
 
-      {loadError && (
-        <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          The waitlist could not be loaded. Refresh to try again.
-        </div>
-      )}
+      {loadError && <LoadError what="the waitlist" />}
 
       {/* Open entries */}
       <div>
@@ -249,7 +247,7 @@ export default function AdminWaitlist() {
         </h2>
         {waiting.length + notified.length === 0 ? (
           loadError ? null : (
-            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50 text-sm">
+            <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/60 text-sm">
               No one is on the waitlist right now. Customers join from your public site when
               slots are full.
             </div>
@@ -270,10 +268,20 @@ export default function AdminWaitlist() {
             Closed ({closed.length})
           </h2>
           <div className="rounded-xl border border-white/10 bg-dark-100 divide-y divide-white/5 overflow-hidden">
-            {closed.map((entry) => (
+            {closed.slice(0, closedShown).map((entry) => (
               <EntryRow key={entry.id} entry={entry} shopId={shopId} />
             ))}
           </div>
+          {closed.length > closedShown && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setClosedShown((n) => n + CLOSED_PAGE)}>
+                Show more
+              </Button>
+              <p className="text-xs text-white/60">
+                Showing {closedShown} of {closed.length}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

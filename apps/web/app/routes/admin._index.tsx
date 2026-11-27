@@ -18,7 +18,17 @@ import type { SetupStatus } from "~/components/admin/SetupGate";
 import { SiteCandidateCard } from "~/components/SiteCandidateCard";
 import { formatDate, formatTime as formatUkTime, ukToday } from "~/lib/dateFormat";
 import { pageShopId } from "~/lib/pageShop";
+import { pageTitle } from "~/lib/pageTitle";
 import { useShopHref } from "~/lib/useShopHref";
+import { LoadError } from "~/components/ui/LoadError";
+import { StatusBadge } from "~/components/ui/StatusBadge";
+import { ErrorScreen } from "~/components/ErrorScreen";
+
+export const meta = () => pageTitle("Overview");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 interface AdminStats {
   date: string;
@@ -38,28 +48,6 @@ interface TodayBooking {
   duration_min: number;
   amount_pence: number;
 }
-
-const STATUS_STYLES: Record<string, { bg: string; text: string; dot: string }> =
-  {
-    pending: {
-      bg: "bg-amber-500/10",
-      text: "text-amber-400",
-      dot: "bg-amber-400",
-    },
-    confirmed: { bg: "bg-gold/10", text: "text-gold", dot: "bg-gold" },
-    in_progress: {
-      bg: "bg-blue-500/10",
-      text: "text-blue-400",
-      dot: "bg-blue-400",
-    },
-    completed: {
-      bg: "bg-emerald-500/10",
-      text: "text-emerald-400",
-      dot: "bg-emerald-400",
-    },
-    cancelled: { bg: "bg-red-500/10", text: "text-red-400", dot: "bg-red-400" },
-    no_show: { bg: "bg-white/5", text: "text-white/60", dot: "bg-white/30" },
-  };
 
 /** "09:05" on the London clock (app/lib/dateFormat.ts). */
 function formatTime(iso: string) {
@@ -83,63 +71,57 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     waitlist_count: 0,
   };
   let todayBookings: TodayBooking[] = [];
-
-  if (shopId) {
-    try {
-      stats = await api.get<AdminStats>(`/api/shops/${shopId}/stats`);
-    } catch {
-      /* use defaults */
-    }
-    // The API's "today" is the shop's own (London) date; the list matches it.
-    const today = /^\d{4}-\d{2}-\d{2}$/.test(stats.date ?? "") ? stats.date : ukToday();
-
-    try {
-      const res = await api.get<TodayBooking[]>(
-        `/api/shops/${shopId}/bookings?date=${today}`,
-      );
-      todayBookings = Array.isArray(res) ? res : [];
-    } catch {
-      /* empty */
-    }
-  }
-
+  let statsError = false;
+  let bookingsError = false;
   let setupStatus: SetupStatus | null = null;
-  if (shopId) {
-    try {
-      setupStatus = await api.get<SetupStatus>(
-        `/api/shops/${shopId}/setup-status`,
-      );
-    } catch {
-      /* non-fatal */
-    }
-  }
-
   // Public shop-site URL for the share card. Built from the request origin so
   // staging previews link to themselves rather than production.
   let shopShare: { url: string; name: string } | null = null;
   let shopSlug: string | null = null;
+
   if (shopId) {
-    try {
-      const shop = await api.get<{ slug: string; name: string }>(
-        `/api/shops/${shopId}`,
-      );
-      if (shop?.slug) {
-        shopSlug = shop.slug;
-        shopShare = {
-          url: `${new URL(request.url).origin}/${shop.slug}`,
-          name: shop.name,
-        };
+    // Today's bookings need the shop's own date from the stats, so they
+    // follow it; the setup status and the shop load alongside both.
+    const statsAndBookings = (async () => {
+      try {
+        stats = await api.get<AdminStats>(`/api/shops/${shopId}/stats`);
+      } catch {
+        statsError = true;
       }
-    } catch {
-      /* non-fatal: card simply not shown */
+      // The API's "today" is the shop's own (London) date; the list matches it.
+      const today = /^\d{4}-\d{2}-\d{2}$/.test(stats.date ?? "") ? stats.date : ukToday();
+      try {
+        const res = await api.get<TodayBooking[]>(
+          `/api/shops/${shopId}/bookings?date=${today}`,
+        );
+        todayBookings = Array.isArray(res) ? res : [];
+      } catch {
+        bookingsError = true;
+      }
+    })();
+
+    const [, setupRes, shopRes] = await Promise.allSettled([
+      statsAndBookings,
+      api.get<SetupStatus>(`/api/shops/${shopId}/setup-status`),
+      api.get<{ slug: string; name: string }>(`/api/shops/${shopId}`),
+    ]);
+    // Non-fatal: without it the overview shows instead of the setup steps.
+    if (setupRes.status === "fulfilled") setupStatus = setupRes.value;
+    // Non-fatal: the share card is simply not shown.
+    if (shopRes.status === "fulfilled" && shopRes.value?.slug) {
+      shopSlug = shopRes.value.slug;
+      shopShare = {
+        url: `${new URL(request.url).origin}/${shopRes.value.slug}`,
+        name: shopRes.value.name,
+      };
     }
   }
 
-  return json({ stats, todayBookings, shopId, setupStatus, shopShare, shopSlug });
+  return json({ stats, todayBookings, shopId, setupStatus, shopShare, shopSlug, statsError, bookingsError });
 }
 
 export default function AdminOverview() {
-  const { stats, todayBookings, shopId, setupStatus, shopShare, shopSlug } =
+  const { stats, todayBookings, shopId, setupStatus, shopShare, shopSlug, statsError, bookingsError } =
     useLoaderData<typeof loader>();
   const shopHref = useShopHref();
 
@@ -169,7 +151,7 @@ export default function AdminOverview() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">
             Overview
@@ -184,9 +166,9 @@ export default function AdminOverview() {
         </div>
         <Link
           to={shopHref("/admin/bookings")}
-          className="flex items-center gap-1.5 text-sm text-gold hover:text-gold/80 transition-colors"
+          className="tap-target flex items-center gap-1.5 text-sm text-gold hover:text-gold/80 transition-colors"
         >
-          All bookings <ArrowRight className="h-3.5 w-3.5" />
+          All bookings <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
 
@@ -194,6 +176,9 @@ export default function AdminOverview() {
       {reviewCard}
 
       {/* Stats */}
+      {statsError ? (
+        <LoadError what="today's figures" />
+      ) : (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Today's bookings"
@@ -212,6 +197,7 @@ export default function AdminOverview() {
         />
         <StatCard label="Waitlist" value={stats.waitlist_count} icon={Clock} />
       </div>
+      )}
 
       {/* Share your shop */}
       {shopShare && (
@@ -224,13 +210,17 @@ export default function AdminOverview() {
           <h2 className="font-heading text-lg font-semibold text-white">
             Today&apos;s schedule
           </h2>
-          <span className="text-xs text-white/60">
-            {completed.length}/{todayBookings.length} completed
-          </span>
+          {!bookingsError && (
+            <span className="text-xs text-white/60">
+              {completed.length} of {todayBookings.length} completed
+            </span>
+          )}
         </div>
 
-        {todayBookings.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-white/50">
+        {bookingsError ? (
+          <LoadError what="today's bookings" />
+        ) : todayBookings.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-white/10 p-10 text-center text-sm text-white/60">
             No bookings scheduled for today.
           </div>
         ) : (
@@ -239,29 +229,28 @@ export default function AdminOverview() {
             {upcoming.length > 0 && (
               <div className="space-y-2">
                 {upcoming.map((b) => {
-                  const s = STATUS_STYLES[b.status] ?? STATUS_STYLES.pending;
                   return (
                     <div
                       key={b.id}
-                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/8 bg-dark-100 px-4 py-3 transition-colors hover:border-white/15"
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/10 bg-dark-100 px-4 py-3 transition-colors hover:border-white/15"
                     >
                       {/* Time */}
                       <div className="w-16 shrink-0 text-center">
                         <p className="text-sm font-semibold text-white">
                           {formatTime(b.start_time)}
                         </p>
-                        <p className="text-xs text-white/50">
-                          {b.duration_min}m
+                        <p className="text-xs text-white/60">
+                          {b.duration_min} min
                         </p>
                       </div>
                       {/* Divider */}
-                      <div className="h-10 w-px bg-white/10 shrink-0" />
+                      <div aria-hidden className="h-10 w-px bg-white/10 shrink-0" />
                       {/* Info */}
                       <div className="min-w-[9rem] flex-1">
                         <p className="text-sm font-medium text-white truncate">
                           {b.customer_name}
                         </p>
-                        <p className="text-xs text-white/50 truncate">
+                        <p className="text-xs text-white/60 truncate">
                           {b.service_name}
                         </p>
                       </div>
@@ -270,12 +259,7 @@ export default function AdminOverview() {
                         <p className="text-sm font-semibold text-gold">
                           {formatPence(b.amount_pence)}
                         </p>
-                        <div
-                          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${s.bg} ${s.text}`}
-                        >
-                          <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
-                          {b.status.replace("_", " ")}
-                        </div>
+                        <StatusBadge status={b.status} />
                       </div>
                     </div>
                   );
@@ -286,8 +270,8 @@ export default function AdminOverview() {
             {/* Completed */}
             {completed.length > 0 && (
               <details className="group">
-                <summary className="flex cursor-pointer items-center gap-2 py-2 text-xs text-white/50 hover:text-white/50 list-none">
-                  <CheckCircle className="h-3.5 w-3.5" />
+                <summary className="tap-target flex cursor-pointer items-center gap-2 py-2 text-xs text-white/70 hover:text-white list-none">
+                  <CheckCircle className="h-3.5 w-3.5" aria-hidden />
                   {completed.length} completed booking
                   {completed.length !== 1 ? "s" : ""}
                 </summary>
@@ -295,29 +279,27 @@ export default function AdminOverview() {
                   {completed.map((b) => (
                     <div
                       key={b.id}
-                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-60"
+                      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3"
                     >
                       <div className="w-16 shrink-0 text-center">
                         <p className="text-sm font-semibold text-white/70">
                           {formatTime(b.start_time)}
                         </p>
                       </div>
-                      <div className="h-10 w-px bg-white/5 shrink-0" />
+                      <div aria-hidden className="h-10 w-px bg-white/5 shrink-0" />
                       <div className="min-w-[9rem] flex-1">
                         <p className="text-sm font-medium text-white/70 truncate">
                           {b.customer_name}
                         </p>
-                        <p className="text-xs text-white/50 truncate">
+                        <p className="text-xs text-white/60 truncate">
                           {b.service_name}
                         </p>
                       </div>
                       <div className="ml-auto flex shrink-0 items-center gap-4">
-                        <p className="text-sm text-white/50">
+                        <p className="text-sm text-white/60">
                           {formatPence(b.amount_pence)}
                         </p>
-                        <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                          <CheckCircle className="h-3 w-3" /> done
-                        </div>
+                        <StatusBadge status="completed" />
                       </div>
                     </div>
                   ))}
@@ -346,8 +328,8 @@ export default function AdminOverview() {
           ].map((l) => (
             <Link
               key={l.to}
-              to={l.to}
-              className="rounded-xl border border-white/8 bg-dark-100 p-4 transition-colors hover:border-gold/25 hover:bg-dark-100"
+              to={shopHref(l.to)}
+              className="rounded-xl border border-white/10 bg-dark-100 p-4 transition-colors hover:border-gold/25 hover:bg-dark-100"
             >
               <p className="text-sm font-semibold text-white">{l.label}</p>
               <p className="mt-0.5 text-xs text-white/60">{l.desc}</p>

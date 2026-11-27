@@ -24,12 +24,12 @@ export default function DevLayout() {
     <DashboardLayout
       role="developer"
       topBarTitle="Pivot Parlor Platform"
-      userName={user?.sub}
+      userName={user?.name ?? "Developer"}
     />
   );
 }
 
 // Friendly fallback for loader/child-route errors instead of a blank page.
 export function ErrorBoundary() {
-  return <ErrorScreen />;
+  return <ErrorScreen fullscreen homeHref="/dev" homeLabel="Back to overview" />;
 }

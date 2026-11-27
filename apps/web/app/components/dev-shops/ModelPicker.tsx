@@ -2,7 +2,8 @@
 // vendor step; the direct providers (OpenAI API, Anthropic API) go straight to
 // the model. Pass live models (from /api/ai/models) when available, else the
 // static snapshot from staticPickerModels().
-import { useId, type ReactNode } from "react";
+import { useId } from "react";
+import { Select } from "~/components/ui/Select";
 import { defaultEffortLabel, EFFORT_OPTIONS } from "./constants";
 import {
   defaultModelForGroup,
@@ -11,20 +12,6 @@ import {
   modelPriceLabel,
   type PickerModel,
 } from "./modelPicker.helpers";
-
-const SELECT_CLASS =
-  "flex h-10 w-full rounded-lg border border-white/20 bg-white/5 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-gold";
-
-function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
-  return (
-    <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-white/80">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
 
 export function ModelPicker({
   label,
@@ -69,88 +56,80 @@ export function ModelPicker({
 
   return (
     <div className="space-y-3">
-      <Field id={`${uid}-provider`} label={`${label} provider`}>
-        <select
+      <Select
           id={`${uid}-provider`}
+          label={`${label} provider`}
           value={routeId}
           onChange={(e) => {
             const r = routes.find((g) => g.id === e.target.value);
             pick(r ? defaultModelForGroup(r) : undefined);
           }}
           disabled={disabled}
-          className={SELECT_CLASS}
           data-testid="picker-provider"
         >
           {routes.map((r) => (
-            <option key={r.id} value={r.id} className="bg-dark">
+            <option key={r.id} value={r.id}>
               {r.label}
             </option>
           ))}
-        </select>
-      </Field>
+        </Select>
       {showVendors && (
-        <Field id={`${uid}-vendor`} label={`${label} vendor`}>
-          <select
+        <Select
             id={`${uid}-vendor`}
+            label={`${label} vendor`}
             value={vendorId}
             onChange={(e) => {
               const v = route?.vendors.find((g) => g.id === e.target.value);
               pick(v ? defaultModelForGroup(v) : undefined);
             }}
             disabled={disabled}
-            className={SELECT_CLASS}
             data-testid="picker-vendor"
           >
             {route?.vendors.map((v) => (
-              <option key={v.id} value={v.id} className="bg-dark">
+              <option key={v.id} value={v.id}>
                 {v.label}
               </option>
             ))}
-          </select>
-        </Field>
+          </Select>
       )}
-      <Field id={`${uid}-model`} label={`${label} model`}>
-        <select
+      <Select
           id={`${uid}-model`}
+          label={`${label} model`}
           value={value}
           onChange={(e) => {
             onChange(e.target.value);
             onEffortChange?.("");
           }}
           disabled={disabled}
-          className={SELECT_CLASS}
           data-testid="picker-model"
         >
           {!selected && (
-            <option value="" disabled className="bg-dark">
+            <option value="" disabled>
               Select a model
             </option>
           )}
           {modelOptions.map((m) => (
-            <option key={m.id} value={m.id} className="bg-dark">
+            <option key={m.id} value={m.id}>
               {m.name}
               {m.recommended ? " ★" : ""} · {modelPriceLabel(m)}
             </option>
           ))}
-        </select>
-      </Field>
+        </Select>
       {effortVisible && (
-        <Field id={`${uid}-effort`} label="Reasoning effort">
-          <select
+        <Select
             id={`${uid}-effort`}
+            label="Reasoning effort"
             value={effortValue}
             onChange={(e) => onEffortChange?.(e.target.value)}
             disabled={disabled}
-            className={SELECT_CLASS}
             data-testid="picker-effort"
           >
             {effortOptions.map((o) => (
-              <option key={o.value} value={o.value} className="bg-dark">
+              <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
-          </select>
-        </Field>
+          </Select>
       )}
     </div>
   );

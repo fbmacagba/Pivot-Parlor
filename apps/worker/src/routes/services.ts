@@ -50,7 +50,13 @@ services.get("/", async (c) => {
     return c.json({ success: false, error: "Shop not found" }, 404);
   }
 
-  const list = await getServicesByShop(c.env.DB, shop.id);
+  // ?include_inactive=1 adds deactivated services, but only for a caller who
+  // may see the shop's unpublished side (its owner or a developer). Anyone else
+  // gets the public list, exactly as before.
+  const includeInactive =
+    c.req.query("include_inactive") === "1" && (await canReadUnpublishedSite(c, shop.id));
+  if (includeInactive) c.header("Cache-Control", "private, no-store");
+  const list = await getServicesByShop(c.env.DB, shop.id, includeInactive);
   console.log(
     "[services][GET] param=",
     shopIdParam,

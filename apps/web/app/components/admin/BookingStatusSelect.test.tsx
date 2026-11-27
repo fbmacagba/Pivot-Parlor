@@ -53,4 +53,12 @@ describe("BookingStatusSelect", () => {
     expect(html).toMatch(/<option[^>]*value="cancelled"[^>]*selected/);
     expect(html).toContain(">Confirmed</option>");
   });
+
+  it("names the select for a screen reader", () => {
+    fetcherData = undefined;
+    const html = render();
+    const id = /<label for="([^"]+)"[^>]*>Change status<\/label>/.exec(html)?.[1];
+    expect(id).toBeTruthy();
+    expect(html).toContain(`<select id="${id}"`);
+  });
 });

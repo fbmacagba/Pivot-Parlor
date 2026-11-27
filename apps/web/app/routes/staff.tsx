@@ -103,8 +103,8 @@ export default function StaffLayout() {
   return (
     <DashboardLayout
       role="staff"
-      userName={user.sub}
-      shopName={developerView?.shopName ?? undefined}
+      userName={user.name ?? (isDeveloper ? "Developer" : "Staff")}
+      shopName={developerView?.shopName ?? user.shop_name}
       showDeveloperViewSwitcher={isDeveloper}
       topBanner={
         developerView ? (
@@ -119,5 +119,5 @@ export default function StaffLayout() {
 
 // Friendly fallback for loader/child-route errors instead of a blank page.
 export function ErrorBoundary() {
-  return <ErrorScreen />;
+  return <ErrorScreen fullscreen homeHref="/staff" homeLabel="Back to today" />;
 }

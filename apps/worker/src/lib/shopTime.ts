@@ -55,6 +55,32 @@ export function shopToday(timeZone?: string | null, now: Date = new Date()): str
 }
 
 /**
+ * When a booking starts, as epoch milliseconds, or NaN when it cannot be read.
+ * bookings.start_time is either an instant (online bookings) or the shop's own
+ * clock reading ("09:30", walk-in and deposit bookings), which only means
+ * something beside booking_date and the shop's zone. Exact for whole-hour
+ * zones such as London (the same limit as peakHoursInShopTime).
+ */
+export function bookingStartMs(bookingDate: string, startTime: string, timeZone?: string | null): number {
+  const direct = Date.parse(startTime);
+  if (!Number.isNaN(direct)) return direct;
+  const clock = /^(\d{2}):(\d{2})/.exec(startTime);
+  if (!clock || !/^\d{4}-\d{2}-\d{2}$/.test(bookingDate)) return NaN;
+  const asUtc = Date.parse(`${bookingDate}T${clock[1]}:${clock[2]}:00Z`);
+  if (Number.isNaN(asUtc)) return NaN;
+  const HOUR = 3_600_000;
+  // The zone's offset at an instant: its clock reading, read back as UTC.
+  const offsetAt = (ms: number) => {
+    const floored = ms - (ms % HOUR);
+    const p = partsAt(new Date(floored), timeZone);
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour) - floored;
+  };
+  // Two passes settle the offset on either side of a clock change.
+  const first = asUtc - offsetAt(asUtc);
+  return asUtc - offsetAt(first);
+}
+
+/**
  * A real calendar day, "YYYY-MM-DD". Not month 00 or 13, and not 30 February,
  * which Date would quietly roll over to 2 March.
  */

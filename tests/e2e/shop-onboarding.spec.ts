@@ -85,15 +85,17 @@ test.describe.serial("Shop onboarding", () => {
     await page.waitForLoadState("networkidle");
 
     // Success state: invite link should be visible
-    const inviteLinkEl = page.locator("text=pivotparlor.com/invite/");
+    // The link is built on the origin the dashboard is served from, so match
+    // its path rather than a fixed host.
+    const inviteLinkEl = page.getByText(/\/invite\/[a-f0-9]{64}/);
     await expect(inviteLinkEl).toBeVisible({ timeout: 10_000 });
 
     // Extract the invite URL for the next test
     const text = await inviteLinkEl.textContent();
-    expect(text).toMatch(/pivotparlor\.com\/invite\/[a-f0-9]{64}/);
+    expect(text).toMatch(/^https?:\/\/[^/]+\/invite\/[a-f0-9]{64}$/);
 
     // Extract just the path portion for navigation
-    const match = text?.match(/pivotparlor\.com(\/invite\/[a-f0-9]{64})/);
+    const match = text?.match(/(\/invite\/[a-f0-9]{64})/);
     if (match) inviteUrl = match[1];
 
     // Copy button should also be present

@@ -31,12 +31,18 @@ test.describe("Dev shops — delete shop (headed repro)", () => {
     await page.goto("/dev/shops");
     await page.waitForLoadState("networkidle");
 
-    const rowDelete = page.getByRole("button", { name: /^Delete$/ }).first();
-    await expect(rowDelete).toBeVisible({ timeout: 20_000 });
-    await rowDelete.click();
+    // Delete sits under each row's "More" disclosure; open the first row's.
+    const firstRow = page.locator('[data-testid="shop-row"]').first();
+    await expect(firstRow).toBeVisible({ timeout: 20_000 });
+    await firstRow.locator("summary").click();
+    await firstRow.getByRole("button", { name: /^Delete$/ }).click();
 
-    const confirmDelete = page.getByRole("button", { name: /Delete shop/i });
+    // The delete stays locked until the shop's slug is typed.
+    const dialog = page.getByRole("dialog");
+    const confirmDelete = dialog.getByRole("button", { name: /Delete shop/i });
     await expect(confirmDelete).toBeVisible();
+    const slug = (await dialog.getByTestId("delete-shop-slug").textContent())?.trim() ?? "";
+    await dialog.getByLabel(/^Type .+ to confirm$/).fill(slug);
     await confirmDelete.click();
 
     await expect

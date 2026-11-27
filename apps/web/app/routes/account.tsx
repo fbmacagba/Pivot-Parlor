@@ -8,6 +8,8 @@ import {
   useNavigate,
 } from "react-router";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
+import { ErrorScreen } from "~/components/ErrorScreen";
+import { Button } from "~/components/ui/Button";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
 
@@ -74,12 +76,9 @@ export default function AccountLayout() {
           ) : null}
           <span className="hidden truncate text-sm text-white/60 sm:inline">{me.email}</span>
           <Form method="post" action="/logout">
-            <button
-              type="submit"
-              className="tap-target rounded-lg border border-white/20 bg-white/5 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-white/10"
-            >
+            <Button type="submit" variant="secondary" size="sm" className="text-sm">
               Log out
-            </button>
+            </Button>
           </Form>
         </div>
       </header>
@@ -98,4 +97,10 @@ export default function AccountLayout() {
       </main>
     </div>
   );
+}
+
+// The account's own fallback when its loader fails (the session check, or the
+// profile it shows): a branded screen with a way back, not the site-wide one.
+export function ErrorBoundary() {
+  return <ErrorScreen fullscreen homeHref="/account" homeLabel="Back to your bookings" />;
 }

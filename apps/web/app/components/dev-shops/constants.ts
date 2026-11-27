@@ -7,7 +7,6 @@ import {
   type ModelKind,
 } from "@repo/utils";
 import type { AIModel } from "@repo/types";
-import type { Shop } from "./types";
 import type { PickerModel } from "./modelPicker.helpers";
 
 export const DEFAULT_TEXT_MODEL = DEFAULT_TEXT_MODEL_ID;
@@ -75,22 +74,3 @@ export const REGEN_STEP_LABELS = [
   "Assembling website",
   "Complete",
 ] as const;
-
-/** SSR-only mock for Playwright (page.route cannot intercept loader fetches to API_URL). */
-export const E2E_STRIPE_LIST_SHOPS: Shop[] = [
-  {
-    id: "e2e-mock-unpaid",
-    shop_number: 999,
-    name: "E2E Unpaid Shop",
-    slug: "e2e-unpaid-999",
-    type: "beauty_parlor",
-    owner_name: "",
-    owner_email: "e2e@example.com",
-    is_active: 0,
-    status: "awaiting_payment",
-    plan: "standard",
-    has_site: null,
-    stripe_payment_status: "unpaid",
-    stripe_checkout_url: "https://checkout.stripe.com/e2e-mock-session",
-  },
-];

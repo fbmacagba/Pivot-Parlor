@@ -67,8 +67,8 @@ export default function AdminLayout() {
     <DashboardLayout
       role="admin"
       showDeveloperViewSwitcher={isDeveloper}
-      shopName={isDeveloper ? (developerShopName ?? undefined) : shopId ? "Your Shop" : undefined}
-      userName={user.sub}
+      shopName={isDeveloper ? (developerShopName ?? undefined) : user.shop_name}
+      userName={user.name ?? (isDeveloper ? "Developer" : "Owner")}
       topBanner={
         devBanner || siteBanner ? (
           <div className="space-y-3 py-3">
@@ -84,5 +84,5 @@ export default function AdminLayout() {
 // Catches errors thrown by this layout's loader or any admin child route,
 // so a failed API call shows a friendly screen instead of a blank page.
 export function ErrorBoundary() {
-  return <ErrorScreen />;
+  return <ErrorScreen fullscreen homeHref="/admin" homeLabel="Back to overview" />;
 }

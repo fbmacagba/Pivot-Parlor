@@ -125,7 +125,8 @@ productsRouter.put("/categories/:categoryId", authMiddleware, requireShopRole("a
 
 productsRouter.get("/", authMiddleware, requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const list = await getProductsWithStockByShop(c.env.DB, shopId);
+  // ?include_inactive=1 adds deactivated products (the owner's list restores them).
+  const list = await getProductsWithStockByShop(c.env.DB, shopId, c.req.query("include_inactive") === "1");
   return c.json({ success: true, data: list });
 });
 

@@ -17,14 +17,15 @@ const buttonVariants = cva(
           "bg-red-600 text-white hover:bg-red-700",
         secondary:
           "bg-dark-200 text-white hover:bg-dark-300 border border-white/10",
-        link: "text-gold underline-offset-4 hover:underline p-0 h-auto",
+        link: "text-gold underline-offset-4 hover:underline p-0 h-auto min-h-0 min-w-0",
       },
       size: {
-        default: "h-10 px-5 py-2",
-        sm: "h-8 px-3 text-xs",
+        // tap-target: 44px minimum under a touch pointer, unchanged for a mouse.
+        default: "tap-target h-10 px-5 py-2",
+        sm: "tap-target h-8 px-3 text-xs",
         lg: "h-12 px-8 text-base",
         xl: "h-14 px-10 text-lg",
-        icon: "h-10 w-10",
+        icon: "tap-target h-10 w-10",
       },
     },
     defaultVariants: {

@@ -66,12 +66,31 @@ export async function posLoader({ request, context }: LoaderFunctionArgs, role: 
   let services: PosService[] = [];
   let products: PosProduct[] = [];
   let staff: PosStaff[] = [];
+  // One flag per list. A list that failed to load must not read as "No
+  // services yet" on the till: the page says so and offers to try again.
+  let servicesError = false;
+  let productsError = false;
+  let staffError = false;
   if (shopId) {
-    // Each list degrades to empty rather than failing the page.
-    [services, products, staff] = await Promise.all([
-      api.get<PosService[]>(`/api/shops/${shopId}/services`).catch(() => []),
-      api.get<PosProduct[]>(`/api/shops/${shopId}/products`).catch(() => []),
-      api.get<PosStaff[]>(`/api/shops/${shopId}/staff`).catch(() => []),
+    const list = <T,>(path: string) =>
+      api.get<T[]>(path).then((rows) => {
+        if (!Array.isArray(rows)) throw new Error("Not a list");
+        return rows;
+      });
+    // One list failing does not fail the page; the others still load.
+    await Promise.all([
+      list<PosService>(`/api/shops/${shopId}/services`).then(
+        (rows) => { services = rows; },
+        () => { servicesError = true; },
+      ),
+      list<PosProduct>(`/api/shops/${shopId}/products`).then(
+        (rows) => { products = rows; },
+        () => { productsError = true; },
+      ),
+      list<PosStaff>(`/api/shops/${shopId}/staff`).then(
+        (rows) => { staff = rows; },
+        () => { staffError = true; },
+      ),
     ]);
   }
 
@@ -81,6 +100,9 @@ export async function posLoader({ request, context }: LoaderFunctionArgs, role: 
     // Back-bar (professional-use) products are not retail lines.
     products: products.filter((p) => p.is_professional !== 1),
     staff,
+    servicesError,
+    productsError,
+    staffError,
     canVoid: user.role !== "staff",
     developerNeedsShop: user.role === "developer" && !shopId,
   });
@@ -114,7 +136,10 @@ export async function posAction({ request, context }: ActionFunctionArgs, role: 
       await api.post(`/api/shops/${shopId}/sales/${saleId}/void`, {});
       return json<PosActionData>({ ok: true, voided: true });
     } catch (e) {
-      return json<PosActionData>({ error: e instanceof Error ? e.message : "Void failed" }, { status: 400 });
+      return json<PosActionData>(
+        { error: e instanceof Error && e.message ? e.message : "The sale was not voided. Check your connection and try again." },
+        { status: 400 },
+      );
     }
   }
 
@@ -164,6 +189,9 @@ export async function posAction({ request, context }: ActionFunctionArgs, role: 
     if (!sale) return json<PosActionData>({ error: "Malformed response from sales API." }, { status: 502 });
     return json<PosActionData>({ ok: true, sale });
   } catch (e) {
-    return json<PosActionData>({ error: e instanceof Error ? e.message : "Sale failed" }, { status: 400 });
+    return json<PosActionData>(
+      { error: e instanceof Error && e.message ? e.message : "The sale was not recorded. Check your connection and try again." },
+      { status: 400 },
+    );
   }
 }

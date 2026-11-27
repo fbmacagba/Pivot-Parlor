@@ -59,7 +59,7 @@ export function MobileTabBar({
   onMore: () => void;
   moreOpen?: boolean;
 }) {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const { tabs, more } = mobileTabsFor(role);
   const shopHref = useShopHref();
   if (tabs.length === 0) return null;
@@ -71,7 +71,7 @@ export function MobileTabBar({
     >
       <ul className="flex">
         {tabs.map(({ href, label, short, icon: Icon }) => {
-          const active = isNavActive(href, pathname);
+          const active = isNavActive(href, pathname, search);
           return (
             <li key={href} className="min-w-0 flex-1">
               <Link

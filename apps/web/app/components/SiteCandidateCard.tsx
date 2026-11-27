@@ -3,6 +3,7 @@ import { ExternalLink, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "~/components/ui/Button";
 import { formatMadeAt } from "~/lib/siteCandidate";
+import { useFetcherResult } from "~/lib/useFetcherResult";
 import type { SiteCandidateSummary } from "~/routes/api.shops.$shopId.site-candidate";
 
 /**
@@ -147,9 +148,8 @@ export function SiteCandidateCard(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the fetcher is stable; reload on shop or refresh only
   }, [endpoint, refreshKey]);
 
-  useEffect(() => {
-    const result = actFetcher.data;
-    if (actFetcher.state !== "idle" || !result) return;
+  // Once per finished publish or discard (app/lib/useFetcherResult.ts).
+  useFetcherResult(actFetcher, (result) => {
     setConfirmingDiscard(false);
     if (result.success) {
       setNotice({
@@ -163,8 +163,7 @@ export function SiteCandidateCard(props: {
       setNotice({ tone: "error", text: result.error });
     }
     loadFetcher.load(endpoint);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to each finished submission only
-  }, [actFetcher.state, actFetcher.data]);
+  });
 
   const loaded = loadFetcher.data;
   const candidate = loaded && loaded.success ? loaded.data : null;

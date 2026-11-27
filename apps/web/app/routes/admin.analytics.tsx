@@ -5,6 +5,16 @@ import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { formatCount, ukParts } from "~/lib/dateFormat";
 import { pageShopId } from "~/lib/pageShop";
+import { pageTitle } from "~/lib/pageTitle";
+import { LoadError } from "~/components/ui/LoadError";
+import { statusLabel } from "~/components/ui/StatusBadge";
+import { ErrorScreen } from "~/components/ErrorScreen";
+
+export const meta = () => pageTitle("Analytics");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,13 +45,16 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const shopId = pageShopId(request, user);
 
   let data: AnalyticsData | null = null;
+  let loadError = false;
   if (shopId) {
     try {
       data = await api.get<AnalyticsData>(`/api/shops/${shopId}/analytics`);
-    } catch { /* empty */ }
+    } catch {
+      loadError = true;
+    }
   }
 
-  return json({ data, shopId });
+  return json({ data, shopId, loadError });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -49,12 +62,15 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DAY_LABELS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
+// The status tokens (DESIGN.md, "Status mapping"). Each bar also carries its
+// status name and count as text, so colour is never the only signal.
 const STATUS_COLORS: Record<string, string> = {
-  completed:  "bg-emerald-500",
-  confirmed:  "bg-blue-500",
-  pending:    "bg-amber-400",
-  cancelled:  "bg-red-400",
-  no_show:    "bg-gray-500",
+  pending:     "bg-amber-400",
+  confirmed:   "bg-emerald-400",
+  in_progress: "bg-gold",
+  completed:   "bg-white/40",
+  cancelled:   "bg-red-400",
+  no_show:     "bg-white/20",
 };
 
 function formatMonth(ym: string) {
@@ -69,7 +85,7 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
     <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
       <p className="text-xs text-white/60 font-medium">{label}</p>
       <p className="text-2xl font-bold text-white mt-1">{value}</p>
-      {sub && <p className="text-xs text-white/50 mt-0.5">{sub}</p>}
+      {sub && <p className="text-xs text-white/60 mt-0.5">{sub}</p>}
     </div>
   );
 }
@@ -81,7 +97,8 @@ function BarChart({
   formatLabel,
   formatValue,
   color = "bg-gold",
-  compactLabelStep = 1,
+  labelStep = 1,
+  compactLabelStep = labelStep,
 }: {
   data: Record<string, unknown>[];
   labelKey: string;
@@ -89,12 +106,14 @@ function BarChart({
   formatLabel?: (v: unknown) => string;
   formatValue?: (v: number) => string;
   color?: string;
-  /** Below sm, show only every Nth axis label so dense charts (24 hours) stay legible on a phone. */
+  /** Show only every Nth axis label, so a dense chart (24 hours) keeps readable labels instead of tiny ones. */
+  labelStep?: number;
+  /** Below sm, thin the labels further. Every bar still names itself on focus, hover or press. */
   compactLabelStep?: number;
 }) {
   const max = Math.max(...data.map(d => Number(d[valueKey])), 1);
   return (
-    <div className="flex h-28 gap-1">
+    <div className="flex h-32 gap-1">
       {data.map((d, i) => {
         const val = Number(d[valueKey]);
         const pct = (val / max) * 100;
@@ -121,7 +140,15 @@ function BarChart({
                 style={{ height: `${Math.max(pct, 2)}%` }}
               />
             </div>
-            <span className={`text-[9px] text-white/50 leading-none ${i % compactLabelStep === 0 ? "" : "invisible sm:visible"}`}>{label}</span>
+            {/* Zero width, so a label may run past its own bar; the ones thinned out leave room for it */}
+            <span
+              aria-hidden
+              className={`flex h-4 w-0 justify-center whitespace-nowrap text-xs leading-none text-white/60 ${
+                i % labelStep !== 0 ? "invisible" : i % compactLabelStep !== 0 ? "invisible sm:visible" : ""
+              }`}
+            >
+              {label}
+            </span>
           </div>
         );
       })}
@@ -132,15 +159,19 @@ function BarChart({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminAnalytics() {
-  const { data } = useLoaderData<typeof loader>();
+  const { data, loadError } = useLoaderData<typeof loader>();
 
   if (!data) {
     return (
       <div className="space-y-4">
         <h1 className="font-heading text-2xl font-bold text-white">Analytics</h1>
-        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-white/50">
-          No data yet. Analytics will appear once bookings are made.
-        </div>
+        {loadError ? (
+          <LoadError what="your analytics" />
+        ) : (
+          <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-sm text-white/60">
+            No data yet. Analytics will appear once bookings are made.
+          </div>
+        )}
       </div>
     );
   }
@@ -171,6 +202,8 @@ export default function AdminAnalytics() {
   });
 
   const totalStatusCount = status_breakdown.reduce((s, r) => s + r.count, 0);
+  // A copy: sorting in place would reorder the loader's own data during render.
+  const statusRows = [...status_breakdown].sort((a, b) => b.count - a.count);
 
   return (
     <div className="space-y-8">
@@ -201,20 +234,22 @@ export default function AdminAnalytics() {
           valueKey="booking_count"
           formatLabel={v => formatMonth(String(v)).slice(0, 3)}
           color="bg-gold"
+          compactLabelStep={2}
         />
       </div>
 
       {/* Revenue trend */}
       <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
         <h2 className="font-heading text-base font-semibold text-white mb-1">Monthly revenue</h2>
-        <p className="text-xs text-white/60 mb-5">Gross revenue (£) over the last 12 months</p>
+        <p className="text-xs text-white/60 mb-5">Gross revenue over the last 12 months</p>
         <BarChart
           data={allMonths}
           labelKey="month"
           valueKey="gross_pence"
           formatLabel={v => formatMonth(String(v)).slice(0, 3)}
-          formatValue={v => `£${Math.round(v / 100)}`}
-          color="bg-emerald-500"
+          formatValue={v => formatPence(v)}
+          color="bg-emerald-400"
+          compactLabelStep={2}
         />
       </div>
 
@@ -232,8 +267,9 @@ export default function AdminAnalytics() {
               const h = Number(v);
               return h === 0 ? "12a" : h < 12 ? `${h}a` : h === 12 ? "12p" : `${h-12}p`;
             }}
-            color="bg-blue-500"
-            compactLabelStep={3}
+            color="bg-white/60"
+            labelStep={3}
+            compactLabelStep={6}
           />
         </div>
 
@@ -246,7 +282,7 @@ export default function AdminAnalytics() {
             labelKey="dow"
             valueKey="booking_count"
             formatLabel={v => DAY_LABELS[Number(v)]}
-            color="bg-purple-500"
+            color="bg-amber-400"
           />
         </div>
 
@@ -258,15 +294,15 @@ export default function AdminAnalytics() {
         <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Booking status</h2>
           <div className="space-y-3">
-            {status_breakdown.sort((a,b) => b.count - a.count).map(s => {
+            {statusRows.map(s => {
               const pct = totalStatusCount > 0 ? Math.round((s.count / totalStatusCount) * 100) : 0;
               return (
                 <div key={s.status}>
                   <div className="flex justify-between text-xs mb-1">
-                    <span className="text-white/60 capitalize">{s.status.replace("_"," ")}</span>
+                    <span className="text-white/80">{statusLabel(s.status)}</span>
                     <span className="text-white/60">{s.count} ({pct}%)</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div aria-hidden className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                     <div
                       className={`h-full rounded-full ${STATUS_COLORS[s.status] ?? "bg-white/30"}`}
                       style={{ width: `${pct}%` }}
@@ -282,7 +318,7 @@ export default function AdminAnalytics() {
         <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Top services</h2>
           {top_services.length === 0 ? (
-            <p className="text-sm text-white/50">No data yet.</p>
+            <p className="text-sm text-white/60">No data yet.</p>
           ) : (
             <div className="space-y-3">
               {top_services.map((s, i) => (
@@ -292,7 +328,7 @@ export default function AdminAnalytics() {
                     <p className="text-sm text-white truncate">{s.service_name}</p>
                     <p className="text-xs text-white/60">{s.booking_count} bookings</p>
                   </div>
-                  <span className="text-sm font-semibold text-gold shrink-0">£{Math.round(s.gross_pence / 100)}</span>
+                  <span className="text-sm font-semibold text-gold shrink-0">{formatPence(s.gross_pence)}</span>
                 </div>
               ))}
             </div>
@@ -303,7 +339,7 @@ export default function AdminAnalytics() {
         <div className="min-w-0 rounded-xl border border-white/10 bg-dark-100 p-6">
           <h2 className="font-heading text-base font-semibold text-white mb-4">Top staff</h2>
           {top_staff.length === 0 ? (
-            <p className="text-sm text-white/50">No data yet.</p>
+            <p className="text-sm text-white/60">No data yet.</p>
           ) : (
             <div className="space-y-3">
               {top_staff.map((s, i) => (
@@ -316,7 +352,7 @@ export default function AdminAnalytics() {
                     <p className="text-sm text-white truncate">{s.display_name}</p>
                     <p className="text-xs text-white/60">{s.booking_count} bookings</p>
                   </div>
-                  <span className="text-sm font-semibold text-gold shrink-0">£{Math.round(s.gross_pence / 100)}</span>
+                  <span className="text-sm font-semibold text-gold shrink-0">{formatPence(s.gross_pence)}</span>
                 </div>
               ))}
             </div>

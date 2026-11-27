@@ -6,6 +6,10 @@ import { reportBrowserError } from "~/lib/browserErrorReporter";
 interface ErrorScreenProps {
   /** When true, fills the viewport (root-level fallback). Otherwise fills its container. */
   fullscreen?: boolean;
+  /** Where the way-out button leads. A dashboard page points it at its own
+   *  overview; the default is the public home page. */
+  homeHref?: string;
+  homeLabel?: string;
 }
 
 /**
@@ -13,7 +17,7 @@ interface ErrorScreenProps {
  * message instead of the app white-screening when a loader/action throws or a
  * route responds with an error status.
  */
-export function ErrorScreen({ fullscreen = false }: ErrorScreenProps) {
+export function ErrorScreen({ fullscreen = false, homeHref = "/", homeLabel = "Go home" }: ErrorScreenProps) {
   const error = useRouteError();
 
   // A page that broke while rendering in the browser reaches the alert email.
@@ -59,7 +63,7 @@ export function ErrorScreen({ fullscreen = false }: ErrorScreenProps) {
       <p className="mt-3 max-w-md text-sm text-white/70">{message}</p>
       <div className="mt-8 flex gap-3">
         <Button asChild variant="outline">
-          <Link to="/">Go home</Link>
+          <Link to={homeHref}>{homeLabel}</Link>
         </Button>
         <Button onClick={() => window.location.reload()}>Try again</Button>
       </div>

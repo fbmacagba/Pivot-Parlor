@@ -194,7 +194,7 @@ async function closeOnboardDialogIfOpen(page: import("@playwright/test").Page) {
  * Escape reveals the row for row-level checks.
  */
 async function submitNewShopAndAwaitSuccess(page: import("@playwright/test").Page, shopName: string) {
-  const row = page.locator("tr").filter({ hasText: shopName }).first();
+  const row = page.locator('[data-testid="shop-row"]').filter({ hasText: shopName }).first();
   const dialog = page.getByRole("dialog");
   const created = dialog.getByText("Shop created!");
   const refused = dialog.locator("div.border-red-500\\/40");
@@ -221,7 +221,7 @@ async function submitNewShopAndAwaitSuccess(page: import("@playwright/test").Pag
 
   // The dialog shows the payment link (Stripe checkout) or the invite link.
   if (await created.isVisible().catch(() => false)) {
-    await expect(dialog.getByText(/Payment link|pivotparlor\.com\/invite\//).first()).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText(/Payment link|\/invite\/[a-f0-9]+/).first()).toBeVisible({ timeout: 15_000 });
     return;
   }
 
@@ -241,13 +241,14 @@ async function getInvitePathFromOpenDialog(page: import("@playwright/test").Page
   const block = page.locator("p.break-all").filter({ hasText: /invite\// });
   if (await block.isVisible().catch(() => false)) {
     const text = await block.textContent();
-    const m = text?.match(/pivotparlor\.com(\/invite\/[a-f0-9]+)/i);
+    const m = text?.match(/(\/invite\/[a-f0-9]+)/i);
     if (m) return m[1];
   }
-  const any = page.locator("text=pivotparlor.com/invite/");
+  // The link is built on the origin the dashboard is served from: match its path.
+  const any = page.getByText(/\/invite\/[a-f0-9]+/).first();
   if (await any.isVisible().catch(() => false)) {
     const text = await any.textContent();
-    const m = text?.match(/pivotparlor\.com(\/invite\/[a-f0-9]+)/i);
+    const m = text?.match(/(\/invite\/[a-f0-9]+)/i);
     if (m) return m[1];
   }
   return null;
@@ -365,7 +366,7 @@ test.describe.serial("Site generation", () => {
     await closeOnboardDialogIfOpen(page);
 
     await page.waitForLoadState("networkidle");
-    const row = page.locator(`tr:has-text("${shopName}")`).first();
+    const row = page.locator('[data-testid="shop-row"]').filter({ hasText: shopName }).first();
     await expect(row).toBeVisible({ timeout: 5_000 });
     const generateBtn = row.getByRole("button", { name: /generate site/i });
     await expect(generateBtn).toBeVisible({ timeout: 2_000 });
@@ -378,8 +379,9 @@ test.describe.serial("Site generation", () => {
 
     const viewLink = page.getByRole("link", { name: /view site/i }).first();
     const href = await viewLink.getAttribute("href");
-    const match = href?.match(/pivotparlor\.com\/([^/]+)/);
-    if (match) shopSlug = match[1];
+    // The link points at the origin the dashboard is served from; the slug is its first path segment.
+    const firstSegment = href ? new URL(href, page.url()).pathname.split("/")[1] : "";
+    if (firstSegment) shopSlug = firstSegment;
     expect(shopSlug).toBeTruthy();
   });
 
@@ -434,12 +436,11 @@ test.describe.serial("Site generation", () => {
     await closeOnboardDialogIfOpen(page);
     await page.waitForLoadState("networkidle");
 
-    const row = page.locator(`tr:has-text("${shopName}")`).first();
+    const row = page.locator('[data-testid="shop-row"]').filter({ hasText: shopName }).first();
     await expect(row).toBeVisible({ timeout: 5_000 });
-    const nameCell = row.locator("td").nth(1);
-    const cellText = await nameCell.textContent();
-    const parts = cellText?.split("/").map((p) => p.trim());
-    const noSiteSlug = parts && parts.length >= 2 ? parts[parts.length - 1] : "";
+    // The row shows the slug on its own line as "/<slug>".
+    const slugLine = await row.getByText(/^\/[a-z0-9-]+$/).first().textContent();
+    const noSiteSlug = slugLine?.trim().replace(/^\//, "") ?? "";
 
     expect(noSiteSlug).toBeTruthy();
 
@@ -665,7 +666,7 @@ test.describe.serial("Site generation", () => {
     await closeOnboardDialogIfOpen(page);
     await page.waitForLoadState("networkidle");
 
-    const row = page.locator(`tr:has-text("${shopName}")`).first();
+    const row = page.locator('[data-testid="shop-row"]').filter({ hasText: shopName }).first();
     await expect(row).toBeVisible({ timeout: 5_000 });
     await row.getByRole("button", { name: /generate site/i }).click();
 
@@ -676,8 +677,8 @@ test.describe.serial("Site generation", () => {
 
     const viewLink = page.getByRole("link", { name: /view site/i }).first();
     const href = await viewLink.getAttribute("href");
-    const m = href?.match(/pivotparlor\.com\/([^/]+)/);
-    if (m) slugs.push(m[1]);
+    const firstSegment = href ? new URL(href, page.url()).pathname.split("/")[1] : "";
+    if (firstSegment) slugs.push(firstSegment);
 
     expect(slugs).toHaveLength(1);
     for (const slug of slugs) {

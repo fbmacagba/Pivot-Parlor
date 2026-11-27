@@ -1,16 +1,33 @@
-import { Link, useLoaderData, data as json } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useLoaderData, useRevalidator, data as json } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
-import { Clock, ArrowRight, CheckCircle } from "lucide-react";
+import { ArrowRight, CheckCircle, Clock } from "lucide-react";
+import { formatPence } from "@repo/utils";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
-import { Badge } from "~/components/ui/Badge";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { ShareShopCard } from "~/components/dashboards/ShareShopCard";
-import { formatDate, formatTime as formatUkTime, ukParts } from "~/lib/dateFormat";
+import { BookingActions } from "~/components/staff/BookingActions";
+import { BookingRow, bookingClock } from "~/components/staff/BookingRow";
+import { countdownLabel, pickNextBooking, type NextKind } from "~/components/staff/today";
+import { Badge } from "~/components/ui/Badge";
+import { LoadError } from "~/components/ui/LoadError";
+import { formatDate, ukParts, ukToday } from "~/lib/dateFormat";
 import { pageShopId, pageStaffId, staffMePath } from "~/lib/pageShop";
+import { pageTitle } from "~/lib/pageTitle";
+import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+import { usePolling } from "~/lib/usePolling";
 import { useShopHref } from "~/lib/useShopHref";
+
+export const meta = () => pageTitle("Today");
+
+// Start and Complete post to the booking's own page (BookingActions). When
+// one is refused, the day shown here may be out of date: reload it.
+export const shouldRevalidate = revalidateAfterFailedSubmission;
 
 interface TodayBooking {
   id: string;
+  booking_date: string;
   start_time: string;
   end_time: string;
   status: string;
@@ -19,15 +36,6 @@ interface TodayBooking {
   duration_min: number;
   amount_pence: number;
   notes?: string | null;
-}
-
-/** "09:05" on the London clock (app/lib/dateFormat.ts). */
-function formatTime(iso: string) {
-  return formatUkTime(iso, { hour: "2-digit", minute: "2-digit" }) || iso;
-}
-
-function minutesUntil(iso: string): number {
-  return Math.round((new Date(iso).getTime() - Date.now()) / 60000);
 }
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
@@ -39,222 +47,198 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   // choose one there is nobody's day to show.
   const shopId = pageShopId(request, user);
   const staffId = pageStaffId(request, user);
-  const needsStaff = user.role === "developer" && !staffId;
+  const readOnly = user.role === "developer";
+  const needsStaff = readOnly && !staffId;
 
-  let todayBookings: TodayBooking[] = [];
-  if (!needsStaff) {
-    try {
-      todayBookings = await api.get<TodayBooking[]>(staffMePath("/api/staff/me/today", staffId));
-      if (!Array.isArray(todayBookings)) todayBookings = [];
-    } catch {
-      /* empty */
-    }
-  }
+  const [today, shop] = await Promise.allSettled([
+    needsStaff
+      ? Promise.resolve<TodayBooking[]>([])
+      : api.get<TodayBooking[]>(staffMePath("/api/staff/me/today", staffId)),
+    // The share card is an extra: without the shop it is simply not shown.
+    shopId ? api.get<{ slug: string; name: string }>(`/api/shops/${shopId}`) : Promise.resolve(null),
+  ]);
 
-  const { hour } = ukParts();
-  const greeting =
-    hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
-  const displayName = user.sub ?? "there";
+  // A failed load must never read as "no appointments today".
+  const loadError = today.status === "rejected" || !Array.isArray(today.value);
+  const todayBookings = today.status === "fulfilled" && Array.isArray(today.value) ? today.value : [];
+
+  // "Now" is read once here and rendered from, so the server's page and the
+  // browser's first render agree; the browser starts its own clock after that.
+  const now = Date.now();
+  const { hour } = ukParts(now);
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   // Public shop-site URL for the share card. Built from the request origin so
   // staging previews link to themselves rather than production.
-  let shopShare: { url: string; name: string } | null = null;
-  if (shopId) {
-    try {
-      const shop = await api.get<{ slug: string; name: string }>(
-        `/api/shops/${shopId}`,
-      );
-      if (shop?.slug) {
-        shopShare = {
-          url: `${new URL(request.url).origin}/${shop.slug}`,
-          name: shop.name,
-        };
-      }
-    } catch {
-      /* non-fatal: card simply not shown */
-    }
-  }
+  const shopRow = shop.status === "fulfilled" ? shop.value : null;
+  const shopShare = shopRow?.slug
+    ? { url: `${new URL(request.url).origin}/${shopRow.slug}`, name: shopRow.name }
+    : null;
 
-  return json({ todayBookings, greeting, displayName, shopShare, needsStaff });
+  return json({ todayBookings, loadError, greeting, shopShare, needsStaff, readOnly, now, today: ukToday(new Date(now)) });
 }
 
+const NEXT_HEADING: Record<NextKind, string> = {
+  in_progress: "In progress now",
+  upcoming: "Next appointment",
+  due: "Next appointment",
+  overdue: "Still open from earlier",
+};
+
 export default function StaffToday() {
-  const { todayBookings, greeting, shopShare, needsStaff } = useLoaderData<typeof loader>();
+  const { todayBookings, loadError, greeting, shopShare, needsStaff, readOnly, now: loadedAt, today } =
+    useLoaderData<typeof loader>();
   const shopHref = useShopHref();
+  const revalidator = useRevalidator();
 
-  const upcoming = todayBookings.filter(
-    (b) => b.status !== "completed" && b.status !== "cancelled",
+  // The clock: the loader's reading until the page is live in the browser,
+  // then the browser's own, ticking. A fresh load brings a fresh reading.
+  const [now, setNow] = useState(loadedAt);
+  useEffect(() => {
+    setNow(Math.max(loadedAt, Date.now()));
+  }, [loadedAt]);
+  usePolling(() => setNow(Date.now()), { intervalMs: 20_000 });
+  // The day itself: a booking made, moved or cancelled elsewhere shows up
+  // within a minute, while this screen is the one being looked at.
+  usePolling(
+    () => {
+      if (revalidator.state === "idle") void revalidator.revalidate();
+    },
+    { intervalMs: 60_000, enabled: !needsStaff },
   );
-  const completed = todayBookings.filter((b) => b.status === "completed");
-  const next = upcoming[0] ?? null;
 
-  const minsUntilNext = next ? minutesUntil(next.start_time) : null;
+  const open = todayBookings.filter((b) => b.status !== "completed" && b.status !== "cancelled" && b.status !== "no_show");
+  const completed = todayBookings.filter((b) => b.status === "completed");
+  const next = pickNextBooking(todayBookings, now);
+  const earnedPence = completed.reduce((sum, b) => sum + (Number(b.amount_pence) || 0), 0);
 
   return (
     <div className="space-y-6">
       {/* Greeting */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <div>
-          <h1 className="font-heading text-2xl font-bold text-white">
-            {greeting}
-          </h1>
+          <h1 className="font-heading text-2xl font-bold text-white">{greeting}</h1>
           <p className="mt-0.5 text-sm text-white/60">
-            {formatDate(new Date(), {
-              weekday: "long",
-              day: "numeric",
-              month: "long",
-            })}
+            {formatDate(now, { weekday: "long", day: "numeric", month: "long" })}
           </p>
         </div>
         <Link
-          to={shopHref("/staff/bookings")}
+          to={shopHref("/staff/bookings?filter=upcoming")}
           className="tap-target flex items-center gap-1.5 text-sm text-gold hover:text-gold/80"
         >
-          All bookings <ArrowRight className="h-3.5 w-3.5" />
+          Tomorrow and later <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
 
-      {/* Next appointment card */}
-      {next ? (
-        <div className="rounded-xl border border-gold/25 bg-gold/5 p-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-gold/70 mb-3">
-            Next appointment
-          </p>
-          <div className="flex items-start gap-4">
-            <div className="flex flex-col items-center justify-center rounded-lg bg-gold/10 px-4 py-3 min-w-[72px]">
-              <span className="text-xl font-bold text-gold">
-                {formatTime(next.start_time)}
-              </span>
-              <span className="text-xs text-gold/60 mt-0.5">
-                {next.duration_min}m
-              </span>
-            </div>
-            <div className="flex-1">
-              <p className="text-base font-semibold text-white">
-                {next.customer_name}
-              </p>
-              <p className="text-sm text-white/60 mt-0.5">
-                {next.service_name}
-              </p>
-              {next.notes && (
-                <p className="text-xs text-white/60 mt-1 italic">
-                  {next.notes}
+      {needsStaff ? (
+        <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
+          <p className="text-sm text-white/60">Choose a staff member above to see their day.</p>
+        </div>
+      ) : loadError ? (
+        <LoadError what="today's appointments" />
+      ) : (
+        <>
+          {/* Next appointment card */}
+          {next ? (
+            <section className="rounded-xl border border-gold/25 bg-gold/5 p-5" aria-labelledby="pp-staff-next">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 id="pp-staff-next" className="text-xs font-semibold uppercase tracking-wider text-gold">
+                  {NEXT_HEADING[next.kind]}
+                </h2>
+                {next.kind === "upcoming" && next.startMs !== null && (
+                  <p className="flex items-center gap-1.5 text-sm text-white/70">
+                    <Clock className="h-3.5 w-3.5" aria-hidden />
+                    {countdownLabel(next.startMs, now)}
+                  </p>
+                )}
+                {next.kind === "due" && <Badge variant="gold">Due now</Badge>}
+                {next.kind === "overdue" && <Badge variant="warning">Overdue</Badge>}
+              </div>
+              <Link
+                to={shopHref(`/staff/bookings/${next.booking.id}`)}
+                aria-label={`${next.booking.customer_name}, ${next.booking.service_name}, ${bookingClock(next.booking.start_time)}. Open booking`}
+                className="tap-target -mx-2 flex items-start gap-4 rounded-lg px-2 py-1 transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+              >
+                <span className="flex min-w-[72px] flex-col items-center justify-center rounded-lg bg-gold/10 px-4 py-3">
+                  <span className="text-xl font-bold text-gold">{bookingClock(next.booking.start_time)}</span>
+                  <span className="mt-0.5 text-xs text-white/70">{next.booking.duration_min}m</span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block break-words text-base font-semibold text-white">
+                    {next.booking.customer_name}
+                  </span>
+                  <span className="mt-0.5 block text-sm text-white/70">{next.booking.service_name}</span>
+                  {next.booking.notes?.trim() && (
+                    <span className="mt-1 block break-words text-sm italic text-white/70">{next.booking.notes}</span>
+                  )}
+                </span>
+              </Link>
+              {next.kind === "overdue" && (
+                <p className="mt-3 text-sm text-white/70">
+                  Its time has passed and it was never marked. Complete it if it happened, or leave it for the shop
+                  owner to sort out.
                 </p>
               )}
-            </div>
-            <div className="text-right">
-              {minsUntilNext !== null && minsUntilNext > 0 && (
-                <div className="flex items-center gap-1.5 text-sm text-white/50">
-                  <Clock className="h-3.5 w-3.5" />
-                  in{" "}
-                  {minsUntilNext < 60
-                    ? `${minsUntilNext}m`
-                    : `${Math.floor(minsUntilNext / 60)}h ${minsUntilNext % 60}m`}
+              {!readOnly && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <BookingActions booking={next.booking} today={today} show="all" />
                 </div>
               )}
-              {minsUntilNext !== null && minsUntilNext <= 0 && (
-                <Badge variant="gold">Now</Badge>
-              )}
+            </section>
+          ) : (
+            <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
+              <p className="text-sm text-white/60">
+                {todayBookings.length === 0 ? "No appointments today." : "No more appointments today."}
+              </p>
             </div>
-          </div>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-dashed border-white/10 p-8 text-center">
-          <p className="text-white/50 text-sm">
-            {needsStaff ? "Choose a staff member above to see their day." : "No more appointments today."}
-          </p>
-        </div>
-      )}
+          )}
 
-      {/* Today's schedule */}
-      {upcoming.length > 0 && (
-        <div>
-          <h2 className="font-heading text-base font-semibold text-white mb-3">
-            Today&apos;s schedule
-            <span className="ml-2 text-xs font-normal text-white/60">
-              {upcoming.length} remaining · {completed.length} done
-            </span>
-          </h2>
-          <div className="space-y-2">
-            {upcoming.map((b, i) => (
-              <div
-                key={b.id}
-                className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3 transition-colors ${
-                  i === 0
-                    ? "border-gold/20 bg-gold/5"
-                    : "border-white/8 bg-dark-100 hover:border-white/15"
-                }`}
-              >
-                <div className="w-14 shrink-0 text-center">
-                  <p className="text-sm font-semibold text-white">
-                    {formatTime(b.start_time)}
-                  </p>
-                  <p className="text-xs text-white/50">{b.duration_min}m</p>
-                </div>
-                <div className="h-8 w-px bg-white/10 shrink-0" />
-                <div className="min-w-[9rem] flex-1">
-                  <p className="text-sm font-medium text-white truncate">
-                    {b.customer_name}
-                  </p>
-                  <p className="text-xs text-white/50 truncate">
-                    {b.service_name}
-                  </p>
-                </div>
-                <Badge
-                  className="ml-auto shrink-0"
-                  variant={
-                    b.status === "in_progress"
-                      ? "gold"
-                      : b.status === "confirmed"
-                        ? "outline"
-                        : "default"
-                  }
-                >
-                  {b.status.replace("_", " ")}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+          {/* Today's schedule */}
+          {open.length > 0 && (
+            <section aria-labelledby="pp-staff-schedule">
+              <h2 id="pp-staff-schedule" className="mb-3 font-heading text-base font-semibold text-white">
+                Today&apos;s schedule
+                <span className="ml-2 text-xs font-normal text-white/60">
+                  {open.length} to go · {completed.length} done
+                </span>
+              </h2>
+              <ul className="space-y-2">
+                {open.map((b) => (
+                  <BookingRow
+                    key={b.id}
+                    booking={b}
+                    today={today}
+                    readOnly={readOnly}
+                    highlight={b.id === next?.booking.id}
+                  />
+                ))}
+              </ul>
+            </section>
+          )}
 
-      {/* Completed (collapsible) */}
-      {completed.length > 0 && (
-        <details>
-          <summary className="flex cursor-pointer items-center gap-2 py-1 text-xs text-white/50 hover:text-white/50 list-none">
-            <CheckCircle className="h-3.5 w-3.5" />
-            {completed.length} completed
-          </summary>
-          <div className="mt-2 space-y-2">
-            {completed.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center gap-4 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 opacity-55"
-              >
-                <div className="w-14 shrink-0 text-center">
-                  <p className="text-sm text-white/60">
-                    {formatTime(b.start_time)}
-                  </p>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-white/60 truncate">
-                    {b.customer_name}
-                  </p>
-                  <p className="text-xs text-white/50 truncate">
-                    {b.service_name}
-                  </p>
-                </div>
-                <Badge variant="success">done</Badge>
-              </div>
-            ))}
-          </div>
-        </details>
+          {/* Done today: the count, what it was worth, and the rows on demand */}
+          {completed.length > 0 && (
+            <details>
+              <summary className="tap-target flex cursor-pointer list-none items-center gap-2 rounded-lg py-1 text-sm text-white/70 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold">
+                <CheckCircle className="h-4 w-4" aria-hidden />
+                {completed.length} done today, worth {formatPence(earnedPence)} in services
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {completed.map((b) => (
+                  <BookingRow key={b.id} booking={b} today={today} readOnly={readOnly} />
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
       )}
 
       {/* Share your shop */}
-      {shopShare && (
-        <ShareShopCard shopUrl={shopShare.url} shopName={shopShare.name} />
-      )}
+      {shopShare && <ShareShopCard shopUrl={shopShare.url} shopName={shopShare.name} />}
     </div>
   );
+}
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/staff" homeLabel="Back to today" />;
 }

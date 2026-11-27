@@ -305,7 +305,7 @@ r.get("/:shopId/sales", async (c) => {
   const rows = await db
     .prepare(
       `SELECT id, booking_id, staff_id, customer_name, subtotal_pence, discount_pence, tip_pence,
-              total_pence, tender_type, status, created_at, completed_at
+              total_pence, refunded_pence, tender_type, status, created_at, completed_at
        FROM sales
        WHERE shop_id = ? AND ${shopDaySql("created_at")}
        ORDER BY created_at DESC

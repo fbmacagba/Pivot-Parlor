@@ -22,7 +22,8 @@ staff.use("*", authMiddleware);
 
 staff.get("/", requireShopRole("admin", "staff"), async (c) => {
   const shopId = c.req.param("shopId")!;
-  const members = await getStaffByShop(c.env.DB, shopId);
+  // ?include_inactive=1 adds deactivated members (the owner's list restores them).
+  const members = await getStaffByShop(c.env.DB, shopId, c.req.query("include_inactive") === "1");
   const enriched = await Promise.all(
     members.map(async (m) => {
       const services = await getStaffServices(c.env.DB, m.id);
@@ -143,6 +144,7 @@ staff.put("/:staffId", requireShopRole("admin"), async (c) => {
     bio?: string | null;
     speciality?: string | null;
     service_ids?: string[];
+    is_active?: number;
   }>(c.req);
   if (!body) {
     return c.json({ success: false, error: "Invalid JSON" }, 400);
@@ -158,7 +160,14 @@ staff.put("/:staffId", requireShopRole("admin"), async (c) => {
         : null;
 
   // Only the columns the update writes, so a stray body key never shows as changed.
-  const columns = { display_name: body.display_name, bio: body.bio, speciality };
+  // is_active 1 restores a deactivated member (0 is the DELETE route's job too);
+  // any other shape is ignored, as in the product and supplier updates.
+  const columns = {
+    display_name: body.display_name,
+    bio: body.bio,
+    speciality,
+    ...(body.is_active === 0 || body.is_active === 1 ? { is_active: body.is_active } : {}),
+  };
   const { changes, fields: changed } = fieldChanges(member as unknown as Record<string, unknown>, columns);
   // The pre-audit gate (truthiness): a truthy non-array still fails as it
   // always did (500), now with nothing written; never mapped to [], which

@@ -1,12 +1,6 @@
-import {
-  useLoaderData,
-  useActionData,
-  useNavigation,
-  useFetcher,
-  data as json,
-} from "react-router";
+import { useLoaderData, useFetcher, data as json } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { Plus, Mail, Pencil, UserX, Camera } from "lucide-react";
+import { Plus, Mail, Pencil, UserX, Camera, RotateCcw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
@@ -14,21 +8,32 @@ import { createApiClient } from "~/lib/api";
 import { formatPence } from "@repo/utils";
 import { Button } from "~/components/ui/Button";
 import { Input } from "~/components/ui/Input";
+import { Textarea } from "~/components/ui/Textarea";
+import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
+import { LoadError } from "~/components/ui/LoadError";
+import { ErrorScreen } from "~/components/ErrorScreen";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "~/components/ui/Dialog";
+import { assignableServices, isActiveFlag, type AssignableService } from "~/components/admin/staffServices";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
+import { pageTitle } from "~/lib/pageTitle";
+import { useFetcherResult } from "~/lib/useFetcherResult";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
 
+export const meta = () => pageTitle("Staff");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Service {
+/** A service as it comes nested in a staff row: the raw database shape. */
+interface StaffServiceRow {
   id: string;
   name: string;
-  duration_min: number;
-  price_pence: number;
-  is_active: boolean;
 }
 
 interface Staff {
@@ -37,10 +42,13 @@ interface Staff {
   bio?: string | null;
   speciality?: string | null;
   avatar_url?: string | null;
-  is_active: boolean;
+  /** 0 or 1 from the API. */
+  is_active: number | boolean;
   user_email?: string;
-  services?: Service[];
+  services?: StaffServiceRow[];
 }
+
+type ActionData = { ok: true; intent: string; message: string } | { ok: false; intent: string; error: string };
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
 
@@ -52,19 +60,32 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const shopId = pageShopId(request, user, null);
 
   let staff: Staff[] = [];
-  let services: Service[] = [];
+  let services: AssignableService[] = [];
+  let loadError = false;
+  let servicesLoadError = false;
 
   if (shopId) {
-    // Independent fetches — run them concurrently instead of serially.
+    // Independent fetches: run them together. Deactivated members come too,
+    // so the owner can restore one.
     const [staffRes, servicesRes] = await Promise.allSettled([
-      api.get<Staff[]>(`/api/shops/${shopId}/staff`),
-      api.get<Service[]>(`/api/shops/${shopId}/services`),
+      api.get<Staff[]>(`/api/shops/${shopId}/staff?include_inactive=1`),
+      api.get<unknown>(`/api/shops/${shopId}/services`),
     ]);
     if (staffRes.status === "fulfilled") staff = staffRes.value;
-    if (servicesRes.status === "fulfilled") services = servicesRes.value;
+    else loadError = true;
+    // The services list is in the public shape (durationMinutes, isActive).
+    if (servicesRes.status === "fulfilled") services = assignableServices(servicesRes.value);
+    else servicesLoadError = true;
   }
 
-  return json({ staff, services, shopId, developerNeedsShop: user.role === "developer" && !shopId });
+  return json({
+    staff,
+    services,
+    shopId,
+    loadError,
+    servicesLoadError,
+    developerNeedsShop: user.role === "developer" && !shopId,
+  });
 }
 
 // ─── Action ───────────────────────────────────────────────────────────────────
@@ -73,14 +94,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
   const user = await requireRole(request, "admin", env.API_URL);
   const token = getSessionToken(request);
-  if (!token) return json({ error: "Unauthorized" }, { status: 401 });
+  const fail = (intent: string, error: string, status = 400) =>
+    json<ActionData>({ ok: false, intent, error }, { status });
+  if (!token) return fail("", "You are signed out. Sign in again to continue.", 401);
 
   const form = await readFormData(request);
-  if (!form) return json({ error: UNREADABLE_FORM }, { status: 400 });
+  if (!form) return fail("", UNREADABLE_FORM);
   const intent = String(form.get("intent") ?? "");
   const formShopId = String(form.get("shopId") ?? "").trim() || null;
   const shopId = pageShopId(request, user, formShopId);
-  if (!shopId) return json({ error: "Missing shop ID" }, { status: 400 });
+  if (!shopId) return fail(intent, "Choose a shop first.");
 
   const api = createApiClient(env.API_URL, token);
 
@@ -88,12 +111,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
   if (intent === "invite") {
     const name = String(form.get("name") ?? "").trim();
     const email = String(form.get("email") ?? "").trim();
-    if (!name || !email) return json({ error: "Name and email are required" }, { status: 400 });
+    if (!name || !email) return fail(intent, "Enter a name and an email address.");
     try {
       await api.post(`/api/shops/${shopId}/staff`, { display_name: name, email });
-      return json({ ok: true, intent: "invite" });
+      return json<ActionData>({ ok: true, intent, message: `Invite sent to ${email}.` });
     } catch (e) {
-      return json({ error: e instanceof Error ? e.message : "Failed to invite staff" }, { status: 400 });
+      return fail(intent, e instanceof Error ? e.message : "The invite could not be sent. Try again.");
     }
   }
 
@@ -103,9 +126,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
     const displayName = String(form.get("display_name") ?? "").trim();
     const bio = String(form.get("bio") ?? "").trim() || null;
     const speciality = String(form.get("speciality") ?? "").trim() || null;
-    const serviceIdsRaw = form.get("service_ids");
-    const serviceIds = serviceIdsRaw ? String(serviceIdsRaw).split(",").filter(Boolean) : undefined;
-    if (!staffId || !displayName) return json({ error: "Staff ID and name required" }, { status: 400 });
+    // The field is only sent when the services list loaded. Present and empty
+    // means "no services": every box was unticked.
+    const serviceIds = form.has("service_ids")
+      ? String(form.get("service_ids") ?? "").split(",").filter(Boolean)
+      : undefined;
+    if (!staffId || !displayName) return fail(intent, "Enter a name for this staff member.");
     try {
       await api.put(`/api/shops/${shopId}/staff/${staffId}`, {
         display_name: displayName,
@@ -113,25 +139,37 @@ export async function action({ request, context }: ActionFunctionArgs) {
         speciality,
         ...(serviceIds !== undefined && { service_ids: serviceIds }),
       });
-      return json({ ok: true, intent: "edit" });
+      return json<ActionData>({ ok: true, intent, message: `${displayName} saved.` });
     } catch (e) {
-      return json({ error: e instanceof Error ? e.message : "Failed to update staff" }, { status: 400 });
+      return fail(intent, e instanceof Error ? e.message : "The changes could not be saved. Try again.");
     }
   }
 
   // ── Deactivate staff ──
   if (intent === "deactivate") {
     const staffId = String(form.get("staffId") ?? "").trim();
-    if (!staffId) return json({ error: "Staff ID required" }, { status: 400 });
+    if (!staffId) return fail(intent, "That staff member could not be found. Reload the page and try again.");
     try {
       await api.del(`/api/shops/${shopId}/staff/${staffId}`);
-      return json({ ok: true, intent: "deactivate" });
+      return json<ActionData>({ ok: true, intent, message: "Staff member deactivated. Restore them from the inactive list." });
     } catch (e) {
-      return json({ error: e instanceof Error ? e.message : "Failed to deactivate staff" }, { status: 400 });
+      return fail(intent, e instanceof Error ? e.message : "The staff member could not be deactivated. Try again.");
     }
   }
 
-  return json({ error: "Unknown intent" }, { status: 400 });
+  // ── Restore staff ──
+  if (intent === "restore") {
+    const staffId = String(form.get("staffId") ?? "").trim();
+    if (!staffId) return fail(intent, "That staff member could not be found. Reload the page and try again.");
+    try {
+      await api.put(`/api/shops/${shopId}/staff/${staffId}`, { is_active: 1 });
+      return json<ActionData>({ ok: true, intent, message: "Staff member restored." });
+    } catch (e) {
+      return fail(intent, e instanceof Error ? e.message : "The staff member could not be restored. Try again.");
+    }
+  }
+
+  return fail(intent, "That action is not recognised. Reload the page and try again.");
 }
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
@@ -140,21 +178,25 @@ function EditStaffModal({
   member,
   shopId,
   allServices,
+  servicesLoadError,
   onClose,
+  onSaved,
 }: {
   member: Staff;
   shopId: string;
-  allServices: Service[];
+  allServices: AssignableService[];
+  servicesLoadError: boolean;
   onClose: () => void;
+  onSaved: (message: string) => void;
 }) {
-  const fetcher = useFetcher<typeof action>();
+  const fetcher = useFetcher<ActionData>();
   const [selectedServices, setSelectedServices] = useState<Set<string>>(
     new Set((member.services ?? []).map((s) => s.id))
   );
 
-  useEffect(() => {
-    if (fetcher.data && "ok" in fetcher.data && fetcher.data.ok) onClose();
-  }, [fetcher.data, onClose]);
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) onSaved(data.message);
+  });
 
   function toggleService(id: string) {
     setSelectedServices((prev) => {
@@ -165,110 +207,207 @@ function EditStaffModal({
     });
   }
 
-  const activeServices = allServices.filter((s) => s.is_active);
+  const busy = fetcher.state !== "idle";
 
   return (
     <fetcher.Form method="post" className="space-y-5">
       <input type="hidden" name="intent" value="edit" />
       <input type="hidden" name="shopId" value={shopId} />
       <input type="hidden" name="staffId" value={member.id} />
-      <input type="hidden" name="service_ids" value={Array.from(selectedServices).join(",")} />
+      {/* Not sent when the list failed to load, so a blank list never wipes assignments. */}
+      {!servicesLoadError && (
+        <input type="hidden" name="service_ids" value={Array.from(selectedServices).join(",")} />
+      )}
 
       <Input label="Name" name="display_name" defaultValue={member.display_name} required />
 
-      <Input
-        label="Speciality (optional)"
-        name="speciality"
-        defaultValue={member.speciality ?? ""}
-        maxLength={80}
-        placeholder="e.g. Skin fades and beard work"
-      />
-      <p className="-mt-3 text-xs text-white/60">Shown under their name on your site and in booking, and used when your site is generated.</p>
-
       <div>
-        <label className="block text-sm font-medium text-white/80 mb-1.5">Bio (optional)</label>
-        <textarea
-          name="bio"
-          defaultValue={member.bio ?? ""}
-          rows={3}
-          className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-gold resize-none"
-          placeholder="Short bio visible to customers…"
+        <Input
+          label="Speciality (optional)"
+          name="speciality"
+          defaultValue={member.speciality ?? ""}
+          maxLength={80}
+          placeholder="e.g. Skin fades and beard work"
         />
+        <p className="mt-1.5 text-xs text-white/60">Shown under their name on your site and in booking, and used when your site is generated.</p>
       </div>
 
-      {activeServices.length > 0 && (
-        <div>
-          <label className="block text-sm font-medium text-white/80 mb-2">Assigned services</label>
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-            {activeServices.map((svc) => (
-              <label key={svc.id} className="tap-target flex items-center gap-3 cursor-pointer group">
+      <Textarea
+        label="Bio (optional)"
+        name="bio"
+        defaultValue={member.bio ?? ""}
+        rows={3}
+        placeholder="Short bio visible to customers…"
+      />
+
+      {servicesLoadError ? (
+        <p role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+          We couldn&apos;t load your services, so assigned services can&apos;t be changed right now. Other changes will
+          still save. Reload the page to try again.
+        </p>
+      ) : allServices.length === 0 ? (
+        <p className="text-sm text-white/60">
+          You have no active services yet. Add services first, then assign them here.
+        </p>
+      ) : (
+        <fieldset>
+          <legend className="mb-2 block text-sm font-medium text-white/80">Assigned services</legend>
+          <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+            {allServices.map((svc) => (
+              <label key={svc.id} className="tap-target group flex cursor-pointer items-center gap-3">
                 <input
                   type="checkbox"
                   className="peer sr-only"
                   checked={selectedServices.has(svc.id)}
                   onChange={() => toggleService(svc.id)}
-                  aria-label={svc.name}
                 />
                 <div
                   aria-hidden="true"
-                  className={`w-5 h-5 rounded flex items-center justify-center border transition-all shrink-0 peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-dark ${
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-dark ${
                     selectedServices.has(svc.id)
-                      ? "bg-gold border-gold"
-                      : "border-white/20 bg-white/5 group-hover:border-white/40"
+                      ? "border-gold bg-gold"
+                      : "border-white/40 bg-white/5 group-hover:border-white/60"
                   }`}
                 >
                   {selectedServices.has(svc.id) && (
-                    <svg className="w-3 h-3 text-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-3 w-3 text-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <span className="text-sm text-white">{svc.name}</span>
-                  <span className="text-xs text-white/60 ml-2">{svc.duration_min}min · {formatPence(svc.price_pence)}</span>
+                  <span className="ml-2 text-xs text-white/60">
+                    {svc.durationMinutes} min · {formatPence(svc.price_pence)}
+                  </span>
                 </div>
               </label>
             ))}
           </div>
-        </div>
+        </fieldset>
       )}
 
-      {fetcher.data && "error" in fetcher.data && (
-        <p className="text-sm text-red-400">{fetcher.data.error}</p>
+      {!busy && fetcher.data && !fetcher.data.ok && (
+        <p role="alert" className="text-sm text-red-400">{fetcher.data.error}</p>
       )}
 
       <div className="flex gap-3 pt-1">
-        <Button type="button" variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
-        <Button type="submit" className="flex-1" disabled={fetcher.state === "submitting"}>
-          {fetcher.state === "submitting" ? "Saving…" : "Save changes"}
+        <Button type="button" variant="ghost" className="flex-1" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button type="submit" className="flex-1" disabled={busy}>
+          {busy ? "Saving…" : "Save changes"}
         </Button>
       </div>
     </fetcher.Form>
   );
 }
 
+// ─── Invite dialog ────────────────────────────────────────────────────────────
+
+function InviteDialog({
+  shopId,
+  disabled,
+  onInvited,
+}: {
+  shopId: string | null;
+  disabled: boolean;
+  onInvited: (message: string) => void;
+}) {
+  const fetcher = useFetcher<ActionData>();
+  const [open, setOpen] = useState(false);
+  // An error belongs to the attempt that produced it: reopening starts clean.
+  const [error, setError] = useState<string | null>(null);
+  const busy = fetcher.state !== "idle";
+
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) {
+      setError(null);
+      setOpen(false);
+      onInvited(data.message);
+    } else {
+      // The dialog stays open with what was typed, and says why.
+      setError(data.error);
+    }
+  });
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (busy) return;
+        setOpen(next);
+        if (next) setError(null);
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button size="sm" disabled={disabled}>
+          <Plus className="h-4 w-4" aria-hidden /> Add staff
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Invite staff member</DialogTitle></DialogHeader>
+        <fetcher.Form method="post" className="space-y-4" onSubmit={() => setError(null)}>
+          <input type="hidden" name="intent" value="invite" />
+          {shopId && <input type="hidden" name="shopId" value={shopId} />}
+          <Input label="Name" name="name" required autoComplete="off" />
+          <Input label="Email" name="email" type="email" required autoComplete="off" />
+          <p className="text-xs text-white/60">We email them a link to set up their own sign in.</p>
+          {error && !busy && (
+            <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {error}
+            </p>
+          )}
+          <Button type="submit" className="w-full" disabled={busy}>
+            <Mail className="h-4 w-4" aria-hidden />
+            {busy ? "Sending invite…" : "Send invite"}
+          </Button>
+        </fetcher.Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // ─── Avatar Upload ────────────────────────────────────────────────────────────
 
-function AvatarUpload({ member, shopId }: { member: Staff; shopId: string }) {
+function AvatarUpload({
+  member,
+  shopId,
+  onError,
+}: {
+  member: Staff;
+  shopId: string;
+  onError: (message: string | null) => void;
+}) {
   const fetcher = useFetcher<{ success: boolean; avatarUrl?: string; error?: string }>();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<string | null>(member.avatar_url ?? null);
+  /** The photo the server holds. The picked file is only shown while it uploads. */
+  const [saved, setSaved] = useState<string | null>(member.avatar_url ?? null);
+  const [pending, setPending] = useState<string | null>(null);
   const isUploading = fetcher.state !== "idle";
 
+  // The picked file's local preview is released once it is no longer shown.
   useEffect(() => {
-    if (fetcher.data?.success && fetcher.data.avatarUrl) {
-      setPreview(fetcher.data.avatarUrl);
+    if (!pending) return;
+    return () => URL.revokeObjectURL(pending);
+  }, [pending]);
+
+  useFetcherResult(fetcher, (data) => {
+    // Either way the local preview goes: the saved photo, old or new, is what is true.
+    setPending(null);
+    if (data.success && data.avatarUrl) {
+      setSaved(data.avatarUrl);
+      onError(null);
+    } else {
+      onError(data.error ?? "The photo could not be uploaded. Try a JPEG, PNG or WebP under 5 MB.");
     }
-  }, [fetcher.data]);
+  });
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    // Allow picking the same file again after a failure.
+    e.target.value = "";
     if (!file) return;
-    // Local preview
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    // Upload
+    onError(null);
+    setPending(URL.createObjectURL(file));
     const form = new FormData();
     form.append("file", file);
     fetcher.submit(form, {
@@ -278,13 +417,14 @@ function AvatarUpload({ member, shopId }: { member: Staff; shopId: string }) {
     });
   }
 
+  const preview = pending ?? saved;
+
   return (
-    <div className="relative w-12 h-12 shrink-0 group">
+    <div className="group relative h-12 w-12 shrink-0">
       {preview ? (
-        <img src={preview} alt={member.display_name}
-          className="w-12 h-12 rounded-full object-cover border border-white/10" />
+        <img src={preview} alt="" className="h-12 w-12 rounded-full border border-white/10 object-cover" />
       ) : (
-        <div className="w-12 h-12 rounded-full bg-gold/20 flex items-center justify-center font-heading text-lg font-bold text-gold">
+        <div aria-hidden className="flex h-12 w-12 items-center justify-center rounded-full bg-gold/20 font-heading text-lg font-bold text-gold">
           {member.display_name.charAt(0).toUpperCase()}
         </div>
       )}
@@ -293,18 +433,20 @@ function AvatarUpload({ member, shopId }: { member: Staff; shopId: string }) {
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={isUploading}
-        className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity [@media(pointer:coarse)]:bg-black/35 [@media(pointer:coarse)]:opacity-100"
-        title="Upload photo"
+        aria-label={isUploading ? `Uploading photo for ${member.display_name}` : `Upload a photo for ${member.display_name}`}
+        className="absolute inset-0 flex items-center justify-center rounded-full bg-black/60 opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold group-hover:opacity-100 [@media(pointer:coarse)]:bg-black/35 [@media(pointer:coarse)]:opacity-100"
       >
         {isUploading
-          ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-          : <Camera className="w-4 h-4 text-white" />}
+          ? <div aria-hidden className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          : <Camera className="h-4 w-4 text-white" aria-hidden />}
       </button>
       <input
         ref={inputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp"
         className="hidden"
+        tabIndex={-1}
+        aria-hidden
         onChange={handleFileChange}
       />
     </div>
@@ -317,39 +459,54 @@ function StaffCard({
   member,
   shopId,
   allServices,
+  servicesLoadError,
+  onNotice,
 }: {
   member: Staff;
   shopId: string;
-  allServices: Service[];
+  allServices: AssignableService[];
+  servicesLoadError: boolean;
+  onNotice: (message: string) => void;
 }) {
   const [editOpen, setEditOpen] = useState(false);
-  const deactivateFetcher = useFetcher<typeof action>();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const deactivateFetcher = useFetcher<ActionData>();
 
   const isDeactivating = deactivateFetcher.state !== "idle";
   const assignedCount = (member.services ?? []).length;
 
+  useFetcherResult(deactivateFetcher, (data) => {
+    if (data.ok) {
+      setConfirmOpen(false);
+      onNotice(`${member.display_name} deactivated. Restore them from the inactive list.`);
+    } else {
+      setDeactivateError(data.error);
+    }
+  });
+
   return (
-    <div className={`rounded-xl border bg-dark-100 p-5 transition-opacity ${isDeactivating ? "opacity-50" : ""} ${member.is_active ? "border-white/10" : "border-white/5 opacity-60"}`}>
+    <div className="rounded-xl border border-white/10 bg-dark-100 p-5">
       {/* Avatar + name row */}
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
-          <AvatarUpload member={member} shopId={shopId} />
-          <div>
-            <p className="font-semibold text-white">{member.display_name}</p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <AvatarUpload member={member} shopId={shopId} onError={setAvatarError} />
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-white">{member.display_name}</p>
             {member.user_email && (
-              <p className="text-xs text-white/60 mt-0.5">{member.user_email}</p>
+              <p className="mt-0.5 truncate text-xs text-white/60">{member.user_email}</p>
             )}
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Edit */}
+        <div className="flex shrink-0 items-center gap-1">
           <Dialog open={editOpen} onOpenChange={setEditOpen}>
             <DialogTrigger asChild>
-              <button aria-label="Edit" className="tap-target w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors">
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
+              <Button variant="ghost" size="icon" aria-label={`Edit ${member.display_name}`} className="text-white/60 hover:text-white">
+                <Pencil className="h-4 w-4" aria-hidden />
+              </Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -359,104 +516,162 @@ function StaffCard({
                 member={member}
                 shopId={shopId}
                 allServices={allServices}
+                servicesLoadError={servicesLoadError}
                 onClose={() => setEditOpen(false)}
+                onSaved={(message) => {
+                  setEditOpen(false);
+                  onNotice(message);
+                }}
               />
             </DialogContent>
           </Dialog>
 
-          {/* Deactivate */}
-          <deactivateFetcher.Form method="post">
-            <input type="hidden" name="intent" value="deactivate" />
-            <input type="hidden" name="shopId" value={shopId} />
-            <input type="hidden" name="staffId" value={member.id} />
-            <button
-              type="submit"
-              disabled={isDeactivating}
-              onClick={(e) => { if (!confirm(`Deactivate ${member.display_name}?`)) e.preventDefault(); }}
-              className="tap-target w-8 h-8 flex items-center justify-center rounded-lg hover:bg-red-500/10 text-white/40 hover:text-red-400 transition-colors"
-              title="Deactivate"
-            >
-              <UserX className="w-3.5 h-3.5" />
-            </button>
-          </deactivateFetcher.Form>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Deactivate ${member.display_name}`}
+            className="text-white/60 hover:bg-red-500/10 hover:text-red-400"
+            onClick={() => {
+              setDeactivateError(null);
+              setConfirmOpen(true);
+            }}
+          >
+            <UserX className="h-4 w-4" aria-hidden />
+          </Button>
         </div>
       </div>
+
+      {avatarError && (
+        <p role="alert" className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          Photo not saved: {avatarError}
+        </p>
+      )}
 
       {/* Bio */}
       {member.bio && (
-        <p className="text-sm text-white/50 mb-3 line-clamp-2">{member.bio}</p>
+        <p className="mb-3 line-clamp-2 text-sm text-white/60">{member.bio}</p>
       )}
 
       {/* Assigned services */}
-      <div className="flex items-center justify-between">
-        <div className="flex flex-wrap gap-1">
-          {(member.services ?? []).slice(0, 3).map((svc) => (
-            <span key={svc.id} className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-white/50 border border-white/10">
-              {svc.name}
-            </span>
-          ))}
-          {assignedCount > 3 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-white/60">
-              +{assignedCount - 3} more
-            </span>
-          )}
-          {assignedCount === 0 && (
-            <span className="text-xs text-white/60 italic">No services assigned</span>
-          )}
-        </div>
+      <div className="flex flex-wrap gap-1">
+        {(member.services ?? []).slice(0, 3).map((svc) => (
+          <span key={svc.id} className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-white/70">
+            {svc.name}
+          </span>
+        ))}
+        {assignedCount > 3 && (
+          <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-white/60">
+            +{assignedCount - 3} more
+          </span>
+        )}
+        {assignedCount === 0 && (
+          <span className="text-xs text-white/60">No services assigned, so customers cannot book them yet.</span>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setDeactivateError(null);
+          deactivateFetcher.submit(
+            { intent: "deactivate", shopId, staffId: member.id },
+            { method: "post" },
+          );
+        }}
+        title={`Deactivate ${member.display_name}?`}
+        confirmLabel={`Deactivate ${member.display_name}`}
+        destructive
+        pending={isDeactivating}
+        pendingLabel="Deactivating…"
+        error={deactivateError}
+      >
+        <p>
+          They come off your team list and your booking page. Bookings already made are not changed, so move or
+          cancel those yourself if needed.
+        </p>
+        <p>This can be undone: restore them from the inactive list on this page.</p>
+      </ConfirmDialog>
     </div>
+  );
+}
+
+// ─── Inactive row ─────────────────────────────────────────────────────────────
+
+function InactiveStaffRow({
+  member,
+  shopId,
+  onNotice,
+}: {
+  member: Staff;
+  shopId: string;
+  onNotice: (message: string) => void;
+}) {
+  const fetcher = useFetcher<ActionData>();
+  const [error, setError] = useState<string | null>(null);
+  const busy = fetcher.state !== "idle";
+
+  useFetcherResult(fetcher, (data) => {
+    if (data.ok) onNotice(`${member.display_name} restored.`);
+    else setError(data.error);
+  });
+
+  return (
+    <li className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+      <div className="min-w-[9rem] flex-1">
+        <p className="truncate text-sm font-medium text-white/80">{member.display_name}</p>
+        {member.user_email && <p className="truncate text-xs text-white/60">{member.user_email}</p>}
+      </div>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        disabled={busy}
+        onClick={() => {
+          setError(null);
+          fetcher.submit({ intent: "restore", shopId, staffId: member.id }, { method: "post" });
+        }}
+      >
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+        {busy ? "Restoring…" : "Restore"}
+      </Button>
+      {error && !busy && (
+        <p role="alert" className="w-full text-xs text-red-400">{error}</p>
+      )}
+    </li>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminStaff() {
-  const { staff, services, shopId, developerNeedsShop } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
-  const nav = useNavigation();
-  const [inviteOpen, setInviteOpen] = useState(false);
+  const { staff, services, shopId, loadError, servicesLoadError, developerNeedsShop } =
+    useLoaderData<typeof loader>();
+  const [notice, setNotice] = useState<string | null>(null);
+  const [showInactive, setShowInactive] = useState(false);
 
-  useEffect(() => {
-    if (actionData && "ok" in actionData && actionData.ok && actionData.intent === "invite") {
-      setInviteOpen(false);
-    }
-  }, [actionData]);
+  const active = staff.filter((m) => isActiveFlag(m.is_active));
+  const inactive = staff.filter((m) => !isActiveFlag(m.is_active));
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-bold text-white">Staff</h1>
-          <p className="mt-0.5 text-sm text-white/60">
-            {staff.length} active member{staff.length !== 1 ? "s" : ""}
-          </p>
+          {!loadError && (
+            <p className="mt-0.5 text-sm text-white/60">
+              {active.length} active member{active.length !== 1 ? "s" : ""}
+              {inactive.length > 0 && ` · ${inactive.length} inactive`}
+            </p>
+          )}
         </div>
+        <InviteDialog shopId={shopId} disabled={developerNeedsShop} onInvited={setNotice} />
+      </div>
 
-        <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" disabled={developerNeedsShop}>
-              <Plus className="h-4 w-4" /> Add staff
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Invite staff member</DialogTitle></DialogHeader>
-            <form method="post" className="space-y-4">
-              <input type="hidden" name="intent" value="invite" />
-              {shopId && <input type="hidden" name="shopId" value={shopId} />}
-              <Input label="Name" name="name" required />
-              <Input label="Email" name="email" type="email" required />
-              {actionData && "error" in actionData && (
-                <p className="text-sm text-red-400">{actionData.error}</p>
-              )}
-              <Button type="submit" className="w-full" disabled={nav.state === "submitting"}>
-                <Mail className="w-4 h-4" />
-                {nav.state === "submitting" ? "Sending…" : "Send invite"}
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+      {/* The outcome of the last action. Always mounted, so a screen reader hears it arrive. */}
+      <div role="status" className={notice ? "rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100" : "sr-only"}>
+        {notice}
       </div>
 
       {/* Developer warning */}
@@ -467,28 +682,53 @@ export default function AdminStaff() {
       )}
 
       {/* Staff grid */}
-      {staff.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center text-white/50">
-          <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-3">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
-          <p className="text-sm font-medium">No staff members yet</p>
-          <p className="text-xs mt-1 text-white/60">Add your first team member above</p>
+      {loadError ? (
+        <LoadError what="your staff" />
+      ) : active.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-white/10 p-12 text-center">
+          <p className="text-sm font-medium text-white/80">
+            {inactive.length > 0 ? "No active staff members" : "No staff members yet"}
+          </p>
+          <p className="mt-1 text-xs text-white/60">
+            {inactive.length > 0
+              ? "Restore someone from the inactive list below, or add a new team member."
+              : "Use Add staff to invite your first team member."}
+          </p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {staff.map((member) => (
+          {active.map((member) => (
             <StaffCard
               key={member.id}
               member={member}
               shopId={shopId!}
               allServices={services}
+              servicesLoadError={servicesLoadError}
+              onNotice={setNotice}
             />
           ))}
         </div>
+      )}
+
+      {/* Inactive members, collapsed until asked for */}
+      {!loadError && inactive.length > 0 && shopId && (
+        <section>
+          <button
+            type="button"
+            aria-expanded={showInactive}
+            onClick={() => setShowInactive((v) => !v)}
+            className="tap-target inline-flex items-center rounded-lg text-sm text-white/70 underline-offset-4 transition-colors hover:text-gold hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+          >
+            {showInactive ? "Hide inactive" : `Show ${inactive.length} inactive`}
+          </button>
+          {showInactive && (
+            <ul className="mt-2 divide-y divide-white/5 rounded-xl border border-white/10 bg-dark-100">
+              {inactive.map((member) => (
+                <InactiveStaffRow key={member.id} member={member} shopId={shopId} onNotice={setNotice} />
+              ))}
+            </ul>
+          )}
+        </section>
       )}
     </div>
   );

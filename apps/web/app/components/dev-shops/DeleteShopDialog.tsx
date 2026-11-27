@@ -1,10 +1,10 @@
-// Delete-shop confirmation dialog for the developer "Shops" dashboard.
-// Extracted from dev.shops.tsx (T7.7 class-2) — behavior-identical; covered by
-// tests/e2e/dev-dashboard.spec.ts (delete lifecycle).
-import type { FetcherWithComponents } from "react-router";
-import { Loader2, Trash2 } from "lucide-react";
-import { Button } from "~/components/ui/Button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "~/components/ui/Dialog";
+// The one delete-shop confirmation, used by the shops list and the shop's own
+// page. Covered by tests/e2e/dev-dashboard.spec.ts (delete lifecycle).
+import { useEffect, useState } from "react";
+import { useFetcher } from "react-router";
+import { formatPence } from "@repo/utils";
+import { ConfirmDialog } from "~/components/ui/ConfirmDialog";
+import { useFetcherResult } from "~/lib/useFetcherResult";
 import type { Shop } from "./types";
 
 export interface DeleteShopResult {
@@ -14,61 +14,89 @@ export interface DeleteShopResult {
   data?: { id?: string };
 }
 
+type DeletableShop = Pick<Shop, "id" | "name" | "slug"> &
+  Partial<Pick<Shop, "booking_count" | "commission_total_pence" | "website_status" | "has_site">>;
+
 export function DeleteShopDialog({
   shop,
   onClose,
-  fetcher,
+  onDeleted,
 }: {
-  shop: Shop | null;
+  /** The shop to delete, or null while the dialog is closed. */
+  shop: DeletableShop | null;
   onClose: () => void;
-  fetcher: FetcherWithComponents<DeleteShopResult>;
+  /** Runs once the shop is gone, before the dialog closes. */
+  onDeleted?: (shopId: string) => void;
 }) {
+  const fetcher = useFetcher<DeleteShopResult>();
+  const [error, setError] = useState<string | null>(null);
+  const shopId = shop?.id ?? null;
+
+  // An error belongs to one attempt on one shop, never to the next shop opened.
+  useEffect(() => {
+    setError(null);
+  }, [shopId]);
+
+  useFetcherResult(fetcher, (result) => {
+    if (result.success) {
+      setError(null);
+      if (shopId) onDeleted?.(shopId);
+      onClose();
+    } else {
+      setError(result.error?.trim() || "The shop could not be deleted. Nothing was removed. Please try again.");
+    }
+  });
+
+  const live = shop?.has_site && (shop.website_status ?? "").toLowerCase() === "live";
+  const bookings = shop?.booking_count;
+
   return (
-    <Dialog open={shop !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete shop</DialogTitle>
-        </DialogHeader>
-        {shop && (
-          <>
-            <p className="text-sm text-white/70">
-              Permanently delete{" "}
-              <span className="font-medium text-white">{shop.name}</span> ({shop.slug})? This
-              removes onboarding data and linked records. This cannot be undone.
-            </p>
-            {fetcher.data && fetcher.data.success === false && typeof fetcher.data.error === "string" ? (
-              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                {fetcher.data.error}
-              </div>
-            ) : null}
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-                Cancel
-              </Button>
-              <fetcher.Form method="post" action={`/api/shops/${shop.id}/delete`}>
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="bg-red-600 hover:bg-red-500"
-                  disabled={fetcher.state !== "idle"}
-                >
-                  {fetcher.state !== "idle" ? (
-                    <>
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                      Deleting…
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="mr-1 h-3.5 w-3.5" />
-                      Delete shop
-                    </>
-                  )}
-                </Button>
-              </fetcher.Form>
-            </div>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
+    <ConfirmDialog
+      open={shop !== null}
+      onCancel={() => {
+        setError(null);
+        onClose();
+      }}
+      onConfirm={() => {
+        if (!shop) return;
+        setError(null);
+        fetcher.submit({}, { method: "post", action: `/api/shops/${encodeURIComponent(shop.id)}/delete` });
+      }}
+      title={shop ? `Delete ${shop.name}?` : "Delete shop?"}
+      confirmLabel="Delete shop"
+      pendingLabel="Deleting…"
+      destructive
+      pending={fetcher.state !== "idle"}
+      error={error}
+      typeToConfirm={shop?.slug}
+    >
+      {shop && (
+        <>
+          <p>
+            This permanently deletes <span className="font-medium text-white">{shop.name}</span> (
+            <code data-testid="delete-shop-slug" className="text-white">
+              {shop.slug}
+            </code>
+            ): the shop, its site, staff accounts, services, bookings and history.
+          </p>
+          {(live || typeof bookings === "number") && (
+            <ul className="list-disc space-y-1 pl-5">
+              {live && <li>Its site is live now and will go offline at once.</li>}
+              {typeof bookings === "number" && (
+                <li>
+                  {bookings === 0
+                    ? "It has no bookings."
+                    : `${bookings} ${bookings === 1 ? "booking" : "bookings"} will be deleted` +
+                      (shop.commission_total_pence
+                        ? `, with ${formatPence(shop.commission_total_pence)} of commission history.`
+                        : ".")}
+                </li>
+              )}
+            </ul>
+          )}
+          <p className="font-medium text-white">This cannot be undone.</p>
+        </>
+      )}
+    </ConfirmDialog>
   );
 }

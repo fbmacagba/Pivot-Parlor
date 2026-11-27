@@ -229,6 +229,21 @@ export function getUserById(db: D1Database, id: string) {
     .first<Omit<DBUser, "password_hash"> & { phone?: string | null }>();
 }
 
+/** The signed-in user for GET /auth/me: getUserById plus their shop's name
+ *  (null for developers and customers), so a dashboard can say whose it is. */
+export function getSessionUserById(db: D1Database, id: string) {
+  return db
+    .prepare(
+      `SELECT pu.id, pu.name, pu.email, pu.phone, pu.role, pu.shop_id, pu.email_verified, pu.created_at,
+              s.name AS shop_name
+       FROM platform_users pu
+       LEFT JOIN shops s ON s.id = pu.shop_id
+       WHERE pu.id = ? LIMIT 1`,
+    )
+    .bind(id)
+    .first<Omit<DBUser, "password_hash"> & { phone?: string | null; shop_name: string | null }>();
+}
+
 interface NewUser {
   id: string;
   name?: string | null;
@@ -1074,6 +1089,22 @@ export function insertGenerationJob(
     .run();
 }
 
+/**
+ * A generation job for this shop that is still running: not finished, not
+ * failed, and touched since `sinceIso` (an older one has stalled and no longer
+ * blocks a new run). The newest, or null.
+ */
+export function getRunningGenerationJob(db: D1Database, shopId: string, sinceIso: string) {
+  return db
+    .prepare(
+      `SELECT id, status, stage FROM generation_jobs
+       WHERE shop_id = ? AND status NOT IN ('complete', 'failed') AND updated_at >= ?
+       ORDER BY updated_at DESC LIMIT 1`,
+    )
+    .bind(shopId, sinceIso)
+    .first<{ id: string; status: string; stage: string | null }>();
+}
+
 export function getGenerationJobById(db: D1Database, id: string) {
   return db
     .prepare("SELECT * FROM generation_jobs WHERE id = ? LIMIT 1")
@@ -1142,10 +1173,14 @@ export function updateShopTheme(db: D1Database, id: string, aiTheme: string) {
 
 // ─── Services ─────────────────────────────────────────────────────────────────
 
-export async function getServicesByShop(db: D1Database, shopId: string) {
+/** Active services by default. `includeInactive` adds deactivated ones, for the
+ *  owner's own list (so a deactivated service can be found and restored). */
+export async function getServicesByShop(db: D1Database, shopId: string, includeInactive = false) {
   const { results } = await db
     .prepare(
-      "SELECT * FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY category, name",
+      includeInactive
+        ? "SELECT * FROM services WHERE shop_id = ? ORDER BY category, name"
+        : "SELECT * FROM services WHERE shop_id = ? AND is_active = 1 ORDER BY category, name",
     )
     .bind(shopId)
     .all<DBService>();
@@ -1224,13 +1259,15 @@ export function updateServiceStmt(db: D1Database, id: string, fields: ServiceUpd
 
 // ─── Staff ────────────────────────────────────────────────────────────────────
 
-export async function getStaffByShop(db: D1Database, shopId: string) {
+/** Active staff by default. `includeInactive` adds deactivated members, for
+ *  the owner's own list (so a deactivated member can be found and restored). */
+export async function getStaffByShop(db: D1Database, shopId: string, includeInactive = false) {
   const { results } = await db
     .prepare(
       `SELECT st.*, pu.email AS user_email
        FROM staff st
        JOIN platform_users pu ON st.user_id = pu.id
-       WHERE st.shop_id = ? AND st.is_active = 1
+       WHERE st.shop_id = ?${includeInactive ? "" : " AND st.is_active = 1"}
        ORDER BY st.display_name`,
     )
     .bind(shopId)
@@ -1394,6 +1431,9 @@ export async function getBookingsByShop(
   shopId: string,
   opts: {
     date?: string;
+    /** Inclusive YYYY-MM-DD bounds; either may be given alone. */
+    dateFrom?: string;
+    dateTo?: string;
     staffId?: string;
     status?: string;
     limit?: number;
@@ -1405,6 +1445,14 @@ export async function getBookingsByShop(
   if (opts.date) {
     conds.push("b.booking_date = ?");
     vals.push(opts.date);
+  }
+  if (opts.dateFrom) {
+    conds.push("b.booking_date >= ?");
+    vals.push(opts.dateFrom);
+  }
+  if (opts.dateTo) {
+    conds.push("b.booking_date <= ?");
+    vals.push(opts.dateTo);
   }
   if (opts.staffId) {
     conds.push("b.staff_id = ?");
@@ -1953,13 +2001,14 @@ export function updateSupplierStmt(
 export async function getProductsWithStockByShop(
   db: D1Database,
   shopId: string,
+  includeInactive = false,
 ) {
   const { results } = await db
     .prepare(
       `SELECT p.*, COALESCE(SUM(sl.quantity), 0) AS total_quantity
        FROM products p
        LEFT JOIN stock_levels sl ON sl.product_id = p.id
-       WHERE p.shop_id = ? AND p.is_active = 1
+       WHERE p.shop_id = ?${includeInactive ? "" : " AND p.is_active = 1"}
        GROUP BY p.id
        ORDER BY p.name`,
     )

@@ -109,7 +109,8 @@ describe("dev.activity action (erase)", () => {
   it("sends a session the API refuses to sign in, without calling erase", async () => {
     const urls = stubApi(null);
     const res = await thrownRedirect(run.action(erasePost(SESSION)));
-    expect(res.headers.get("Location")).toBe("/login");
+    // Same destination as no session at all: sign in, then back to this page.
+    expect(res.headers.get("Location")).toBe("/login?redirect=%2Fdev%2Factivity");
     expect(urls).not.toContain(ERASE_URL);
   });
 

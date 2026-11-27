@@ -1,13 +1,24 @@
-import { useLoaderData, useFetcher, useSearchParams, data as json, redirect } from "react-router";
+import { useLoaderData, useFetcher, useRevalidator, useSearchParams, data as json, redirect } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { Button } from "~/components/ui/Button";
 import { createApiClient } from "~/lib/api";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { pageShopId } from "~/lib/pageShop";
+import { pageTitle } from "~/lib/pageTitle";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
+import { usePolling } from "~/lib/usePolling";
+import { LoadError } from "~/components/ui/LoadError";
+import { StatusBadge } from "~/components/ui/StatusBadge";
+import { ErrorScreen } from "~/components/ErrorScreen";
 
 // Reload this page's data after a failed submission, as Remix 2 did (app/lib/revalidation.ts).
 export const shouldRevalidate = revalidateAfterFailedSubmission;
+
+export const meta = () => pageTitle("Payments");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 interface ConnectStatus {
   account_id: string | null;
@@ -25,16 +36,24 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   // owner's step. A developer sees the status but cannot start it.
   const canOnboard = user.role !== "developer";
   if (!shopId || !token) {
-    return json({ shopId: null as string | null, status: null as ConnectStatus | null, error: "no_shop" as const, canOnboard });
+    return json({
+      shopId: null as string | null,
+      status: null as ConnectStatus | null,
+      error: "no_shop" as const,
+      canOnboard,
+      loadError: false,
+    });
   }
   const api = createApiClient(env.API_URL, token);
   let status: ConnectStatus | null = null;
+  let loadError = false;
   try {
     status = (await api.get(`/api/shops/${shopId}/connect/status`)) as ConnectStatus;
   } catch {
-    status = null;
+    // Unknown is not "not connected": the page says it could not check.
+    loadError = true;
   }
-  return json({ shopId, status, error: null as null, canOnboard });
+  return json({ shopId, status, error: null as null, canOnboard, loadError });
 }
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -63,32 +82,50 @@ export async function action({ request, context }: ActionFunctionArgs) {
 }
 
 export default function AdminPayments() {
-  const { status, error, canOnboard } = useLoaderData<typeof loader>();
+  const { status, error, canOnboard, loadError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<{ ok: boolean; error?: string }>();
+  const revalidator = useRevalidator();
   const [searchParams] = useSearchParams();
   const justReturned = searchParams.get("connect") === "return";
   const busy = fetcher.state !== "idle";
 
+  const onboarded = status?.onboarded === true;
+  const started = Boolean(status?.account_id);
+
+  // While Stripe is still reviewing, look again every 15 seconds, so the page
+  // turns to "connected" by itself as its copy promises.
+  usePolling(() => revalidator.revalidate(), {
+    intervalMs: 15_000,
+    enabled: error !== "no_shop" && !loadError && started && !onboarded && !busy,
+  });
+
   if (error === "no_shop") {
     return (
-      <div className="p-6">
-        <p className="text-white/60 text-sm">No shop is assigned to this account.</p>
+      <div className="space-y-4">
+        <h1 className="font-heading text-2xl font-bold text-white">Payments</h1>
+        <p className="text-sm text-white/60">No shop is assigned to this account.</p>
       </div>
     );
   }
 
-  const onboarded = status?.onboarded === true;
-  const started = Boolean(status?.account_id);
+  if (loadError || !status) {
+    return (
+      <div className="max-w-2xl space-y-4">
+        <h1 className="font-heading text-2xl font-bold text-white">Payments</h1>
+        <LoadError what="your Stripe connection" />
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-2xl">
-      <h1 className="font-heading text-2xl text-white mb-1">Payments</h1>
-      <p className="text-white/50 text-sm mb-6">
+    <div className="max-w-2xl">
+      <h1 className="mb-1 font-heading text-2xl font-bold text-white">Payments</h1>
+      <p className="mb-6 text-sm text-white/60">
         Connect your Stripe account so customers can pay deposits and you receive payouts directly.
       </p>
 
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-        <div className="flex items-center justify-between gap-4">
+      <div className="rounded-xl border border-white/10 bg-dark-100 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-white font-medium">
               {onboarded
@@ -97,23 +134,21 @@ export default function AdminPayments() {
                   ? "Stripe onboarding in progress"
                   : "Stripe account not connected"}
             </p>
-            <p className="text-white/50 text-sm mt-1">
+            <p className="mt-1 text-sm text-white/60" role="status">
               {onboarded
                 ? "Deposits and payouts are enabled for this shop."
-                : justReturned
-                  ? "Thanks. Stripe is reviewing your details; this page updates automatically once your account is enabled."
-                  : "You will be redirected to Stripe to verify your business details. It takes about 5 minutes."}
+                : justReturned && started
+                  ? "Thanks. Stripe is reviewing your details. This page checks every 15 seconds and updates by itself once your account is enabled."
+                  : started
+                    ? "Stripe still needs some details, or is reviewing them. This page checks every 15 seconds while it is open."
+                    : "You will be redirected to Stripe to verify your business details. It takes about 5 minutes."}
             </p>
           </div>
-          <span
-            className={
-              onboarded
-                ? "shrink-0 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300"
-                : "shrink-0 rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-300"
-            }
-          >
-            {onboarded ? "Active" : started ? "Pending" : "Not set up"}
-          </span>
+          <StatusBadge
+            status={onboarded ? "active" : started ? "pending" : "inactive"}
+            label={onboarded ? "Active" : started ? "Pending" : "Not set up"}
+            className="shrink-0"
+          />
         </div>
 
         {!onboarded && !canOnboard && (
@@ -122,10 +157,10 @@ export default function AdminPayments() {
         {!onboarded && canOnboard && (
           <fetcher.Form method="post" className="mt-5">
             <Button type="submit" disabled={busy}>
-              {busy ? "Redirecting to Stripe..." : started ? "Continue Stripe setup" : "Set up payments with Stripe"}
+              {busy ? "Redirecting to Stripe…" : started ? "Continue Stripe setup" : "Set up payments with Stripe"}
             </Button>
             {fetcher.data && !fetcher.data.ok && (
-              <p className="text-red-400 text-sm mt-3">{fetcher.data.error}</p>
+              <p role="alert" className="mt-3 text-sm text-red-400">{fetcher.data.error}</p>
             )}
           </fetcher.Form>
         )}

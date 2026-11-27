@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { sign, verify } from "hono/jwt";
 import { AuditWriteError } from "@repo/audit";
 import type { Bindings } from "../bindings.js";
-import { getUserByEmail, getUserById, createUserStmt } from "../db/queries.js";
+import { getUserByEmail, getUserById, getSessionUserById, createUserStmt } from "../db/queries.js";
 import { actorForUser, auditFor, auditRefused, batchWithAudit, requestIp, statusOutcome } from "../audit/context.js";
 import { fieldChanges } from "../audit/diff.js";
 import { authMiddleware, extractSessionJwt, getUser, type JWTUser } from "../middleware/auth.js";
@@ -461,7 +461,7 @@ auth.post(
 
 auth.get("/me", authMiddleware, async (c) => {
   const caller = getUser(c);
-  const user = await getUserById(c.env.DB, caller.sub);
+  const user = await getSessionUserById(c.env.DB, caller.sub);
   if (!user) return c.json({ success: false, error: "User not found" }, 404);
   return c.json({ success: true, data: user });
 });

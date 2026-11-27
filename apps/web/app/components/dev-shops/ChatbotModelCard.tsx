@@ -69,7 +69,7 @@ export function ChatbotModelCard({
       <h2 id="chatbot-model-heading" className="font-heading text-lg font-bold text-white">
         Shop chatbot model
       </h2>
-      <p className="text-xs text-white/50">
+      <p className="text-xs text-white/60">
         One choice for every shop&apos;s visitor chatbot. Visitors wait for each reply, so effort goes up to Medium;
         None or Low answers fastest.
       </p>
@@ -100,7 +100,11 @@ export function ChatbotModelCard({
         {state === "saved" && (
           <p className="text-xs text-emerald-400">Saved. New conversations use this model from now on.</p>
         )}
-        {state === "error" && <p className="text-xs text-red-400">{error}</p>}
+        {state === "error" && (
+          <p role="alert" className="text-xs text-red-400">
+            {error}
+          </p>
+        )}
       </div>
     </section>
   );

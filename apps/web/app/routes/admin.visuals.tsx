@@ -4,6 +4,15 @@ import { pageShopId } from "~/lib/pageShop";
 import { getSessionToken, requireRole } from "~/lib/auth";
 import { createApiClient } from "~/lib/api";
 import { VisualManager, type VisualsData } from "~/components/VisualManager";
+import { pageTitle } from "~/lib/pageTitle";
+import { LoadError } from "~/components/ui/LoadError";
+import { ErrorScreen } from "~/components/ErrorScreen";
+
+export const meta = () => pageTitle("Visuals");
+
+export function ErrorBoundary() {
+  return <ErrorScreen homeHref="/admin" homeLabel="Back to overview" />;
+}
 
 export async function loader({ request, context }: LoaderFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -13,16 +22,18 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const shopId = pageShopId(request, user);
 
   let visuals: VisualsData | null = null;
+  let loadError = false;
   if (shopId) {
     try {
       visuals = await api.get<VisualsData>(`/api/shops/${shopId}/visuals`);
     } catch {
-      visuals = null;
+      loadError = true;
     }
   }
 
   return json({
     visuals,
+    loadError,
     shopId,
     apiUrl: env.API_URL,
     developerNeedsShop: user.role === "developer" && !shopId,
@@ -30,7 +41,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
 }
 
 export default function AdminVisuals() {
-  const { visuals, shopId, apiUrl, developerNeedsShop } = useLoaderData<typeof loader>();
+  const { visuals, loadError, shopId, apiUrl, developerNeedsShop } = useLoaderData<typeof loader>();
 
   return (
     <div>
@@ -49,8 +60,10 @@ export default function AdminVisuals() {
 
       {shopId && visuals ? (
         <VisualManager role="admin" shopId={shopId} apiUrl={apiUrl} {...visuals} />
+      ) : loadError ? (
+        <LoadError what="your logo and photos" />
       ) : !developerNeedsShop ? (
-        <p className="text-sm text-white/60">Visuals are unavailable for this shop right now.</p>
+        <p className="text-sm text-white/60">No shop is assigned to this account, so there are no visuals to manage.</p>
       ) : null}
     </div>
   );
