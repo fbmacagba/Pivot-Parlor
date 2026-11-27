@@ -159,7 +159,7 @@ test.describe("Stripe payment gate", () => {
     await page.waitForLoadState("networkidle");
 
     await expect(page.getByText("Awaiting Payment")).toBeVisible();
-    await expect(page.getByText("E2E Unpaid Shop")).toBeVisible();
+    await expect(page.getByText("E2E Unpaid Shop", { exact: true })).toBeVisible();
   });
 
   test("Copy Payment Link button is visible for unpaid shop", async ({ page }) => {
