@@ -248,7 +248,11 @@ export default function AdminRefunds() {
                       Requested by {r.requested_by_name ?? "someone at the shop"} on {formatDateTime(r.requested_at)}
                     </p>
                     <p className="mt-3 whitespace-pre-wrap break-words text-sm text-white/80">{r.reason}</p>
-                    {r.has_evidence ? (
+                    {r.shop_cancelled ? (
+                      <p className="mt-2 text-xs text-white/60">
+                        Shop cancellation: your terms promise this refund, so it needs no evidence file.
+                      </p>
+                    ) : r.has_evidence ? (
                       <a
                         href={evidenceHref(r)}
                         target="_blank"
@@ -268,7 +272,8 @@ export default function AdminRefunds() {
                         it again with evidence, or have another owner approve it.
                       </p>
                     ) : (
-                      own && (
+                      own &&
+                      !r.shop_cancelled && (
                         <p className="mt-3 text-xs text-white/60">
                           You filed this request. If you approve it, the audit trail records it as self-approved.
                         </p>

@@ -792,6 +792,76 @@ describe("refund review: a deposit goes back only on an approved request", () =>
     expect(await requestRow(bareId)).toMatchObject({ status: "approved", requested_by: "user-admin", reviewed_by: "user-admin" });
   });
 
+  it("the shop cancelling: the owner files and approves in one go, with no evidence, and it is marked", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop);
+    const admin = await tokenFor("admin", shop);
+
+    const filed = await file(shop, admin, { kind: "deposit", booking_id: bookingId, shop_cancelled: true });
+    expect(filed.status).toBe(201);
+    const id = ((await filed.json()) as { data: { id: string } }).data.id;
+    expect(await requestRow(id)).toMatchObject({
+      shop_cancelled: 1,
+      reason: "Cancelled by the shop.",
+      evidence_key: null,
+      requested_by: "user-admin",
+    });
+    // Filing alone cancels nothing and refunds nothing.
+    expect(await bookingStatus(bookingId)).toBe("confirmed");
+    expect(await refundTx(bookingId)).toBeNull();
+
+    const approved = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: id });
+    expect(approved.status).toBe(200);
+    expect(await bookingStatus(bookingId)).toBe("cancelled");
+    expect(await refundTx(bookingId)).toMatchObject({ amount_pence: 1250 });
+    expect(await requestRow(id)).toMatchObject({ status: "approved", reviewed_by: "user-admin", refunded_pence: 1250 });
+
+    const entries = await env.DB
+      .prepare("SELECT action, details_json FROM audit_log WHERE shop_id = ? AND phase = 'outcome' ORDER BY rowid")
+      .bind(shop)
+      .all<{ action: string; details_json: string | null }>();
+    const marked = (entries.results ?? []).filter((e) => (e.details_json ?? "").includes('"shop_cancelled":true'));
+    expect(marked.map((e) => e.action)).toContain("payment.refund.request");
+    expect(marked.length).toBeGreaterThanOrEqual(2);
+
+    const list = await dispatch("GET", `/booking/shops/${shop}/refund-requests`, {
+      headers: { Authorization: `Bearer ${admin}` },
+    });
+    const rows = ((await list.json()) as { data: Array<Record<string, unknown>> }).data;
+    expect(rows.find((r) => r.id === id)).toMatchObject({ shop_cancelled: true });
+  });
+
+  it("the shop cancelling is the owner's call only, for a deposit on a booking still standing", async () => {
+    const { shop, staff, service } = await setupDepositShop();
+    const bookingId = await bookDeposit(shop, staff, service);
+    await settleDeposit(bookingId, shop);
+    const admin = await tokenFor("admin", shop);
+    const staffToken = await tokenFor("staff", shop);
+
+    // Staff cannot cancel for the shop.
+    const byStaff = await file(shop, staffToken, { kind: "deposit", booking_id: bookingId, shop_cancelled: true });
+    expect(byStaff.status).toBe(403);
+
+    // Not a way to refund a till sale without a reason.
+    const sale = await file(shop, admin, { kind: "sale", sale_id: "sale-x", lines: [], shop_cancelled: true });
+    expect(sale.status).toBe(400);
+
+    // A booking someone already cancelled is not the shop cancelling now.
+    expect((await cancel(shop, bookingId, admin, {})).status).toBe(200);
+    const late = await file(shop, admin, { kind: "deposit", booking_id: bookingId, shop_cancelled: true });
+    expect(late.status).toBe(400);
+    expect(((await late.json()) as { error: string }).error).toMatch(/already cancelled/);
+
+    // An ordinary request on it still needs evidence before its filer approves.
+    const ordinary = await file(shop, admin, { kind: "deposit", booking_id: bookingId, reason: "Customer rang to cancel" });
+    const ordinaryId = ((await ordinary.json()) as { data: { id: string } }).data.id;
+    expect(await requestRow(ordinaryId)).toMatchObject({ shop_cancelled: 0 });
+    const refused = await cancel(shop, bookingId, admin, { refundDeposit: true, refund_request_id: ordinaryId });
+    expect(refused.status).toBe(403);
+    expect(await refundTx(bookingId)).toBeNull();
+  });
+
   it("a request for one booking cannot refund another", async () => {
     const { shop, staff, service } = await setupDepositShop();
     const first = await bookDeposit(shop, staff, service, 0);

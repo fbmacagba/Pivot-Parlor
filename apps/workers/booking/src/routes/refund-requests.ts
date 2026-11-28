@@ -20,6 +20,7 @@ import {
   NOTE_MAX,
   REASON_MAX,
   REASON_MIN,
+  SHOP_CANCELLED_REASON,
   evidencePrefix,
   type RefundLine,
 } from "../lib/refund-requests.js";
@@ -35,7 +36,7 @@ async function refundableDeposit(
   db: D1Database,
   shopId: string,
   bookingId: string
-): Promise<{ ok: true; pence: number } | { ok: false; status: 400 | 404; error: string }> {
+): Promise<{ ok: true; pence: number; bookingStatus: string } | { ok: false; status: 400 | 404; error: string }> {
   const booking = await db
     .prepare("SELECT status FROM bookings WHERE id = ? AND shop_id = ? LIMIT 1")
     .bind(bookingId, shopId)
@@ -70,7 +71,7 @@ async function refundableDeposit(
     !depositTx.sale_id &&
     pence > 0;
   if (!charged) return { ok: false, status: 400, error: "This booking has no deposit that can be refunded" };
-  return { ok: true, pence };
+  return { ok: true, pence, bookingStatus: booking.status };
 }
 
 // ─── POST /:shopId/refund-requests — file a request ──────────────────────────
@@ -92,6 +93,7 @@ r.post("/:shopId/refund-requests", async (c) => {
     evidence_key?: string;
     evidence_name?: string;
     evidence_type?: string;
+    shop_cancelled?: boolean | string;
   }>(c.req);
   if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
 
@@ -99,7 +101,20 @@ r.post("/:shopId/refund-requests", async (c) => {
   if (kind !== "deposit" && kind !== "sale") {
     return c.json({ success: false, error: "kind must be deposit or sale" }, 400);
   }
-  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  // A shop cancellation: the shop is cancelling the booking itself, and its
+  // terms promise that refund. Only someone who can cancel for the shop may
+  // say so, and only about a deposit.
+  const shopCancelled = body.shop_cancelled === true || body.shop_cancelled === "1";
+  if (shopCancelled) {
+    if (user.role !== "admin" && user.role !== "developer") {
+      return c.json({ success: false, error: "Only the owner can cancel a booking as the shop" }, 403);
+    }
+    if (kind !== "deposit") {
+      return c.json({ success: false, error: "Only a booking deposit can be refunded as a shop cancellation" }, 400);
+    }
+  }
+  const written = typeof body.reason === "string" ? body.reason.trim() : "";
+  const reason = shopCancelled && written.length === 0 ? SHOP_CANCELLED_REASON : written;
   if (reason.length < REASON_MIN) {
     return c.json(
       { success: false, error: `Say why this refund is due, in at least ${REASON_MIN} characters.` },
@@ -137,6 +152,15 @@ r.post("/:shopId/refund-requests", async (c) => {
     if (!targetId) return c.json({ success: false, error: "booking_id is required" }, 400);
     const deposit = await refundableDeposit(db, shopId, targetId);
     if (!deposit.ok) return c.json({ success: false, error: deposit.error }, deposit.status);
+    // The shop can only cancel a booking that is still standing. One that is
+    // already cancelled was cancelled by someone, for a reason on record; its
+    // deposit goes back through an ordinary request.
+    if (shopCancelled && deposit.bookingStatus === "cancelled") {
+      return c.json(
+        { success: false, error: "This booking is already cancelled. Ask for the refund with a reason instead." },
+        400
+      );
+    }
     amountPence = deposit.pence;
   } else {
     targetId = typeof body.sale_id === "string" ? body.sale_id : "";
@@ -167,6 +191,7 @@ r.post("/:shopId/refund-requests", async (c) => {
           [column]: targetId,
           amount_pence: amountPence,
           evidence: evidenceKey !== null,
+          ...(shopCancelled ? { shop_cancelled: true } : {}),
         },
       },
       async (): Promise<Response> => {
@@ -176,8 +201,8 @@ r.post("/:shopId/refund-requests", async (c) => {
           .prepare(
             `INSERT INTO refund_requests
                (id, shop_id, kind, booking_id, sale_id, lines_json, amount_pence, reason,
-                evidence_key, evidence_name, evidence_type, status, requested_by, requested_at)
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', ?12, ?13
+                evidence_key, evidence_name, evidence_type, status, requested_by, requested_at, shop_cancelled)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', ?12, ?13, ?15
              WHERE NOT EXISTS (
                SELECT 1 FROM refund_requests
                WHERE shop_id = ?2 AND kind = ?3 AND ${column} = ?14 AND status IN ('pending','approving')
@@ -197,7 +222,8 @@ r.post("/:shopId/refund-requests", async (c) => {
             evidenceType,
             user.sub,
             nowIso,
-            targetId
+            targetId,
+            shopCancelled ? 1 : 0
           )
           .run();
         if ((inserted.meta?.changes ?? 0) !== 1) {
@@ -239,7 +265,7 @@ r.get("/:shopId/refund-requests", async (c) => {
       `SELECT rr.id, rr.kind, rr.booking_id, rr.sale_id, rr.lines_json, rr.amount_pence, rr.reason,
               rr.evidence_name, rr.evidence_type, rr.evidence_key IS NOT NULL AS has_evidence,
               rr.status, rr.requested_by, rr.requested_at, rr.reviewed_by, rr.reviewed_at,
-              rr.review_note, rr.refunded_pence,
+              rr.review_note, rr.refunded_pence, rr.shop_cancelled,
               ru.name AS requested_by_name, rv.name AS reviewed_by_name,
               COALESCE(b.customer_name, s.customer_name) AS customer_name,
               b.booking_date, b.start_time, b.status AS booking_status,
@@ -258,6 +284,7 @@ r.get("/:shopId/refund-requests", async (c) => {
   const data = (rows.results ?? []).map((row) => ({
     ...row,
     has_evidence: Number(row.has_evidence) === 1,
+    shop_cancelled: Number(row.shop_cancelled) === 1,
     // A claim in flight reads as pending to the page.
     status: row.status === "approving" ? "pending" : row.status,
   }));

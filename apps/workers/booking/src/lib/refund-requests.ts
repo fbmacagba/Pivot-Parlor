@@ -35,6 +35,8 @@ export interface RefundRequestRow {
   reviewed_at: string | null;
   review_note: string | null;
   refunded_pence: number | null;
+  /** 1 when the shop cancelled the booking: the refund is owed, not asked for. */
+  shop_cancelled: number;
 }
 
 export interface RefundLine {
@@ -47,6 +49,9 @@ export const REASON_MIN = 10;
 export const REASON_MAX = 1000;
 export const NOTE_MAX = 500;
 const STALE_CLAIM_MS = 10 * 60 * 1000;
+
+/** The reason a shop cancellation carries when none is written. */
+export const SHOP_CANCELLED_REASON = "Cancelled by the shop.";
 
 export const SELF_APPROVAL_MESSAGE =
   "You filed this request, and it has no evidence attached. Someone else must approve it, or decline it and file it again with evidence.";
@@ -87,17 +92,20 @@ export async function getRefundRequest(
 }
 
 export type ClaimResult =
-  | { ok: true; request: RefundRequestRow; selfApproved: boolean }
+  | { ok: true; request: RefundRequestRow; selfApproved: boolean; shopCancelled: boolean }
   | { ok: false; status: 400 | 403 | 404 | 409; error: string };
 
 /**
  * Nobody approves their own request on their word alone: the person who
  * filed a request may approve it only when it carries an evidence file.
+ * A shop cancellation is the exception: the shop's terms promise that refund,
+ * so whoever cancelled may approve it.
  */
 export function selfApprovalBlocked(
-  request: Pick<RefundRequestRow, "requested_by" | "evidence_key">,
+  request: Pick<RefundRequestRow, "requested_by" | "evidence_key" | "shop_cancelled">,
   approverId: string
 ): boolean {
+  if (Number(request.shop_cancelled) === 1) return false;
   return request.requested_by === approverId && !request.evidence_key;
 }
 
@@ -131,6 +139,7 @@ export async function claimRefundRequest(
   if (
     own &&
     own.requested_by === args.approverId &&
+    Number(own.shop_cancelled) !== 1 &&
     own.evidence_key &&
     (own.status === "pending" || own.status === "approving") &&
     !(await args.evidence.head(own.evidence_key))
@@ -142,13 +151,18 @@ export async function claimRefundRequest(
       `UPDATE refund_requests SET status = 'approving', reviewed_at = ?1
        WHERE id = ?2 AND shop_id = ?3 AND kind = ?4 AND ${column} = ?5
          AND (status = 'pending' OR (status = 'approving' AND reviewed_at < ?6))
-         AND (requested_by <> ?7 OR evidence_key IS NOT NULL)`
+         AND (requested_by <> ?7 OR evidence_key IS NOT NULL OR shop_cancelled = 1)`
     )
     .bind(nowIso, args.requestId, args.shopId, args.kind, args.targetId, staleBefore, args.approverId)
     .run();
   const request = await getRefundRequest(db, args.shopId, args.requestId);
   if ((claim.meta?.changes ?? 0) === 1 && request) {
-    return { ok: true, request, selfApproved: request.requested_by === args.approverId };
+    return {
+      ok: true,
+      request,
+      selfApproved: request.requested_by === args.approverId,
+      shopCancelled: Number(request.shop_cancelled) === 1,
+    };
   }
   if (!request || request.kind !== args.kind || request[column] !== args.targetId) {
     return { ok: false, status: 404, error: "Refund request not found" };

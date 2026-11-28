@@ -94,6 +94,20 @@ describe("filing a refund request", () => {
     expect(await evidenceKeys(shopId)).toHaveLength(0);
   });
 
+  it("forwards a shop cancellation from the form, and nothing else the form adds", async () => {
+    const shopId = await seedShop("shop-cancel");
+    const token = await adminToken(shopId);
+    const form = new FormData();
+    form.set("kind", "deposit");
+    form.set("booking_id", "b-1");
+    form.set("shop_cancelled", "1");
+    form.set("status", "approved");
+    const res = await postForm(`/api/shops/${shopId}/refund-requests`, token, form);
+    expect(res.status).toBe(201);
+    const forwarded = JSON.parse(((await res.json()) as Echo).data.body ?? "{}") as Record<string, unknown>;
+    expect(forwarded).toEqual({ kind: "deposit", booking_id: "b-1", shop_cancelled: true });
+  });
+
   it("refuses a file that is not an image or a PDF, and one over 5MB, storing nothing", async () => {
     const shopId = await seedShop("bad-evidence");
     const token = await adminToken(shopId);

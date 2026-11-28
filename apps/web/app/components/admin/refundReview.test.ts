@@ -139,6 +139,11 @@ describe("approving your own request", () => {
     expect(selfApprovalBlocked({ requested_by: null, has_evidence: false }, "u-1")).toBe(false);
   });
 
+  it("is never blocked for a shop cancellation", () => {
+    expect(selfApprovalBlocked({ requested_by: "u-1", has_evidence: false, shop_cancelled: true }, "u-1")).toBe(false);
+    expect(selfApprovalBlocked({ requested_by: "u-1", has_evidence: false, shop_cancelled: false }, "u-1")).toBe(true);
+  });
+
   it("the Refunds page is told who is looking", async () => {
     stubApi();
     const res = asResponse(
@@ -243,6 +248,37 @@ describe("bookings page", () => {
     const noReason = await post(bookingsPage, "/admin/bookings", { intent: "request_refund", bookingId: "b-1", cancel: "1", reason: "" });
     expect(noReason.status).toBe(400);
     expect(writes().map((c) => c.path)).toEqual(["/api/shops/shop-1/refund-requests"]);
+  });
+
+  it("the shop cancelling files a shop cancellation, then cancels with the refund under that request", async () => {
+    stubApi({ "/api/shops/shop-1/refund-requests": { id: "rr-shop", amount_pence: 1250 } });
+    const res = await post(bookingsPage, "/admin/bookings", { intent: "shop_cancel", bookingId: "b-1" });
+    expect(res.body).toEqual({ ok: true });
+    expect(writes().map((c) => [c.method, c.path, c.body])).toEqual([
+      ["POST", "/api/shops/shop-1/refund-requests", { kind: "deposit", booking_id: "b-1", shop_cancelled: "1" }],
+      [
+        "PUT",
+        "/api/shops/shop-1/bookings/b-1/status",
+        { status: "cancelled", refund_deposit: true, refund_request_id: "rr-shop" },
+      ],
+    ]);
+  });
+
+  it("the shop cancelling leaves the booking alone when the request is refused", async () => {
+    stubApi({ "/api/shops/shop-1/refund-requests": 400 });
+    const res = await post(bookingsPage, "/admin/bookings", { intent: "shop_cancel", bookingId: "b-1" });
+    expect(res.status).toBe(400);
+    expect(writes().map((c) => c.path)).toEqual(["/api/shops/shop-1/refund-requests"]);
+  });
+
+  it("the shop cancelling says where the request waits when the refund fails", async () => {
+    stubApi({
+      "/api/shops/shop-1/refund-requests": { id: "rr-shop", amount_pence: 1250 },
+      "/api/shops/shop-1/bookings/b-1/status": 502,
+    });
+    const res = await post(bookingsPage, "/admin/bookings", { intent: "shop_cancel", bookingId: "b-1" });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/did not go through.*Refunds page/);
   });
 
   it("a request on an already cancelled booking changes no status", async () => {

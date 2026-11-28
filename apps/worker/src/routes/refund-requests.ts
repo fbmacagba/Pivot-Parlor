@@ -78,6 +78,7 @@ refundRequests.post("/", requireShopRole("admin", "staff"), async (c) => {
       booking_id: form.booking_id,
       sale_id: form.sale_id,
       reason: form.reason,
+      ...(form.shop_cancelled === "1" ? { shop_cancelled: true } : {}),
       ...(lines !== undefined ? { lines } : {}),
     };
     if (form.evidence instanceof File && form.evidence.size > 0) file = form.evidence;

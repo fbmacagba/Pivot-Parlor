@@ -1,0 +1,12 @@
+-- 055: a refund request can be a shop cancellation.
+--
+-- The shop's terms promise the customer a full refund when the SHOP cancels a
+-- booking. That refund is owed, not discretionary, so it must not wait on an
+-- evidence file: an owner who cancels a booking as the shop may approve the
+-- request themselves. shop_cancelled = 1 marks those requests, so the
+-- exception is visible on the request and in the audit trail rather than
+-- inferred from its wording.
+--
+-- Only a deposit request filed by an owner or a developer, for a booking that
+-- is not already cancelled, may carry it (the booking worker enforces this).
+ALTER TABLE refund_requests ADD COLUMN shop_cancelled INTEGER NOT NULL DEFAULT 0;
