@@ -15,16 +15,23 @@
     "@playwright/test": "^1.58.2",
     "dotenv": "^17.3.1",
     "prettier": "^3.7.4",
+    "sharp": "0.35.5",
     "turbo": "^2.8.17",
     "typescript": "5.9.2",
-    "wrangler": "^4.154.0"
+    "undici": "7.30.2",
+    "wrangler": "^4.154.0",
+    "zod": "4.6.7"
   },
   "engines": {
     "node": ">=18"
   },
   "overrides": {
     "miniflare": {
-      "undici": "7.30.2"
+      "undici": "$undici",
+      "sharp": "$sharp"
+    },
+    "@cloudflare/vitest-pool-workers": {
+      "zod": "$zod"
     }
   },
   "packageManager": "npm@11.10.1",
