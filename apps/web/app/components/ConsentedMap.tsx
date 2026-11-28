@@ -14,7 +14,9 @@ export function ConsentedMap({ title, src, className = "h-full w-full" }: { titl
         title={title}
         className={`${className} border-0`}
         loading="lazy"
-        referrerPolicy="no-referrer-when-downgrade"
+        // Google gets the site's address only, never the page: the booking
+        // confirmation page carries the booking's id in its address.
+        referrerPolicy="strict-origin-when-cross-origin"
         src={src}
       />
     );
