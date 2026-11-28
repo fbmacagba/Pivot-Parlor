@@ -35,6 +35,18 @@ const EVIDENCE_TYPES: Record<string, string> = {
   "application/pdf": "pdf",
 };
 
+type StoredEvidence = { evidence_key: string; evidence_name: string; evidence_type: string };
+
+/** Store an evidence file in the private audit bucket, or say why it cannot be. */
+async function storeEvidence(c: Ctx, shopId: string, file: File): Promise<StoredEvidence | { error: string }> {
+  const ext = EVIDENCE_TYPES[file.type];
+  if (!ext) return { error: "Evidence must be a PNG, JPEG or WebP image, or a PDF." };
+  if (file.size > MAX_EVIDENCE_BYTES) return { error: "Evidence file too large (max 5MB)" };
+  const key = `refund-evidence/${shopId}/${crypto.randomUUID()}.${ext}`;
+  await c.env.AUDIT_ARCHIVE.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
+  return { evidence_key: key, evidence_name: file.name.slice(0, 200), evidence_type: file.type };
+}
+
 function bookingHeaders(c: Ctx): Headers {
   // The booking worker's auth is Bearer-only; a cookie session carries the
   // same JWT, so mint the header from whichever transport arrived.
@@ -93,23 +105,10 @@ refundRequests.post("/", requireShopRole("admin", "staff"), async (c) => {
 
   let evidenceKey: string | null = null;
   if (file) {
-    const ext = EVIDENCE_TYPES[file.type];
-    if (!ext) {
-      return c.json({ success: false, error: "Evidence must be a PNG, JPEG or WebP image, or a PDF." }, 400);
-    }
-    if (file.size > MAX_EVIDENCE_BYTES) {
-      return c.json({ success: false, error: "Evidence file too large (max 5MB)" }, 400);
-    }
-    evidenceKey = `refund-evidence/${shopId}/${crypto.randomUUID()}.${ext}`;
-    await c.env.AUDIT_ARCHIVE.put(evidenceKey, await file.arrayBuffer(), {
-      httpMetadata: { contentType: file.type },
-    });
-    fields = {
-      ...fields,
-      evidence_key: evidenceKey,
-      evidence_name: file.name.slice(0, 200),
-      evidence_type: file.type,
-    };
+    const stored = await storeEvidence(c, shopId, file);
+    if ("error" in stored) return c.json({ success: false, error: stored.error }, 400);
+    evidenceKey = stored.evidence_key;
+    fields = { ...fields, ...stored };
   }
 
   let res: Response;
@@ -123,6 +122,39 @@ refundRequests.post("/", requireShopRole("admin", "staff"), async (c) => {
   }
   // No request was filed: the file belongs to nothing, so it does not stay.
   if (!res.ok && evidenceKey) await c.env.AUDIT_ARCHIVE.delete(evidenceKey).catch(() => {});
+  return res;
+});
+
+// Attach evidence to a waiting request that has none. The booking worker
+// decides whether it may be attached (once, by its filer or the owner); the
+// file is stored first and removed again when the answer is no.
+refundRequests.post("/:requestId/evidence", requireShopRole("admin", "staff"), async (c) => {
+  const shopId = c.req.param("shopId")!;
+  let form: Record<string, string | File>;
+  try {
+    form = (await c.req.parseBody()) as Record<string, string | File>;
+  } catch {
+    return c.json({ success: false, error: "Invalid multipart body" }, 400);
+  }
+  const file = form.evidence instanceof File && form.evidence.size > 0 ? form.evidence : null;
+  if (!file) return c.json({ success: false, error: "Choose a file to attach." }, 400);
+  const stored = await storeEvidence(c, shopId, file);
+  if ("error" in stored) return c.json({ success: false, error: stored.error }, 400);
+
+  let res: Response;
+  try {
+    res = await c.env.BOOKING.fetch(
+      new Request(bookingUrl(c, `/${encodeURIComponent(c.req.param("requestId")!)}/evidence`), {
+        method: "POST",
+        headers: bookingHeaders(c),
+        body: JSON.stringify(stored),
+      })
+    );
+  } catch (e) {
+    await c.env.AUDIT_ARCHIVE.delete(stored.evidence_key).catch(() => {});
+    throw e;
+  }
+  if (!res.ok) await c.env.AUDIT_ARCHIVE.delete(stored.evidence_key).catch(() => {});
   return res;
 });
 

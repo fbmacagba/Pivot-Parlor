@@ -103,6 +103,7 @@ export const ROUTE_AUDIT: Record<string, AuditDeclaration> = {
   "ALL /api/shops/:shopId/sales/:saleId/void": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
   "ALL /api/shops/:shopId/sales/:saleId/refund": { exempt: "pure proxy to the booking worker, which records the change itself (Plan 3)" },
   "POST /api/shops/:shopId/refund-requests": { exempt: "forwards to the booking worker, which records the request itself; the evidence file stored here is named on that entry and removed when the request is refused" },
+  "POST /api/shops/:shopId/refund-requests/:requestId/evidence": { exempt: "forwards to the booking worker, which records the attachment itself; the file stored here is removed when the attachment is refused" },
   "POST /api/shops/:shopId/refund-requests/:requestId/decline": { exempt: "pure proxy to the booking worker, which records the change itself" },
 };
 

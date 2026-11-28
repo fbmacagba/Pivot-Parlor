@@ -143,6 +143,45 @@ describe("filing a refund request", () => {
   });
 });
 
+describe("adding evidence to a waiting request", () => {
+  it("stores the file privately and forwards its key to the booking worker", async () => {
+    const shopId = await seedShop("add-evidence");
+    const token = await staffToken(shopId);
+    const form = new FormData();
+    form.set("evidence", new File([new Uint8Array([1, 2, 3])], "text.jpg", { type: "image/jpeg" }));
+    const res = await postForm(`/api/shops/${shopId}/refund-requests/rr-1/evidence`, token, form);
+    expect(res.status).toBe(201);
+    const echo = (await res.json()) as Echo;
+    expect(echo.data.url).toBe(`https://booking/booking/shops/${shopId}/refund-requests/rr-1/evidence`);
+    const forwarded = JSON.parse(echo.data.body ?? "{}") as Record<string, unknown>;
+    const keys = await evidenceKeys(shopId);
+    expect(keys).toHaveLength(1);
+    expect(forwarded).toEqual({ evidence_key: keys[0], evidence_name: "text.jpg", evidence_type: "image/jpeg" });
+  });
+
+  it("needs a file of an allowed kind, and stores nothing otherwise", async () => {
+    const shopId = await seedShop("add-evidence-bad");
+    const token = await adminToken(shopId);
+    const none = await postForm(`/api/shops/${shopId}/refund-requests/rr-1/evidence`, token, new FormData());
+    expect(none.status).toBe(400);
+    const form = new FormData();
+    form.set("evidence", new File(["<p>x</p>"], "note.html", { type: "text/html" }));
+    const bad = await postForm(`/api/shops/${shopId}/refund-requests/rr-1/evidence`, token, form);
+    expect(bad.status).toBe(400);
+    expect(await evidenceKeys(shopId)).toHaveLength(0);
+  });
+
+  it("is closed to another shop's staff", async () => {
+    const shopId = await seedShop("add-evidence-own");
+    const other = await seedShop("add-evidence-other");
+    const form = new FormData();
+    form.set("evidence", new File([new Uint8Array([1])], "a.png", { type: "image/png" }));
+    const res = await postForm(`/api/shops/${shopId}/refund-requests/rr-1/evidence`, await staffToken(other), form);
+    expect(res.status).toBe(403);
+    expect(await evidenceKeys(shopId)).toHaveLength(0);
+  });
+});
+
 describe("reviewing refund requests", () => {
   it("forwards the list, and lets only the owner decline", async () => {
     const shopId = await seedShop("review");

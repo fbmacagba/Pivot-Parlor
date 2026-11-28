@@ -116,3 +116,38 @@ export async function fileRefundRequest(
   }
   return payload.data;
 }
+
+/** A refund request id, safe to put in an API path. */
+const REFUND_REQUEST_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
+/**
+ * The `add_evidence` form intent, shared by the pages that list requests
+ * (server side): attach the posted file to a waiting request that has none.
+ * The API decides whether it may be attached (once, by whoever filed the
+ * request or the owner).
+ */
+export async function addEvidenceFromForm(
+  apiUrl: string,
+  token: string,
+  shopId: string,
+  form: FormData
+): Promise<{ status: number; body: { ok: true; message: string } | { error: string } }> {
+  const requestId = String(form.get("requestId") ?? "").trim();
+  if (!REFUND_REQUEST_ID.test(requestId)) return { status: 400, body: { error: "Missing refund request." } };
+  const evidence = evidenceFrom(form);
+  if (!evidence) return { status: 400, body: { error: "Choose a file to attach." } };
+  const problem = refundEvidenceProblem(evidence);
+  if (problem) return { status: 400, body: { error: problem } };
+
+  const send = new FormData();
+  send.set("evidence", evidence, evidence.name);
+  const res = await fetch(
+    `${apiUrl}/api/shops/${encodeURIComponent(shopId)}/refund-requests/${requestId}/evidence`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: send }
+  );
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+    return { status: 400, body: { error: payload?.error ?? "The file could not be attached." } };
+  }
+  return { status: 200, body: { ok: true, message: "Evidence attached to the request." } };
+}

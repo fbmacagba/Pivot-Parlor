@@ -124,6 +124,7 @@ const LABELS: Record<string, string> = {
   "payment.refund.issue": "Refund issued",
   "payment.refund.request": "Refund requested",
   "payment.refund.decline": "Refund request declined",
+  "payment.refund.evidence": "Refund evidence added",
   "payment.payout": "Payout recorded",
   "payment.stripe.webhook": "Stripe event received",
   "account.create": "Account created",

@@ -330,6 +330,30 @@ describe("refunds page", () => {
     expect(writes()).toEqual([]);
   });
 
+  it("adding evidence sends only the file, to the request named", async () => {
+    stubApi({ "/api/shops/shop-1/refund-requests/rr-1/evidence": { id: "rr-1", has_evidence: true } });
+    const evidence = new File([new Uint8Array([1, 2])], "text.png", { type: "image/png" });
+    const res = await post(refundsPage, "/admin/refunds", { intent: "add_evidence", requestId: "rr-1", evidence });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(writes().map((c) => [c.method, c.path, c.body])).toEqual([
+      ["POST", "/api/shops/shop-1/refund-requests/rr-1/evidence", { evidence: { name: "text.png", type: "image/png", size: 2 } }],
+    ]);
+  });
+
+  it("adding evidence needs a file of an allowed kind and a real request id, and shows the API's refusal", async () => {
+    stubApi({ "/api/shops/shop-1/refund-requests/rr-1/evidence": 409 });
+    const png = new File([new Uint8Array([1])], "a.png", { type: "image/png" });
+    const html = new File(["<p>x</p>"], "note.html", { type: "text/html" });
+    expect((await post(refundsPage, "/admin/refunds", { intent: "add_evidence", requestId: "rr-1" })).status).toBe(400);
+    expect((await post(refundsPage, "/admin/refunds", { intent: "add_evidence", requestId: "rr-1", evidence: html })).status).toBe(400);
+    expect((await post(refundsPage, "/admin/refunds", { intent: "add_evidence", requestId: "../x", evidence: png })).status).toBe(400);
+    expect(writes()).toEqual([]);
+
+    const refused = await post(refundsPage, "/admin/refunds", { intent: "add_evidence", requestId: "rr-1", evidence: png });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe("The API said no");
+  });
+
   it("declining sends the note and moves no money", async () => {
     stubApi();
     const res = await post(refundsPage, "/admin/refunds", { intent: "decline", requestId: "rr-sale", note: " Outside the window " });

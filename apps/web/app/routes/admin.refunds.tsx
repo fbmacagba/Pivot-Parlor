@@ -22,7 +22,8 @@ import { tenderLabel } from "~/components/admin/salesSummary";
 import { formatDateTime, formatDay } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { pageTitle } from "~/lib/pageTitle";
-import { selfApprovalBlocked, type RefundRequest } from "~/lib/refundRequests";
+import { addEvidenceFromForm, selfApprovalBlocked, type RefundRequest } from "~/lib/refundRequests";
+import { AddEvidence } from "~/components/admin/AddEvidence";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 import { useFetcherResult } from "~/lib/useFetcherResult";
 
@@ -75,6 +76,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
   const requestId = String(form.get("requestId") ?? "").trim();
   const intent = String(form.get("intent") ?? "");
+  if (shopId && intent === "add_evidence") {
+    const added = await addEvidenceFromForm(env.API_URL, token, shopId, form);
+    return json<ActionData>(added.body, { status: added.status });
+  }
   if (!shopId || !REQUEST_ID.test(requestId)) {
     return json<ActionData>({ error: "Missing shop or refund request." }, { status: 400 });
   }
@@ -264,12 +269,15 @@ export default function AdminRefunds() {
                         <span className="sr-only"> (opens in a new tab)</span>
                       </a>
                     ) : (
-                      <p className="mt-2 text-xs text-amber-200">No evidence file was attached.</p>
+                      <>
+                        <p className="mt-2 text-xs text-amber-200">No evidence file was attached.</p>
+                        <AddEvidence shopId={shopId} requestId={r.id} />
+                      </>
                     )}
                     {blocked ? (
                       <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
-                        You filed this request without evidence, so you cannot approve it yourself. Decline it and file
-                        it again with evidence, or have another owner approve it.
+                        You filed this request without evidence, so you cannot approve it yourself. Add evidence above, or
+                        have another owner approve it.
                       </p>
                     ) : (
                       own &&
