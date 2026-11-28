@@ -27,6 +27,8 @@ import {
 
 const r = new Hono<{ Bindings: Env }>();
 
+const STAFF_OWN_BOOKINGS_ONLY = "You can only ask for a deposit refund on your own bookings.";
+
 /**
  * The deposit a booking still holds that could be refunded, in pence, or why
  * there is none. The same reading the deposit-cancel route takes before it
@@ -150,6 +152,21 @@ r.post("/:shopId/refund-requests", async (c) => {
   if (kind === "deposit") {
     targetId = typeof body.booking_id === "string" ? body.booking_id : "";
     if (!targetId) return c.json({ success: false, error: "booking_id is required" }, 400);
+    // Staff ask only about bookings that are their own. (A booking that does
+    // not exist falls through to the 404 below.)
+    if (user.role === "staff") {
+      const mine = await db
+        .prepare(
+          `SELECT st.user_id FROM bookings b
+           LEFT JOIN staff st ON st.id = b.staff_id AND st.shop_id = b.shop_id AND st.is_active = 1
+           WHERE b.id = ? AND b.shop_id = ? LIMIT 1`
+        )
+        .bind(targetId, shopId)
+        .first<{ user_id: string | null }>();
+      if (mine && mine.user_id !== user.sub) {
+        return c.json({ success: false, error: STAFF_OWN_BOOKINGS_ONLY }, 403);
+      }
+    }
     const deposit = await refundableDeposit(db, shopId, targetId);
     if (!deposit.ok) return c.json({ success: false, error: deposit.error }, deposit.status);
     // The shop can only cancel a booking that is still standing. One that is

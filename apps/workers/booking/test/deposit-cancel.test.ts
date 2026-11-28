@@ -40,6 +40,17 @@ const evtId = () => `evt_dc_${++evtN}_${crypto.randomUUID().slice(0, 8)}`;
 const FUTURE_DATE = "2099-09-20";
 const customer = { customer_name: "Dana", customer_email: "dana@test.local" };
 
+/** Make the test's staff sign-in (tokenFor("staff")) the person this staff record belongs to. */
+async function signInAs(staffId: string) {
+  await env.DB
+    .prepare(
+      `INSERT OR IGNORE INTO platform_users (id, name, email, password_hash, role, shop_id)
+       VALUES ('user-staff', 'Test staff', 'user-staff@test.local', 'x', 'staff', NULL)`
+    )
+    .run();
+  await env.DB.prepare("UPDATE staff SET user_id = 'user-staff' WHERE id = ?").bind(staffId).run();
+}
+
 async function setupDepositShop() {
   const shop = await seedShop("Cancel Shop");
   await env.DB
@@ -729,6 +740,23 @@ describe("refund review: a deposit goes back only on an approved request", () =>
     const staffToken = await tokenFor("staff", shop);
 
     expect((await cancel(shop, bookingId, staffToken, {})).status).toBe(200);
+    // The booking belongs to someone else on the team: not theirs to ask about.
+    const notMine = await file(shop, staffToken, {
+      kind: "deposit",
+      booking_id: bookingId,
+      reason: "Asking about a colleague's booking",
+    });
+    expect(notMine.status).toBe(403);
+    const none = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM refund_requests WHERE booking_id = ?")
+      .bind(bookingId)
+      .first<{ n: number }>();
+    expect(none?.n).toBe(0);
+    // A booking that does not exist is still a plain "not found".
+    const missing = await file(shop, staffToken, { kind: "deposit", booking_id: "no-such-booking", reason: "Nothing to see here" });
+    expect(missing.status).toBe(404);
+
+    await signInAs(staff);
     const filed = await file(shop, staffToken, {
       kind: "deposit",
       booking_id: bookingId,

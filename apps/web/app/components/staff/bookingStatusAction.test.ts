@@ -135,6 +135,60 @@ describe("staff booking page: start and complete", () => {
   });
 });
 
+describe("staff booking page: asking for the deposit back", () => {
+  const ask = (fields: Record<string, string | File>) => {
+    const body = new FormData();
+    for (const [k, v] of Object.entries(fields)) body.set(k, v);
+    const request = new Request("https://pivotparlor.com/staff/bookings/b-1", {
+      method: "POST",
+      headers: { Cookie: "pp_session=tok.abc.123" },
+      body,
+    });
+    return bookingPage.action({ request, context, params: { bookingId: "b-1" } } as never);
+  };
+  const filedAnswer = () => Response.json({ success: true, data: { id: "rr-1", amount_pence: 1250 } }, { status: 201 });
+
+  it("files a deposit request for this booking at the staff member's own shop", async () => {
+    stubApi("staff", filedAnswer);
+    const { status: http, body } = await answerOf(
+      await ask({ intent: "refund_request", reason: "Customer rang on Tuesday to cancel", shopId: "shop-other" }),
+    );
+    expect(http).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(calls.map((c) => [c.method, c.path])).toEqual([["POST", "/api/shops/shop-1/refund-requests"]]);
+  });
+
+  it("needs a real reason and an allowed kind of file before it calls the API", async () => {
+    stubApi("staff", filedAnswer);
+    expect((await answerOf(await ask({ intent: "refund_request", reason: "short" }))).status).toBe(400);
+    const html = new File(["<p>x</p>"], "note.html", { type: "text/html" });
+    expect(
+      (await answerOf(await ask({ intent: "refund_request", reason: "Customer rang on Tuesday", evidence: html }))).status,
+    ).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("shows the API's own refusal", async () => {
+    stubApi("staff", () =>
+      Response.json({ success: false, error: "You can only ask for a deposit refund on your own bookings." }, { status: 403 }),
+    );
+    const { status: http, body } = await answerOf(
+      await ask({ intent: "refund_request", reason: "Customer rang on Tuesday to cancel" }),
+    );
+    expect(http).toBe(400);
+    expect(body.error).toBe("You can only ask for a deposit refund on your own bookings.");
+  });
+
+  it("refuses a developer", async () => {
+    stubApi("developer");
+    const { status: http } = await answerOf(
+      await ask({ intent: "refund_request", reason: "Customer rang on Tuesday to cancel" }),
+    );
+    expect(http).toBe(403);
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("staff booking page: loader", () => {
   const get = (search = "") =>
     bookingPage.loader({

@@ -9,6 +9,7 @@ import { ArrowLeft, Mail, Phone } from "lucide-react";
 import { formatPence } from "@repo/utils";
 import { ErrorScreen } from "~/components/ErrorScreen";
 import { BookingActions } from "~/components/staff/BookingActions";
+import { DepositRefundRequest } from "~/components/staff/DepositRefundRequest";
 import { bookingClock } from "~/components/staff/BookingRow";
 import { Button } from "~/components/ui/Button";
 import { LoadError } from "~/components/ui/LoadError";
@@ -19,6 +20,7 @@ import { formatDay, ukToday } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { DEVELOPER_STAFF_READ_ONLY, pageStaffId, staffMePath } from "~/lib/pageShop";
 import { pageTitle } from "~/lib/pageTitle";
+import { evidenceFrom, fileRefundRequest, refundEvidenceProblem, refundReasonProblem } from "~/lib/refundRequests";
 import { revalidateAfterFailedSubmission } from "~/lib/revalidation";
 import { useShopHref } from "~/lib/useShopHref";
 
@@ -40,6 +42,10 @@ interface BookingDetail {
   service_name: string;
   duration_min: number;
   amount_pence: number;
+  /** The deposit that could still be refunded, or null when there is none. */
+  deposit_refundable_pence?: number | null;
+  /** A refund request for the deposit already waits for the owner. */
+  deposit_refund_requested?: boolean;
 }
 
 /** The id goes into an API path, so anything but a plain id is refused. */
@@ -74,6 +80,9 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 /**
  * POST { intent: "status", status: "in_progress" | "completed" }. The Today
  * screen, the bookings list and this page all post here (BookingActions).
+ * POST { intent: "refund_request", reason, evidence? } asks the owner to
+ * refund this booking's deposit (DepositRefundRequest). The API refuses a
+ * booking that is not the staff member's own.
  */
 export async function action({ request, context, params }: ActionFunctionArgs) {
   const env = context.env as { API_URL: string };
@@ -87,6 +96,30 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   }
   const form = await readFormData(request);
   if (!form) return json({ ok: false, error: UNREADABLE_FORM }, { status: 400 });
+
+  if (form.get("intent") === "refund_request") {
+    const token = getSessionToken(request);
+    if (!token || !user.shop_id) return json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    const reason = String(form.get("reason") ?? "").trim();
+    const evidence = evidenceFrom(form);
+    const problem = refundReasonProblem(reason) ?? refundEvidenceProblem(evidence);
+    if (problem) return json({ ok: false, error: problem }, { status: 400 });
+    try {
+      await fileRefundRequest(
+        env.API_URL,
+        token,
+        user.shop_id,
+        { kind: "deposit", booking_id: bookingId, reason },
+        evidence,
+      );
+      return json({ ok: true, message: "Refund request filed. No money has moved: it waits for the owner." });
+    } catch (e) {
+      return json(
+        { ok: false, error: e instanceof Error && e.message ? e.message : "The request could not be filed." },
+        { status: 400 },
+      );
+    }
+  }
 
   const status = String(form.get("status") ?? "");
   if (form.get("intent") !== "status" || !(STAFF_STATUSES as readonly string[]).includes(status)) {
@@ -189,6 +222,14 @@ export default function StaffBookingDetail() {
               )}
             </div>
           </section>
+
+          {typeof booking.deposit_refundable_pence === "number" && (
+            <DepositRefundRequest
+              depositPence={booking.deposit_refundable_pence}
+              requested={booking.deposit_refund_requested === true}
+              readOnly={readOnly}
+            />
+          )}
 
           {readOnly ? (
             <p className="rounded-xl border border-white/10 bg-dark-100 p-5 text-sm text-white/60">

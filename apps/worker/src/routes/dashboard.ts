@@ -12,6 +12,7 @@ import {
   BOOKING_TIME_TAKEN,
   bookingTimeTaken,
   getBookingById,
+  getBookingDepositState,
   getBookingStatus,
   getPlatformRevenueByMonth,
   getRevenueByShop,
@@ -512,7 +513,43 @@ staffMeRouter.get("/bookings/:bookingId", async (c) => {
     return c.json({ success: false, error: "Booking not found" }, 404);
   }
 
-  return c.json({ success: true, data: booking });
+  // What the page needs to offer "ask for the deposit back": the deposit that
+  // could still be refunded (the booking worker's own reading, which decides
+  // when a request is filed), and whether a request already waits.
+  const { shopId } = viewed;
+  const closed = booking.status === "completed" || booking.status === "no_show";
+  const [deposit, refunded, waiting] = await Promise.all([
+    getBookingDepositState(c.env.DB, bookingId, shopId),
+    c.env.DB
+      .prepare("SELECT id FROM bw_transactions WHERE booking_id = ? AND type = 'refund' LIMIT 1")
+      .bind(bookingId)
+      .first<{ id: string }>(),
+    c.env.DB
+      .prepare(
+        `SELECT id FROM refund_requests
+         WHERE shop_id = ? AND kind = 'deposit' AND booking_id = ? AND status IN ('pending','approving') LIMIT 1`
+      )
+      .bind(shopId, bookingId)
+      .first<{ id: string }>(),
+  ]);
+  const pence = Number(deposit?.deposit_amount_pence ?? 0);
+  const refundable =
+    !closed &&
+    !refunded &&
+    Boolean(deposit?.deposit_paid_at) &&
+    Boolean(deposit?.stripe_payment_intent_id?.trim()) &&
+    deposit?.deposit_tx_status === "captured" &&
+    !deposit.deposit_tx_sale_id &&
+    pence > 0;
+
+  return c.json({
+    success: true,
+    data: {
+      ...booking,
+      deposit_refundable_pence: refundable ? pence : null,
+      deposit_refund_requested: waiting !== null,
+    },
+  });
 });
 
 /**
