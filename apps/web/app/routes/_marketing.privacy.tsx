@@ -257,13 +257,27 @@ export default function Privacy() {
                 Enquiry and contact records are retained for up to 2 years.
               </li>
               <li>
-                Account and shop data is retained for the duration of the
-                shop&rsquo;s active subscription plus 12 months after
-                termination.
+                Account and shop data is retained until the shop is deleted,
+                at the owner&rsquo;s request or when the subscription ends.
               </li>
               <li>
-                Booking and transaction records are retained for up to 7 years
-                to satisfy accounting and legal obligations.
+                Customer details on booking records (name, email address,
+                phone number and notes) are removed 2 years after the
+                appointment. Booking, payment and refund records are kept
+                without those details for at least 6 years to satisfy
+                accounting and legal obligations.
+              </li>
+              <li>
+                Conversations with a shop&rsquo;s chat assistant are deleted
+                after 90 days, and waitlist entries after 1 year.
+              </li>
+              <li>
+                Photos or documents supplied to support a refund are deleted
+                after 6 years.
+              </li>
+              <li>
+                A security record of actions taken on the system is kept for 6
+                years. Any IP address in it is removed after 30 days.
               </li>
               <li>
                 Technical and server logs are typically retained for up to 90

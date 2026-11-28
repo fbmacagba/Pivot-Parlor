@@ -196,13 +196,26 @@ export default function ShopPrivacyPolicy() {
         </p>
         <ul className="list-disc space-y-1 pl-5">
           <li>
-            Booking records are retained for up to 3 years from the date of the
-            appointment.
+            Your name, email address, phone number and notes are removed from
+            booking records 2 years after the appointment. The record of the
+            appointment and any payment is kept without your details, for
+            accounting.
+          </li>
+          <li>
+            Conversations with the chat assistant are deleted after 90 days.
+          </li>
+          <li>Waitlist entries are deleted after 1 year.</li>
+          <li>
+            Photos or documents supplied to support a refund are deleted after
+            6 years.
+          </li>
+          <li>
+            A security record of actions taken on the system is kept for 6
+            years. Any IP address in it is removed after 30 days.
           </li>
           <li>
             Account data is retained for as long as your account remains active.
           </li>
-          <li>Communication records are retained for up to 1 year.</li>
           <li>
             Technical and usage data (server logs) are typically retained for up
             to 90 days.
