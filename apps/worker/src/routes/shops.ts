@@ -70,6 +70,7 @@ import { clientIp, rateLimit } from "../middleware/rate-limit.js";
 import { e2eMockAllowed } from "../lib/e2e.js";
 import { generateOpenRouterImageBuffer } from "../services/openrouter-image-generation.js";
 import { effortFor, getLiveModels, parseTextEffort, providerKeysFromEnv } from "../services/model-registry.js";
+import { archiveShopRecords } from "../services/shop-archive.js";
 
 /** `listed(id, kind)` against the live registry (KV-cached); one read per request. */
 type ModelLookup = ((id: string, kind: "text" | "image") => boolean) & {
@@ -1384,6 +1385,11 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
         // live shop's people. Ruling 16: the date may only move forward.
         // Spec 6.2: personal details of this shop's people are blanked 30 days after it leaves.
         const redactAfter = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+        // The delete below takes the shop's payments, commission, sales and
+        // refunds with it. They are financial records, so a copy without
+        // personal details goes to the locked archive first. If that copy
+        // cannot be written this throws and the shop stays.
+        await archiveShopRecords(c.env.DB, c.env.AUDIT_ARCHIVE, shop);
         await c.env.DB.batch([
           c.env.DB.prepare("DELETE FROM generation_jobs WHERE shop_id = ?").bind(shop.id),
           c.env.DB.prepare("UPDATE contacts SET shop_id = NULL WHERE shop_id = ?").bind(shop.id),
@@ -1407,11 +1413,14 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
     if (leftover.length) console.error("[shops.delete] shop removed; KV keys left behind:", leftover.join(", "));
     // The shop's refund requests went with it (cascade), so their evidence
     // files have nothing left pointing at them. They hold personal data and
-    // go too. Like the KV keys: a failure is logged, not a failed delete.
+    // should go too. The bucket's lock refuses to delete a file younger than
+    // 2192 days, so this removes only what the lock allows; the nightly
+    // retention sweep removes the rest when each file's lock ends
+    // (refund_evidence_files_expired). A refusal is expected, not an error.
     try {
       await deleteRefundEvidenceFiles(c.env.AUDIT_ARCHIVE, shop.id);
     } catch (e) {
-      console.error("[shops.delete] shop removed; refund evidence files left behind:", e);
+      console.warn("[shops.delete] shop removed; refund evidence files stay until their lock ends:", e);
     }
     return c.json({ success: true, data: { id: shop.id } });
   } catch (e) {

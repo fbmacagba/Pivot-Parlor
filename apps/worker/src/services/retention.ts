@@ -10,6 +10,9 @@
  * What is deliberately KEPT:
  *  - Financial rows (bw_transactions, bw_commission_ledger, sales/sale_items):
  *    UK financial-record retention (~6 years) outlives every window here.
+ *    When a shop is deleted its rows go, and a copy without personal details
+ *    is written to the locked archive first (services/shop-archive.ts); the
+ *    sweep below removes those files once their lock has ended.
  *    Booking rows are anonymised IN PLACE, never deleted, so money reporting
  *    and the audit trail keep their joins.
  *  - platform_users: account data lives until account deletion (right-to-
@@ -21,7 +24,8 @@
  *    erasure request.
  */
 import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
-import { expireOldEntries, redactDueSubjects } from "../audit/retention.js";
+import { AUDIT_RETENTION_DAYS, expireOldEntries, redactDueSubjects } from "../audit/retention.js";
+import { expireArchiveFiles, SHOP_RECORDS_PREFIX } from "./shop-archive.js";
 import {
   anonymiseOldBookings,
   deleteExpiredChatSessions,
@@ -79,6 +83,17 @@ export async function runRetentionSweep(
     [
       "refund_evidence_expired",
       () => expireRefundEvidence(db, bucket, RETENTION_POLICY.refundEvidenceYears, maxPerTable),
+    ],
+    // Files in the locked bucket that no row points at any more: a deleted
+    // shop's evidence files and its archived money records. Each goes the day
+    // after its lock ends (the lock is AUDIT_RETENTION_DAYS from upload).
+    [
+      "refund_evidence_files_expired",
+      () => expireArchiveFiles(bucket, "refund-evidence/", AUDIT_RETENTION_DAYS + 1, maxPerTable),
+    ],
+    [
+      "shop_records_expired",
+      () => expireArchiveFiles(bucket, SHOP_RECORDS_PREFIX, AUDIT_RETENTION_DAYS + 1, maxPerTable),
     ],
     ["audit_subjects_redacted", () => redactDueSubjects(db, new Date(), maxPerTable)],
     ["audit_log_expired", () => expireOldEntries(db, bucket, new Date(), maxPerTable)],
