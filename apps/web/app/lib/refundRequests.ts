@@ -34,17 +34,21 @@ export interface RefundRequest {
   start_time: string | null;
   sale_created_at: string | null;
   sale_tender_type: string | null;
+  /** The shop cancelled the booking: the refund its terms promise. */
+  shop_cancelled?: boolean;
 }
 
 /**
  * Nobody approves their own request on their word alone: whoever filed a
  * request may approve it only when it carries evidence. The booking worker
- * enforces this; the page uses it to say so before the tap.
+ * enforces this; the page uses it to say so before the tap. A shop
+ * cancellation is the exception: that refund is owed under the shop's terms.
  */
 export function selfApprovalBlocked(
-  request: Pick<RefundRequest, "requested_by" | "has_evidence">,
+  request: Pick<RefundRequest, "requested_by" | "has_evidence" | "shop_cancelled">,
   userId: string
 ): boolean {
+  if (request.shop_cancelled) return false;
   return request.requested_by === userId && !request.has_evidence;
 }
 
@@ -83,12 +87,15 @@ export async function fileRefundRequest(
   shopId: string,
   fields:
     | { kind: "deposit"; booking_id: string; reason: string }
+    // The shop itself is cancelling: no reason to write, the server records it.
+    | { kind: "deposit"; booking_id: string; shop_cancelled: true }
     | { kind: "sale"; sale_id: string; lines: unknown; reason: string },
   evidence: File | null
 ): Promise<{ id: string; amount_pence: number }> {
   const form = new FormData();
   form.set("kind", fields.kind);
-  form.set("reason", fields.reason);
+  if ("shop_cancelled" in fields) form.set("shop_cancelled", "1");
+  else form.set("reason", fields.reason);
   if (fields.kind === "deposit") {
     form.set("booking_id", fields.booking_id);
   } else {

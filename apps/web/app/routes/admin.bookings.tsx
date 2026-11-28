@@ -176,6 +176,45 @@ export async function action({ request, context }: ActionFunctionArgs) {
     return json({ ok: true });
   }
 
+  // The shop itself is cancelling. Its terms promise the customer that money
+  // back, so this files the request as a shop cancellation and approves it in
+  // the same step. Both are recorded, marked as a shop cancellation.
+  if (form.get("intent") === "shop_cancel") {
+    if (!token) return json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    let requestId: string;
+    try {
+      // Filed first: if it is refused, the booking is left exactly as it was.
+      const filed = await fileRefundRequest(
+        env.API_URL,
+        token,
+        shopId,
+        { kind: "deposit", booking_id: bookingId, shop_cancelled: true },
+        null,
+      );
+      requestId = filed.id;
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "The cancellation could not be started";
+      return json({ ok: false, error: message }, { status: 400 });
+    }
+    try {
+      await api.put(`/api/shops/${shopId}/bookings/${bookingId}/status`, {
+        status: "cancelled",
+        refund_deposit: true,
+        refund_request_id: requestId,
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Something went wrong";
+      return json(
+        {
+          ok: false,
+          error: `The refund did not go through: ${message} The request is waiting on the Refunds page, where you can approve it again.`,
+        },
+        { status: 502 },
+      );
+    }
+    return json({ ok: true });
+  }
+
   const newStatus = form.get("status") as BookingStatus;
   try {
     await api.put(`/api/shops/${shopId}/bookings/${bookingId}/status`, {
@@ -325,6 +364,8 @@ function CancelDepositDialog({
   const busy = fetcher.state !== "idle";
   // The second step: say why the deposit should go back, and attach evidence.
   const [asking, setAsking] = useState(false);
+  // The other second step: the shop itself is cancelling, so the deposit goes back.
+  const [shopCancelling, setShopCancelling] = useState(false);
   const [reason, setReason] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [tried, setTried] = useState(false);
@@ -343,6 +384,13 @@ function CancelDepositDialog({
     fd.set("bookingId", booking.id);
     fd.set("status", "cancelled");
     fd.set("refund_deposit", "0");
+    fetcher.submit(fd, { method: "post" });
+  }
+
+  function shopCancel() {
+    const fd = new FormData();
+    fd.set("intent", "shop_cancel");
+    fd.set("bookingId", booking.id);
     fetcher.submit(fd, { method: "post" });
   }
 
@@ -377,19 +425,40 @@ function CancelDepositDialog({
         className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] w-[calc(100%-2rem)] max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-white/10 bg-dark-100 p-6 shadow-2xl"
       >
         <h3 id="cancel-deposit-title" className="font-heading text-lg font-semibold text-white">
-          {asking ? "Cancel and ask for a refund?" : "Cancel this booking?"}
+          {shopCancelling
+            ? "Cancel as the shop and refund?"
+            : asking
+              ? "Cancel and ask for a refund?"
+              : "Cancel this booking?"}
         </h3>
         <p className="mt-2 text-sm text-white/60">
-          {asking
+          {shopCancelling
+            ? `Use this only when the shop is the one cancelling. The booking is cancelled and the ${deposit} deposit goes back to the customer's card now, as your terms promise. It is recorded as a shop cancellation.`
+            : asking
             ? `The booking is cancelled now and the ${deposit} deposit stays held. It goes back to the customer only when the owner approves your request on the Refunds page.`
-            : `The customer paid a ${deposit} deposit. Cancelling keeps it: standard commission applies to the amount kept. To give it back, file a refund request with the reason.`}
+            : `The customer paid a ${deposit} deposit. Cancelling keeps it: standard commission applies to the amount kept. To give it back, file a refund request with the reason. If the shop is the one cancelling, the deposit is refunded.`}
         </p>
         {fetcher.data && !fetcher.data.ok && fetcher.data.error && (
           <p role="alert" className="mt-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs text-red-400">
             {fetcher.data.error}
           </p>
         )}
-        {asking ? (
+        {shopCancelling ? (
+          <div className="mt-5 flex flex-col gap-2">
+            <Button type="button" onClick={shopCancel} disabled={busy} className="w-full">
+              {busy ? "Working…" : `Cancel booking and refund ${deposit}`}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setShopCancelling(false)}
+              disabled={busy}
+              className="w-full text-white/70"
+            >
+              Go back
+            </Button>
+          </div>
+        ) : asking ? (
           <form
             className="mt-4 space-y-4"
             noValidate
@@ -423,6 +492,15 @@ function CancelDepositDialog({
             </Button>
             <Button type="button" variant="outline" onClick={() => setAsking(true)} disabled={busy} className="w-full">
               Cancel and ask for a refund
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShopCancelling(true)}
+              disabled={busy}
+              className="w-full"
+            >
+              The shop is cancelling
             </Button>
             <Button type="button" variant="ghost" onClick={onClose} disabled={busy} className="w-full text-white/70">
               Go back

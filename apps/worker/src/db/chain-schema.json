@@ -420,6 +420,7 @@
         "reviewed_at": "text",
         "reviewed_by": "text",
         "sale_id": "text",
+        "shop_cancelled": "integer not null default 0",
         "shop_id": "text not null references shops(id)on delete cascade",
         "status": "text not null default 'pending' check(status in('pending','approving','approved','declined'))"
       },

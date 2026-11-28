@@ -484,7 +484,9 @@ CREATE TABLE IF NOT EXISTS refund_requests (
   reviewed_by    TEXT,
   reviewed_at    TEXT,
   review_note    TEXT,
-  refunded_pence INTEGER
+  refunded_pence INTEGER,
+  -- 055: the shop cancelled the booking, so the refund is owed (see the migration).
+  shop_cancelled INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_refund_requests_shop_status ON refund_requests(shop_id, status, requested_at);

@@ -966,6 +966,8 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
   const requestId = typeof body.refund_request_id === "string" ? body.refund_request_id.trim() : "";
   // The approver filed the request themselves (allowed only with evidence).
   let selfApproved = false;
+  // The request is a shop cancellation: the refund the shop's terms promise.
+  let shopCancelled = false;
   if (refundDeposit) {
     const role = getUser(c).role;
     if (role !== "admin" && role !== "developer") {
@@ -1046,6 +1048,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
       return c.json({ success: false, error: claimed.error }, claimed.status);
     }
     selfApproved = claimed.selfApproved;
+    shopCancelled = claimed.shopCancelled;
   }
   const releaseRequest = async (refundedPence: number | null): Promise<void> => {
     if (!refundDeposit) return;
@@ -1249,6 +1252,7 @@ r.post("/:shopId/bookings/:bookingId/cancel", async (c) => {
                 deposit_action: auditDeposit,
                 ...(refundDeposit ? { refund_request_id: requestId } : {}),
                 ...(selfApproved ? { self_approved: true } : {}),
+                ...(shopCancelled ? { shop_cancelled: true } : {}),
               },
             }
           : keptCancelled
