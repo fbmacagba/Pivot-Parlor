@@ -152,6 +152,8 @@ function destinationOf(r: RefundRequest): string {
   return r.sale_tender_type ? `by ${tenderLabel(r.sale_tender_type).toLowerCase()}` : "";
 }
 
+const EVIDENCE_EXPIRED = "The evidence file was removed after 6 years, as the retention policy requires.";
+
 export default function AdminRefunds() {
   const { shopId, developerNeedsShop, userId, requests, loadError } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<ActionData>();
@@ -268,6 +270,8 @@ export default function AdminRefunds() {
                         View evidence{r.evidence_name ? `: ${r.evidence_name}` : ""}
                         <span className="sr-only"> (opens in a new tab)</span>
                       </a>
+                    ) : r.evidence_expired ? (
+                      <p className="mt-2 text-xs text-white/60">{EVIDENCE_EXPIRED}</p>
                     ) : (
                       <>
                         <p className="mt-2 text-xs text-amber-200">No evidence file was attached.</p>
@@ -344,6 +348,7 @@ export default function AdminRefunds() {
                     </p>
                     <p className="mt-2 whitespace-pre-wrap break-words text-sm text-white/70">{r.reason}</p>
                     {r.review_note && <p className="mt-1 text-sm text-white/60">Decision note: {r.review_note}</p>}
+                    {r.evidence_expired && <p className="mt-1 text-xs text-white/60">{EVIDENCE_EXPIRED}</p>}
                     {r.has_evidence && (
                       <a
                         href={evidenceHref(r)}

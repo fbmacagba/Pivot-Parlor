@@ -281,6 +281,7 @@ r.get("/:shopId/refund-requests", async (c) => {
     .prepare(
       `SELECT rr.id, rr.kind, rr.booking_id, rr.sale_id, rr.lines_json, rr.amount_pence, rr.reason,
               rr.evidence_name, rr.evidence_type, rr.evidence_key IS NOT NULL AS has_evidence,
+              rr.evidence_expired_at IS NOT NULL AS evidence_expired,
               rr.status, rr.requested_by, rr.requested_at, rr.reviewed_by, rr.reviewed_at,
               rr.review_note, rr.refunded_pence, rr.shop_cancelled,
               ru.name AS requested_by_name, rv.name AS reviewed_by_name,
@@ -301,6 +302,7 @@ r.get("/:shopId/refund-requests", async (c) => {
   const data = (rows.results ?? []).map((row) => ({
     ...row,
     has_evidence: Number(row.has_evidence) === 1,
+    evidence_expired: Number(row.evidence_expired) === 1,
     shop_cancelled: Number(row.shop_cancelled) === 1,
     // A claim in flight reads as pending to the page.
     status: row.status === "approving" ? "pending" : row.status,

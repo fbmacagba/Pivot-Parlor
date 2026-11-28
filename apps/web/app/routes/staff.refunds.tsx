@@ -177,7 +177,7 @@ export default function StaffRefunds() {
                 </p>
                 <p className="mt-2 whitespace-pre-wrap break-words text-sm text-white/70">{r.reason}</p>
                 <p className="mt-2 text-sm text-white/70">{outcomeOf(r)}</p>
-                {r.status === "pending" && !r.has_evidence && <AddEvidence shopId={shopId} requestId={r.id} />}
+                {r.status === "pending" && !r.has_evidence && !r.evidence_expired && <AddEvidence shopId={shopId} requestId={r.id} />}
                 {r.review_note && (
                   <p className="mt-1 whitespace-pre-wrap break-words text-sm text-white/60">
                     Owner&apos;s note: {r.review_note}
