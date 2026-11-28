@@ -76,6 +76,20 @@ async function refundableDeposit(
   return { ok: true, pence, bookingStatus: booking.status };
 }
 
+/**
+ * Whether a refund request already points at this evidence file. Each file
+ * backs one request: a borrowed file would let an owner approve their own
+ * request on someone else's evidence, and would be deleted from under the
+ * younger request when the older one's retention ran out.
+ */
+async function evidenceKeyInUse(db: D1Database, key: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS n FROM refund_requests WHERE evidence_key = ? LIMIT 1")
+    .bind(key)
+    .first<{ n: number }>();
+  return row !== null;
+}
+
 // ─── POST /:shopId/refund-requests — file a request ──────────────────────────
 
 r.post("/:shopId/refund-requests", async (c) => {
@@ -139,6 +153,10 @@ r.post("/:shopId/refund-requests", async (c) => {
     // the file it names must really be in the bucket. Evidence that is not
     // there would let someone approve their own request on a made-up name.
     if (!(await c.env.AUDIT_ARCHIVE.head(body.evidence_key))) {
+      return c.json({ success: false, error: "Invalid evidence file" }, 400);
+    }
+    // One file, one request: another request's evidence cannot be borrowed.
+    if (await evidenceKeyInUse(db, body.evidence_key)) {
       return c.json({ success: false, error: "Invalid evidence file" }, 400);
     }
     evidenceKey = body.evidence_key;
@@ -326,6 +344,9 @@ r.post("/:shopId/refund-requests/:requestId/evidence", async (c) => {
   const key = typeof body.evidence_key === "string" ? body.evidence_key : "";
   // Same rule as filing: under this shop's evidence folder, and really there.
   if (!key || !key.startsWith(evidencePrefix(shopId)) || key.includes("..") || !(await c.env.AUDIT_ARCHIVE.head(key))) {
+    return c.json({ success: false, error: "Invalid evidence file" }, 400);
+  }
+  if (await evidenceKeyInUse(db, key)) {
     return c.json({ success: false, error: "Invalid evidence file" }, 400);
   }
   const name = typeof body.evidence_name === "string" ? body.evidence_name.slice(0, 200) : null;

@@ -3009,7 +3009,14 @@ export async function expireRefundEvidence(
     .all<{ id: string; evidence_key: string }>();
   let expired = 0;
   for (const row of results) {
-    await bucket.delete(row.evidence_key);
+    // A file belongs to one request (the booking worker refuses a key already
+    // in use). Should two ever share one, the file stays while the other
+    // request still points at it: only this request's pointer is cleared.
+    const shared = await db
+      .prepare("SELECT 1 AS n FROM refund_requests WHERE evidence_key = ? AND id <> ? LIMIT 1")
+      .bind(row.evidence_key, row.id)
+      .first<{ n: number }>();
+    if (!shared) await bucket.delete(row.evidence_key);
     const r = await db
       .prepare(
         `UPDATE refund_requests

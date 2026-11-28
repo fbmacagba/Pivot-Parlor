@@ -98,6 +98,19 @@ describe("refund evidence retention", () => {
     expect((await row(noFile.id))!.evidence_expired_at).toBeNull();
   });
 
+  it("leaves a file alone while a younger request still points at it", async () => {
+    const shopId = await seedShop("Evidence Shared");
+    const years = RETENTION_POLICY.refundEvidenceYears;
+    const old = await seedRequest(shopId, { requestedAt: yearsAgo(years, 30) });
+    const young = await seedRequest(shopId, { requestedAt: yearsAgo(1), withFile: false });
+    await env.DB.prepare("UPDATE refund_requests SET evidence_key = ? WHERE id = ?").bind(old.key, young.id).run();
+
+    await runRetentionSweep(env.DB, env.AUDIT_ARCHIVE);
+    expect((await row(old.id))!.evidence_key).toBeNull();
+    expect((await row(young.id))!.evidence_key).toBe(old.key);
+    expect(await env.AUDIT_ARCHIVE.head(old.key!)).not.toBeNull();
+  });
+
   it("is bounded per run", async () => {
     const shopId = await seedShop("Evidence Bounded");
     const years = RETENTION_POLICY.refundEvidenceYears;
