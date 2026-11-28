@@ -34,6 +34,8 @@ export const AUDIT_ACTIONS = [
   // Refund review: a refund is requested with a reason, then approved
   // (payment.refund.issue or booking.cancel) or declined.
   "payment.refund.request", "payment.refund.decline",
+  // Evidence attached to a request that was filed without any.
+  "payment.refund.evidence",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

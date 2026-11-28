@@ -13,6 +13,7 @@ import { ukToday } from "~/lib/dateFormat";
 import { readFormData, UNREADABLE_FORM } from "~/lib/formBody";
 import { DEVELOPER_STAFF_READ_ONLY, pageShopId, withShopId } from "~/lib/pageShop";
 import {
+  addEvidenceFromForm,
   evidenceFrom,
   fileRefundRequest,
   refundEvidenceProblem,
@@ -138,6 +139,10 @@ export async function salesRefundAction({ request, context }: ActionFunctionArgs
   const form = await readFormData(request);
   if (!form) return json<SalesRefundActionData>({ error: UNREADABLE_FORM }, { status: 400 });
   const shopId = pageShopId(request, user, String(form.get("shopId") ?? "").trim() || null);
+  if (shopId && form.get("intent") === "add_evidence") {
+    const added = await addEvidenceFromForm(env.API_URL, token, shopId, form);
+    return json<SalesRefundActionData>(added.body, { status: added.status });
+  }
   const saleId = String(form.get("saleId") ?? "").trim();
   if (!shopId || !saleId) return json<SalesRefundActionData>({ error: "Missing shop or sale." }, { status: 400 });
 

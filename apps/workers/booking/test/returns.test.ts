@@ -1007,6 +1007,74 @@ describe("refund review: a sale refund needs a filed, pending request", () => {
     expect(entry?.details_json).not.toContain("self_approved");
   });
 
+  it("evidence can be added once to a waiting request, by its filer or the owner, and unlocks self-approval", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const attach = (id: string, as: string, key: string) =>
+      post(`/booking/shops/${shop}/refund-requests/${id}/evidence`, as, {
+        evidence_key: key,
+        evidence_name: "photo.png",
+        evidence_type: "image/png",
+      });
+    const filed = await file(shop, token, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Customer said it was faulty",
+    });
+    const id = ((await filed.json()) as { data: { id: string } }).data.id;
+    const key = `refund-evidence/${shop}/photo.png`;
+
+    // A name with no file behind it, and a file from somewhere else, are refused.
+    expect((await attach(id, token, key)).status).toBe(400);
+    await env.AUDIT_ARCHIVE.put("refund-evidence/another-shop/x.png", "png");
+    expect((await attach(id, token, "refund-evidence/another-shop/x.png")).status).toBe(400);
+    expect((await attach("no-such-request", token, key)).status).toBe(400);
+
+    await env.AUDIT_ARCHIVE.put(key, "png");
+    expect((await attach("no-such-request", token, key)).status).toBe(404);
+    // Staff who did not file it cannot add to it.
+    expect((await attach(id, await tokenFor("staff", shop), key)).status).toBe(403);
+    expect(await requestRow(id)).toMatchObject({ evidence_key: null });
+
+    const added = await attach(id, token, key);
+    expect(added.status).toBe(200);
+    expect(await requestRow(id)).toMatchObject({ evidence_key: key, evidence_name: "photo.png", status: "pending" });
+
+    // Never replaced.
+    await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/other.png`, "png");
+    expect((await attach(id, token, `refund-evidence/${shop}/other.png`)).status).toBe(409);
+    expect(await requestRow(id)).toMatchObject({ evidence_key: key });
+
+    // The owner's own request now carries evidence, so they may approve it.
+    const approved = await post(`/booking/shops/${shop}/sales/${saleId}/refund`, token, { refund_request_id: id });
+    expect(approved.status).toBe(200);
+    // Nothing is added to a decided request.
+    expect((await attach(id, token, `refund-evidence/${shop}/other.png`)).status).toBe(409);
+  });
+
+  it("staff can add evidence to their own request", async () => {
+    const { shop, staff, service, product, token } = await seedRefundShop();
+    const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);
+    const staffToken = await tokenFor("staff", shop);
+    const filed = await file(shop, staffToken, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Customer returned it the same day",
+    });
+    const id = ((await filed.json()) as { data: { id: string } }).data.id;
+    const key = `refund-evidence/${shop}/receipt.png`;
+    await env.AUDIT_ARCHIVE.put(key, "png");
+    const added = await post(`/booking/shops/${shop}/refund-requests/${id}/evidence`, staffToken, { evidence_key: key });
+    expect(added.status).toBe(200);
+    const entry = await env.DB
+      .prepare("SELECT outcome FROM audit_log WHERE action = 'payment.refund.evidence' AND shop_id = ? AND phase = 'outcome'")
+      .bind(shop)
+      .first<{ outcome: string }>();
+    expect(entry?.outcome).toBe("succeeded");
+  });
+
   it("a declined request can never be approved, and staff cannot decline", async () => {
     const { shop, staff, service, product, token } = await seedRefundShop();
     const { saleId, productItem } = await ringCashSale(shop, staff, service, product, token);

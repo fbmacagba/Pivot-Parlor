@@ -175,6 +175,14 @@ describe("staff Refunds page", () => {
     expect(data.sales).toHaveLength(1);
   });
 
+  it("adds evidence to a request, for the staff member's own shop", async () => {
+    stubApi({ "/api/shops/shop-1/refund-requests/rr-1/evidence": { id: "rr-1", has_evidence: true } });
+    const evidence = new File([new Uint8Array([1, 2, 3])], "receipt.png", { type: "image/png" });
+    const res = await post("/staff/refunds", { shopId: "shop-other", intent: "add_evidence", requestId: "rr-1", evidence });
+    expect(res.status).toBe(200);
+    expect(writes().map((c) => c.path)).toEqual(["/api/shops/shop-1/refund-requests/rr-1/evidence"]);
+  });
+
   it("for a developer: sends them to Admin view's Sales, and files nothing for them", async () => {
     stubApi({}, "developer");
     const res = await load("/staff/refunds?shopId=shop-1&staffId=staff-9");

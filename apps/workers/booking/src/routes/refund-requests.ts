@@ -291,6 +291,67 @@ r.get("/:shopId/refund-requests", async (c) => {
   return c.json({ success: true, data });
 });
 
+// ─── POST /:shopId/refund-requests/:requestId/evidence ───────────────────────
+// Attach evidence to a request that was filed without any, while it still
+// waits. Once only: a request's evidence is never replaced, so what an
+// approver saw is what stays on record.
+
+r.post("/:shopId/refund-requests/:requestId/evidence", async (c) => {
+  const shopId = c.req.param("shopId");
+  const requestId = c.req.param("requestId");
+  const db = c.env.DB;
+  const user = getUser(c);
+
+  const body = await readJsonObject<{ evidence_key?: string; evidence_name?: string; evidence_type?: string }>(c.req);
+  if (!body) return c.json({ success: false, error: "Invalid JSON" }, 400);
+  const key = typeof body.evidence_key === "string" ? body.evidence_key : "";
+  // Same rule as filing: under this shop's evidence folder, and really there.
+  if (!key || !key.startsWith(evidencePrefix(shopId)) || key.includes("..") || !(await c.env.AUDIT_ARCHIVE.head(key))) {
+    return c.json({ success: false, error: "Invalid evidence file" }, 400);
+  }
+  const name = typeof body.evidence_name === "string" ? body.evidence_name.slice(0, 200) : null;
+  const type = typeof body.evidence_type === "string" ? body.evidence_type.slice(0, 100) : null;
+
+  const existing = await db
+    .prepare("SELECT requested_by FROM refund_requests WHERE id = ? AND shop_id = ? LIMIT 1")
+    .bind(requestId, shopId)
+    .first<{ requested_by: string }>();
+  if (!existing) return c.json({ success: false, error: "Refund request not found" }, 404);
+  // Whoever filed it, or someone who could decide it.
+  if (existing.requested_by !== user.sub && user.role !== "admin" && user.role !== "developer") {
+    return c.json({ success: false, error: "Only the person who filed this request can add its evidence" }, 403);
+  }
+
+  try {
+    return await auditFor(c).run(
+      { action: "payment.refund.evidence", shopId, entityType: "refund_request", entityId: requestId },
+      async (): Promise<Response> => {
+        const attached = await db
+          .prepare(
+            `UPDATE refund_requests SET evidence_key = ?, evidence_name = ?, evidence_type = ?
+             WHERE id = ? AND shop_id = ? AND status = 'pending' AND evidence_key IS NULL`
+          )
+          .bind(key, name, type, requestId, shopId)
+          .run();
+        if ((attached.meta?.changes ?? 0) !== 1) {
+          return c.json(
+            {
+              success: false,
+              error: "Evidence can be added once, to a request that is still waiting. Reload to see where this one stands.",
+            },
+            409
+          );
+        }
+        return c.json({ success: true, data: { id: requestId, has_evidence: true } });
+      },
+      statusOutcome()
+    );
+  } catch (e) {
+    if (e instanceof AuditWriteError) return auditRefused(c);
+    throw e;
+  }
+});
+
 // ─── POST /:shopId/refund-requests/:requestId/decline ────────────────────────
 
 r.post("/:shopId/refund-requests/:requestId/decline", async (c) => {
