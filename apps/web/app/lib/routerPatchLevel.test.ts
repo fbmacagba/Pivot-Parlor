@@ -18,7 +18,7 @@
  *  nested react-router under apps/web is fixed by dropping that lockfile
  *  entry, deleting the directory and running `npm install` again. */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 
@@ -97,9 +97,13 @@ describe("React Router patch level", () => {
     const fromWeb = createRequire(resolve(process.cwd(), "package.json"));
     const fromAdapter = createRequire(fromWeb.resolve("@react-router/cloudflare"));
     const loaded = fromAdapter.resolve("react-router");
-    const rootCopy = resolve(ROOT, "node_modules/react-router");
-    expect(resolve(loaded).startsWith(rootCopy), `${loaded} is not under ${rootCopy}`).toBe(true);
-    expect(resolve(dirname(fromWeb.resolve("react-router"))).startsWith(rootCopy)).toBe(true);
+    // Real paths on both sides: Node resolves through a linked node_modules
+    // to where the files really are, so a checkout whose node_modules is a
+    // junction or symlink to another one (aramid's mutation worktree is)
+    // would otherwise fail here with the right router loaded.
+    const rootCopy = realpathSync(resolve(ROOT, "node_modules/react-router"));
+    expect(realpathSync(loaded).startsWith(rootCopy), `${loaded} is not under ${rootCopy}`).toBe(true);
+    expect(realpathSync(dirname(fromWeb.resolve("react-router"))).startsWith(rootCopy)).toBe(true);
   });
 
   it("catches the Remix 2 lockfile shape", () => {
