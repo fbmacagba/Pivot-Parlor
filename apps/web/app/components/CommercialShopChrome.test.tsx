@@ -314,6 +314,48 @@ describe("CommercialShopChrome: overlapping phone layers", () => {
 // on production), but the chat loaded api.js and never rendered a widget, so
 // no message ever carried a token. Every message on a real shop got 400
 // "Security check required" and the visitor saw only the fallback reply.
+describe("CommercialShopChrome: the cookie notice and the map", () => {
+  function noticeFor(shopSlug: string, settings: ComponentProps<typeof CommercialShopChrome>["settings"]) {
+    class MockIO {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("IntersectionObserver", MockIO);
+    localStorage.clear();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <CommercialShopChrome site={site} settings={settings} shopSlug={shopSlug}>
+          <main>content</main>
+        </CommercialShopChrome>,
+      ),
+    );
+    const notice = container.querySelector('[aria-label="Cookie notice"]');
+    const buttons = [...(notice?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    return buttons;
+  }
+
+  it("asks about the map on a shop with an address", () => {
+    expect(noticeFor("test-shop", { address: "1 High St, London" })).toContain("Allow map");
+  });
+
+  it("does not ask when the shop has no address, or only spaces", () => {
+    expect(noticeFor("test-shop", {})).not.toContain("Allow map");
+    expect(noticeFor("test-shop", { address: "   " })).not.toContain("Allow map");
+  });
+
+  it("does not ask on a portfolio demo, which shows no map", () => {
+    expect(noticeFor("linden-and-lark-demo", { address: "1 High St, London" })).not.toContain("Allow map");
+  });
+});
+
 describe("CommercialShopChrome: shop chat bot check", () => {
   type Fn = ReturnType<typeof vi.fn>;
   const services = [{ name: "Cut", price_gbp: 20, duration_minutes: 30, category: "Hair" }];

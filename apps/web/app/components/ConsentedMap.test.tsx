@@ -48,6 +48,9 @@ describe("ConsentedMap", () => {
     const frame = container!.querySelector("iframe");
     expect(frame?.getAttribute("src")).toBe(SRC);
     expect(frame?.getAttribute("title")).toBe("Map showing Example Cuts");
+    // Only the site's address reaches Google, not the page (a booking
+    // confirmation's address names the booking).
+    expect(frame?.getAttribute("referrerpolicy")).toBe("strict-origin-when-cross-origin");
   });
 
   it("Show map records the choice and loads every map on the page", () => {
