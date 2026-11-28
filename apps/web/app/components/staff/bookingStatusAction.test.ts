@@ -1,3 +1,4 @@
+// @vitest-environment node
 /** The staff booking page's action: the one place "Start" and "Complete"
  *  reach the API from (the Today screen, the bookings list and the booking's
  *  own page all post to it). Lives outside routes/ so the router never mounts
