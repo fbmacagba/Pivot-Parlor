@@ -22,7 +22,7 @@
     "stripe": "^20.4.1"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.16.15",
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
     "@cloudflare/workers-types": "^4.20241022.0",
     "@repo/typescript-config": "*",
     "tsx": "^4.21.0",

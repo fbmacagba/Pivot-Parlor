@@ -12,8 +12,8 @@ export default defineConfig({
         r2Buckets: ["ASSETS", "AUDIT_ARCHIVE"],
         // Same limits as wrangler.toml's [[ratelimits]] (csp-report and web-errors tests).
         ratelimits: {
-          CSP_REPORT_LIMITER: { simple: { limit: 20, period: 60 } },
-          WEB_ERROR_LIMITER: { simple: { limit: 30, period: 60 } },
+          CSP_REPORT_LIMITER: { namespace_id: "7101", simple: { limit: 20, period: 60 } },
+          WEB_ERROR_LIMITER: { namespace_id: "7103", simple: { limit: 30, period: 60 } },
         },
         bindings: {
           JWT_SECRET: "test-secret",
