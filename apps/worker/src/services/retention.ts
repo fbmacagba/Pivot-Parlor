@@ -28,6 +28,7 @@ import {
   deleteExpiredInvites,
   deleteStaleContacts,
   deleteStaleWaitlist,
+  expireRefundEvidence,
   pruneAiUsageLog,
 } from "../db/queries.js";
 
@@ -45,6 +46,9 @@ export const RETENTION_POLICY = {
   bookingPiiMonths: 24,
   /** AI usage rows: ops metrics only. */
   aiUsageLogMonths: 12,
+  /** Refund evidence files (photos, screenshots, receipts): as long as the
+   *  financial record they back up, then the file goes and the request stays. */
+  refundEvidenceYears: 6,
 } as const;
 
 /** Per-table per-run bound; a nightly cron drains any realistic backlog. */
@@ -58,7 +62,8 @@ export type RetentionResult = {
 /** One nightly pass. Sweeps run independently — one failing table never
  *  blocks the others; failures are returned for the caller to log.
  *  `bucket` is the audit archive (Ruling 40: expireOldEntries re-verifies its
- *  candidate range against R2 immediately before deleting). */
+ *  candidate range against R2 immediately before deleting). Refund evidence
+ *  files live in the same private bucket, under refund-evidence/<shop>/. */
 export async function runRetentionSweep(
   db: D1Database,
   bucket: R2Bucket,
@@ -71,6 +76,10 @@ export async function runRetentionSweep(
     ["contacts", () => deleteStaleContacts(db, RETENTION_POLICY.contactsMonths, maxPerTable)],
     ["bookings_anonymised", () => anonymiseOldBookings(db, RETENTION_POLICY.bookingPiiMonths, maxPerTable)],
     ["ai_usage_log", () => pruneAiUsageLog(db, RETENTION_POLICY.aiUsageLogMonths, maxPerTable)],
+    [
+      "refund_evidence_expired",
+      () => expireRefundEvidence(db, bucket, RETENTION_POLICY.refundEvidenceYears, maxPerTable),
+    ],
     ["audit_subjects_redacted", () => redactDueSubjects(db, new Date(), maxPerTable)],
     ["audit_log_expired", () => expireOldEntries(db, bucket, new Date(), maxPerTable)],
   ];

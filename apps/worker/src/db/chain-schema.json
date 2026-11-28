@@ -406,6 +406,7 @@
       "columns": {
         "amount_pence": "integer not null check(amount_pence >= 0)",
         "booking_id": "text",
+        "evidence_expired_at": "text",
         "evidence_key": "text",
         "evidence_name": "text",
         "evidence_type": "text",

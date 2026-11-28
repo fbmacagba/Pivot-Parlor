@@ -1,4 +1,4 @@
-import type { D1Database, D1PreparedStatement } from "@cloudflare/workers-types";
+import type { D1Database, D1PreparedStatement, R2Bucket } from "@cloudflare/workers-types";
 import {
   BOOKING_CLASH_SQL,
   INACTIVE_BOOKING_STATUSES,
@@ -2983,6 +2983,51 @@ export async function pruneAiUsageLog(
     .bind(`-${olderThanMonths} months`, limit)
     .run();
   return r.meta.changes ?? 0;
+}
+
+/**
+ * Refund evidence files past their retention: delete each file from the
+ * bucket, then clear the request's pointer to it and stamp when it went. The
+ * file goes first, so a failed delete leaves the request pointing at a file
+ * that is still there and the next night tries again. The clock starts when
+ * the request was decided (when it was filed, for one never decided).
+ */
+export async function expireRefundEvidence(
+  db: D1Database,
+  bucket: R2Bucket,
+  olderThanYears: number,
+  limit: number,
+) {
+  const { results } = await db
+    .prepare(
+      `SELECT id, evidence_key FROM refund_requests
+       WHERE evidence_key IS NOT NULL
+         AND datetime(COALESCE(reviewed_at, requested_at)) < datetime('now', ?)
+       LIMIT ?`,
+    )
+    .bind(`-${olderThanYears} years`, limit)
+    .all<{ id: string; evidence_key: string }>();
+  let expired = 0;
+  for (const row of results) {
+    // A file belongs to one request (the booking worker refuses a key already
+    // in use). Should two ever share one, the file stays while the other
+    // request still points at it: only this request's pointer is cleared.
+    const shared = await db
+      .prepare("SELECT 1 AS n FROM refund_requests WHERE evidence_key = ? AND id <> ? LIMIT 1")
+      .bind(row.evidence_key, row.id)
+      .first<{ n: number }>();
+    if (!shared) await bucket.delete(row.evidence_key);
+    const r = await db
+      .prepare(
+        `UPDATE refund_requests
+         SET evidence_key = NULL, evidence_name = NULL, evidence_type = NULL, evidence_expired_at = ?
+         WHERE id = ? AND evidence_key = ?`,
+      )
+      .bind(new Date().toISOString(), row.id, row.evidence_key)
+      .run();
+    expired += r.meta.changes ?? 0;
+  }
+  return expired;
 }
 
 /** The evidence file attached to a shop's refund request, if any. */

@@ -1041,6 +1041,16 @@ describe("refund review: a sale refund needs a filed, pending request", () => {
     expect(added.status).toBe(200);
     expect(await requestRow(id)).toMatchObject({ evidence_key: key, evidence_name: "photo.png", status: "pending" });
 
+    // The file now backs this request and no other: a second request cannot borrow it.
+    const borrowed = await file(shop, token, {
+      kind: "sale",
+      sale_id: saleId,
+      lines: [{ sale_item_id: productItem, quantity: 1 }],
+      reason: "Trying to reuse another request's evidence",
+      evidence_key: key,
+    });
+    expect(borrowed.status).toBe(400);
+
     // Never replaced.
     await env.AUDIT_ARCHIVE.put(`refund-evidence/${shop}/other.png`, "png");
     expect((await attach(id, token, `refund-evidence/${shop}/other.png`)).status).toBe(409);

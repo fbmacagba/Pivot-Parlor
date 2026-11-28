@@ -19,6 +19,8 @@ export interface RefundRequest {
   amount_pence: number;
   reason: string;
   has_evidence: boolean;
+  /** There was an evidence file; it was removed when its 6 years were up. */
+  evidence_expired?: boolean;
   evidence_name: string | null;
   status: "pending" | "approved" | "declined";
   /** The user id of whoever filed it. */

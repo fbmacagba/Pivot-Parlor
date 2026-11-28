@@ -1319,6 +1319,20 @@ shops.get("/:shopId/owner-details", authMiddleware, requireRole("developer"), as
 // POST …/delete matches the Remix BFF pattern (same as /activate) so deletes work even when
 // DELETE is not routed or an older Worker build is missing the DELETE handler.
 
+/** Delete every refund evidence file stored for a shop (refund-evidence/<shop>/). */
+export async function deleteRefundEvidenceFiles(bucket: R2Bucket, shopId: string): Promise<number> {
+  let deleted = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await bucket.list({ prefix: `refund-evidence/${shopId}/`, cursor, limit: 500 });
+    const keys = page.objects.map((o) => o.key);
+    if (keys.length) await bucket.delete(keys);
+    deleted += keys.length;
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return deleted;
+}
+
 async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
   const param = c.req.param("shopId");
   if (!param) return c.json({ success: false, error: "Missing shop id" }, 400);
@@ -1391,6 +1405,14 @@ async function deleteShopDeveloper(c: Context<{ Bindings: Bindings }>) {
     const kvResults = await Promise.allSettled(kvKeys.map((key) => c.env.KV.delete(key)));
     const leftover = kvKeys.filter((_, i) => kvResults[i]?.status === "rejected");
     if (leftover.length) console.error("[shops.delete] shop removed; KV keys left behind:", leftover.join(", "));
+    // The shop's refund requests went with it (cascade), so their evidence
+    // files have nothing left pointing at them. They hold personal data and
+    // go too. Like the KV keys: a failure is logged, not a failed delete.
+    try {
+      await deleteRefundEvidenceFiles(c.env.AUDIT_ARCHIVE, shop.id);
+    } catch (e) {
+      console.error("[shops.delete] shop removed; refund evidence files left behind:", e);
+    }
     return c.json({ success: true, data: { id: shop.id } });
   } catch (e) {
     if (e instanceof AuditWriteError) return auditRefused(c);

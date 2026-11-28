@@ -486,7 +486,9 @@ CREATE TABLE IF NOT EXISTS refund_requests (
   review_note    TEXT,
   refunded_pence INTEGER,
   -- 055: the shop cancelled the booking, so the refund is owed (see the migration).
-  shop_cancelled INTEGER NOT NULL DEFAULT 0
+  shop_cancelled INTEGER NOT NULL DEFAULT 0,
+  -- 056: when the retention sweep removed the evidence file (6 years on).
+  evidence_expired_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_refund_requests_shop_status ON refund_requests(shop_id, status, requested_at);
